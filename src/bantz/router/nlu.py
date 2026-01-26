@@ -177,7 +177,7 @@ def parse_intent(text: str) -> Parsed:
             "google", "tarayıcı", "browser", "sayfa", "site", "url", "link",
             # Social media / web sites -> browser_open, not app_open
             "instagram", "youtube", "twitter", "facebook", "github", "linkedin",
-            "reddit", "twitch", "spotify", "netflix", "whatsapp", "telegram",
+            "reddit", "twitch", "netflix", "whatsapp", "telegram",
             "wikipedia", "vikipedi", "amazon", "ebay", "stackoverflow",
             # AI chat services
             "duck", "duckduckgo", "chatgpt", "claude", "gemini", "perplexity",

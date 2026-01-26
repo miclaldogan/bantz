@@ -8,6 +8,13 @@ authors = [{ name = "Bantz" }]
 dependencies = []
 
 [project.optional-dependencies]
+browser = [
+	"websockets>=11.0.0",
+]
+dev = [
+	"pytest>=7.4.0",
+	"tomli>=2.0.1",
+]
 llm = [
 	"requests>=2.31.0",
 ]

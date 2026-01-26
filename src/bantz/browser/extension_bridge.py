@@ -202,6 +202,14 @@ class ExtensionBridge:
     def request_navigate(self, url: str) -> bool:
         """Request navigation to URL."""
         return self.send_command("navigate", url=url)
+
+    def request_go_back(self) -> bool:
+        """Request browser back navigation."""
+        return self.send_command("go_back")
+
+    def request_go_forward(self) -> bool:
+        """Request browser forward navigation."""
+        return self.send_command("go_forward")
     
     def request_find_tabs(self, url_pattern: str) -> Optional[list]:
         """Request tabs matching URL pattern from extension.
