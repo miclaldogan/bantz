@@ -391,22 +391,36 @@ function setupNavigationEvents() {
  * Navigate to URL in address bar
  */
 function navigateToUrl() {
-  let url = urlBar.value.trim();
-  
+  const url = normalizeNavigationUrl(urlBar.value);
   if (!url) return;
-  
+  webview.src = url;
+}
+
+function normalizeNavigationUrl(input) {
+  const raw = String(input ?? '').trim();
+  if (!raw) return '';
+
+  let candidate = raw;
+
   // Add protocol if missing
-  if (!url.match(/^https?:\/\//)) {
+  if (!candidate.match(/^https?:\/\//i)) {
     // Check if it looks like a URL
-    if (url.includes('.') && !url.includes(' ')) {
-      url = 'https://' + url;
+    if (candidate.includes('.') && !candidate.includes(' ')) {
+      candidate = 'https://' + candidate;
     } else {
-      // Treat as search query
-      url = `https://duckduckgo.com/?q=${encodeURIComponent(url)}`;
+      return `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`;
     }
   }
-  
-  webview.src = url;
+
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`;
+    }
+    return parsed.toString();
+  } catch {
+    return `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`;
+  }
 }
 
 /**
@@ -1407,16 +1421,8 @@ async function executeType(el, text) {
  * Navigate to URL or search
  */
 function navigateTo(target) {
-  let url = target;
-  
-  if (!url.match(/^https?:\/\//)) {
-    if (url.includes('.') && !url.includes(' ')) {
-      url = 'https://' + url;
-    } else {
-      url = `https://duckduckgo.com/?q=${encodeURIComponent(url)}`;
-    }
-  }
-  
+  const url = normalizeNavigationUrl(target);
+  if (!url) return;
   addMessage(`🌐 Gidiliyor: ${url}`, 'system');
   webview.src = url;
 }
@@ -1474,7 +1480,7 @@ function addMessage(text, type = 'system') {
   if (text.includes('\n')) {
     const pre = document.createElement('pre');
     pre.textContent = text;
-    content.innerHTML = '';
+    content.textContent = '';
     content.appendChild(pre);
   }
   

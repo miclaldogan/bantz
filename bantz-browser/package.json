@@ -16,6 +16,9 @@
     "electron": "^35.7.5",
     "electron-builder": "^24.9.0"
   },
+  "overrides": {
+    "tar": "^7.5.4"
+  },
   "build": {
     "appId": "com.bantz.browser",
     "productName": "Bantz Browser",
