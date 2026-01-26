@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Bantz Bridge</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      width: 280px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      background: #1a1a2e;
+      color: #e5e5e5;
+    }
+    
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #333;
+    }
+    
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+    }
+    
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      background: #252540;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+    
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+    }
+    
+    .status-dot.connected {
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+    }
+    
+    .status-text {
+      flex: 1;
+    }
+    
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    button {
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      background: #6366f1;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    
+    button:hover {
+      background: #4f46e5;
+    }
+    
+    button:disabled {
+      background: #4b5563;
+      cursor: not-allowed;
+    }
+    
+    button.secondary {
+      background: #374151;
+    }
+    
+    button.secondary:hover {
+      background: #4b5563;
+    }
+    
+    .info {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #333;
+      font-size: 11px;
+      color: #9ca3af;
+    }
+    
+    .keyboard-hint {
+      margin-top: 8px;
+      padding: 8px;
+      background: #252540;
+      border-radius: 6px;
+      font-size: 11px;
+    }
+    
+    kbd {
+      display: inline-block;
+      padding: 2px 6px;
+      font-family: monospace;
+      font-size: 11px;
+      background: #374151;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🤖 Bantz Bridge</h1>
+  </div>
+  
+  <div class="status" id="status">
+    <div class="status-dot" id="status-dot"></div>
+    <div class="status-text">
+      <span id="status-text">Bağlanıyor...</span>
+    </div>
+  </div>
+  
+  <div class="actions">
+    <button id="btn-scan">📋 Sayfayı Tara</button>
+    <button id="btn-toggle" class="secondary">👁 Overlay Kapat</button>
+  </div>
+  
+  <div class="info">
+    <div class="keyboard-hint">
+      <strong>İpuçları:</strong><br>
+      • "sayfayı tara" - öğeleri numarala<br>
+      • "5'e tıkla" - numaraya tıkla<br>
+      • "aşağı kaydır" - scroll
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

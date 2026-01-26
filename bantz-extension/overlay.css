@@ -1,0 +1,89 @@
+/**
+ * Bantz Overlay Styles
+ */
+
+#bantz-overlay-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+.bantz-badge {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  background: #6366f1;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.bantz-badge-link {
+  background: #3b82f6;
+}
+
+.bantz-badge-button {
+  background: #10b981;
+}
+
+.bantz-badge-input {
+  background: #f59e0b;
+}
+
+/* Highlight on hover (when overlay is interactive) */
+.bantz-badge:hover {
+  transform: translateY(-50%) scale(1.2);
+  z-index: 1;
+}
+
+/* Animation for new badges */
+@keyframes bantz-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
+.bantz-badge {
+  animation: bantz-fade-in 0.15s ease-out;
+}
+
+/* Status indicator */
+.bantz-status {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 8px 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: white;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 20px;
+  z-index: 2147483646;
+  pointer-events: none;
+}
+
+.bantz-status.connected {
+  background: rgba(16, 185, 129, 0.9);
+}
+
+.bantz-status.disconnected {
+  background: rgba(239, 68, 68, 0.9);
+}

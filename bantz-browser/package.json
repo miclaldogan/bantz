@@ -1,0 +1,30 @@
+{
+  "name": "bantz-browser",
+  "version": "0.1.0",
+  "description": "Bantz Browser - Your personal AI-powered browser",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:linux": "electron-builder --linux",
+    "build:appimage": "electron-builder --linux AppImage"
+  },
+  "author": "iclaldogan",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.0"
+  },
+  "build": {
+    "appId": "com.bantz.browser",
+    "productName": "Bantz Browser",
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Network;WebBrowser"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}

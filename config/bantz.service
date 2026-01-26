@@ -1,0 +1,18 @@
+[Unit]
+Description=Bantz Local Voice Assistant Daemon
+Documentation=https://github.com/iclaldogan/bantz
+After=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+Environment=PYTHONPATH=/home/iclaldogan/Desktop/Bantz/src
+WorkingDirectory=/home/iclaldogan/Desktop/Bantz
+ExecStart=/home/iclaldogan/Desktop/Bantz/.venv/bin/python -m bantz.daemon
+ExecStop=/home/iclaldogan/Desktop/Bantz/.venv/bin/python -m bantz --stop
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

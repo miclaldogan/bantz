@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
+  <title>Bantz Browser</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Top Navigation Bar -->
+    <div id="navbar">
+      <div class="nav-buttons">
+        <button id="btn-back" class="nav-btn" title="Geri (Alt+←)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+        </button>
+        <button id="btn-forward" class="nav-btn" title="İleri (Alt+→)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+        <button id="btn-reload" class="nav-btn" title="Yenile (F5)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6M1 20v-6h6"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="url-bar-container">
+        <input type="text" id="url-bar" placeholder="URL veya arama yaz..." autocomplete="off">
+        <button id="btn-go" class="nav-btn" title="Git">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="nav-actions">
+        <button id="btn-panel-toggle" class="nav-btn active" title="Bantz Panel (Ctrl+B)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <path d="M15 3v18"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="main-content">
+      <!-- Browser Content (WebView) -->
+      <div id="browser-container">
+        <webview id="webview" 
+          src="https://duckduckgo.com" 
+          partition="persist:bantz"
+          allowpopups="false">
+        </webview>
+        
+        <!-- Loading indicator -->
+        <div id="loading-bar" class="hidden"></div>
+      </div>
+
+      <!-- Bantz Side Panel -->
+      <div id="bantz-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="bantz-logo">🤖</span>
+            <span>Bantz</span>
+          </div>
+          <div class="panel-status">
+            <span id="inbox-badge" class="inbox-badge hidden" title="Inbox">Inbox (0)</span>
+            <span id="core-status" class="status-dot disconnected" title="Core bağlantısı"></span>
+          </div>
+        </div>
+
+        <!-- HUD: Current page info -->
+        <div id="hud">
+          <div class="hud-item">
+            <span class="hud-label">Sayfa:</span>
+            <span id="hud-title" class="hud-value">-</span>
+          </div>
+          <div class="hud-item">
+            <span class="hud-label">Mod:</span>
+            <span id="hud-mode" class="hud-value">browse</span>
+          </div>
+          <div class="hud-item hidden" id="hud-pending-container">
+            <span class="hud-label">Bekleyen:</span>
+            <span id="hud-pending" class="hud-value">-</span>
+          </div>
+        </div>
+
+        <!-- Proactive Inbox -->
+        <div id="inbox-panel" class="inbox-panel hidden">
+          <div class="inbox-header">
+            <span class="inbox-title">Inbox</span>
+            <button id="btn-inbox-clear" class="inbox-clear">Temizle</button>
+          </div>
+          <div id="inbox-list" class="inbox-list"></div>
+        </div>
+
+        <!-- Chat/Output Area -->
+        <div id="output-area">
+          <div class="message system">
+            <span class="msg-icon">🤖</span>
+            <span class="msg-text">Merhaba! Bantz Browser'a hoş geldin. Komut yazmak için aşağıdaki kutuyu kullan.</span>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div id="quick-actions">
+          <button class="quick-btn overlay-btn" data-cmd="overlay aç">🏷️ Overlay</button>
+          <button class="quick-btn" data-cmd="sayfayı tara">📋 Tara</button>
+          <button class="quick-btn" data-cmd="daha fazla">⬇️ Daha</button>
+          <button class="quick-btn" data-cmd="geri dön">◀️ Geri</button>
+          <button class="quick-btn" data-cmd="yenile">🔄 Yenile</button>
+          <button class="quick-btn" data-cmd="overlay kapat">❌ Kapat</button>
+        </div>
+
+        <!-- Command Input -->
+        <div id="input-area">
+          <input type="text" id="command-input" placeholder="Komut yaz... (Enter ile gönder)" autocomplete="off">
+          <button id="btn-send" title="Gönder">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div id="statusbar">
+      <span id="status-left">Hazır</span>
+      <span id="status-right">
+        <span id="status-url"></span>
+      </span>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

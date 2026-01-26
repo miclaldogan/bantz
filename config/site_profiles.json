@@ -1,0 +1,261 @@
+{
+  "profiles": {
+    "duck.ai": {
+      "name": "Duck AI",
+      "domains": ["duck.ai"],
+      "description": "DuckDuckGo AI Chat",
+      "autoScan": true,
+      "scanDelay": 1500,
+      "selectors": {
+        "input": "textarea",
+        "submit": "button[type='submit'], button[aria-label*='send'], button[aria-label*='Send']",
+        "newChat": "button[aria-label*='new'], a[href*='new']",
+        "messages": ".message, [class*='message'], [role='article']"
+      },
+      "actions": {
+        "send_prompt": {
+          "steps": [
+            {"action": "wait", "selector": "textarea", "timeout": 5000},
+            {"action": "click", "selector": "textarea"},
+            {"action": "clear"},
+            {"action": "type", "text": "${prompt}"},
+            {"action": "press", "key": "Enter"}
+          ]
+        },
+        "new_chat": {
+          "steps": [
+            {"action": "click", "selector": "button[aria-label*='new'], a[href*='new']"}
+          ]
+        },
+        "copy_answer": {
+          "steps": [
+            {"action": "wait", "selector": ".message:last-child", "timeout": 30000},
+            {"action": "getText", "selector": ".message:last-child"}
+          ]
+        }
+      },
+      "risks": {
+        "confirm": []
+      }
+    },
+    
+    "youtube.com": {
+      "name": "YouTube",
+      "domains": ["youtube.com", "www.youtube.com"],
+      "description": "YouTube video platform",
+      "autoScan": true,
+      "scanDelay": 2000,
+      "selectors": {
+        "searchInput": "input#search, input[name='search_query']",
+        "searchButton": "button#search-icon-legacy",
+        "video": "ytd-video-renderer, ytd-rich-item-renderer",
+        "playButton": ".ytp-play-button",
+        "pauseButton": ".ytp-play-button[data-title-no-tooltip='Pause']"
+      },
+      "actions": {
+        "search": {
+          "steps": [
+            {"action": "click", "selector": "input#search"},
+            {"action": "clear"},
+            {"action": "type", "text": "${query}"},
+            {"action": "press", "key": "Enter"}
+          ]
+        },
+        "play_first": {
+          "steps": [
+            {"action": "click", "selector": "ytd-video-renderer:first-child a#thumbnail"}
+          ]
+        },
+        "play": {
+          "steps": [
+            {"action": "click", "selector": ".ytp-play-button"}
+          ]
+        },
+        "pause": {
+          "steps": [
+            {"action": "click", "selector": ".ytp-play-button"}
+          ]
+        },
+        "fullscreen": {
+          "steps": [
+            {"action": "click", "selector": ".ytp-fullscreen-button"}
+          ]
+        }
+      },
+      "risks": {
+        "confirm": ["subscribe", "like", "comment"]
+      }
+    },
+    
+    "instagram.com": {
+      "name": "Instagram",
+      "domains": ["instagram.com", "www.instagram.com"],
+      "description": "Instagram social media",
+      "autoScan": true,
+      "scanDelay": 2000,
+      "selectors": {
+        "searchButton": "svg[aria-label*='Search'], a[href='/explore/']",
+        "searchInput": "input[placeholder*='Search'], input[aria-label*='Search']",
+        "messages": "a[href='/direct/inbox/']",
+        "profile": "a[href*='/profile']"
+      },
+      "actions": {
+        "open_search": {
+          "steps": [
+            {"action": "click", "selector": "svg[aria-label*='Search']"}
+          ]
+        },
+        "search": {
+          "steps": [
+            {"action": "click", "selector": "svg[aria-label*='Search']"},
+            {"action": "wait", "selector": "input[placeholder*='Search']", "timeout": 3000},
+            {"action": "type", "text": "${query}"},
+            {"action": "wait", "ms": 1000}
+          ]
+        },
+        "open_messages": {
+          "steps": [
+            {"action": "click", "selector": "a[href='/direct/inbox/']"}
+          ]
+        }
+      },
+      "risks": {
+        "confirm": ["follow", "like", "comment", "message", "send", "share"]
+      }
+    },
+    
+    "twitter.com": {
+      "name": "Twitter/X",
+      "domains": ["twitter.com", "x.com"],
+      "description": "Twitter/X social media",
+      "autoScan": true,
+      "scanDelay": 2000,
+      "selectors": {
+        "searchInput": "input[data-testid='SearchBox_Search_Input']",
+        "tweetButton": "a[data-testid='SideNav_NewTweet_Button']",
+        "home": "a[data-testid='AppTabBar_Home_Link']"
+      },
+      "actions": {
+        "search": {
+          "steps": [
+            {"action": "click", "selector": "a[href='/explore']"},
+            {"action": "wait", "selector": "input[data-testid='SearchBox_Search_Input']", "timeout": 3000},
+            {"action": "type", "text": "${query}"},
+            {"action": "press", "key": "Enter"}
+          ]
+        }
+      },
+      "risks": {
+        "confirm": ["tweet", "retweet", "like", "follow", "message"]
+      }
+    },
+    
+    "github.com": {
+      "name": "GitHub",
+      "domains": ["github.com"],
+      "description": "GitHub code hosting",
+      "autoScan": true,
+      "scanDelay": 1500,
+      "selectors": {
+        "searchInput": "input[name='q'], input.header-search-input",
+        "newRepo": "a[href='/new']",
+        "codeTab": "a#code-tab"
+      },
+      "actions": {
+        "search": {
+          "steps": [
+            {"action": "press", "key": "/"},
+            {"action": "wait", "ms": 500},
+            {"action": "type", "text": "${query}"},
+            {"action": "press", "key": "Enter"}
+          ]
+        }
+      },
+      "risks": {
+        "confirm": ["delete", "fork", "star", "create", "push"]
+      }
+    },
+    
+    "chat.openai.com": {
+      "name": "ChatGPT",
+      "domains": ["chat.openai.com", "chatgpt.com"],
+      "description": "OpenAI ChatGPT",
+      "autoScan": true,
+      "scanDelay": 2000,
+      "selectors": {
+        "input": "textarea[data-id='root'], textarea#prompt-textarea",
+        "submit": "button[data-testid='send-button']",
+        "newChat": "button[data-testid='create-new-chat-button'], a[href='/']"
+      },
+      "actions": {
+        "send_prompt": {
+          "steps": [
+            {"action": "wait", "selector": "textarea", "timeout": 5000},
+            {"action": "click", "selector": "textarea"},
+            {"action": "type", "text": "${prompt}"},
+            {"action": "press", "key": "Enter"}
+          ]
+        },
+        "new_chat": {
+          "steps": [
+            {"action": "click", "selector": "a[href='/']"}
+          ]
+        }
+      },
+      "risks": {
+        "confirm": []
+      }
+    },
+    
+    "claude.ai": {
+      "name": "Claude",
+      "domains": ["claude.ai"],
+      "description": "Anthropic Claude AI",
+      "autoScan": true,
+      "scanDelay": 2000,
+      "selectors": {
+        "input": "div[contenteditable='true'], textarea",
+        "submit": "button[aria-label*='Send']",
+        "newChat": "button[aria-label*='New']"
+      },
+      "actions": {
+        "send_prompt": {
+          "steps": [
+            {"action": "wait", "selector": "div[contenteditable='true'], textarea", "timeout": 5000},
+            {"action": "click", "selector": "div[contenteditable='true'], textarea"},
+            {"action": "type", "text": "${prompt}"},
+            {"action": "press", "key": "Enter"}
+          ]
+        }
+      },
+      "risks": {
+        "confirm": []
+      }
+    },
+    
+    "perplexity.ai": {
+      "name": "Perplexity",
+      "domains": ["perplexity.ai"],
+      "description": "Perplexity AI Search",
+      "autoScan": true,
+      "scanDelay": 1500,
+      "selectors": {
+        "input": "textarea",
+        "submit": "button[aria-label*='Submit'], button[type='submit']"
+      },
+      "actions": {
+        "send_prompt": {
+          "steps": [
+            {"action": "wait", "selector": "textarea", "timeout": 5000},
+            {"action": "click", "selector": "textarea"},
+            {"action": "type", "text": "${prompt}"},
+            {"action": "press", "key": "Enter"}
+          ]
+        }
+      },
+      "risks": {
+        "confirm": []
+      }
+    }
+  }
+}

@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import time
+from dataclasses import asdict, dataclass, field
+from typing import Any, Optional
+
+from bantz.router.types import Intent
+
+
+@dataclass
+class PendingAction:
+    original_text: str
+    intent: Intent
+    slots: dict
+    policy_decision: str
+    created_at: float
+    expires_at: float
+
+    def expired(self) -> bool:
+        return time.time() > self.expires_at
+
+
+@dataclass
+class QueueStep:
+    """A single step in a multi-step task chain."""
+    original_text: str
+    intent: Intent
+    slots: dict
+
+
+@dataclass
+class ConversationContext:
+    timeout_seconds: int = 120
+    pending_timeout_seconds: int = 90
+    _last_updated: float = field(default_factory=lambda: time.time())
+
+    # Mode state
+    mode: str = "normal"  # "normal" | "dev"
+
+    # Basit bağlam: son intent ve beklenen follow-up
+    last_intent: Optional[str] = None
+    awaiting: Optional[str] = None  # e.g. "search_query", "app_next_step"
+    pending: Optional[PendingAction] = None
+
+    # App session state (PC control)
+    active_app: Optional[str] = None  # e.g. "discord", "firefox", "spotify"
+    active_window_id: Optional[str] = None  # wmctrl window id (optional)
+
+    # Queue state for multi-step task chains
+    queue: list[QueueStep] = field(default_factory=list)
+    queue_index: int = 0
+    queue_paused: bool = False
+
+    def _expired(self) -> bool:
+        return (time.time() - self._last_updated) > self.timeout_seconds
+
+    def touch(self) -> None:
+        self._last_updated = time.time()
+
+    def reset_if_expired(self) -> None:
+        if self._expired():
+            self.last_intent = None
+            self.awaiting = None
+            self.pending = None
+            self.touch()
+
+    def reset_pending_if_expired(self) -> None:
+        if self.pending and self.pending.expired():
+            self.pending = None
+
+    def set_pending(self, *, original_text: str, intent: Intent, slots: dict, policy_decision: str) -> None:
+        now = time.time()
+        self.pending = PendingAction(
+            original_text=original_text,
+            intent=intent,
+            slots=slots,
+            policy_decision=policy_decision,
+            created_at=now,
+            expires_at=now + self.pending_timeout_seconds,
+        )
+
+    def clear_pending(self) -> None:
+        self.pending = None
+
+    def cancel_all(self) -> None:
+        self.awaiting = None
+        self.pending = None
+        self.clear_queue()
+
+    # App session management
+    def set_active_app(self, app_name: str, window_id: Optional[str] = None) -> None:
+        """Set the currently active app for session-aware commands."""
+        self.active_app = app_name.lower()
+        self.active_window_id = window_id
+        self.awaiting = "app_next_step"
+
+    def clear_active_app(self) -> None:
+        """Clear the active app session."""
+        self.active_app = None
+        self.active_window_id = None
+        if self.awaiting == "app_next_step":
+            self.awaiting = None
+
+    def has_active_app(self) -> bool:
+        """Check if there's an active app session."""
+        return self.active_app is not None
+
+    # Queue management
+    def set_queue(self, steps: list[QueueStep]) -> None:
+        self.queue = steps
+        self.queue_index = 0
+        self.queue_paused = False
+
+    def clear_queue(self) -> None:
+        self.queue = []
+        self.queue_index = 0
+        self.queue_paused = False
+
+    def queue_active(self) -> bool:
+        return len(self.queue) > 0 and self.queue_index < len(self.queue)
+
+    def current_step(self) -> Optional[QueueStep]:
+        if self.queue_active():
+            return self.queue[self.queue_index]
+        return None
+
+    def advance_queue(self) -> None:
+        if self.queue_index < len(self.queue):
+            self.queue_index += 1
+
+    def skip_current(self) -> None:
+        self.advance_queue()
+
+    def remaining_steps(self) -> list[QueueStep]:
+        return self.queue[self.queue_index:]
+
+    def set_mode(self, mode: str) -> None:
+        if mode not in {"normal", "dev"}:
+            return
+        if self.mode != mode:
+            # prevent state mixing across modes
+            self.cancel_all()
+        self.mode = mode
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "last_intent": self.last_intent,
+            "awaiting": self.awaiting,
+            "pending": asdict(self.pending) if self.pending else None,
+            "active_app": self.active_app,
+            "queue_len": len(self.queue),
+            "queue_index": self.queue_index,
+            "queue_paused": self.queue_paused,
+        }

@@ -1,0 +1,31 @@
+[project]
+name = "bantz"
+version = "0.1.0"
+description = "Bantz - Local Jarvis (text-first)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Bantz" }]
+dependencies = []
+
+[project.optional-dependencies]
+llm = [
+	"requests>=2.31.0",
+]
+voice = [
+	"requests>=2.31.0",
+	"numpy>=1.24.0",
+	"sounddevice>=0.4.6",
+	"faster-whisper>=1.0.0",
+	"pynput>=1.7.6",
+	"rapidfuzz>=3.6.0",
+]
+
+[project.scripts]
+bantz = "bantz.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bantz"]
