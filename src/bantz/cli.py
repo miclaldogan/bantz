@@ -117,6 +117,10 @@ def print_welcome() -> None:
   • {c.GREEN}12'ye tıkla{c.RESET}  → Index ile tıkla
   • {c.GREEN}geri dön{c.RESET}     → Önceki sayfa
   • {c.GREEN}daha fazla{c.RESET}   → Sonraki 10 öğe
+    • {c.GREEN}agent: ...{c.RESET}    → Çok-adımlı agent planla ve çalıştır (örn: agent: YouTube'a git, Coldplay ara)
+    • {c.GREEN}agent durum{c.RESET}   → Agent progress göster
+    • {c.GREEN}agent geçmişi{c.RESET} → Son agent planı + adım durumları
+    • {c.GREEN}son 3 agent{c.RESET}   → Son N agent task listesi
   • {c.GREEN}clear{c.RESET}        → Ekranı temizle
   • {c.GREEN}exit{c.RESET}         → Çık
 

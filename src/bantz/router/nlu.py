@@ -82,6 +82,50 @@ def parse_intent(text: str) -> Parsed:
     t = _clean(text).lower()
 
     # ─────────────────────────────────────────────────────────────────
+    # Agent mode (Issue #3)
+    # Explicit prefix to avoid changing existing behavior.
+    # Examples:
+    #   "agent: YouTube'a git, Coldplay ara, ilk videoyu aç"    (preview gösterir)
+    #   "agent!: Instagram'a git"                                (direkt çalıştırır)
+    #   "planla: instagram'a git ve hikayeler'e bak"            (preview gösterir)
+    # ─────────────────────────────────────────────────────────────────
+    # Immediate mode (skip preview): agent!: / planla!:
+    m = re.search(r"^\s*(agent|planla|cok\s*adimli|çok\s*adıml[ıi])!\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        req = m.group(2).strip()
+        return Parsed(intent="agent_run", slots={"request": req, "skip_preview": True})
+
+    # Standard mode (show preview first): agent: / planla:
+    m = re.search(r"^\s*(agent|planla|cok\s*adimli|çok\s*adıml[ıi])\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        req = m.group(2).strip()
+        return Parsed(intent="agent_run", slots={"request": req, "skip_preview": False})
+
+    # Agent confirm after preview
+    if re.search(r"\b(plan[ıi]?\s+(tamam|onayla|ba[sş]lat)|agent[ıi]?\s+ba[sş]lat|plan[ıi]?\s+[cç]al[ıi][sş]t[ıi]r)\b", t):
+        return Parsed(intent="agent_confirm_plan", slots={})
+
+    # Agent status
+    if re.search(r"\b(agent\s+durum(u)?|agent\s+status|agent\s+ne\s+yap[ıi]yor)\b", t):
+        return Parsed(intent="agent_status", slots={})
+
+    # Agent history / plan listing
+    m = re.search(r"\bson\s+(\d+)\s+(agent|ajan)\b", t)
+    if m:
+        return Parsed(intent="agent_history", slots={"n": int(m.group(1))})
+
+    if re.search(r"\b(agent\s+ge[cç]mi[sş]i|agent\s+history|son\s+agent\s+plan[ıi]|plan[ıi]m[ıi]\s+g[oö]ster|agent\s+plan[ıi]n[ıi]\s+g[oö]ster)\b", t):
+        return Parsed(intent="agent_history", slots={})
+
+    # Agent retry - son başarısız task'ı tekrar çalıştır
+    if re.search(r"\b(agent\s+tekrar|agent\s+retry|tekrar\s+dene\s+agent|son\s+agent[ıi]?\s+tekrar)\b", t):
+        return Parsed(intent="agent_retry", slots={})
+
+    # Agent cancel/abort mid-task
+    if re.search(r"\b(agent[ıi]?\s+iptal|agent\s+durdur|agent[ıi]?\s+bitir)\b", t):
+        return Parsed(intent="queue_abort", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
     # Overlay / UI commands (highest priority)
     # ─────────────────────────────────────────────────────────────────
     
@@ -104,9 +148,9 @@ def parse_intent(text: str) -> Parsed:
     # Queue control commands (highest priority)
     if t in {"duraklat", "bekle", "dur bir"}:
         return Parsed(intent="queue_pause", slots={})
-    if t in {"devam et", "devam", "sürdür"}:
+    if t in {"devam et", "devam", "sürdür", "tekrar dene", "yeniden dene", "retry"}:
         return Parsed(intent="queue_resume", slots={})
-    if t in {"iptal et", "tümünü iptal", "kuyruğu iptal", "zinciri iptal"}:
+    if t in {"iptal et", "tümünü iptal", "kuyruğu iptal", "zinciri iptal", "agent iptal", "agent'i iptal"}:
         return Parsed(intent="queue_abort", slots={})
     if t in {"sıradaki", "atla", "bunu atla", "sonrakine geç"}:
         return Parsed(intent="queue_skip", slots={})

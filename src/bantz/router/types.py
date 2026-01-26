@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 Intent = Literal[
+    "agent_run",
+    "agent_history",
+    "agent_status",
+    "agent_retry",
+    "agent_preview",
+    "agent_confirm_plan",
     "open_browser",
     "google_search",
     "open_path",
@@ -33,6 +39,7 @@ Intent = Literal[
     "browser_info",
     "browser_detail",
     "browser_wait",
+    "browser_search",
     # Advanced desktop input
     "pc_mouse_move",
     "pc_mouse_click",
