@@ -19,6 +19,7 @@ from typing import Optional, Callable, Awaitable
 
 from .protocol import (
     StateMessage,
+    ActionMessage,
     PingMessage,
     PongMessage,
     AckMessage,
@@ -33,6 +34,9 @@ from .protocol import (
     OverlayState,
     OverlayPosition,
     MessageType,
+    action_preview,
+    action_cursor_dot,
+    action_highlight_rect,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,6 +184,42 @@ class OverlayClient:
         if not self._connected or not self._writer:
             logger.warning("[OverlayClient] Not connected, cannot send state")
             return False
+
+    async def send_action(self, msg: ActionMessage) -> bool:
+        """Send action message to overlay (ephemeral visuals)."""
+        if not self._connected or not self._writer:
+            logger.warning("[OverlayClient] Not connected, cannot send action")
+            return False
+
+        try:
+            data = encode_message(msg)
+            self._writer.write(data)
+            await self._writer.drain()
+
+            # Track pending ack
+            self._pending_acks[msg.id] = asyncio.get_event_loop().time()
+
+            logger.debug(
+                f"[OverlayClient] Sent action: {msg.action}, text: {msg.text[:30] if msg.text else 'None'}..."
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"[OverlayClient] Action send error: {e}")
+            await self._handle_disconnect()
+            return False
+
+    async def preview(self, text: str, duration_ms: int = 1200) -> bool:
+        """Convenience: show a short action preview text."""
+        return await self.send_action(action_preview(text=text, duration_ms=duration_ms))
+
+    async def cursor_dot(self, x: int, y: int, duration_ms: int = 800) -> bool:
+        """Convenience: show a cursor dot/ring."""
+        return await self.send_action(action_cursor_dot(x=x, y=y, duration_ms=duration_ms))
+
+    async def highlight_rect(self, x: int, y: int, w: int, h: int, duration_ms: int = 1200) -> bool:
+        """Convenience: highlight a rectangle region."""
+        return await self.send_action(action_highlight_rect(x=x, y=y, w=w, h=h, duration_ms=duration_ms))
         
         try:
             data = encode_message(msg)

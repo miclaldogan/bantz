@@ -245,6 +245,30 @@ class IPCOverlayHook(OverlayStateHook):
         if self._client:
             return await self._client.set_position(position)
         return False
+
+    async def preview_action(self, text: str, duration_ms: int = 1200) -> None:
+        """Show a transient action preview on the overlay."""
+        if self._client:
+            try:
+                await self._client.preview(text=text, duration_ms=duration_ms)
+            except Exception:
+                return
+
+    async def cursor_dot(self, x: int, y: int, duration_ms: int = 800) -> None:
+        """Show a transient cursor dot at screen coordinate."""
+        if self._client:
+            try:
+                await self._client.cursor_dot(x=x, y=y, duration_ms=duration_ms)
+            except Exception:
+                return
+
+    async def highlight_rect(self, x: int, y: int, w: int, h: int, duration_ms: int = 1200) -> None:
+        """Highlight a rectangle region on screen."""
+        if self._client:
+            try:
+                await self._client.highlight_rect(x=x, y=y, w=w, h=h, duration_ms=duration_ms)
+            except Exception:
+                return
     
     # Sync wrappers for use from engine (sync context)
     def wake_sync(self, text: str = "Sizi dinliyorum efendim.") -> None:
@@ -265,6 +289,15 @@ class IPCOverlayHook(OverlayStateHook):
     def set_position_sync(self, position: str) -> bool:
         result = self._run_async(self.set_position(position))
         return result if result is not None else False
+
+    def preview_action_sync(self, text: str, duration_ms: int = 1200) -> None:
+        self._run_async(self.preview_action(text=text, duration_ms=duration_ms))
+
+    def cursor_dot_sync(self, x: int, y: int, duration_ms: int = 800) -> None:
+        self._run_async(self.cursor_dot(x=x, y=y, duration_ms=duration_ms))
+
+    def highlight_rect_sync(self, x: int, y: int, w: int, h: int, duration_ms: int = 1200) -> None:
+        self._run_async(self.highlight_rect(x=x, y=y, w=w, h=h, duration_ms=duration_ms))
     
     def is_connected(self) -> bool:
         """Check if overlay is connected."""

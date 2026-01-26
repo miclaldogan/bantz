@@ -23,10 +23,18 @@ IPC_VERSION = 1
 class MessageType(str, Enum):
     """IPC message types."""
     STATE = "state"
+    ACTION = "action"
     EVENT = "event"
     PING = "ping"
     PONG = "pong"
     ACK = "ack"
+
+
+class ActionType(str, Enum):
+    """Daemon → Overlay: ephemeral action visuals."""
+    PREVIEW = "preview"      # short text shown under main state
+    CURSOR_DOT = "cursor_dot"  # show a dot/ring at a screen coordinate
+    HIGHLIGHT = "highlight"  # highlight a rectangle region
 
 
 class OverlayState(str, Enum):
@@ -107,6 +115,27 @@ class StateMessage(BaseMessage):
 
 
 @dataclass
+class ActionMessage(BaseMessage):
+    """Daemon → Overlay: Show transient action feedback."""
+    type: str = MessageType.ACTION.value
+    action: str = ActionType.PREVIEW.value
+    text: Optional[str] = None
+
+    # Screen coordinate (global)
+    x: Optional[int] = None
+    y: Optional[int] = None
+
+    # Rectangle (global screen coords)
+    rect_x: Optional[int] = None
+    rect_y: Optional[int] = None
+    rect_w: Optional[int] = None
+    rect_h: Optional[int] = None
+
+    # Lifetime
+    duration_ms: Optional[int] = 1200
+
+
+@dataclass
 class EventMessage(BaseMessage):
     """
     Overlay → Daemon: Event notification.
@@ -142,7 +171,7 @@ class PongMessage(BaseMessage):
 
 
 # Type alias for all message types
-IPCMessage = Union[StateMessage, EventMessage, AckMessage, PingMessage, PongMessage]
+IPCMessage = Union[StateMessage, ActionMessage, EventMessage, AckMessage, PingMessage, PongMessage]
 
 
 def encode_message(msg: BaseMessage) -> bytes:
@@ -196,6 +225,21 @@ def parse_message(data: dict) -> Optional[IPCMessage]:
                 timeout_ms=data.get('timeout_ms'),
                 sticky=data.get('sticky', False),
                 priority=data.get('priority', 10),
+            )
+        elif msg_type == MessageType.ACTION.value:
+            return ActionMessage(
+                v=data.get('v', IPC_VERSION),
+                id=data.get('id', _generate_id()),
+                ts=data.get('ts', _now_ms()),
+                action=data.get('action', ActionType.PREVIEW.value),
+                text=data.get('text'),
+                x=data.get('x'),
+                y=data.get('y'),
+                rect_x=data.get('rect_x'),
+                rect_y=data.get('rect_y'),
+                rect_w=data.get('rect_w'),
+                rect_h=data.get('rect_h'),
+                duration_ms=data.get('duration_ms', 1200),
             )
         elif msg_type == MessageType.EVENT.value:
             return EventMessage(
@@ -312,3 +356,25 @@ def event_timeout(reason: str = EventReason.NO_SPEECH.value) -> EventMessage:
 def event_dismissed(reason: str = EventReason.USER_CLOSE.value) -> EventMessage:
     """Create dismissed event."""
     return EventMessage(event=EventType.DISMISSED.value, reason=reason)
+
+
+def action_preview(text: str, duration_ms: int = 1200) -> ActionMessage:
+    """Create a transient action preview message."""
+    return ActionMessage(action=ActionType.PREVIEW.value, text=text, duration_ms=duration_ms)
+
+
+def action_cursor_dot(x: int, y: int, duration_ms: int = 800) -> ActionMessage:
+    """Create a cursor dot/ring message."""
+    return ActionMessage(action=ActionType.CURSOR_DOT.value, x=x, y=y, duration_ms=duration_ms)
+
+
+def action_highlight_rect(x: int, y: int, w: int, h: int, duration_ms: int = 1200) -> ActionMessage:
+    """Create a highlight rectangle message."""
+    return ActionMessage(
+        action=ActionType.HIGHLIGHT.value,
+        rect_x=x,
+        rect_y=y,
+        rect_w=w,
+        rect_h=h,
+        duration_ms=duration_ms,
+    )

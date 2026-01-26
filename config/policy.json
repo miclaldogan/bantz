@@ -70,6 +70,13 @@
     "app_type": "confirm",
     "app_submit": "confirm",
     "app_session_exit": "allow",
+
+    "pc_mouse_move": "confirm",
+    "pc_mouse_click": "confirm",
+    "pc_mouse_scroll": "confirm",
+    "pc_hotkey": "confirm",
+    "clipboard_set": "confirm",
+    "clipboard_get": "allow",
     "unknown": "deny"
   }
 }

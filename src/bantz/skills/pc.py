@@ -16,6 +16,10 @@ import time
 from typing import Optional, Tuple, List, Dict, Any
 
 
+def _run(cmd: List[str], timeout: float = 5.0) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
 # ─────────────────────────────────────────────────────────────────
 # Application Allowlist
 # ─────────────────────────────────────────────────────────────────
@@ -377,6 +381,149 @@ def send_key(key: str, window_id: Optional[str] = None) -> Tuple[bool, str]:
         
     except Exception as e:
         return False, f"❌ Hata: {e}"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Advanced Mouse / Keyboard / Clipboard
+# ─────────────────────────────────────────────────────────────────
+
+def move_mouse(x: int, y: int, duration_ms: int = 0) -> Tuple[bool, str]:
+    """Move mouse to absolute screen coordinates (x,y)."""
+    if not shutil.which("xdotool"):
+        return False, "❌ xdotool yüklü değil. `sudo apt install xdotool` ile yükleyebilirsin."
+
+    try:
+        if duration_ms and duration_ms > 0:
+            # Simple smooth-ish movement by stepping
+            steps = max(5, min(60, duration_ms // 20))
+            # Use xdotool mousemove --sync which jumps; we emulate stepping by querying current pos
+            cur = _run(["xdotool", "getmouselocation", "--shell"], timeout=2)
+            cur_x, cur_y = None, None
+            if cur.returncode == 0:
+                for line in cur.stdout.splitlines():
+                    if line.startswith("X="):
+                        cur_x = int(line.split("=", 1)[1])
+                    if line.startswith("Y="):
+                        cur_y = int(line.split("=", 1)[1])
+            if cur_x is None or cur_y is None:
+                _run(["xdotool", "mousemove", str(int(x)), str(int(y))], timeout=5)
+                return True, f"✅ İmleci ({x}, {y}) konumuna götürdüm."
+
+            for i in range(1, steps + 1):
+                ix = int(cur_x + (x - cur_x) * i / steps)
+                iy = int(cur_y + (y - cur_y) * i / steps)
+                _run(["xdotool", "mousemove", str(ix), str(iy)], timeout=2)
+                time.sleep(duration_ms / 1000.0 / steps)
+        else:
+            _run(["xdotool", "mousemove", str(int(x)), str(int(y))], timeout=5)
+        return True, f"✅ İmleci ({x}, {y}) konumuna götürdüm."
+    except Exception as e:
+        return False, f"❌ Hata: {e}"
+
+
+def click_mouse(
+    button: str = "left",
+    x: Optional[int] = None,
+    y: Optional[int] = None,
+    double: bool = False,
+) -> Tuple[bool, str]:
+    """Click mouse. Optionally move to (x,y) first."""
+    if not shutil.which("xdotool"):
+        return False, "❌ xdotool yüklü değil. `sudo apt install xdotool` ile yükleyebilirsin."
+
+    button_map = {"left": "1", "middle": "2", "right": "3"}
+    btn = button_map.get(button.lower(), "1")
+
+    try:
+        if x is not None and y is not None:
+            _run(["xdotool", "mousemove", str(int(x)), str(int(y))], timeout=5)
+        if double:
+            _run(["xdotool", "click", "--repeat", "2", "--delay", "80", btn], timeout=5)
+            return True, "✅ Çift tık yaptım."
+        _run(["xdotool", "click", btn], timeout=5)
+        return True, "✅ Tıkladım."
+    except Exception as e:
+        return False, f"❌ Hata: {e}"
+
+
+def scroll_mouse(direction: str = "down", amount: int = 3) -> Tuple[bool, str]:
+    """Scroll mouse wheel up/down by repeating xdotool click 4/5."""
+    if not shutil.which("xdotool"):
+        return False, "❌ xdotool yüklü değil."
+
+    direction = direction.lower().strip()
+    amount = max(1, min(int(amount), 50))
+    btn = "5" if direction in {"down", "aşağı", "asagi"} else "4"
+    try:
+        _run(["xdotool", "click", "--repeat", str(amount), btn], timeout=5)
+        return True, f"✅ Kaydırdım ({direction}, {amount})."
+    except Exception as e:
+        return False, f"❌ Hata: {e}"
+
+
+def hotkey(combo: str) -> Tuple[bool, str]:
+    """Send a hotkey combination using xdotool, e.g. 'ctrl+alt+t'."""
+    if not shutil.which("xdotool"):
+        return False, "❌ xdotool yüklü değil."
+    combo = combo.strip()
+    if not combo:
+        return False, "❌ Kısayol boş olamaz."
+    try:
+        _run(["xdotool", "key", "--clearmodifiers", combo], timeout=5)
+        return True, f"✅ Kısayol gönderildi: {combo}"
+    except Exception as e:
+        return False, f"❌ Hata: {e}"
+
+
+def clipboard_set(text: str) -> Tuple[bool, str]:
+    """Set clipboard text (prefers pyperclip, falls back to xclip)."""
+    text = str(text)
+    try:
+        try:
+            import pyperclip  # type: ignore
+
+            pyperclip.copy(text)
+            return True, "✅ Panoya kopyaladım."
+        except Exception:
+            pass
+
+        if shutil.which("xclip"):
+            p = subprocess.Popen(
+                ["xclip", "-selection", "clipboard"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            assert p.stdin is not None
+            p.stdin.write(text.encode("utf-8"))
+            p.stdin.close()
+            p.wait(timeout=2)
+            return True, "✅ Panoya kopyaladım."
+        return False, "❌ Clipboard için pyperclip veya xclip gerekli."
+    except Exception as e:
+        return False, f"❌ Hata: {e}"
+
+
+def clipboard_get() -> Tuple[bool, str, str]:
+    """Get clipboard text (prefers pyperclip, falls back to xclip)."""
+    try:
+        try:
+            import pyperclip  # type: ignore
+
+            val = pyperclip.paste() or ""
+            return True, "✅ Panodaki metin:", str(val)
+        except Exception:
+            pass
+
+        if shutil.which("xclip"):
+            r = _run(["xclip", "-selection", "clipboard", "-o"], timeout=2)
+            if r.returncode == 0:
+                return True, "✅ Panodaki metin:", r.stdout
+            return False, "❌ Panodan okunamadı.", ""
+
+        return False, "❌ Clipboard için pyperclip veya xclip gerekli.", ""
+    except Exception as e:
+        return False, f"❌ Hata: {e}", ""
 
 
 # ─────────────────────────────────────────────────────────────────

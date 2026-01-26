@@ -33,12 +33,18 @@ Intent = Literal[
     "browser_info",
     "browser_detail",
     "browser_wait",
+    # Advanced desktop input
+    "pc_mouse_move",
+    "pc_mouse_click",
+    "pc_mouse_scroll",
+    "pc_hotkey",
+    "clipboard_set",
+    "clipboard_get",
     "unknown",
 ]
 
 
 PolicyDecision = Literal["allow", "confirm", "deny"]
-
 
 @dataclass(frozen=True)
 class RouterResult:
