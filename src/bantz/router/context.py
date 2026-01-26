@@ -50,6 +50,8 @@ class ConversationContext:
     queue: list[QueueStep] = field(default_factory=list)
     queue_index: int = 0
     queue_paused: bool = False
+    queue_source: str = "chain"  # "chain" | "agent"
+    current_agent_task_id: Optional[str] = None
 
     def _expired(self) -> bool:
         return (time.time() - self._last_updated) > self.timeout_seconds
@@ -106,15 +108,19 @@ class ConversationContext:
         return self.active_app is not None
 
     # Queue management
-    def set_queue(self, steps: list[QueueStep]) -> None:
+    def set_queue(self, steps: list[QueueStep], source: str = "chain", task_id: Optional[str] = None) -> None:
         self.queue = steps
         self.queue_index = 0
         self.queue_paused = False
+        self.queue_source = source
+        self.current_agent_task_id = task_id if source == "agent" else None
 
     def clear_queue(self) -> None:
         self.queue = []
         self.queue_index = 0
         self.queue_paused = False
+        self.queue_source = "chain"
+        self.current_agent_task_id = None
 
     def queue_active(self) -> bool:
         return len(self.queue) > 0 and self.queue_index < len(self.queue)
@@ -142,6 +148,25 @@ class ConversationContext:
             self.cancel_all()
         self.mode = mode
 
+    # Pending agent plan (for preview before execution)
+    _pending_agent_plan: Optional[dict] = field(default=None, repr=False)
+
+    def set_pending_agent_plan(self, *, task_id: str, steps: list[QueueStep]) -> None:
+        """Store a planned agent task awaiting user confirmation."""
+        self._pending_agent_plan = {
+            "task_id": task_id,
+            "steps": steps,
+            "created_at": time.time(),
+        }
+
+    def get_pending_agent_plan(self) -> Optional[dict]:
+        """Get the pending agent plan if any."""
+        return self._pending_agent_plan
+
+    def clear_pending_agent_plan(self) -> None:
+        """Clear the pending agent plan."""
+        self._pending_agent_plan = None
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
@@ -152,4 +177,7 @@ class ConversationContext:
             "queue_len": len(self.queue),
             "queue_index": self.queue_index,
             "queue_paused": self.queue_paused,
+            "queue_source": self.queue_source,
+            "current_agent_task_id": self.current_agent_task_id,
+            "pending_agent_plan": bool(self._pending_agent_plan),
         }
