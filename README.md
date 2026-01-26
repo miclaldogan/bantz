@@ -186,6 +186,8 @@ vim config/site_profiles.json
 
 ## Roadmap
 
+Full v2 roadmap: [docs/jarvis-roadmap-v2.md](docs/jarvis-roadmap-v2.md)
+
 ### Phase 0 - Core (Current Focus)
 - [x] Voice recognition (Whisper)
 - [x] Wake word detection
