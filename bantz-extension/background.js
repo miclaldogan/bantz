@@ -122,6 +122,22 @@ function handleDaemonMessage(message) {
     case 'navigate':
       browser.tabs.update({ url: message.url });
       break;
+
+    case 'go_back':
+      browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+        if (tabs[0]) {
+          browser.tabs.goBack(tabs[0].id).catch(() => {});
+        }
+      });
+      break;
+
+    case 'go_forward':
+      browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+        if (tabs[0]) {
+          browser.tabs.goForward(tabs[0].id).catch(() => {});
+        }
+      });
+      break;
       
     case 'overlay':
       // Toggle overlay visibility

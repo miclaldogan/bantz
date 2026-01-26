@@ -189,9 +189,12 @@ def browser_go_back() -> Tuple[bool, str]:
     if not bridge or not bridge.has_client():
         # Fallback: just say we can't
         return False, "Extension bağlı değil"
-    
-    # Extension doesn't have go_back yet, but we can add it
-    return False, "Geri gitme henüz desteklenmiyor"
+
+    try:
+        ok = bridge.request_go_back()
+        return (True, "Geri gittim") if ok else (False, "Geri gitme komutu gönderilemedi")
+    except Exception as e:
+        return False, f"Geri gitme hatası: {e}"
 
 
 def browser_current_info() -> Tuple[bool, str]:
@@ -360,7 +363,7 @@ def browser_ai_chat(service: str, prompt: str) -> Tuple[bool, str]:
         return False, f"Bilinmeyen AI servisi: {service}. Desteklenen: {', '.join(_AI_SERVICE_URLS.keys())}"
     
     # Open the service in Firefox
-    ok, msg = open_url_in_firefox(url)
+    ok, msg = open_url(url)
     if not ok:
         return False, f"{service} açılamadı: {msg}"
     

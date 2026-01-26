@@ -604,9 +604,10 @@ class Router:
 
         if intent == "browser_scan":
             from bantz.browser.skills import browser_scan
-            ok, msg, _ = browser_scan()
+            ok, msg, scan = browser_scan()
             ctx.last_intent = intent
-            return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up)
+            data = {"scan": scan} if scan else None
+            return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up, data=data)
 
         if intent == "browser_click":
             from bantz.browser.skills import browser_click_index, browser_click_text

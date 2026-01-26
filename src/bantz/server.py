@@ -315,6 +315,7 @@ class BantzServer:
         # Page memory pagination state
         self._scan_page_index = 0
         self._scan_page_size = 10
+        self._last_scan: Optional[dict] = None
 
     def _get_router(self) -> Router:
         if self.router is None:
@@ -430,12 +431,23 @@ class BantzServer:
 
         # If this was a scan, store pagination state
         if parsed.intent == "browser_scan" and result.ok:
-            from bantz.browser.skills import get_page_memory
-            mem = get_page_memory()
-            if mem:
+            scan = None
+            if result.data and isinstance(result.data, dict):
+                scan = result.data.get("scan")
+
+            if not scan:
+                try:
+                    from bantz.browser.extension_bridge import get_bridge
+                    bridge = get_bridge()
+                    if bridge:
+                        scan = bridge.get_last_scan()
+                except Exception:
+                    scan = None
+
+            if scan:
+                self._last_scan = scan
                 self._scan_page_index = 0
-                # Truncate to first page
-                return self._format_scan_result(mem, result)
+                return self._format_scan_result(scan)
 
         return {
             "ok": result.ok,
@@ -445,17 +457,26 @@ class BantzServer:
             "data": result.data,
         }
 
-    def _format_scan_result(self, mem, result) -> dict:
+    def _format_scan_result(self, scan: dict) -> dict:
         """Format scan result with pagination."""
-        elements = mem.elements
+        elements = list(scan.get("elements") or [])
         total = len(elements)
         start = self._scan_page_index * self._scan_page_size
         end = min(start + self._scan_page_size, total)
         page_elements = elements[start:end]
 
-        lines = [f"Sayfa: {mem.title}", f"URL: {mem.url}", ""]
+        title = str(scan.get("title") or "?")
+        url = str(scan.get("url") or "?")
+
+        lines = [f"Sayfa: {title}", f"URL: {url}", ""]
         for el in page_elements:
-            lines.append(f"  [{el.index}] ({el.role}) {el.text[:40]}{'…' if len(el.text) > 40 else ''}")
+            try:
+                idx = el.get("index")
+                role = el.get("role")
+                text = str(el.get("text") or "")
+            except AttributeError:
+                idx, role, text = "?", "?", str(el)
+            lines.append(f"  [{idx}] ({role}) {text[:40]}{'…' if len(text) > 40 else ''}")
 
         if end < total:
             lines.append(f"\n... ve {total - end} öğe daha. 'daha fazla' de.")
@@ -471,27 +492,45 @@ class BantzServer:
 
     def _paginate_next(self) -> dict:
         """Show next page of scan results."""
-        from bantz.browser.skills import get_page_memory
-        mem = get_page_memory()
-        if not mem:
+        scan = self._last_scan
+        if not scan:
+            try:
+                from bantz.browser.extension_bridge import get_bridge
+                bridge = get_bridge()
+                if bridge:
+                    scan = bridge.get_last_scan()
+            except Exception:
+                scan = None
+
+        if not scan:
             return {"ok": False, "text": "Gösterilecek tarama yok. Önce 'sayfayı tara' de."}
 
-        total = len(mem.elements)
+        total = len(list(scan.get("elements") or []))
         max_page = (total - 1) // self._scan_page_size
         if self._scan_page_index < max_page:
             self._scan_page_index += 1
-        return self._format_scan_result(mem, None)
+        self._last_scan = scan
+        return self._format_scan_result(scan)
 
     def _paginate_prev(self) -> dict:
         """Show previous page of scan results."""
-        from bantz.browser.skills import get_page_memory
-        mem = get_page_memory()
-        if not mem:
+        scan = self._last_scan
+        if not scan:
+            try:
+                from bantz.browser.extension_bridge import get_bridge
+                bridge = get_bridge()
+                if bridge:
+                    scan = bridge.get_last_scan()
+            except Exception:
+                scan = None
+
+        if not scan:
             return {"ok": False, "text": "Gösterilecek tarama yok. Önce 'sayfayı tara' de."}
 
         if self._scan_page_index > 0:
             self._scan_page_index -= 1
-        return self._format_scan_result(mem, None)
+        self._last_scan = scan
+        return self._format_scan_result(scan)
 
     def run(self) -> None:
         """Start the server loop."""
