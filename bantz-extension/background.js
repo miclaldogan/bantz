@@ -17,6 +17,20 @@ const state = {
   currentProfile: null,
 };
 
+function sanitizeForLog(value) {
+  let text;
+  if (typeof value === 'string') {
+    text = value;
+  } else {
+    try {
+      text = JSON.stringify(value);
+    } catch {
+      text = String(value);
+    }
+  }
+  return text.replace(/[\r\n\t]/g, ' ').replace(/[\u0000-\u001f\u007f]/g, ' ');
+}
+
 /**
  * Connect to Bantz daemon WebSocket server
  */
@@ -86,7 +100,7 @@ function sendToDaemon(message) {
  * Handle incoming messages from daemon
  */
 function handleDaemonMessage(message) {
-  console.log('[Bantz] Received:', message);
+  console.log('[Bantz] Received:', sanitizeForLog(message));
   
   switch (message.type) {
     case 'scan':
@@ -158,7 +172,7 @@ function handleDaemonMessage(message) {
       break;
       
     default:
-      console.log('[Bantz] Unknown message type:', message.type);
+      console.log('[Bantz] Unknown message type:', sanitizeForLog(message && message.type));
   }
 }
 

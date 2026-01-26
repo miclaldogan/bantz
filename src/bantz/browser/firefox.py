@@ -416,54 +416,63 @@ def start_firefox(url: Optional[str] = None) -> Tuple[bool, str]:
 
 def _format_url(url: str) -> str:
     """Format URL for display (extract site name)."""
-    url_lower = url.lower()
-    if "youtube" in url_lower:
-        return "YouTube"
-    if "instagram" in url_lower:
-        return "Instagram"
-    if "duck.ai" in url_lower or "duckduckgo" in url_lower:
-        return "DuckDuckGo AI Chat"
-    if "twitter" in url_lower or "x.com" in url_lower:
-        return "Twitter/X"
-    if "facebook" in url_lower:
-        return "Facebook"
-    if "github" in url_lower:
-        return "GitHub"
-    if "chatgpt" in url_lower or "chat.openai" in url_lower:
-        return "ChatGPT"
-    if "claude.ai" in url_lower:
-        return "Claude"
-    if "gemini" in url_lower:
-        return "Gemini"
-    if "perplexity" in url_lower:
-        return "Perplexity"
-    if "whatsapp" in url_lower:
-        return "WhatsApp Web"
-    if "telegram" in url_lower:
-        return "Telegram Web"
-    if "discord" in url_lower:
-        return "Discord"
-    if "reddit" in url_lower:
-        return "Reddit"
-    if "linkedin" in url_lower:
-        return "LinkedIn"
-    if "spotify" in url_lower:
-        return "Spotify"
-    if "netflix" in url_lower:
-        return "Netflix"
-    if "twitch" in url_lower:
-        return "Twitch"
-    if "google" in url_lower:
-        return "Google"
-    if "wikipedia" in url_lower:
-        return "Wikipedia"
-    
-    # Extract domain
     try:
         from urllib.parse import urlparse
-        parsed = urlparse(url)
+
+        candidate = url.strip()
+        if "://" not in candidate:
+            candidate = "https://" + candidate
+
+        parsed = urlparse(candidate)
+        host = (parsed.hostname or "").lower()
+
+        def host_is(domain: str) -> bool:
+            return host == domain
+
+        def host_is_or_subdomain(domain: str) -> bool:
+            return host == domain or host.endswith("." + domain)
+
+        if host_is("youtu.be") or host_is_or_subdomain("youtube.com"):
+            return "YouTube"
+        if host_is_or_subdomain("instagram.com"):
+            return "Instagram"
+        if host_is("duck.ai") or host_is_or_subdomain("duckduckgo.com"):
+            return "DuckDuckGo AI Chat"
+        if host_is_or_subdomain("twitter.com") or host_is_or_subdomain("x.com"):
+            return "Twitter/X"
+        if host_is_or_subdomain("facebook.com"):
+            return "Facebook"
+        if host_is_or_subdomain("github.com"):
+            return "GitHub"
+        if host_is_or_subdomain("openai.com") or host_is("chat.openai.com"):
+            return "ChatGPT"
+        if host_is_or_subdomain("claude.ai"):
+            return "Claude"
+        if host_is_or_subdomain("google.com") or host_is_or_subdomain("gemini.google.com"):
+            return "Gemini"
+        if host_is_or_subdomain("perplexity.ai"):
+            return "Perplexity"
+        if host_is_or_subdomain("whatsapp.com"):
+            return "WhatsApp Web"
+        if host_is_or_subdomain("telegram.org"):
+            return "Telegram Web"
+        if host_is_or_subdomain("discord.com"):
+            return "Discord"
+        if host_is_or_subdomain("reddit.com"):
+            return "Reddit"
+        if host_is_or_subdomain("linkedin.com"):
+            return "LinkedIn"
+        if host_is_or_subdomain("spotify.com"):
+            return "Spotify"
+        if host_is_or_subdomain("netflix.com"):
+            return "Netflix"
+        if host_is_or_subdomain("twitch.tv"):
+            return "Twitch"
+        if host_is_or_subdomain("wikipedia.org"):
+            return "Wikipedia"
+
         return parsed.netloc or url
-    except:
+    except Exception:
         return url
 
 
