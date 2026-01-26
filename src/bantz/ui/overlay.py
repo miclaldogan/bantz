@@ -21,9 +21,9 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QGraphicsOpacityEffect
 )
 from PyQt5.QtCore import (
-    Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QObject, QSize
+    Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QObject, QSize, QRect
 )
-from PyQt5.QtGui import QFont, QColor, QPainter, QPainterPath, QPixmap
+from PyQt5.QtGui import QFont, QColor, QPainter, QPainterPath, QPixmap, QPen
 from PyQt5.QtSvg import QSvgWidget
 
 logger = logging.getLogger(__name__)
@@ -101,6 +101,8 @@ class OverlaySignals(QObject):
     set_state_signal = pyqtSignal(str, str)  # state, message
     set_position_signal = pyqtSignal(str)  # position name
     update_message_signal = pyqtSignal(str)
+    set_action_signal = pyqtSignal(str, int)  # text, duration_ms
+    clear_action_signal = pyqtSignal()
 
 
 class BantzOverlay(QWidget):
@@ -125,6 +127,8 @@ class BantzOverlay(QWidget):
         self.signals.set_state_signal.connect(self._do_set_state)
         self.signals.set_position_signal.connect(self._do_set_position)
         self.signals.update_message_signal.connect(self._do_update_message)
+        self.signals.set_action_signal.connect(self._do_set_action)
+        self.signals.clear_action_signal.connect(self._do_clear_action)
         
         # Timeout timer
         self._timeout_timer = QTimer(self)
@@ -185,6 +189,25 @@ class BantzOverlay(QWidget):
             }}
         """)
         layout.addWidget(self.status_label)
+
+        # Action preview (ephemeral)
+        self.action_label = QLabel("")
+        self.action_label.setAlignment(Qt.AlignCenter)
+        self.action_label.setWordWrap(True)
+        self.action_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self.config.text_color};
+                font-size: {max(11, self.config.font_size - 2)}px;
+                font-weight: 400;
+                opacity: 0.9;
+            }}
+        """)
+        self.action_label.hide()
+        layout.addWidget(self.action_label)
+
+        self._action_timer = QTimer(self)
+        self._action_timer.setSingleShot(True)
+        self._action_timer.timeout.connect(self._do_clear_action)
         
         # Load icons
         self._load_icons()
@@ -294,6 +317,14 @@ class BantzOverlay(QWidget):
     def update_message(self, message: str):
         """Update status message (thread-safe)."""
         self.signals.update_message_signal.emit(message)
+
+    def set_action(self, text: str, duration_ms: int = 1200):
+        """Show ephemeral action preview text (thread-safe)."""
+        self.signals.set_action_signal.emit(text, int(duration_ms))
+
+    def clear_action(self):
+        """Clear action preview (thread-safe)."""
+        self.signals.clear_action_signal.emit()
     
     def set_timeout_callback(self, callback: Callable):
         """Set callback for timeout (false wake)."""
@@ -379,6 +410,117 @@ class BantzOverlay(QWidget):
     def _do_update_message(self, message: str):
         """Update status message."""
         self.status_label.setText(message)
+
+    def _do_set_action(self, text: str, duration_ms: int):
+        text = (text or "").strip()
+        if not text:
+            self._do_clear_action()
+            return
+
+        self.action_label.setText(text)
+        self.action_label.show()
+        self._action_timer.stop()
+        if duration_ms and duration_ms > 0:
+            self._action_timer.start(duration_ms)
+
+    def _do_clear_action(self):
+        self._action_timer.stop()
+        self.action_label.setText("")
+        self.action_label.hide()
+
+
+class CursorDotOverlay(QWidget):
+    """Small always-on-top transparent widget to show a cursor dot/ring."""
+
+    def __init__(self, color: str = "#6366f1", diameter: int = 22):
+        super().__init__()
+        self._color = QColor(color)
+        self._diameter = int(diameter)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+
+        self.setWindowFlags(
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint |
+            Qt.Tool |
+            Qt.X11BypassWindowManagerHint
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setFixedSize(self._diameter, self._diameter)
+        self.hide()
+
+    def show_at(self, x: int, y: int, duration_ms: int = 800) -> None:
+        r = self._diameter // 2
+        self.move(int(x) - r, int(y) - r)
+        self.show()
+        self.raise_()
+        self._timer.stop()
+        if duration_ms and duration_ms > 0:
+            self._timer.start(int(duration_ms))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(self._color)
+        pen.setWidth(3)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        inset = 3
+        painter.drawEllipse(inset, inset, self._diameter - 2 * inset, self._diameter - 2 * inset)
+
+
+class HighlightOverlay(QWidget):
+    """Fullscreen transparent overlay to draw a highlight rectangle."""
+
+    def __init__(self, color: str = "#6366f1"):
+        super().__init__()
+        self._color = QColor(color)
+        self._rect: Optional[QRect] = None
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+
+        self.setWindowFlags(
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint |
+            Qt.Tool |
+            Qt.X11BypassWindowManagerHint
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.hide()
+
+    def show_rect(self, x: int, y: int, w: int, h: int, duration_ms: int = 1200) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        screen = app.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.geometry()
+        self.setGeometry(geo)
+        self._rect = QRect(int(x), int(y), int(w), int(h))
+        self.show()
+        self.raise_()
+        self._timer.stop()
+        if duration_ms and duration_ms > 0:
+            self._timer.start(int(duration_ms))
+        self.update()
+
+    def paintEvent(self, event):
+        if not self._rect:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(self._color)
+        pen.setWidth(4)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(self._rect, 6, 6)
     
     def _on_timeout(self):
         """Handle timeout - false wake."""

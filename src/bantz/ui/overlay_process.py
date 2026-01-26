@@ -29,12 +29,16 @@ from bantz.ui.overlay import (
     AssistantState,
     GridPosition,
     POSITION_ALIASES,
+    CursorDotOverlay,
+    HighlightOverlay,
 )
 
 # Import IPC
 from bantz.ipc.overlay_server import OverlayServer, get_overlay_server
 from bantz.ipc.protocol import (
     StateMessage,
+    ActionMessage,
+    ActionType,
     OverlayState,
     OverlayPosition,
     EventReason,
@@ -70,6 +74,7 @@ class OverlayBridge(QObject):
     
     # Signals for thread-safe Qt updates
     state_changed = pyqtSignal(str, str, str, int, bool)  # state, text, position, timeout_ms, sticky
+    action_received = pyqtSignal(str, str, int, int, int, int, int, int, int)  # type, text, x, y, rx, ry, rw, rh, duration
     hide_requested = pyqtSignal()
     quit_requested = pyqtSignal()
     
@@ -77,6 +82,10 @@ class OverlayBridge(QObject):
         super().__init__()
         self.overlay = overlay
         self.server = server
+
+        # Action visuals
+        self._cursor = CursorDotOverlay(color=self.overlay.config.accent_color)
+        self._highlight = HighlightOverlay(color=self.overlay.config.accent_color)
         
         # Current state tracking
         self._current_state = OverlayState.IDLE.value
@@ -90,11 +99,13 @@ class OverlayBridge(QObject):
         
         # Connect signals to slots
         self.state_changed.connect(self._on_state_changed)
+        self.action_received.connect(self._on_action_received)
         self.hide_requested.connect(self._on_hide_requested)
         self.quit_requested.connect(self._on_quit_requested)
         
         # Set server callback
         server.set_state_callback(self._handle_state)
+        server.set_action_callback(self._handle_action)
         server.set_disconnect_callback(self._handle_disconnect)
         
         # Set overlay timeout callback
@@ -115,6 +126,20 @@ class OverlayBridge(QObject):
             msg.position or OverlayPosition.CENTER.value,
             msg.timeout_ms or 0,
             msg.sticky,
+        )
+
+    async def _handle_action(self, msg: ActionMessage) -> None:
+        """Handle action message from daemon (async) and forward to Qt thread."""
+        self.action_received.emit(
+            msg.action or ActionType.PREVIEW.value,
+            msg.text or "",
+            int(msg.x or 0),
+            int(msg.y or 0),
+            int(msg.rect_x or 0),
+            int(msg.rect_y or 0),
+            int(msg.rect_w or 0),
+            int(msg.rect_h or 0),
+            int(msg.duration_ms or 0),
         )
     
     async def _handle_disconnect(self) -> None:
@@ -166,10 +191,40 @@ class OverlayBridge(QObject):
         """Slot: Hide overlay."""
         self.overlay.hide_overlay()
         self._timeout_timer.stop()
+
+        # Hide action visuals
+        self._cursor.hide()
+        self._highlight.hide()
     
     def _on_quit_requested(self):
         """Slot: Quit application."""
         QApplication.instance().quit()
+
+    def _on_action_received(
+        self,
+        action_type: str,
+        text: str,
+        x: int,
+        y: int,
+        rx: int,
+        ry: int,
+        rw: int,
+        rh: int,
+        duration_ms: int,
+    ):
+        """Slot: Render action visuals (runs in Qt thread)."""
+        try:
+            if action_type == ActionType.PREVIEW.value:
+                if text.strip():
+                    self.overlay.set_action(text.strip(), duration_ms or 1200)
+            elif action_type == ActionType.CURSOR_DOT.value:
+                if x and y:
+                    self._cursor.show_at(x, y, duration_ms or 800)
+            elif action_type == ActionType.HIGHLIGHT.value:
+                if rw and rh:
+                    self._highlight.show_rect(rx, ry, rw, rh, duration_ms or 1200)
+        except Exception as e:
+            logger.error(f"[OverlayBridge] Action render error: {e}")
     
     def _on_timeout(self):
         """Internal timeout triggered."""

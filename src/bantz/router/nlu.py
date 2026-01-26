@@ -206,6 +206,71 @@ def parse_intent(text: str) -> Parsed:
         return Parsed(intent="app_session_exit", slots={})
 
     # ─────────────────────────────────────────────────────────────────
+    # Advanced desktop input (Issue #2)
+    # Explicit prefixes to avoid clashing with browser intents.
+    # ─────────────────────────────────────────────────────────────────
+
+    # Clipboard set: "panoya kopyala: ...", "clipboard set: ..."
+    m = re.search(r"\b(panoya\s+kopyala|clipboard\s+set)\b\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="clipboard_set", slots={"text": m.group(2).strip()})
+
+    # Clipboard get: "panoda ne var", "panoyu oku", "clipboard getir"
+    if re.search(r"\b(panoda\s+ne\s+var|panoyu\s+oku|clipboard\s+(getir|oku|get))\b", t):
+        return Parsed(intent="clipboard_get", slots={})
+
+    # Mouse click: "mouse 500 300 sol tıkla", "fare sağ tıkla", "mouse çift tık"
+    m = re.search(
+        r"\b(mouse|fare)\b(?:[^\d]*(\d{1,5})\s*[, ]\s*(\d{1,5}))?[^\n]*?\b(?:(sol|sa[ğg]|orta)\s*)?(çift\s*)?(t[ıi]kla|click)\b",
+        t,
+    )
+    if m:
+        x = int(m.group(2)) if m.group(2) else None
+        y = int(m.group(3)) if m.group(3) else None
+        btn_raw = (m.group(4) or "sol").lower()
+        button = "left"
+        if btn_raw.startswith("sa"):
+            button = "right"
+        elif btn_raw.startswith("or"):
+            button = "middle"
+        double = m.group(5) is not None or "çift" in t
+        return Parsed(intent="pc_mouse_click", slots={"x": x, "y": y, "button": button, "double": double})
+
+    # Mouse scroll: "mouse aşağı 5 kaydır", "fare yukarı kaydır"
+    m = re.search(r"\b(mouse|fare)\b.*\b(a[şs]a[gğ][ıi]|yukar[ıi])\b(?:\s*(\d+))?\s*(kayd[ıi]r|scroll)\b", t)
+    if m:
+        dword = (m.group(2) or "").lower()
+        direction = "down" if re.search(r"a[şs]a", dword) else "up"
+        amount = int(m.group(3) or 3)
+        return Parsed(intent="pc_mouse_scroll", slots={"direction": direction, "amount": amount})
+
+    # Mouse move: "mouse 500 300 git", "imleç 800,400 götür" (requires explicit move verb)
+    m = re.search(
+        r"\b(mouse|fare|imle[çc])\b[^\d]*(\d{1,5})\s*[, ]\s*(\d{1,5})\b(?:[^\d]*(\d{1,5})\s*(ms|saniye|sn))?[^\n]*(git|g[oö]t[üu]r|ta[şs][ıi]|move)\b",
+        t,
+    )
+    if m:
+        x = int(m.group(2))
+        y = int(m.group(3))
+        dur_n = m.group(4)
+        dur_unit = (m.group(5) or "").lower()
+        duration_ms = 0
+        if dur_n:
+            n = int(dur_n)
+            duration_ms = n if dur_unit == "ms" else int(n * 1000)
+        return Parsed(intent="pc_mouse_move", slots={"x": x, "y": y, "duration_ms": duration_ms})
+
+    # Hotkey: "kısayol: ctrl alt t", "hotkey: ctrl+shift+esc"
+    m = re.search(r"\b(k[ıi]sayol|hotkey)\b\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        raw = m.group(2).strip()
+        raw = re.sub(r"\b(bas|press|g[öo]nder)\b", "", raw, flags=re.IGNORECASE).strip()
+        combo = raw.replace(" ", "+")
+        combo = re.sub(r"\+{2,}", "+", combo)
+        combo = combo.replace("control", "ctrl").replace("win", "super").replace("meta", "super")
+        return Parsed(intent="pc_hotkey", slots={"combo": combo})
+
+    # ─────────────────────────────────────────────────────────────────
     # Browser Agent commands
     # ─────────────────────────────────────────────────────────────────
     

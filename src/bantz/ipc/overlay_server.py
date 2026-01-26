@@ -16,6 +16,7 @@ from typing import Optional, Callable, Awaitable
 
 from .protocol import (
     StateMessage,
+    ActionMessage,
     EventMessage,
     AckMessage,
     PingMessage,
@@ -50,6 +51,7 @@ class OverlayServer:
         
         # Callbacks
         self._on_state: Optional[Callable[[StateMessage], Awaitable[None]]] = None
+        self._on_action: Optional[Callable[[ActionMessage], Awaitable[None]]] = None
         self._on_disconnect: Optional[Callable[[], Awaitable[None]]] = None
         
         # Receive task
@@ -67,6 +69,10 @@ class OverlayServer:
         The callback receives StateMessage and should update the overlay UI.
         """
         self._on_state = callback
+
+    def set_action_callback(self, callback: Callable[[ActionMessage], Awaitable[None]]) -> None:
+        """Set callback for action messages (daemon → overlay)."""
+        self._on_action = callback
     
     def set_disconnect_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
         """
@@ -267,6 +273,19 @@ class OverlayServer:
                     await self._on_state(msg)
                 except Exception as e:
                     logger.error(f"[OverlayServer] State callback error: {e}")
+
+        elif isinstance(msg, ActionMessage):
+            logger.debug(f"[OverlayServer] Received action: {msg.action}, text: {msg.text[:30] if msg.text else 'None'}...")
+
+            # Send ack
+            ack = AckMessage(id=msg.id)
+            await self._send_ack(ack)
+
+            if self._on_action:
+                try:
+                    await self._on_action(msg)
+                except Exception as e:
+                    logger.error(f"[OverlayServer] Action callback error: {e}")
         
         elif isinstance(msg, PingMessage):
             logger.debug("[OverlayServer] Received ping")

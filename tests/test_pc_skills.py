@@ -81,6 +81,57 @@ class TestNLUAppIntents:
         assert parsed.intent == expected_intent
 
 
+class TestNLUAdvancedDesktopInput:
+    """Test that NLU correctly parses advanced desktop input intents."""
+
+    @pytest.mark.parametrize("text,x,y", [
+        ("mouse 500 300 git", 500, 300),
+        ("imleç 800,400 götür", 800, 400),
+    ])
+    def test_mouse_move(self, text, x, y):
+        parsed = parse_intent(text)
+        assert parsed.intent == "pc_mouse_move"
+        assert parsed.slots.get("x") == x
+        assert parsed.slots.get("y") == y
+
+    @pytest.mark.parametrize("text,button,double,x,y", [
+        ("mouse 500 300 sol tıkla", "left", False, 500, 300),
+        ("fare sağ tıkla", "right", False, None, None),
+        ("mouse 200 100 çift tıkla", "left", True, 200, 100),
+    ])
+    def test_mouse_click(self, text, button, double, x, y):
+        parsed = parse_intent(text)
+        assert parsed.intent == "pc_mouse_click"
+        assert parsed.slots.get("button") == button
+        assert parsed.slots.get("double") == double
+        assert parsed.slots.get("x") == x
+        assert parsed.slots.get("y") == y
+
+    @pytest.mark.parametrize("text,direction,amount", [
+        ("mouse aşağı 5 kaydır", "down", 5),
+        ("fare yukarı kaydır", "up", 3),
+    ])
+    def test_mouse_scroll(self, text, direction, amount):
+        parsed = parse_intent(text)
+        assert parsed.intent == "pc_mouse_scroll"
+        assert parsed.slots.get("direction") == direction
+        assert parsed.slots.get("amount") == amount
+
+    def test_hotkey(self):
+        parsed = parse_intent("kısayol: ctrl alt t")
+        assert parsed.intent == "pc_hotkey"
+        assert parsed.slots.get("combo") == "ctrl+alt+t"
+
+    def test_clipboard_set(self):
+        parsed = parse_intent("panoya kopyala: merhaba")
+        assert parsed.intent == "clipboard_set"
+        assert parsed.slots.get("text") == "merhaba"
+
+    def test_clipboard_get(self):
+        parsed = parse_intent("panoda ne var")
+        assert parsed.intent == "clipboard_get"
+
+
 # ─────────────────────────────────────────────────────────────
 # Context Tests
 # ─────────────────────────────────────────────────────────────
@@ -153,6 +204,24 @@ class TestPolicyAppIntents:
         ("app_submit", "confirm"),
     ])
     def test_confirm_intents(self, policy, intent, expected_decision):
+        decision, _ = policy.decide(text="test", intent=intent, confirmed=False)
+        assert decision == expected_decision
+
+
+class TestPolicyAdvancedDesktopInput:
+    @pytest.fixture
+    def policy(self):
+        return Policy.from_json_file("config/policy.json")
+
+    @pytest.mark.parametrize("intent,expected_decision", [
+        ("pc_mouse_move", "confirm"),
+        ("pc_mouse_click", "confirm"),
+        ("pc_mouse_scroll", "confirm"),
+        ("pc_hotkey", "confirm"),
+        ("clipboard_set", "confirm"),
+        ("clipboard_get", "allow"),
+    ])
+    def test_intent_levels(self, policy, intent, expected_decision):
         decision, _ = policy.decide(text="test", intent=intent, confirmed=False)
         assert decision == expected_decision
 

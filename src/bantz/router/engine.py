@@ -24,6 +24,12 @@ from bantz.skills.pc import (
     list_windows,
     type_text,
     send_key,
+    move_mouse,
+    click_mouse,
+    scroll_mouse,
+    hotkey,
+    clipboard_set,
+    clipboard_get,
 )
 
 
@@ -59,6 +65,18 @@ class OverlayStateHook:
     async def set_position(self, position: str) -> bool:
         """Update overlay position. Returns True if valid position."""
         return False
+
+    async def preview_action(self, text: str, duration_ms: int = 1200) -> None:
+        """Show transient action preview text."""
+        pass
+
+    async def cursor_dot(self, x: int, y: int, duration_ms: int = 800) -> None:
+        """Show transient cursor dot at (x,y)."""
+        pass
+
+    async def highlight_rect(self, x: int, y: int, w: int, h: int, duration_ms: int = 1200) -> None:
+        """Highlight rectangle region."""
+        pass
 
 
 # Global overlay hook instance (set by daemon)
@@ -848,6 +866,14 @@ class Router:
             text_to_type = str(slots.get("text", "")).strip()
             if not text_to_type:
                 return RouterResult(ok=False, intent=intent, user_text="Ne yazayım?" + follow_up)
+
+            hook = get_overlay_hook()
+            if hook and hasattr(hook, "preview_action_sync"):
+                try:
+                    getattr(hook, "preview_action_sync")(f"Yazıyorum: {text_to_type[:60]}", 1200)
+                except Exception:
+                    pass
+
             # Use active window if we have a session
             target_window = ctx.active_window_id if ctx.has_active_app() else None
             ok, msg = type_text(text_to_type, window_id=target_window)
@@ -858,10 +884,112 @@ class Router:
         if intent == "app_submit":
             # Send Enter key to submit
             target_window = ctx.active_window_id if ctx.has_active_app() else None
+
+            hook = get_overlay_hook()
+            if hook and hasattr(hook, "preview_action_sync"):
+                try:
+                    getattr(hook, "preview_action_sync")("Enter gönderiyorum…", 800)
+                except Exception:
+                    pass
+
             ok, msg = send_key("Return", window_id=target_window)
             ctx.last_intent = intent
             session_hint = f" ({ctx.active_app} oturumunda)" if ctx.has_active_app() else ""
             return RouterResult(ok=ok, intent=intent, user_text="Gönderildi." + session_hint + follow_up)
+
+        # ─────────────────────────────────────────────────────────────
+        # Advanced desktop input (Issue #2)
+        # ─────────────────────────────────────────────────────────────
+        if intent == "pc_mouse_move":
+            x = int(slots.get("x", 0))
+            y = int(slots.get("y", 0))
+            duration_ms = int(slots.get("duration_ms", 0) or 0)
+
+            hook = get_overlay_hook()
+            if hook and hasattr(hook, "cursor_dot_sync"):
+                try:
+                    getattr(hook, "cursor_dot_sync")(x, y, 700)
+                except Exception:
+                    pass
+            if hook and hasattr(hook, "preview_action_sync"):
+                try:
+                    getattr(hook, "preview_action_sync")(f"İmleci ({x}, {y}) konumuna götürüyorum…", 900)
+                except Exception:
+                    pass
+
+            ok, msg = move_mouse(x, y, duration_ms=duration_ms)
+            ctx.last_intent = intent
+            return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up)
+
+        if intent == "pc_mouse_click":
+            x = slots.get("x")
+            y = slots.get("y")
+            button = str(slots.get("button", "left"))
+            double = bool(slots.get("double", False))
+
+            hook = get_overlay_hook()
+            if hook and hasattr(hook, "preview_action_sync"):
+                try:
+                    btn_tr = "sol" if button == "left" else "sağ" if button == "right" else "orta"
+                    click_tr = "çift tık" if double else "tık"
+                    where = f"({int(x)}, {int(y)})" if x is not None and y is not None else "mevcut konum"
+                    getattr(hook, "preview_action_sync")(f"{btn_tr} {click_tr}: {where}", 900)
+                except Exception:
+                    pass
+            if x is not None and y is not None and hook and hasattr(hook, "cursor_dot_sync"):
+                try:
+                    getattr(hook, "cursor_dot_sync")(int(x), int(y), 700)
+                except Exception:
+                    pass
+
+            ok, msg = click_mouse(button=button, x=int(x) if x is not None else None, y=int(y) if y is not None else None, double=double)
+            ctx.last_intent = intent
+            return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up)
+
+        if intent == "pc_mouse_scroll":
+            direction = str(slots.get("direction", "down"))
+            amount = int(slots.get("amount", 3) or 3)
+            hook = get_overlay_hook()
+            if hook and hasattr(hook, "preview_action_sync"):
+                try:
+                    tr = "aşağı" if direction == "down" else "yukarı"
+                    getattr(hook, "preview_action_sync")(f"Kaydırıyorum: {tr} ({amount})", 900)
+                except Exception:
+                    pass
+            ok, msg = scroll_mouse(direction=direction, amount=amount)
+            ctx.last_intent = intent
+            return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up)
+
+        if intent == "pc_hotkey":
+            combo = str(slots.get("combo", "")).strip()
+            hook = get_overlay_hook()
+            if hook and hasattr(hook, "preview_action_sync"):
+                try:
+                    getattr(hook, "preview_action_sync")(f"Kısayol: {combo}", 900)
+                except Exception:
+                    pass
+            ok, msg = hotkey(combo)
+            ctx.last_intent = intent
+            return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up)
+
+        if intent == "clipboard_set":
+            txt = str(slots.get("text", ""))
+            hook = get_overlay_hook()
+            if hook and hasattr(hook, "preview_action_sync"):
+                try:
+                    getattr(hook, "preview_action_sync")("Panoya kopyalıyorum…", 900)
+                except Exception:
+                    pass
+            ok, msg = clipboard_set(txt)
+            ctx.last_intent = intent
+            return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up)
+
+        if intent == "clipboard_get":
+            ok, msg, val = clipboard_get()
+            ctx.last_intent = intent
+            if ok:
+                return RouterResult(ok=True, intent=intent, user_text=(msg + "\n" + val).strip() + follow_up, data={"clipboard": val})
+            return RouterResult(ok=False, intent=intent, user_text=msg + follow_up)
 
         if intent == "app_session_exit":
             if ctx.has_active_app():
