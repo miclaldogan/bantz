@@ -70,6 +70,7 @@
     "app_type": "confirm",
     "app_submit": "confirm",
     "app_session_exit": "allow",
+    "vision_screenshot": "confirm",
     "unknown": "deny"
   }
 }

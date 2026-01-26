@@ -25,6 +25,7 @@ from bantz.skills.pc import (
     type_text,
     send_key,
 )
+from bantz.skills.vision import take_screenshot
 
 
 # ─────────────────────────────────────────────────────────────
@@ -581,6 +582,28 @@ class Router:
         follow_up = "" if in_queue else " Başka ne yapayım?"
         search_follow = "" if in_queue else " Ne arayayım?"
 
+        def _overlay_hint(method: str, text: str) -> None:
+            hook = get_overlay_hook()
+            if not hook:
+                return
+
+            sync_name = f"{method}_sync"
+            try:
+                if hasattr(hook, sync_name):
+                    getattr(hook, sync_name)(text)
+                    return
+
+                import asyncio
+
+                coro = getattr(hook, method)(text)
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(coro)
+                else:
+                    loop.run_until_complete(coro)
+            except Exception:
+                return
+
         # ─────────────────────────────────────────────────────────────
         # AI Chat commands (duck.ai, chatgpt, claude, etc.)
         # ─────────────────────────────────────────────────────────────
@@ -591,6 +614,33 @@ class Router:
             ok, msg = browser_ai_chat(service, prompt)
             ctx.last_intent = intent
             return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up)
+
+        # ─────────────────────────────────────────────────────────────
+        # Vision / Screenshot
+        # ─────────────────────────────────────────────────────────────
+        if intent == "vision_screenshot":
+            x = slots.get("x")
+            y = slots.get("y")
+            w = slots.get("w")
+            h = slots.get("h")
+
+            _overlay_hint("thinking", "Ekran görüntüsü alıyorum...")
+            ok, msg, result = take_screenshot(
+                x=int(x) if x is not None else None,
+                y=int(y) if y is not None else None,
+                w=int(w) if w is not None else None,
+                h=int(h) if h is not None else None,
+            )
+            if ok:
+                _overlay_hint("speaking", "Ekran görüntüsü kaydedildi.")
+            else:
+                _overlay_hint("speaking", "Ekran görüntüsü alınamadı.")
+
+            ctx.last_intent = intent
+            data = None
+            if result is not None:
+                data = {"path": result.path, "region": result.region}
+            return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up, data=data)
 
         # ─────────────────────────────────────────────────────────────
         # Browser Agent commands (Firefox primary)

@@ -145,6 +145,35 @@ def parse_intent(text: str) -> Parsed:
         return Parsed(intent="show_events", slots={"n": 10})
 
     # ─────────────────────────────────────────────────────────────────
+    # Vision / Screen capture (Issue #1)
+    # ─────────────────────────────────────────────────────────────────
+
+    # Region screenshot: "ekran görüntüsü al: x y w h" / "screenshot al: x y w h"
+    m = re.search(
+        r"\b(ekran\s*g[oö]r[uü]nt[uü]s[uü]|ekran[ıi]?|screenshot|screen\s*shot)\b.*\b(al|çek|capture)\b\s*:?\s*(\d{1,5})\s+([0-9]{1,5})\s+([0-9]{1,5})\s+([0-9]{1,5})\b",
+        t,
+    )
+    if m:
+        return Parsed(
+            intent="vision_screenshot",
+            slots={
+                "x": int(m.group(3)),
+                "y": int(m.group(4)),
+                "w": int(m.group(5)),
+                "h": int(m.group(6)),
+            },
+        )
+
+    # Full screenshot: "ekran görüntüsü al" / "screenshot al" / "ekranı çek"
+    if re.search(r"\b(ekran\s*g[oö]r[uü]nt[uü]s[uü]|ekran[ıi]?|screenshot|screen\s*shot)\b.*\b(al|çek|capture)\b", t) or t in {
+        "ekran görüntüsü",
+        "ekran görüntüsü al",
+        "screenshot",
+        "screenshot al",
+    }:
+        return Parsed(intent="vision_screenshot", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
     # PC Control / App commands
     # ─────────────────────────────────────────────────────────────────
     

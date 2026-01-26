@@ -33,6 +33,9 @@ Intent = Literal[
     "browser_info",
     "browser_detail",
     "browser_wait",
+
+    # Vision
+    "vision_screenshot",
     "unknown",
 ]
 
