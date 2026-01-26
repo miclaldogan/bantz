@@ -393,7 +393,13 @@ function setupNavigationEvents() {
 function navigateToUrl() {
   const url = normalizeNavigationUrl(urlBar.value);
   if (!url) return;
-  webview.src = url;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+    webview.src = parsed.toString();
+  } catch {
+    // ignore
+  }
 }
 
 function normalizeNavigationUrl(input) {
@@ -1423,8 +1429,15 @@ async function executeType(el, text) {
 function navigateTo(target) {
   const url = normalizeNavigationUrl(target);
   if (!url) return;
-  addMessage(`🌐 Gidiliyor: ${url}`, 'system');
-  webview.src = url;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+    const safeUrl = parsed.toString();
+    addMessage(`🌐 Gidiliyor: ${safeUrl}`, 'system');
+    webview.src = safeUrl;
+  } catch {
+    // ignore
+  }
 }
 
 /**
