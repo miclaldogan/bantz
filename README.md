@@ -25,51 +25,51 @@
 
 ---
 
-## 🎬 Demo
+## Demo
 
 ```
 👤 "Hey Bantz, bugünkü haberlerde ne var?"
-🤖 "Şimdi sizin için arıyorum efendim..."
+🤖 "Sizin için şimdi arıyorum efendim..."
    [tarayıcıda arama yapar]
-🤖 "Sonuçlar burada efendim."
+🤖 "Sonuçlarınız burada."
    [ekranda transparent panel açılır, haberler listelenir]
 👤 "3. haberi aç"
 🤖 "Açıyorum efendim."
 👤 "Bu CEO olayını anlayamadım, anlat bakalım"
-🤖 "Arıyorum efendim... Bu haberde Tesla CEO'su..."
+🤖 "Hemen arıyorum... Bu haberde Tesla CEO'su..."
 ```
 
-## ✨ Features
+## Features
 
-### 🎙️ Voice Control
-- **Wake Word Detection** - "Hey Bantz" ile aktifleştir
+### Voice Control
+- **Wake Word Detection** - "Hey Bantz" ya da "Bantz" ile aktifleştir
 - **Push-to-Talk** - Space tuşu ile konuş
 - **Continuous Listening** - Konuşma modunda wake word gerekmez
 - **Turkish ASR** - Faster-Whisper ile hızlı Türkçe tanıma
 
-### 🌐 Browser Automation
+### Browser Automation
 - **Firefox Integration** - Gerçek profil ile çalışır (login'ler korunur)
 - **Site-Specific Actions** - Google, YouTube, GitHub, LinkedIn desteği
 - **Page Scanning** - Sayfa içeriğini analiz et
 - **Smart Navigation** - "geri dön", "yenile", "kapat"
 
-### 🖥️ Desktop Control
+### Desktop Control
 - **App Launcher** - "btop aç", "terminal aç"
 - **File Manager** - "indirilenler klasörünü aç"
 - **Notifications** - "bildirim göster: mesaj"
 - **Window Management** - wmctrl ile pencere kontrolü
 
-### 🧠 LLM Integration
+### LLM Integration
 - **Ollama Backend** - Yerel LLM (qwen2.5:3b-instruct)
 - **Command Rewriting** - ASR hatalarını düzelt
 - **Conversational AI** - Doğal dil anlama
 
-### 🎨 Overlay UI
+### Overlay UI
 - **PyQt5 Overlay** - Transparent bilgi paneli
 - **State Indicators** - Listening, Thinking, Speaking durumları
 - **Results Display** - Arama sonuçlarını göster
 
-## 🛠️ Installation
+## Installation
 
 ### Prerequisites
 
@@ -113,7 +113,7 @@ pip install -e ".[llm]"      # LLM integration
 # 4. Select bantz-extension/manifest.json
 ```
 
-## 🚀 Usage
+## Usage
 
 ### Quick Start
 
@@ -153,7 +153,7 @@ vim config/policy.json
 vim config/site_profiles.json
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -184,7 +184,7 @@ vim config/site_profiles.json
     └─────────┘         └───────────┘
 ```
 
-## 📋 Roadmap
+## Roadmap
 
 ### Phase 0 - Core (Current Focus)
 - [x] Voice recognition (Whisper)
@@ -210,7 +210,7 @@ vim config/site_profiles.json
 
 See [Issues](https://github.com/miclaldogan/bantz/issues) for detailed roadmap.
 
-## 🔧 Development
+## Development
 
 ```bash
 # Run in development mode
@@ -250,7 +250,7 @@ This software is provided for **viewing and educational purposes only**.
 
 See [LICENSE](LICENSE) for full terms.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [Faster-Whisper](https://github.com/guillaumekln/faster-whisper) - ASR
 - [OpenWakeWord](https://github.com/dscripka/openWakeWord) - Wake word
