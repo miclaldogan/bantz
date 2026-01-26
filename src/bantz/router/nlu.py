@@ -688,6 +688,80 @@ def parse_intent(text: str) -> Parsed:
     if m:
         return Parsed(intent="checkin_add", slots={"schedule": m.group(2).strip(), "prompt": m.group(3).strip()})
 
+    # ─────────────────────────────────────────────────────────────────
+    # Coding Agent Commands (Issue #4)
+    # File operations, terminal, code editing via natural language
+    # ─────────────────────────────────────────────────────────────────
+    
+    # File read: "dosya oku: path", "oku: file.py", "file.py dosyasını oku"
+    m = re.search(r"(dosya|file)\s*(oku|okuyabilir\s+misin|göster)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="file_read", slots={"path": m.group(3).strip()})
+    m = re.search(r"oku\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="file_read", slots={"path": m.group(1).strip()})
+    m = re.search(r"(.+?)\s+dosyas[ıi]n[ıi]\s+(oku|göster)", t)
+    if m:
+        return Parsed(intent="file_read", slots={"path": m.group(1).strip()})
+    
+    # File write/create: "dosya yaz: path", "oluştur: file.py"
+    m = re.search(r"(dosya|file)\s*(yaz|oluştur|olu[sş]tur|create)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="file_create", slots={"path": m.group(3).strip()})
+    m = re.search(r"olu[sş]tur\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="file_create", slots={"path": m.group(1).strip()})
+    
+    # File list/tree: "dosyaları listele", "proje yapısı", "tree", "ls"
+    if re.search(r"\b(dosyalar[ıi]?\s+(listele|g[öo]ster)|proje\s+yap[ıi]s[ıi]|tree|file\s+tree|klasör\s+yap[ıi]s[ıi])\b", t):
+        return Parsed(intent="project_tree", slots={})
+    
+    # File search: "dosya ara: *.py", "ara: config"
+    m = re.search(r"(dosya|file)?\s*ara\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m and m.group(2).strip():
+        return Parsed(intent="file_search", slots={"pattern": m.group(2).strip()})
+    
+    # Undo: "geri al", "undo", "son değişikliği geri al"
+    if re.search(r"\b(geri\s+al|undo|son\s+de[ğg]i[şs]ikli[ğg]i\s+geri\s+al)\b", t):
+        return Parsed(intent="file_undo", slots={})
+    
+    # Terminal run: "terminal: ls -la", "çalıştır: npm run dev", "run: pytest"
+    m = re.search(r"(terminal|[çc]al[ıi][şs]t[ıi]r|run|shell|exec)\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="terminal_run", slots={"command": m.group(2).strip()})
+    
+    # Background process: "arka planda: npm run dev", "background: python server.py"
+    m = re.search(r"(arka\s*planda?|background|bg)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="terminal_background", slots={"command": m.group(2).strip()})
+    
+    # Background list/kill: "arka plan işlemleri", "bg kill 1"
+    if re.search(r"\b(arka\s*plan\s*i[şs]lemleri?|background\s*processes?|bg\s+list)\b", t):
+        return Parsed(intent="terminal_background_list", slots={})
+    m = re.search(r"\b(bg\s+kill|arka\s*plan\s*kapat)\s+(\d+)\b", t)
+    if m:
+        return Parsed(intent="terminal_background_kill", slots={"id": int(m.group(2))})
+    
+    # Code format: "formatla: file.py", "format: src/", "kodu formatla"
+    m = re.search(r"(formatla|format|düzenle)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="code_format", slots={"path": m.group(2).strip()})
+    
+    # Project info: "proje bilgisi", "dependencies", "bağımlılıklar"
+    if re.search(r"\b(proje\s+bilgi(si)?|project\s+info|ba[ğg][ıi]ml[ıi]l[ıi]klar|dependencies)\b", t):
+        return Parsed(intent="project_info", slots={})
+    
+    # Symbol search: "fonksiyon bul: parse", "class ara: Router"
+    m = re.search(r"(fonksiyon|function|class|sembol|symbol)\s*(bul|ara)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        symbol_type = "function" if "fonk" in m.group(1).lower() or "func" in m.group(1).lower() else "class" if "class" in m.group(1).lower() else None
+        return Parsed(intent="project_search_symbol", slots={"name": m.group(3).strip(), "type": symbol_type})
+    
+    # Symbols in file: "semboller: file.py", "fonksiyonlar: engine.py"
+    m = re.search(r"(sembol|symbol|fonksiyon|function|class)ler[ıi]?\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="project_symbols", slots={"path": m.group(2).strip()})
+
     # dev mode placeholder
     if re.search(r"\b(repo|test|build|branch|commit|pull request|pr|ci)\b", t):
         return Parsed(intent="dev_task", slots={"text": text})

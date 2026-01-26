@@ -12,6 +12,9 @@ def build_default_registry() -> ToolRegistry:
 
     reg = ToolRegistry()
 
+    # ─────────────────────────────────────────────────────────────────
+    # Browser Tools
+    # ─────────────────────────────────────────────────────────────────
     reg.register(
         Tool(
             name="browser_open",
@@ -210,6 +213,226 @@ def build_default_registry() -> ToolRegistry:
             name="clipboard_get",
             description="Read current clipboard text.",
             parameters={"type": "object", "properties": {}},
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────
+    # Coding Agent Tools (Issue #4)
+    # ─────────────────────────────────────────────────────────────────
+    
+    # File operations
+    reg.register(
+        Tool(
+            name="file_read",
+            description="Read contents of a file. Can read specific line ranges.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path"},
+                    "start_line": {"type": "integer", "description": "Starting line (1-indexed)"},
+                    "end_line": {"type": "integer", "description": "Ending line (inclusive)"},
+                },
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_write",
+            description="Write content to a file. Creates backup automatically.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path"},
+                    "content": {"type": "string", "description": "File content"},
+                },
+                "required": ["path", "content"],
+            },
+            requires_confirmation=True,
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_edit",
+            description="Replace a specific string in a file. Include enough context for unique match.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path"},
+                    "old_string": {"type": "string", "description": "Exact text to find"},
+                    "new_string": {"type": "string", "description": "Replacement text"},
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_create",
+            description="Create a new file with optional initial content.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path"},
+                    "content": {"type": "string", "description": "Initial content"},
+                },
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_undo",
+            description="Undo the last edit to a file by restoring from backup.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_search",
+            description="Search for files by name pattern, optionally matching content.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.py')"},
+                    "content": {"type": "string", "description": "Search within file content (regex)"},
+                },
+                "required": ["pattern"],
+            },
+        )
+    )
+    
+    # Terminal operations
+    reg.register(
+        Tool(
+            name="terminal_run",
+            description="Run a shell command. Some commands require confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Shell command to run"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds"},
+                },
+                "required": ["command"],
+            },
+            requires_confirmation=True,
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="terminal_background",
+            description="Start a command in background. For servers, watch, etc.",
+            parameters={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="terminal_background_list",
+            description="List all running background processes.",
+            parameters={"type": "object", "properties": {}},
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="terminal_background_kill",
+            description="Kill a background process by ID.",
+            parameters={
+                "type": "object",
+                "properties": {"id": {"type": "integer"}},
+                "required": ["id"],
+            },
+        )
+    )
+    
+    # Code editing
+    reg.register(
+        Tool(
+            name="code_format",
+            description="Format code using appropriate formatter (black, prettier, etc.).",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="code_replace_function",
+            description="Replace an entire function in a file.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "function_name": {"type": "string"},
+                    "new_code": {"type": "string"},
+                },
+                "required": ["path", "function_name", "new_code"],
+            },
+        )
+    )
+    
+    # Project context
+    reg.register(
+        Tool(
+            name="project_info",
+            description="Get project information (type, name, dependencies).",
+            parameters={"type": "object", "properties": {}},
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="project_tree",
+            description="Get project file tree structure.",
+            parameters={
+                "type": "object",
+                "properties": {"max_depth": {"type": "integer"}},
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="project_symbols",
+            description="Get symbols (functions, classes) from a file.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="project_search_symbol",
+            description="Search for a symbol across the project.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Symbol name (partial match)"},
+                    "type": {"type": "string", "description": "Filter by type (function, class)"},
+                },
+                "required": ["name"],
+            },
         )
     )
 
