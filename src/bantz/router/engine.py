@@ -2366,6 +2366,48 @@ class Router:
                 return RouterResult(ok=True, intent=intent, user_text=f"✅ {old_app} oturumundan çıktım. Normal moda döndüm." + follow_up)
             return RouterResult(ok=True, intent=intent, user_text="Zaten aktif uygulama oturumu yok." + follow_up)
 
+        # ─────────────────────────────────────────────────────────────────
+        # Coding Agent intents (Issue #4)
+        # ─────────────────────────────────────────────────────────────────
+        coding_intents = {
+            "file_read", "file_write", "file_edit", "file_create", "file_delete",
+            "file_undo", "file_list", "file_search",
+            "terminal_run", "terminal_background", "terminal_background_output",
+            "terminal_background_kill", "terminal_background_list",
+            "code_apply_diff", "code_replace_function", "code_replace_class",
+            "code_insert_lines", "code_delete_lines", "code_format", "code_search_replace",
+            "project_info", "project_tree", "project_symbols", "project_search_symbol",
+            "project_related_files", "project_imports",
+        }
+        
+        if intent in coding_intents:
+            try:
+                from bantz.coding import CodingToolExecutor
+                
+                # Initialize executor (lazily cached)
+                if not hasattr(self, "_coding_executor"):
+                    from pathlib import Path
+                    workspace = Path.cwd()
+                    self._coding_executor = CodingToolExecutor(workspace_root=workspace)
+                
+                import asyncio
+                
+                # Run async execute
+                loop = asyncio.new_event_loop()
+                try:
+                    ok, result_text = loop.run_until_complete(
+                        self._coding_executor.execute(intent, slots)
+                    )
+                finally:
+                    loop.close()
+                
+                ctx.last_intent = intent
+                return RouterResult(ok=ok, intent=intent, user_text=result_text + follow_up)
+                
+            except Exception as e:
+                ctx.last_intent = intent
+                return RouterResult(ok=False, intent=intent, user_text=f"❌ Coding agent hatası: {e}" + follow_up)
+
         ctx.last_intent = "unknown"
         return RouterResult(
             ok=False,
