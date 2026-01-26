@@ -1,5 +1,25 @@
 # Bantz – Issue Backlog (Draft)
 
+> Jarvis v2 roadmap dokümanı: [docs/jarvis-roadmap-v2.md](docs/jarvis-roadmap-v2.md)
+
+---
+
+## Epic V2 — “Jarvis Seviye” Roadmap (Phases 0–8 + UI/Voice)
+
+Bu bölüm, v2 mimarisi için **faz bazlı** epic issue’ları takip etmek içindir. Detaylar roadmap dokümanında.
+
+- V2-0: Faz 0 — Ürün tanımı + Done kriterleri (#30: https://github.com/miclaldogan/bantz/issues/30)
+- V2-1: Faz 1 — Agent OS çekirdeği (Event Bus + Job Manager + Interrupt/Barge-in) (#31: https://github.com/miclaldogan/bantz/issues/31)
+- V2-2: Faz 2 — Tool Runtime (retry/timeout/circuit breaker + web tools katmanı) (#32: https://github.com/miclaldogan/bantz/issues/32)
+- V2-3: Faz 3 — Cite-first doğrulama + çelişki + confidence (#33: https://github.com/miclaldogan/bantz/issues/33)
+- V2-4: Faz 4 — Memory (session/profile/episodic + write policy + retrieval) (#36: https://github.com/miclaldogan/bantz/issues/36)
+- V2-5: Faz 5 — Gizlilik & güvenlik (permission engine + secrets vault + audit log) (#37: https://github.com/miclaldogan/bantz/issues/37)
+- V2-6: Faz 6 — Conversation engine (state machine + barge-in + feedback standardı) (#38: https://github.com/miclaldogan/bantz/issues/38)
+- V2-7: Faz 7 — Doküman/PDF/DOC anlama (pipeline + hybrid cloud permission) (#39: https://github.com/miclaldogan/bantz/issues/39)
+- V2-8: Faz 8 — Agentic automation v1 (PEV + templates + fail-safe) (#40: https://github.com/miclaldogan/bantz/issues/40)
+- UI-2: Jarvis Panel v0 (animations + cards + image slots + ticker + event stream) (#34: https://github.com/miclaldogan/bantz/issues/34)
+- Voice-2: Attention Gate (wakeword-only during tasks + pause/resume + engaged window) (#35: https://github.com/miclaldogan/bantz/issues/35)
+
 
 Bu liste iki kaynaktan birleşik:
 - Repo içi teknik borç / buglar (benim taramada bulduklarım)
