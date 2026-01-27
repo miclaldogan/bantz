@@ -45,6 +45,20 @@ from .jarvis_overlay import (
     create_jarvis_overlay,
 )
 
+# Issue #19: Jarvis Panel UI
+from .jarvis_panel import (
+    JarvisPanel,
+    JarvisPanelController,
+    PanelPosition,
+    PanelColors,
+    PANEL_POSITION_ALIASES,
+    ResultItem,
+    SummaryData,
+    create_jarvis_panel,
+    MockJarvisPanel,
+    MockJarvisPanelController,
+)
+
 from .components import (
     ArcReactorWidget,
     MiniArcReactor,
@@ -111,6 +125,17 @@ __all__ = [
     "GridPosition",
     "POSITION_ALIASES",
     "create_jarvis_overlay",
+    # Panel (Issue #19)
+    "JarvisPanel",
+    "JarvisPanelController",
+    "PanelPosition",
+    "PanelColors",
+    "PANEL_POSITION_ALIASES",
+    "ResultItem",
+    "SummaryData",
+    "create_jarvis_panel",
+    "MockJarvisPanel",
+    "MockJarvisPanelController",
     # Components
     "ArcReactorWidget",
     "MiniArcReactor",

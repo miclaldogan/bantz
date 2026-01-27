@@ -100,6 +100,38 @@ JARVIS_RESPONSES: Dict[str, List[str]] = {
         "Sayfa içeriği okunamadı efendim.",
     ],
     
+    # Panel moved
+    "panel_moved": [
+        "Panel taşındı efendim.",
+        "Paneli taşıdım efendim.",
+        "Tamam efendim.",
+    ],
+    
+    # Panel shown
+    "panel_shown": [
+        "Sonuçlar panelde efendim.",
+        "Panel açıldı efendim.",
+        "Buyurun efendim.",
+    ],
+    
+    # Panel hidden
+    "panel_hidden": [
+        "Panel kapatıldı efendim.",
+        "Tamam efendim.",
+    ],
+    
+    # Panel paginated
+    "panel_page": [
+        "Sayfa değişti efendim.",
+        "Buyurun efendim.",
+    ],
+    
+    # Panel item selected
+    "panel_select": [
+        "Açıyorum efendim.",
+        "Hemen açıyorum efendim.",
+    ],
+    
     # Opening something
     "opening": [
         "Açıyorum efendim.",

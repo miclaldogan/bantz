@@ -145,6 +145,57 @@ def parse_intent(text: str) -> Parsed:
     if re.search(r"\b(gizlen|overlay.*kapat|kendini\s+kapat|ekrandan\s+[cç][ıi]k)\b", t):
         return Parsed(intent="overlay_hide", slots={})
 
+    # ─────────────────────────────────────────────────────────────────
+    # Jarvis Panel control (Issue #19)
+    # Note: These are specific panel commands that require "panel" keyword
+    # Generic pagination like "sonraki", "önceki" are handled later
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Panel move: "paneli sağa taşı", "paneli sol üste götür", "paneli ortaya al"
+    m = re.search(r"\bpanel[ie]?\s*(sa[ğg](a)?|sol(a)?|sa[ğg]\s*[üu]st(e)?|sol\s*[üu]st(e)?|orta(ya)?|merkez(e)?|sa[ğg]\s*alt(a)?|sol\s*alt(a)?)\s*(ta[şs][ıi]|g[oö]t[üu]r|al|git|ge[çc]|koy)\b", t)
+    if m:
+        position = m.group(1).strip()
+        return Parsed(intent="panel_move", slots={"position": position})
+    
+    # Alternative: "sağa taşı paneli", "sol üste al paneli"
+    m = re.search(r"\b(sa[ğg](a)?|sol(a)?|sa[ğg]\s*[üu]st(e)?|sol\s*[üu]st(e)?|orta(ya)?|merkez(e)?)\s*(ta[şs][ıi]|g[oö]t[üu]r|al)\s*panel[ie]?\b", t)
+    if m:
+        position = m.group(1).strip()
+        return Parsed(intent="panel_move", slots={"position": position})
+    
+    # Panel hide: "paneli kapat", "paneli gizle", "sonuçları kapat"
+    if re.search(r"\b(panel[ie]?\s*(kapat|gizle|hide)|sonu[çc]lar[ıi]?\s*kapat)\b", t):
+        return Parsed(intent="panel_hide", slots={})
+    
+    # Panel minimize: "paneli küçült", "paneli minimize et"
+    if re.search(r"\b(panel[ie]?\s*(k[üu][çc][üu]lt|minimize)|k[üu][çc][üu]lt\s*panel[ie]?)\b", t):
+        return Parsed(intent="panel_minimize", slots={})
+    
+    # Panel maximize/restore: "paneli büyüt", "paneli aç", "paneli göster"
+    if re.search(r"\b(panel[ie]?\s*(b[üu]y[üu]t|g[oö]ster|maximize|restore)|b[üu]y[üu]t\s*panel[ie]?)\b", t):
+        return Parsed(intent="panel_maximize", slots={})
+    
+    # Panel pagination: ONLY with explicit "panel" or "sayfa" keyword
+    # "panelde sonraki", "sonraki sayfa"
+    if re.search(r"\b(panel(de)?\s+sonraki|sonraki\s+sayfa)\b", t):
+        return Parsed(intent="panel_next_page", slots={})
+    
+    # Panel prev: ONLY with explicit "panel" or "sayfa" keyword
+    # "panelde önceki", "önceki sayfa"
+    if re.search(r"\b(panel(de)?\s+[öo]nceki|[öo]nceki\s+sayfa)\b", t):
+        return Parsed(intent="panel_prev_page", slots={})
+    
+    # Panel select item: "panelde 3. sonucu aç", "panelden 2. sonucu seç"
+    # Note: Without "panel" keyword, these go to news_open_result
+    m = re.search(r"\bpanel(de|den|deki)?\s*(\d+)\.\s*sonu[çc][uü]?\s*(a[çc]|se[çc]|g[öo]ster)?\b", t)
+    if m:
+        return Parsed(intent="panel_select_item", slots={"index": int(m.group(2))})
+    
+    # Alternative: "3. paneldeki sonucu aç"
+    m = re.search(r"\b(\d+)\.\s*panel(de|den|deki)\s*sonu[çc][uü]?\s*(a[çc]|se[çc]|g[öo]ster)?\b", t)
+    if m:
+        return Parsed(intent="panel_select_item", slots={"index": int(m.group(1))})
+
     # Queue control commands (highest priority)
     if t in {"duraklat", "bekle", "dur bir"}:
         return Parsed(intent="queue_pause", slots={})
