@@ -2181,6 +2181,161 @@ class Router:
             )
 
         # ─────────────────────────────────────────────────────────────
+        # Page Summarization commands (Jarvis-style)
+        # ─────────────────────────────────────────────────────────────
+        if intent == "page_summarize":
+            from bantz.skills.summarizer import PageSummarizer
+            from bantz.llm.persona import JarvisPersona
+            from bantz.llm.ollama_client import OllamaClient
+            from bantz.browser.extension_bridge import get_bridge
+            
+            persona = JarvisPersona()
+            
+            # Get bridge for page extraction
+            bridge = get_bridge()
+            if not bridge or not bridge.has_client():
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Tarayıcı bağlantısı yok efendim. Firefox eklentisi aktif mi?"
+                )
+            
+            # Create LLM client and summarizer
+            try:
+                llm = OllamaClient()
+                summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
+                
+                # Store in context for follow-up commands
+                ctx.set_page_summarizer(summarizer)
+                
+                # Return thinking response - actual summarization will happen
+                thinking_msg = persona.get_response("thinking")
+                ctx.last_intent = intent
+                ctx.set_pending_page_summarize(detail_level="short")
+                
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=thinking_msg,
+                    data={"state": "extracting", "detail_level": "short"}
+                )
+            except Exception as e:
+                logger.error(f"[Router] Page summarize error: {e}")
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text=persona.get_response("error")
+                )
+
+        if intent == "page_summarize_detailed":
+            from bantz.skills.summarizer import PageSummarizer
+            from bantz.llm.persona import JarvisPersona
+            from bantz.llm.ollama_client import OllamaClient
+            from bantz.browser.extension_bridge import get_bridge
+            
+            persona = JarvisPersona()
+            
+            # Check if we have existing summary - can just expand
+            summarizer = ctx.get_page_summarizer()
+            if summarizer and summarizer.has_summary:
+                # Already have content, just need detailed summary
+                summary = summarizer.last_summary
+                if summary and summary.detailed_summary:
+                    # Already have detailed summary
+                    overlay_data = summarizer.format_for_overlay(summary, detailed=True)
+                    ctx.last_intent = intent
+                    return RouterResult(
+                        ok=True,
+                        intent=intent,
+                        user_text=persona.get_response("results_found"),
+                        data=overlay_data
+                    )
+            
+            # Need to extract and generate detailed summary
+            bridge = get_bridge()
+            if not bridge or not bridge.has_client():
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Tarayıcı bağlantısı yok efendim."
+                )
+            
+            try:
+                llm = OllamaClient()
+                summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
+                ctx.set_page_summarizer(summarizer)
+                
+                thinking_msg = persona.get_response("thinking")
+                ctx.last_intent = intent
+                ctx.set_pending_page_summarize(detail_level="detailed")
+                
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=thinking_msg,
+                    data={"state": "extracting", "detail_level": "detailed"}
+                )
+            except Exception as e:
+                logger.error(f"[Router] Page summarize detailed error: {e}")
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text=persona.get_response("error")
+                )
+
+        if intent == "page_question":
+            from bantz.skills.summarizer import PageSummarizer
+            from bantz.llm.persona import JarvisPersona
+            from bantz.llm.ollama_client import OllamaClient
+            from bantz.browser.extension_bridge import get_bridge
+            
+            persona = JarvisPersona()
+            question = str(slots.get("question", "")).strip()
+            
+            if not question:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Ne sormak istiyorsun efendim?"
+                )
+            
+            # Check if we have existing summarizer with content
+            summarizer = ctx.get_page_summarizer()
+            
+            if not summarizer or not summarizer.has_content:
+                # Need to extract first
+                bridge = get_bridge()
+                if not bridge or not bridge.has_client():
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text="Tarayıcı bağlantısı yok efendim."
+                    )
+                
+                try:
+                    llm = OllamaClient()
+                    summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
+                    ctx.set_page_summarizer(summarizer)
+                except Exception as e:
+                    logger.error(f"[Router] Page question setup error: {e}")
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text=persona.get_response("error")
+                    )
+            
+            thinking_msg = persona.get_response("thinking")
+            ctx.last_intent = intent
+            ctx.set_pending_page_question(question)
+            
+            return RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=thinking_msg,
+                data={"state": "answering", "question": question}
+            )
+
+        # ─────────────────────────────────────────────────────────────
         # Original daily skills
         # ─────────────────────────────────────────────────────────────
         if intent == "open_browser":

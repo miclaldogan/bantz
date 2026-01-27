@@ -154,6 +154,11 @@ class ConversationContext:
     # News briefing state
     _news_briefing: Any = field(default=None, repr=False)
     _pending_news_search: Optional[str] = field(default=None, repr=False)
+    
+    # Page summarizer state
+    _page_summarizer: Any = field(default=None, repr=False)
+    _pending_page_summarize: Optional[str] = field(default=None, repr=False)
+    _pending_page_question: Optional[str] = field(default=None, repr=False)
 
     def set_pending_agent_plan(self, *, task_id: str, steps: list[QueueStep]) -> None:
         """Store a planned agent task awaiting user confirmation."""
@@ -197,6 +202,45 @@ class ConversationContext:
         """Clear pending news search."""
         self._pending_news_search = None
 
+    # Page summarizer management
+    def set_page_summarizer(self, summarizer: Any) -> None:
+        """Store page summarizer instance for follow-up commands."""
+        self._page_summarizer = summarizer
+
+    def get_page_summarizer(self) -> Any:
+        """Get the current page summarizer instance."""
+        return self._page_summarizer
+
+    def clear_page_summarizer(self) -> None:
+        """Clear the page summarizer state."""
+        self._page_summarizer = None
+        self._pending_page_summarize = None
+        self._pending_page_question = None
+
+    def set_pending_page_summarize(self, detail_level: str = "short") -> None:
+        """Mark that a page summarization is pending."""
+        self._pending_page_summarize = detail_level
+
+    def get_pending_page_summarize(self) -> Optional[str]:
+        """Get pending page summarize detail level."""
+        return self._pending_page_summarize
+
+    def clear_pending_page_summarize(self) -> None:
+        """Clear pending page summarize."""
+        self._pending_page_summarize = None
+
+    def set_pending_page_question(self, question: str) -> None:
+        """Mark that a page question is pending."""
+        self._pending_page_question = question
+
+    def get_pending_page_question(self) -> Optional[str]:
+        """Get pending page question."""
+        return self._pending_page_question
+
+    def clear_pending_page_question(self) -> None:
+        """Clear pending page question."""
+        self._pending_page_question = None
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
@@ -212,4 +256,7 @@ class ConversationContext:
             "pending_agent_plan": bool(self._pending_agent_plan),
             "has_news_briefing": self._news_briefing is not None,
             "pending_news_search": self._pending_news_search,
+            "has_page_summarizer": self._page_summarizer is not None,
+            "pending_page_summarize": self._pending_page_summarize,
+            "pending_page_question": self._pending_page_question,
         }

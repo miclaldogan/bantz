@@ -547,6 +547,52 @@ def parse_intent(text: str) -> Parsed:
         return Parsed(intent="news_briefing", slots={"query": "gündem"})
 
     # ─────────────────────────────────────────────────────────────────
+    # Page Summarization Commands (Jarvis-style)
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Question about page content: "Bu CEO kim?", "Fiyatı ne?", "Kim yazmış?"
+    # Must check BEFORE general summarize patterns
+    m = re.search(r"\b(bu|şu|o)\s+(.+?)(\s+kim|\s+ne\s+zaman|\s+neden|\s+nas[ıi]l|\s+nerede)\b.*\?", t)
+    if m:
+        question = text.strip()
+        return Parsed(intent="page_question", slots={"question": question})
+    
+    # Direct questions: "CEO kim?", "Fiyatı ne?", "Kaç para?", "Ne zaman?"
+    if re.search(r"\b(kim|ne|neden|nas[ıi]l|nerede|ka[çc])\b.*\?$", t):
+        question = text.strip()
+        return Parsed(intent="page_question", slots={"question": question})
+    
+    # Detailed summarize: "detaylı anlat", "tam anlat", "daha detaylı özetle"
+    if re.search(r"\b(tam|daha\s+)?(detayl[ıi]|uzun)\s*(anlat|[öo]zetle|a[çc][ıi]kla)\b", t):
+        return Parsed(intent="page_summarize_detailed", slots={})
+    
+    # Detailed summarize: "detaylı olarak anlat", "ayrıntılı açıkla"
+    if re.search(r"\b(detayl[ıi]\s+olarak|ayr[ıi]nt[ıi]l[ıi])\s*(anlat|[öo]zetle|a[çc][ıi]kla)\b", t):
+        return Parsed(intent="page_summarize_detailed", slots={})
+    
+    # Short summarize: "bu sayfayı özetle", "bu haberi anlat", "şu makaleyi oku"
+    # Note: Turkish suffixes can be -ı/-i/-u/-ü or -yı/-yi/-yu/-yü or -nı/-ni/-nu/-nü
+    # içerik -> içeriği (k->ğ mutation)
+    if re.search(r"\b(bu|[şs]u)\s*(sayfa|haber|i[çc]eri[gğk]|makale|yaz[ıi])([yniıuü]+)?\s+([öo]zetle|anlat|a[çc][ıi]kla|oku)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+    
+    # Short summarize: "bunu özetle", "şunu anlat"
+    if re.search(r"\b(bunu|[şs]unu)\s*([öo]zetle|anlat|a[çc][ıi]kla)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+    
+    # Short summarize: "özetle", "anlat bakalım", "ne anlatıyor", "ne yazıyor"
+    if re.search(r"\b(ne\s+anlat[ıi]yor|ne\s+yaz[ıi]yor|ne\s+diyor|neler\s+var)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+    
+    # Short summarize: "anlayamadım anlat", "anlamadım açıkla"
+    if re.search(r"\b(anlaya?mad[ıi]m|anlamad[ıi]m).*(anlat|a[çc][ıi]kla|[öo]zetle)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+    
+    # Summarize with question marker: "bu ne anlatıyor bana?"
+    if re.search(r"\b(bu|[şs]u)\s+(ne\s+anlat|ne\s+yaz|ne\s+di)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
     # Original skills
     # ─────────────────────────────────────────────────────────────────
 

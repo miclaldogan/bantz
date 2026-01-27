@@ -45,6 +45,10 @@ Intent = Literal[
     "news_open_result",
     "news_open_current",
     "news_more",
+    # Page Summarization intents
+    "page_summarize",
+    "page_summarize_detailed",
+    "page_question",
     # Advanced desktop input
     "pc_mouse_move",
     "pc_mouse_click",
