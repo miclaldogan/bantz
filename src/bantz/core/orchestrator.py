@@ -721,8 +721,12 @@ class BantzOrchestrator:
         try:
             import numpy as np
             
-            # Convert bytes to float32
-            audio_np = np.frombuffer(audio, dtype=np.float32)
+            # ContinuousListener sends audio as int16 bytes
+            # Convert int16 bytes to float32 for ASR
+            audio_int16 = np.frombuffer(audio, dtype=np.int16)
+            audio_np = audio_int16.astype(np.float32) / 32768.0
+            
+            logger.debug(f"[Orchestrator] Audio: {len(audio)} bytes, {len(audio_np)} samples, max={np.max(np.abs(audio_np)):.4f}")
             
             # ASR returns (text, meta) tuple
             text, meta = self._asr.transcribe(audio_np)

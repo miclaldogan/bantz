@@ -959,6 +959,99 @@ class Router:
             return dev_result
 
         # ─────────────────────────────────────────────────────────────
+        # Greeting intent: friendly response
+        # ─────────────────────────────────────────────────────────────
+        if intent == "greeting":
+            import random
+            greetings = [
+                "Merhaba efendim! Size nasıl yardımcı olabilirim?",
+                "Selam! Emrinize amadeyim.",
+                "Merhaba! Ne yapabilirim sizin için?",
+                "Hey! Dinliyorum sizi.",
+            ]
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=random.choice(greetings),
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
+
+        # ─────────────────────────────────────────────────────────────
+        # Help intent: show available commands
+        # ─────────────────────────────────────────────────────────────
+        if intent == "help":
+            help_text = (
+                "Size yardımcı olabileceğim bazı şeyler:\n"
+                "• 'discord aç' - Uygulama açma\n"
+                "• 'youtube aç' - Web sitesi açma\n"
+                "• 'hatırlat: 5 dakika sonra toplantı' - Hatırlatıcı ekleme\n"
+                "• 'google'da hava durumu ara' - Web araması\n"
+                "• 'saat kaç' - Saat sorma\n"
+                "Başka ne yapabilirim?"
+            )
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=help_text,
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
+
+        # ─────────────────────────────────────────────────────────────
+        # Time query intent
+        # ─────────────────────────────────────────────────────────────
+        if intent == "time_query":
+            from datetime import datetime
+            now = datetime.now()
+            time_str = now.strftime("%H:%M")
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=f"Saat şu an {time_str}.",
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
+
+        # ─────────────────────────────────────────────────────────────
+        # Date query intent
+        # ─────────────────────────────────────────────────────────────
+        if intent == "date_query":
+            from datetime import datetime
+            now = datetime.now()
+            days_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+            months_tr = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", 
+                        "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+            day_name = days_tr[now.weekday()]
+            month_name = months_tr[now.month - 1]
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=f"Bugün {day_name}, {now.day} {month_name} {now.year}.",
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
+
+        # ─────────────────────────────────────────────────────────────
+        # Goodbye intent
+        # ─────────────────────────────────────────────────────────────
+        if intent == "goodbye":
+            import random
+            goodbyes = [
+                "Rica ederim! İhtiyacınız olursa buradayım.",
+                "Güle güle! Yine beklerim.",
+                "İyi günler dilerim!",
+                "Hoşça kalın efendim!",
+            ]
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=random.choice(goodbyes),
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
+
+        # ─────────────────────────────────────────────────────────────
         # Unknown intent: ask to repeat instead of policy deny
         # ─────────────────────────────────────────────────────────────
         if intent == "unknown":

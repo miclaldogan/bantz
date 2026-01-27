@@ -258,6 +258,30 @@ def parse_intent(text: str) -> Parsed:
     t = _clean(text).lower()
 
     # ─────────────────────────────────────────────────────────────────
+    # Greeting / Conversational intents (Basic Jarvis interaction)
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Greeting: "merhaba", "selam", "selam jarvis", "hey", "naber"
+    if re.search(r"^(merhaba|selam(\s+jarvis)?|hey(\s+jarvis)?|naber|nas[ıi]ls[ıi]n|g[üu]nayd[ıi]n|iyi\s+ak[şs]amlar|iyi\s+g[üu]nler)$", t):
+        return Parsed(intent="greeting", slots={})
+    
+    # Help: "yardım", "help", "ne yapabilirsin", "komutlar"
+    if re.search(r"^(yard[ıi]m|help|ne\s+yapabilirsin|komutlar|yard[ıi]m\s+et|nas[ıi]l\s+kullan[ıi]r[ıi]m)$", t):
+        return Parsed(intent="help", slots={})
+    
+    # Time query: "saat kaç", "ne zaman", "bugün günlerden ne"
+    if re.search(r"^(saat\s+ka[çc]|saati?\s+s[öo]yle(r\s+misin)?|[şs]u\s+an(ki)?\s+saat)$", t):
+        return Parsed(intent="time_query", slots={})
+    
+    # Date query: "bugün ne", "hangi gün", "tarih ne"
+    if re.search(r"^(bug[üu]n\s+ne|hangi\s+g[üu]n|tarih\s+ne|bug[üu]n\s+g[üu]nlerden\s+ne)$", t):
+        return Parsed(intent="date_query", slots={})
+    
+    # Thanks/Goodbye: "teşekkürler", "sağ ol", "hoşça kal"
+    if re.search(r"^(te[şs]ekk[üu]rler|te[şs]ekk[üu]r\s+ederim|sa[ğg]\s*ol|eyvallah|ho[şs][çc]a\s*kal|g[öo]r[üu][şs][üu]r[üu]z|bay\s*bay|bye|iyi\s+geceler)$", t):
+        return Parsed(intent="goodbye", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
     # Job Control intents (Issue #31 - V2-1: Agent OS Core)
     # These have high priority as they control running jobs
     # ─────────────────────────────────────────────────────────────────
@@ -979,6 +1003,16 @@ def parse_intent(text: str) -> Parsed:
     m = re.search(r"\bhat[ıi]rlat\s*:\s*(\d+\s*(?:dakika|dk|saat|sa|saniye|sn)\s*sonra)\s+(.+)$", text, flags=re.IGNORECASE)
     if m:
         return Parsed(intent="reminder_add", slots={"time": m.group(1).strip(), "message": m.group(2).strip()})
+    
+    # Pattern: "hatırlat: yarın 10'da toplantı" (informal time with 'da/'de suffix)
+    m = re.search(r"\bhat[ıi]rlat\s*:\s*(yar[ıi]n\s*\d{1,2}['\s]*(da|de|'da|'de)?)\s+(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="reminder_add", slots={"time": m.group(1).strip(), "message": m.group(3).strip()})
+    
+    # Pattern: "hatırlat: message" (fallback - just message, no time specified = immediate/soon)
+    m = re.search(r"\bhat[ıi]rlat\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="reminder_add", slots={"time": "5 dakika sonra", "message": m.group(1).strip()})
 
     # ─────────────────────────────────────────────────────────────────
     # Check-in commands (Bantz proactive conversations)
