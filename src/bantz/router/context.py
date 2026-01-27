@@ -159,6 +159,11 @@ class ConversationContext:
     _page_summarizer: Any = field(default=None, repr=False)
     _pending_page_summarize: Optional[str] = field(default=None, repr=False)
     _pending_page_question: Optional[str] = field(default=None, repr=False)
+    
+    # Jarvis panel state
+    _panel_controller: Any = field(default=None, repr=False)
+    _panel_results: list = field(default_factory=list, repr=False)
+    _panel_visible: bool = field(default=False, repr=False)
 
     def set_pending_agent_plan(self, *, task_id: str, steps: list[QueueStep]) -> None:
         """Store a planned agent task awaiting user confirmation."""
@@ -241,6 +246,43 @@ class ConversationContext:
         """Clear pending page question."""
         self._pending_page_question = None
 
+    # Jarvis Panel management
+    def set_panel_controller(self, controller: Any) -> None:
+        """Store panel controller instance for commands."""
+        self._panel_controller = controller
+
+    def get_panel_controller(self) -> Any:
+        """Get the current panel controller instance."""
+        return self._panel_controller
+
+    def set_panel_results(self, results: list) -> None:
+        """Store results currently displayed in panel."""
+        self._panel_results = results
+        self._panel_visible = True
+
+    def get_panel_results(self) -> list:
+        """Get results currently displayed in panel."""
+        return self._panel_results
+
+    def get_panel_result_by_index(self, index: int) -> Optional[dict]:
+        """Get a specific result by 1-indexed number."""
+        if 1 <= index <= len(self._panel_results):
+            return self._panel_results[index - 1]
+        return None
+
+    def is_panel_visible(self) -> bool:
+        """Check if panel is currently visible."""
+        return self._panel_visible
+
+    def set_panel_visible(self, visible: bool) -> None:
+        """Set panel visibility state."""
+        self._panel_visible = visible
+
+    def clear_panel(self) -> None:
+        """Clear panel state."""
+        self._panel_results = []
+        self._panel_visible = False
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
@@ -259,4 +301,6 @@ class ConversationContext:
             "has_page_summarizer": self._page_summarizer is not None,
             "pending_page_summarize": self._pending_page_summarize,
             "pending_page_question": self._pending_page_question,
+            "panel_visible": self._panel_visible,
+            "panel_results_count": len(self._panel_results),
         }

@@ -49,6 +49,14 @@ Intent = Literal[
     "page_summarize",
     "page_summarize_detailed",
     "page_question",
+    # Jarvis Panel control intents
+    "panel_move",
+    "panel_hide",
+    "panel_minimize",
+    "panel_maximize",
+    "panel_next_page",
+    "panel_prev_page",
+    "panel_select_item",
     # Advanced desktop input
     "pc_mouse_move",
     "pc_mouse_click",
@@ -83,6 +91,9 @@ Intent = Literal[
     "project_search_symbol",
     "project_related_files",
     "project_imports",
+    # Overlay control intents
+    "overlay_move",
+    "overlay_hide",
     "unknown",
 ]
 

@@ -2336,6 +2336,163 @@ class Router:
             )
 
         # ─────────────────────────────────────────────────────────────
+        # Jarvis Panel Control (Issue #19)
+        # ─────────────────────────────────────────────────────────────
+        if intent == "panel_move":
+            position = str(slots.get("position", "")).strip()
+            if not position:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Nereye taşıyayım efendim?"
+                )
+            
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.move_panel(position)
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=f"Panel {position} tarafına taşındı efendim."
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Panel henüz açık değil efendim."
+                )
+
+        if intent == "panel_hide":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.hide_panel()
+                ctx.set_panel_visible(False)
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text="Panel kapatıldı efendim."
+                )
+            else:
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text="Panel zaten kapalı efendim."
+                )
+
+        if intent == "panel_minimize":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.minimize_panel()
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text="Panel küçültüldü efendim."
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Panel açık değil efendim."
+                )
+
+        if intent == "panel_maximize":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.maximize_panel()
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text="Panel büyütüldü efendim."
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Panel açık değil efendim."
+                )
+
+        if intent == "panel_next_page":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.next_page()
+                page = controller.current_page
+                total = controller.total_pages
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=f"Sayfa {page}/{total} efendim.",
+                    data={"page": page, "total": total}
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Gösterilecek sonuç yok efendim."
+                )
+
+        if intent == "panel_prev_page":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.prev_page()
+                page = controller.current_page
+                total = controller.total_pages
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=f"Sayfa {page}/{total} efendim.",
+                    data={"page": page, "total": total}
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Gösterilecek sonuç yok efendim."
+                )
+
+        if intent == "panel_select_item":
+            index = slots.get("index", 0)
+            if not index:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Kaçıncı sonucu açayım efendim?"
+                )
+            
+            # Get item from context
+            item = ctx.get_panel_result_by_index(index)
+            if item:
+                url = item.get("url", "")
+                if url:
+                    ok, msg = open_url(url)
+                    ctx.last_intent = intent
+                    return RouterResult(
+                        ok=ok,
+                        intent=intent,
+                        user_text=f"{index}. sonuç açılıyor efendim.",
+                        data={"index": index, "url": url}
+                    )
+                else:
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text=f"{index}. sonuçta URL yok efendim."
+                    )
+            else:
+                total = len(ctx.get_panel_results())
+                if total > 0:
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text=f"Geçersiz numara. 1 ile {total} arasında bir sayı söyleyin efendim."
+                    )
+                else:
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text="Gösterilecek sonuç yok efendim."
+                    )
+
+        # ─────────────────────────────────────────────────────────────
         # Original daily skills
         # ─────────────────────────────────────────────────────────────
         if intent == "open_browser":
