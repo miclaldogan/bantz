@@ -209,11 +209,11 @@ class TestMockPageSummarizer:
     @pytest.mark.asyncio
     async def test_summarize_short(self):
         """Test short summarization."""
-        from bantz.skills.summarizer import MockPageSummarizer
+        from bantz.skills.summarizer import MockPageSummarizer, SummaryLength
         
         summarizer = MockPageSummarizer()
         
-        summary = await summarizer.summarize(detail_level="short")
+        summary = await summarizer.summarize(length=SummaryLength.PARAGRAPH)
         
         assert summary is not None
         assert summary.short_summary != ""
@@ -223,11 +223,11 @@ class TestMockPageSummarizer:
     @pytest.mark.asyncio
     async def test_summarize_detailed(self):
         """Test detailed summarization."""
-        from bantz.skills.summarizer import MockPageSummarizer
+        from bantz.skills.summarizer import MockPageSummarizer, SummaryLength
         
         summarizer = MockPageSummarizer()
         
-        summary = await summarizer.summarize(detail_level="detailed")
+        summary = await summarizer.summarize(length=SummaryLength.FULL)
         
         assert summary is not None
         assert summary.short_summary != ""
