@@ -7,6 +7,15 @@ natural-language request into a multi-step queue of existing Bantz intents.
 from .core import Agent, AgentState, Step, Task
 from .planner import Planner
 from .tools import Tool, ToolRegistry
+from .controller import (
+    AgentController,
+    ControllerState,
+    PlanDisplay,
+    PlanStepDisplay,
+    MockAgentController,
+    get_step_icon,
+    STEP_STATUS_COLORS,
+)
 
 __all__ = [
     "Agent",
@@ -16,4 +25,11 @@ __all__ = [
     "Task",
     "Tool",
     "ToolRegistry",
+    "AgentController",
+    "ControllerState",
+    "PlanDisplay",
+    "PlanStepDisplay",
+    "MockAgentController",
+    "get_step_icon",
+    "STEP_STATUS_COLORS",
 ]

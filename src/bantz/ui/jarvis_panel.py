@@ -131,6 +131,7 @@ class JarvisPanelSignals(QObject):
     hide_signal = pyqtSignal()
     show_results_signal = pyqtSignal(list, str)  # results, title
     show_summary_signal = pyqtSignal(dict)  # summary dict
+    show_plan_signal = pyqtSignal(dict)  # plan dict for agent tasks
     move_to_signal = pyqtSignal(str)  # position name
     minimize_signal = pyqtSignal()
     maximize_signal = pyqtSignal()
@@ -207,6 +208,7 @@ class JarvisPanel(QWidget):
         self.signals.hide_signal.connect(self._do_hide)
         self.signals.show_results_signal.connect(self._show_results_internal)
         self.signals.show_summary_signal.connect(self._show_summary_internal)
+        self.signals.show_plan_signal.connect(self._show_plan_internal)
         self.signals.move_to_signal.connect(self._move_to_internal)
         self.signals.minimize_signal.connect(self.toggle_minimize)
         self.signals.maximize_signal.connect(self._restore_from_minimize)
@@ -547,6 +549,161 @@ class JarvisPanel(QWidget):
         # Show with animation
         self._fade_in()
     
+    def show_plan(self, plan: Dict[str, Any]):
+        """Show a task plan (thread-safe).
+        
+        Args:
+            plan: Dict with keys: title, description, steps, current_step, status, progress_percent
+                  Each step has: index, description, status, icon, color
+        """
+        self.signals.show_plan_signal.emit(plan)
+    
+    def _show_plan_internal(self, plan: Dict[str, Any]):
+        """Internal method to show task plan."""
+        self.title_label.setText(f"📋 {plan.get('title', 'GÖREV PLANI')}")
+        
+        # Clear existing content
+        self._clear_content()
+        
+        # Description (original request)
+        if plan.get("description"):
+            desc_label = QLabel(f'"{plan["description"]}"')
+            desc_label.setStyleSheet(
+                f"color: rgba(255, 255, 255, 180); font-style: italic; font-size: 11px;"
+            )
+            desc_label.setWordWrap(True)
+            self.content_layout.addWidget(desc_label)
+            self.content_layout.addSpacing(10)
+        
+        # Progress bar
+        progress = plan.get("progress_percent", 0)
+        progress_frame = QFrame()
+        progress_frame.setFixedHeight(8)
+        progress_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: rgba(0, 195, 255, 30);
+                border-radius: 4px;
+            }}
+        """)
+        
+        # Progress fill (nested frame)
+        progress_fill = QFrame(progress_frame)
+        fill_width = int(progress_frame.width() * progress / 100) if progress > 0 else 0
+        progress_fill.setFixedHeight(8)
+        progress_fill.setStyleSheet(f"""
+            QFrame {{
+                background-color: {self.colors.success.name() if progress == 100 else self.colors.accent.name()};
+                border-radius: 4px;
+            }}
+        """)
+        self.content_layout.addWidget(progress_frame)
+        self.content_layout.addSpacing(15)
+        
+        # Separator line
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet("background-color: rgba(0, 195, 255, 50);")
+        self.content_layout.addWidget(sep)
+        self.content_layout.addSpacing(10)
+        
+        # Steps
+        steps = plan.get("steps", [])
+        current_step = plan.get("current_step", 0)
+        
+        for step in steps:
+            step_widget = self._create_plan_step_widget(step, current_step)
+            self.content_layout.addWidget(step_widget)
+        
+        # Add stretch
+        self.content_layout.addStretch()
+        
+        # Footer buttons for plan
+        status = plan.get("status", "planning")
+        if status == "awaiting_confirmation":
+            self.hint_label.setText('💬 "Başla" veya "İptal" diyebilirsiniz')
+        elif status == "executing":
+            self.hint_label.setText('💬 "Duraklat" veya "Atla" diyebilirsiniz')
+        else:
+            self.hint_label.setText(f'📊 {plan.get("completed", 0)}/{plan.get("total_steps", len(steps))} adım tamamlandı')
+        
+        # Hide pagination for plans
+        self.prev_btn.hide()
+        self.page_label.hide()
+        self.next_btn.hide()
+        
+        # Show with animation
+        self._fade_in()
+    
+    def _create_plan_step_widget(self, step: Dict[str, Any], current_step: int) -> QFrame:
+        """Create a single plan step widget."""
+        frame = QFrame()
+        
+        index = step.get("index", 0)
+        status = step.get("status", "pending")
+        is_current = (index == current_step + 1)
+        
+        # Style based on status
+        if status == "completed":
+            bg_color = "rgba(0, 255, 136, 30)"
+            border_color = "rgba(0, 255, 136, 80)"
+        elif status == "running":
+            bg_color = "rgba(255, 215, 0, 40)"
+            border_color = "rgba(255, 215, 0, 150)"
+        elif status == "failed":
+            bg_color = "rgba(255, 68, 68, 30)"
+            border_color = "rgba(255, 68, 68, 80)"
+        elif status == "skipped":
+            bg_color = "rgba(100, 100, 100, 30)"
+            border_color = "rgba(100, 100, 100, 80)"
+        else:  # pending
+            bg_color = "rgba(0, 195, 255, 15)"
+            border_color = "rgba(0, 195, 255, 40)"
+        
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg_color};
+                border-radius: 6px;
+                border: 1px solid {border_color};
+                margin: 2px 0;
+            }}
+        """)
+        
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(10)
+        
+        # Status icon
+        icon = step.get("icon", "○")
+        icon_label = QLabel(icon)
+        icon_label.setFixedWidth(20)
+        icon_label.setStyleSheet(f"""
+            color: {step.get('color', '#888888')};
+            font-size: 14px;
+            font-weight: bold;
+            background: transparent;
+        """)
+        layout.addWidget(icon_label)
+        
+        # Description
+        desc = step.get("description", "")
+        desc_label = QLabel(desc)
+        desc_label.setStyleSheet(f"""
+            color: {self.colors.text.name()};
+            font-size: 11px;
+            background: transparent;
+        """)
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label, 1)
+        
+        # Elapsed time (if completed)
+        elapsed = step.get("elapsed_time")
+        if elapsed is not None:
+            time_label = QLabel(f"{elapsed:.1f}s")
+            time_label.setStyleSheet("color: rgba(255, 255, 255, 100); font-size: 10px; background: transparent;")
+            layout.addWidget(time_label)
+        
+        return frame
+    
     def move_to_position(self, position: str):
         """Move panel to position (thread-safe).
         
@@ -803,6 +960,41 @@ class JarvisPanelController:
         self._results = []
         self.panel.show_summary(summary)
     
+    def show_plan(self, plan):
+        """Show a task plan.
+        
+        Args:
+            plan: PlanDisplay object or dict with plan data
+        """
+        self._results = []
+        
+        # Convert PlanDisplay to dict if needed
+        if hasattr(plan, "__dict__"):
+            plan_dict = {
+                "id": getattr(plan, "id", ""),
+                "title": getattr(plan, "title", "GÖREV PLANI"),
+                "description": getattr(plan, "description", ""),
+                "steps": [
+                    {
+                        "index": getattr(s, "index", i + 1),
+                        "description": getattr(s, "description", ""),
+                        "status": getattr(s, "status", "pending"),
+                        "icon": getattr(s, "icon", "○"),
+                        "color": getattr(s, "color", "#888888"),
+                        "elapsed_time": getattr(s, "elapsed_time", None),
+                    }
+                    for i, s in enumerate(getattr(plan, "steps", []))
+                ],
+                "current_step": getattr(plan, "current_step", 0),
+                "total_steps": getattr(plan, "total_steps", 0),
+                "status": getattr(plan, "status", "planning"),
+                "progress_percent": getattr(plan, "progress_percent", 0),
+            }
+        else:
+            plan_dict = plan
+        
+        self.panel.show_plan(plan_dict)
+    
     def next_page(self):
         """Go to next page."""
         if self._current_page < self.total_pages - 1:
@@ -948,6 +1140,7 @@ class MockJarvisPanelController:
         self._results: List[Dict[str, Any]] = []
         self._current_page = 0
         self.items_per_page = 5
+        self._current_plan: Optional[Dict[str, Any]] = None
     
     @property
     def total_pages(self) -> int:
@@ -962,11 +1155,52 @@ class MockJarvisPanelController:
     def show_results(self, results: List[Dict[str, Any]], title: str = "SONUÇLAR"):
         self._results = results
         self._current_page = 0
+        self._current_plan = None
         self.panel.show_results(results[:self.items_per_page], title)
     
     def show_summary(self, summary: Dict[str, Any]):
         self._results = []
+        self._current_plan = None
         self.panel.show_summary(summary)
+    
+    def show_plan(self, plan):
+        """Show a task plan.
+        
+        Args:
+            plan: PlanDisplay object or dict with plan data
+        """
+        self._results = []
+        
+        # Convert PlanDisplay to dict if needed
+        if hasattr(plan, "__dict__"):
+            plan_dict = {
+                "id": getattr(plan, "id", ""),
+                "title": getattr(plan, "title", "GÖREV PLANI"),
+                "description": getattr(plan, "description", ""),
+                "steps": [
+                    {
+                        "index": getattr(s, "index", i + 1),
+                        "description": getattr(s, "description", ""),
+                        "status": getattr(s, "status", "pending"),
+                        "icon": getattr(s, "icon", "○"),
+                        "color": getattr(s, "color", "#888888"),
+                    }
+                    for i, s in enumerate(getattr(plan, "steps", []))
+                ],
+                "current_step": getattr(plan, "current_step", 0),
+                "total_steps": getattr(plan, "total_steps", 0),
+                "status": getattr(plan, "status", "planning"),
+                "progress_percent": getattr(plan, "progress_percent", 0),
+            }
+        else:
+            plan_dict = plan
+        
+        self._current_plan = plan_dict
+        self.panel._visible = True
+    
+    @property
+    def current_plan(self) -> Optional[Dict[str, Any]]:
+        return self._current_plan
     
     def next_page(self):
         if self._current_page < self.total_pages - 1:
