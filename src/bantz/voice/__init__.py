@@ -1,9 +1,14 @@
-"""Voice module for TTS, ASR, and wakeword detection.
+"""Voice module for TTS, ASR, wakeword detection, and continuous listening.
 
 Includes:
 - Advanced TTS with emotion and speed control
 - Streaming audio playback
 - Emotion detection for expressive speech
+- Voice Activity Detection (VAD)
+- Speech segmentation
+- Noise filtering
+- Multi wake word detection
+- Continuous listening mode
 """
 from bantz.voice.advanced_tts import (
     AdvancedTTS,
@@ -26,6 +31,43 @@ from bantz.voice.emotion import (
     JarvisResponseFormatter,
     MockEmotionSelector,
 )
+from bantz.voice.vad import (
+    AdvancedVAD,
+    VADConfig,
+    VADState,
+    EnergyVAD,
+    MockVAD,
+)
+from bantz.voice.segmenter import (
+    SpeechSegmenter,
+    SegmenterConfig,
+    Segment,
+    SegmentState,
+    MockSegmenter,
+)
+from bantz.voice.noise_filter import (
+    NoiseFilter,
+    NoiseFilterConfig,
+    SimpleNoiseFilter,
+    SpectralSubtractionFilter,
+    MockNoiseFilter,
+)
+from bantz.voice.wakeword import (
+    WakeWordDetector,
+    WakeWordConfig,
+    MultiWakeWordDetector,
+    MultiWakeWordConfig,
+    VADRecorder,
+    MockMultiWakeWordDetector,
+)
+from bantz.voice.continuous import (
+    ContinuousListener,
+    ContinuousListenerConfig,
+    ListenerState,
+    ListenerStats,
+    MockContinuousListener,
+    get_continuous_listener,
+)
 
 __all__ = [
     # Advanced TTS
@@ -46,4 +88,36 @@ __all__ = [
     "EmotionResult",
     "JarvisResponseFormatter",
     "MockEmotionSelector",
+    # VAD
+    "AdvancedVAD",
+    "VADConfig",
+    "VADState",
+    "EnergyVAD",
+    "MockVAD",
+    # Segmenter
+    "SpeechSegmenter",
+    "SegmenterConfig",
+    "Segment",
+    "SegmentState",
+    "MockSegmenter",
+    # Noise Filter
+    "NoiseFilter",
+    "NoiseFilterConfig",
+    "SimpleNoiseFilter",
+    "SpectralSubtractionFilter",
+    "MockNoiseFilter",
+    # Wake Word
+    "WakeWordDetector",
+    "WakeWordConfig",
+    "MultiWakeWordDetector",
+    "MultiWakeWordConfig",
+    "VADRecorder",
+    "MockMultiWakeWordDetector",
+    # Continuous Listening
+    "ContinuousListener",
+    "ContinuousListenerConfig",
+    "ListenerState",
+    "ListenerStats",
+    "MockContinuousListener",
+    "get_continuous_listener",
 ]
