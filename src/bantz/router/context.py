@@ -150,6 +150,10 @@ class ConversationContext:
 
     # Pending agent plan (for preview before execution)
     _pending_agent_plan: Optional[dict] = field(default=None, repr=False)
+    
+    # News briefing state
+    _news_briefing: Any = field(default=None, repr=False)
+    _pending_news_search: Optional[str] = field(default=None, repr=False)
 
     def set_pending_agent_plan(self, *, task_id: str, steps: list[QueueStep]) -> None:
         """Store a planned agent task awaiting user confirmation."""
@@ -167,6 +171,32 @@ class ConversationContext:
         """Clear the pending agent plan."""
         self._pending_agent_plan = None
 
+    # News briefing management
+    def set_news_briefing(self, news: Any) -> None:
+        """Store news briefing instance for follow-up commands."""
+        self._news_briefing = news
+
+    def get_news_briefing(self) -> Any:
+        """Get the current news briefing instance."""
+        return self._news_briefing
+
+    def clear_news_briefing(self) -> None:
+        """Clear the news briefing state."""
+        self._news_briefing = None
+        self._pending_news_search = None
+
+    def set_pending_news_search(self, query: str) -> None:
+        """Mark that a news search is pending."""
+        self._pending_news_search = query
+
+    def get_pending_news_search(self) -> Optional[str]:
+        """Get pending news search query."""
+        return self._pending_news_search
+
+    def clear_pending_news_search(self) -> None:
+        """Clear pending news search."""
+        self._pending_news_search = None
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
@@ -180,4 +210,6 @@ class ConversationContext:
             "queue_source": self.queue_source,
             "current_agent_task_id": self.current_agent_task_id,
             "pending_agent_plan": bool(self._pending_agent_plan),
+            "has_news_briefing": self._news_briefing is not None,
+            "pending_news_search": self._pending_news_search,
         }

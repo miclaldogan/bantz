@@ -40,6 +40,11 @@ Intent = Literal[
     "browser_detail",
     "browser_wait",
     "browser_search",
+    # News Briefing intents
+    "news_briefing",
+    "news_open_result",
+    "news_open_current",
+    "news_more",
     # Advanced desktop input
     "pc_mouse_move",
     "pc_mouse_click",

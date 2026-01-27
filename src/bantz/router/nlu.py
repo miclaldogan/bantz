@@ -231,6 +231,8 @@ def parse_intent(text: str) -> Parsed:
             "ilk", "birinci", "ikinci", "üçüncü", "şu", "bu",
             # Music/media words that are usually browser targets
             "müzik", "müziği", "müziğini", "kanal", "kanalı", "kanalını", "playlist",
+            # News-related keywords - handled by news intents
+            "haber", "haberi", "haberin", "haberini", "haberleri",
         }
         if app not in browser_keywords:
             return Parsed(intent="app_open", slots={"app": app})
@@ -498,6 +500,51 @@ def parse_intent(text: str) -> Parsed:
     # browser_info: "bu sayfa ne", "neredeyim"
     if re.search(r"\b(bu\s+sayfa\s+ne|neredeyim|hangi\s+sayfa)\b", t):
         return Parsed(intent="browser_info", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
+    # News Briefing Commands (Jarvis-style news)
+    # Check specific patterns FIRST, then general patterns
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Open news result by index: "3. haberi aç", "3. haberi göster", "2. sonucu aç"
+    # MUST be checked BEFORE general "haberi göster" pattern
+    m = re.search(r"\b(\d+)\.\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster|oku)\b", t)
+    if m:
+        return Parsed(intent="news_open_result", slots={"index": int(m.group(1))})
+    
+    # Open by ordinal: "birinci haberi aç", "ikinci haberi aç", "üçüncü haberi aç"
+    m = re.search(r"\b(birinci|ilk)\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster)\b", t)
+    if m:
+        return Parsed(intent="news_open_result", slots={"index": 1})
+    m = re.search(r"\b(ikinci|second)\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster)\b", t)
+    if m:
+        return Parsed(intent="news_open_result", slots={"index": 2})
+    m = re.search(r"\b([üu][çc][üu]nc[üu]|third)\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster)\b", t)
+    if m:
+        return Parsed(intent="news_open_result", slots={"index": 3})
+    
+    # Open current news: "bu haberi aç", "şu haberi aç"
+    if re.search(r"\b([şs]u|bu)\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster)\b", t):
+        return Parsed(intent="news_open_current", slots={})
+    
+    # More news: "daha fazla haber", "devamını göster", "diğer haberler"
+    if re.search(r"\b(daha\s+fazla\s+haber|devam[ıi]n[ıi]\s+g[öo]ster|di[ğg]er\s+haberler|sonraki\s+haberler)\b", t):
+        return Parsed(intent="news_more", slots={})
+    
+    # News briefing: "bugünkü haberlerde ne var", "günlük haberleri göster", "gündem ne"
+    if re.search(r"\b(bug[üu]nk[üu]|g[üu]nl[üu]k|son)?\s*(haberlerde?|g[üu]ndem)\s*(de|da)?\s*(ne\s+var|neler?\s+var|ne)\b", t):
+        return Parsed(intent="news_briefing", slots={"query": "gündem"})
+    
+    # News with topic: "teknoloji haberleri", "ekonomi haberi", "spor haberleri"
+    m = re.search(r"\b(teknoloji|ekonomi|spor|siyaset|sa[ğg]l[ıi]k|e[ğg]itim|k[üu]lt[üu]r|magazin|d[üu]nya|t[üu]rkiye)\s*(haber(ler)?i?)\b", t)
+    if m:
+        topic = m.group(1).strip()
+        return Parsed(intent="news_briefing", slots={"query": topic})
+    
+    # News search: "haberleri göster", "haberler oku", "haberleri getir", "haberleri aç"
+    # Only matches plural forms to avoid matching "X haberi aç"
+    if re.search(r"\bhaber(ler)[iı]?\s*(g[öo]ster|oku|getir|a[çc]|ver)\b", t):
+        return Parsed(intent="news_briefing", slots={"query": "gündem"})
 
     # ─────────────────────────────────────────────────────────────────
     # Original skills
