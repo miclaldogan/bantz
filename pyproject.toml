@@ -42,6 +42,9 @@ vision = [
 	"PyMuPDF>=1.24.0",
 	"pytesseract>=0.3.10",
 ]
+security = [
+	"cryptography>=42.0.0",
+]
 
 [project.scripts]
 bantz = "bantz.cli:main"
