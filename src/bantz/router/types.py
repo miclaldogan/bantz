@@ -94,6 +94,9 @@ Intent = Literal[
     # Overlay control intents
     "overlay_move",
     "overlay_hide",
+    # Query clarification intents (Issue #21)
+    "vague_search",           # Belirsiz arama: "şurada kaza olmuş"
+    "clarification_response", # Clarification yanıtı
     "unknown",
 ]
 

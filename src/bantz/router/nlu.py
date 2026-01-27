@@ -914,4 +914,44 @@ def parse_intent(text: str) -> Parsed:
     if re.search(r"\b(kill|pkill|killall|systemctl|service)\b", t):
         return Parsed(intent="unknown", slots={"text": text, "risky": True})
 
+    # ─────────────────────────────────────────────────────────────────
+    # Vague Search Detection (Issue #21)
+    # "şurada kaza olmuş", "geçenlerde birşey olmuş orada"
+    # These should trigger clarification flow
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Vague location indicators
+    VAGUE_LOCATION = r"\b([şs]urada|orada|burada|burda|[şs]urda|bir\s*yerde|[şs]uradaki|oradaki|o\s*taraf(ta|lar)?)\b"
+    
+    # Vague time indicators  
+    VAGUE_TIME = r"\b(ge[çc]enlerde|ge[çc]en\s*g[üu]n(lerde)?|d[üu]n|[şs]imdi|demin|az\s*[öo]nce|biraz\s*[öo]nce|son\s*zamanlarda)\b"
+    
+    # Vague subject indicators
+    VAGUE_SUBJECT = r"\b(bir\s*[şs]ey(ler)?|bi'?\s*[şs]i|neler|birisi|biri|adam|kad[ıi]n|bir\s*tip|kimse)\b"
+    
+    # Event patterns that may be vague
+    EVENT_WORDS = r"\b(kaza|yang[ıi]n|deprem|olay|sald[ıi]r[ıi]|patlama|sel|kavga|cinayet|h[ıi]rs[ıi]zl[ıi]k|olmu[şs]|ya[şs]an[ıi]yor)\b"
+    
+    # Check for vague patterns
+    has_vague_location = bool(re.search(VAGUE_LOCATION, t))
+    has_vague_time = bool(re.search(VAGUE_TIME, t))
+    has_vague_subject = bool(re.search(VAGUE_SUBJECT, t))
+    has_event = bool(re.search(EVENT_WORDS, t))
+    
+    # If there's an event with vague indicators, mark as vague_search
+    if has_event and (has_vague_location or has_vague_time or has_vague_subject):
+        vague_slots = {
+            "text": text,
+            "has_vague_location": has_vague_location,
+            "has_vague_time": has_vague_time,
+            "has_vague_subject": has_vague_subject,
+        }
+        return Parsed(intent="vague_search", slots=vague_slots)
+    
+    # Generic "neler olmuş" patterns
+    if re.search(r"\b(neler\s+olmu[şs]|ne\s+olmu[şs]|ne\s+var\s+ne\s+yok)\b", t):
+        if has_vague_location:
+            return Parsed(intent="vague_search", slots={"text": text, "has_vague_location": True})
+
     return Parsed(intent="unknown", slots={"text": text})
+

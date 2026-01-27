@@ -103,6 +103,10 @@ class Router:
         # Agent framework (lazy import usage)
         self._agent_history: list[dict] = []
         self._agent_history_by_id: dict[str, dict] = {}
+        
+        # Query clarification (Issue #21)
+        from bantz.router.clarifier import QueryClarifier
+        self._clarifier = QueryClarifier()
 
     def _agent_rec(self, task_id: str | None) -> Optional[dict]:
         if not task_id:
@@ -114,7 +118,72 @@ class Router:
         ctx.reset_pending_if_expired()
 
         ctx_before = ctx.snapshot()
-        parsed = parse_intent(text)
+        
+        # ─────────────────────────────────────────────────────────────
+        # Query Clarification Flow (Issue #21)
+        # If there's a pending clarification, process the response first
+        # ─────────────────────────────────────────────────────────────
+        if self._clarifier.has_pending_question():
+            # Process user response to clarification question
+            collected = self._clarifier.process_response(text)
+            
+            # Check if we need more clarification
+            analysis = self._clarifier.analyze_query(
+                self._clarifier._state.original_query,
+                intent="news_briefing",
+            )
+            
+            if analysis.needs_clarification and self._clarifier._state.clarification_count < 2:
+                # Ask another clarification question
+                question = analysis.clarification_question
+                self._clarifier._state.pending_question = question
+                self._clarifier._state.clarification_count += 1
+                
+                result = RouterResult(
+                    ok=True,
+                    intent="vague_search",
+                    user_text=question.question,
+                    needs_confirmation=True,
+                    confirmation_prompt=question.question,
+                    data={"clarification_type": question.type.value},
+                )
+                self._log(text, result, parse_intent(text), ctx_before, ctx)
+                return result
+            
+            # We have enough info, create search query
+            search_query = self._clarifier.get_search_query()
+            self._clarifier.reset()
+            
+            # Now execute news briefing with the clarified query
+            parsed = Parsed(intent="news_briefing", slots={"query": search_query})
+            # Fall through to normal handling
+        else:
+            parsed = parse_intent(text)
+            
+            # ─────────────────────────────────────────────────────────────
+            # Vague Search Detection (Issue #21)
+            # If query is vague, ask clarifying question
+            # ─────────────────────────────────────────────────────────────
+            if parsed.intent == "vague_search":
+                analysis = self._clarifier.analyze_query(text, intent="news_briefing")
+                
+                if analysis.needs_clarification:
+                    question = analysis.clarification_question
+                    self._clarifier.start_clarification(text, question)
+                    
+                    result = RouterResult(
+                        ok=True,
+                        intent="vague_search",
+                        user_text=question.question,
+                        needs_confirmation=True,
+                        confirmation_prompt=question.question,
+                        data={
+                            "clarification_type": question.type.value,
+                            "original_query": text,
+                        },
+                    )
+                    self._log(text, result, parsed, ctx_before, ctx)
+                    return result
 
         # ─────────────────────────────────────────────────────────────
         # Agent mode: plan -> queue (Issue #3)
