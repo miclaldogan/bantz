@@ -13,6 +13,11 @@ from bantz.router.query_expander import (
     QuerySuggestion,
     MockQueryExpander,
 )
+from bantz.router.nlu import (
+    parse_contextual_intent,
+    is_contextual_response,
+    ContextualParsed,
+)
 
 __all__ = [
     "QueryClarifier",
@@ -25,4 +30,8 @@ __all__ = [
     "ExpandedQuery",
     "QuerySuggestion",
     "MockQueryExpander",
+    # Conversation flow (Issue #20)
+    "parse_contextual_intent",
+    "is_contextual_response",
+    "ContextualParsed",
 ]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .types import Intent
 
@@ -16,7 +16,183 @@ class Parsed:
     slots: dict
 
 
+@dataclass(frozen=True)
+class ContextualParsed:
+    """Context-aware parse result for conversation flow."""
+    intent: str
+    slots: dict
+    requires_context: bool = False  # True if this makes sense only in conversation
+
+
 _TURKISH_QUOTES = "'\"""''"
+
+# ─────────────────────────────────────────────────────────────────
+# Context-aware patterns for Jarvis Conversation Flow (Issue #20)
+# These patterns match short responses that only make sense when
+# the user is already engaged in a conversation.
+# ─────────────────────────────────────────────────────────────────
+
+# Confirmation patterns
+_CONTEXT_CONFIRM_PATTERNS = [
+    r"^(evet|ehe|olur|tamam|ok|okey|tabii|tabi|elbette|kesinlikle|ay[nı]en|do[ğg]ru)$",
+    r"^(evet\s+evet|tamam\s+tamam|elbette\s+efendim)$",
+]
+
+# Rejection patterns
+_CONTEXT_REJECT_PATTERNS = [
+    r"^(hay[ıi]r|yok|olmaz|istemiyorum|gerek\s+yok|vazge[çc]|iptal)$",
+    r"^(hay[ıi]r\s+te[şs]ekk[üu]rler|yok\s+gerek\s+yok)$",
+]
+
+# Number selection patterns
+_CONTEXT_NUMBER_PATTERNS = [
+    r"^(\d+)$",  # Just a number: "3"
+    r"^(\d+)\.\s*(sonu[çc]|[şs]ey|madde|se[çc]enek)?$",  # "3. sonuç" or "3."
+    r"^(birinci|ikinci|[üu][çc][üu]nc[üu]|d[öo]rd[üu]nc[üu]|be[şs]inci|alt[ıi]nc[ıi]|yedinci|sekizinci|dokuzuncu|onuncu)$",
+    r"^(ilk|son)$",  # "ilk" = 1, "son" = -1 (last)
+    r"^(ilkini|sonuncuyu|birincisini|ikincisini|[üu][çc][üu]nc[üu]s[üu]n[üu])$",
+]
+
+# Navigation patterns (within results/lists)
+_CONTEXT_NAV_PATTERNS = [
+    r"^(sonraki|[ıi]leri|devam|next|ilerle|bir\s+sonraki)$",
+    r"^([öo]nceki|geri|back|previous|geriye|bir\s+[öo]nceki)$",
+    r"^(a[şs]a[ğg][ıi]|yukar[ıi]|down|up)$",
+]
+
+# Follow-up question patterns
+_CONTEXT_FOLLOWUP_PATTERNS = [
+    r"^(peki|ya|bir\s+de|ayr[ıi]ca|hem\s+de)$",
+    r"^(ba[şs]ka)(\s+bir\s+[şs]ey)?$",
+    r"^(bunu|[şs]unu|onu)(\s+da)?$",
+]
+
+# Goodbye/thanks patterns
+_CONTEXT_GOODBYE_PATTERNS = [
+    r"^(te[şs]ekk[üu]rler|sa[ğg]\s*ol|mersi|eyvallah)$",
+    r"^(tamam\s+bu\s+kadar|yeter|bu\s+kadar|bitti|tamamd[ıi]r)$",
+    r"^(g[öo]r[üu][şs][üu]r[üu]z|ho[şs][çc]a\s*kal|bay\s*bay|bye)$",
+    r"^(iyi\s+geceler|iyi\s+g[üu]nler|iyi\s+ak[şs]amlar)$",
+]
+
+# Compiled context patterns
+_COMPILED_CONTEXT_PATTERNS: dict[str, list[re.Pattern]] = {}
+
+
+def _compile_context_patterns() -> None:
+    """Compile context patterns once."""
+    global _COMPILED_CONTEXT_PATTERNS
+    if _COMPILED_CONTEXT_PATTERNS:
+        return
+    
+    _COMPILED_CONTEXT_PATTERNS = {
+        "context_confirm": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_CONFIRM_PATTERNS],
+        "context_reject": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_REJECT_PATTERNS],
+        "context_select_number": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_NUMBER_PATTERNS],
+        "context_navigate": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_NAV_PATTERNS],
+        "context_followup": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_FOLLOWUP_PATTERNS],
+        "context_goodbye": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_GOODBYE_PATTERNS],
+    }
+
+
+def parse_contextual_intent(text: str) -> Optional[ContextualParsed]:
+    """Parse short responses that only make sense in conversation context.
+    
+    This is used by ConversationManager to detect quick responses
+    when the user is already engaged.
+    
+    Args:
+        text: User's utterance
+        
+    Returns:
+        ContextualParsed if a context pattern matches, None otherwise
+    """
+    _compile_context_patterns()
+    t = text.strip()
+    
+    # Skip if too long - context responses are short
+    if len(t.split()) > 6:
+        return None
+    
+    for intent, patterns in _COMPILED_CONTEXT_PATTERNS.items():
+        for pattern in patterns:
+            m = pattern.match(t)
+            if m:
+                slots: dict = {}
+                
+                # Extract number for selection
+                if intent == "context_select_number":
+                    num = _extract_number_from_text(t)
+                    if num is not None:
+                        slots["number"] = num
+                
+                # Extract navigation direction
+                if intent == "context_navigate":
+                    direction = _extract_nav_direction(t)
+                    if direction:
+                        slots["direction"] = direction
+                
+                return ContextualParsed(
+                    intent=intent,
+                    slots=slots,
+                    requires_context=True
+                )
+    
+    return None
+
+
+def _extract_number_from_text(text: str) -> Optional[int]:
+    """Extract a number from text, handling Turkish ordinals."""
+    t = text.strip().lower()
+    
+    # Direct digit
+    m = re.match(r"^(\d+)", t)
+    if m:
+        return int(m.group(1))
+    
+    # Turkish ordinals
+    ordinals = {
+        "birinci": 1, "ilk": 1, "ilkini": 1, "birincisini": 1,
+        "ikinci": 2, "ikincisini": 2,
+        "üçüncü": 3, "ucuncu": 3, "üçüncüsünü": 3,
+        "dördüncü": 4, "dorduncu": 4,
+        "beşinci": 5, "besinci": 5,
+        "altıncı": 6, "altinci": 6,
+        "yedinci": 7,
+        "sekizinci": 8,
+        "dokuzuncu": 9,
+        "onuncu": 10,
+        "son": -1, "sonuncu": -1, "sonuncuyu": -1,
+    }
+    
+    for word, num in ordinals.items():
+        if word in t:
+            return num
+    
+    return None
+
+
+def _extract_nav_direction(text: str) -> Optional[str]:
+    """Extract navigation direction from text."""
+    t = text.strip().lower()
+    
+    next_words = ["sonraki", "ileri", "devam", "next", "aşağı", "asagi", "down"]
+    prev_words = ["önceki", "onceki", "geri", "back", "previous", "yukarı", "yukari", "up"]
+    
+    for word in next_words:
+        if word in t:
+            return "next"
+    
+    for word in prev_words:
+        if word in t:
+            return "prev"
+    
+    return None
+
+
+def is_contextual_response(text: str) -> bool:
+    """Check if text looks like a contextual response (short, likely needs context)."""
+    return parse_contextual_intent(text) is not None
 
 # Bağlaçlar: cümleyi adımlara bölmek için
 # Not: "X dakika sonra" gibi zaman ifadelerini ayırmamalı, bu yüzden
