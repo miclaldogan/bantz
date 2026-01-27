@@ -134,6 +134,22 @@ from .event_binding import (
     create_panel_binder,
 )
 
+# Issue #63: Popup/Bubble System
+from .popup import (
+    PopupPanel,
+    PopupManager,
+    PopupContentType,
+    PopupPosition,
+    PopupAnimation,
+    PopupStatus,
+    PopupColors,
+    PopupConfig,
+    PopupAnimationConfig,
+    POPUP_POSITION_ALIASES,
+    parse_popup_position,
+    is_popup_dismiss_intent,
+)
+
 __all__ = [
     # Themes
     "OverlayTheme",
@@ -218,4 +234,17 @@ __all__ = [
     "PanelEventBinder",
     "PanelEventConfig",
     "create_panel_binder",
+    # Popup/Bubble System (Issue #63)
+    "PopupPanel",
+    "PopupManager",
+    "PopupContentType",
+    "PopupPosition",
+    "PopupAnimation",
+    "PopupStatus",
+    "PopupColors",
+    "PopupConfig",
+    "PopupAnimationConfig",
+    "POPUP_POSITION_ALIASES",
+    "parse_popup_position",
+    "is_popup_dismiss_intent",
 ]
