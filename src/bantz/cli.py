@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import os
 import socket
-import os
 import sys
 import shutil
 import threading
@@ -18,6 +17,8 @@ import queue as queue_module
 from collections import deque
 from datetime import datetime
 from typing import Optional
+
+import logging
 
 from bantz.router.engine import Router
 from bantz.router.policy import Policy
@@ -380,6 +381,16 @@ Kullanım örnekleri:
     parser.add_argument("--once", default=None, metavar="CMD", help="Tek seferlik komut")
     parser.add_argument("--stop", action="store_true", help="Çalışan session'ı kapat")
 
+    # Compatibility flags (README/back-compat)
+    parser.add_argument("--text", action="store_true", help="Text mod (varsayılan). (Uyumluluk)")
+    parser.add_argument("--ptt", action="store_true", help="Push-to-talk alias'ı (== --voice). (Uyumluluk)")
+    parser.add_argument("--debug", action="store_true", help="Debug logları aç. (Uyumluluk)")
+    parser.add_argument(
+        "--overlay",
+        action="store_true",
+        help="Overlay UI. (Not: tam overlay için orchestrator önerilir). (Uyumluluk)",
+    )
+
     # Voice mode (PTT)
     parser.add_argument("--voice", action="store_true", help="Sesli mod (PTT: SPACE basılı tut)")
     parser.add_argument("--wake", action="store_true", help="Wake word modu ('Hey Jarvis' ile aktive)")
@@ -397,6 +408,30 @@ Kullanım örnekleri:
 
     args = parser.parse_args(argv)
 
+    # Apply compatibility flag mappings
+    if args.ptt:
+        args.voice = True
+
+    if args.debug:
+        os.environ["BANTZ_DEBUG"] = "1"
+        logging.basicConfig(level=logging.DEBUG)
+
+    if args.overlay:
+        # Keep CLI stable: accept the flag and continue.
+        # Full overlay experience is implemented in bantz.core.orchestrator.
+        print(
+            "ℹ️ --overlay bayrağı alındı. Tam overlay için öneri: "
+            "python -m bantz.core.orchestrator (veya ./scripts/jarvis.sh start --foreground)",
+            file=sys.stderr,
+        )
+
+    # Make Ollama settings available to all components (server thread, router, agent).
+    # CLI flags should take precedence for this run.
+    if getattr(args, "ollama_url", None):
+        os.environ["BANTZ_OLLAMA_URL"] = str(args.ollama_url)
+    if getattr(args, "ollama_model", None):
+        os.environ["BANTZ_OLLAMA_MODEL"] = str(args.ollama_model)
+
     def _can_connect(host: str, port: int, timeout_s: float = 3.0) -> bool:
         try:
             sock = socket.create_connection((host, port), timeout=timeout_s)
@@ -412,6 +447,10 @@ Kullanım örnekleri:
     # Voice mode runs as a client: ASR -> daemon -> TTS
     # Warmup is also handled here (no daemon needed).
     if args.voice or args.wake or args.voice_warmup:
+        # Pass policy/log through env for voice auto-start.
+        os.environ["BANTZ_POLICY"] = str(args.policy)
+        os.environ["BANTZ_LOG"] = str(args.log)
+
         from bantz.voice.loop import VoiceLoopConfig, run_voice_loop, run_wake_word_loop
         from bantz.voice.asr import ASR, ASRConfig
 

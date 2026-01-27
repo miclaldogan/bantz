@@ -1,4 +1,17 @@
-"""Bantz Core - Event bus, state management, proactive systems."""
+"""Bantz Core - Event bus, state management, proactive systems.
+
+Note:
+This package intentionally avoids importing `bantz.core.orchestrator` at
+import-time. Running `python -m bantz.core.orchestrator` causes Python to load
+the package `bantz.core` first; eager imports would load the orchestrator
+module twice and trigger a `runpy` warning.
+"""
+
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
 from bantz.core.events import EventBus, Event, get_event_bus, EventType
 from bantz.core.timing import (
     TimingRequirements,
@@ -14,16 +27,24 @@ from bantz.core.timing import (
 from bantz.core.job import Job, JobState, InvalidTransitionError, TRANSITIONS
 from bantz.core.job_manager import JobManager, get_job_manager
 from bantz.core.interrupt import InterruptManager, get_interrupt_manager
-from bantz.core.orchestrator import (
-    BantzOrchestrator,
-    OrchestratorConfig,
-    SystemState,
-    ComponentState,
-    ComponentStatus,
-    get_orchestrator,
-    start_jarvis,
-    stop_jarvis,
-)
+
+_ORCHESTRATOR_EXPORTS = {
+    "BantzOrchestrator",
+    "OrchestratorConfig",
+    "SystemState",
+    "ComponentState",
+    "ComponentStatus",
+    "get_orchestrator",
+    "start_jarvis",
+    "stop_jarvis",
+}
+
+
+def __getattr__(name: str) -> Any:  # pragma: no cover
+    if name in _ORCHESTRATOR_EXPORTS:
+        module = importlib.import_module("bantz.core.orchestrator")
+        return getattr(module, name)
+    raise AttributeError(f"module 'bantz.core' has no attribute {name!r}")
 
 __all__ = [
     # Events

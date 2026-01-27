@@ -464,7 +464,7 @@ pip install -e ".[all]"
 # Or install specific components
 pip install -e ".[voice]"    # Voice recognition
 pip install -e ".[browser]"  # Browser automation
-pip install -e ".[ui]"       # Overlay UI
+pip install -e ".[ui]"       # Overlay UI (PyQt5)
 pip install -e ".[llm]"      # LLM integration
 ```
 
@@ -485,20 +485,24 @@ pip install -e ".[llm]"      # LLM integration
 ### Quick Start
 
 ```bash
-# Start with voice (wake word mode)
+# Text-first interactive mode (browser session stays alive)
 bantz
 
-# Start with voice (push-to-talk mode)
-bantz --ptt
+# Stateless one-shot command
+bantz --once "google aç"
 
-# Text mode (no voice)
-bantz --text
+# Voice mode (push-to-talk)
+bantz --voice --piper-model /path/to/tr.onnx
 
-# With overlay UI
-bantz --overlay
+# Voice mode (wake word)
+bantz --wake --piper-model /path/to/tr.onnx
 
 # Debug mode
 bantz --debug
+
+# Compatibility aliases
+bantz --ptt --piper-model /path/to/tr.onnx   # == --voice
+bantz --text --once "merhaba"               # == default text behavior
 ```
 
 ### Voice Commands

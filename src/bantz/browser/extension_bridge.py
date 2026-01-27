@@ -361,9 +361,27 @@ class ExtensionBridge:
             asyncio.set_event_loop(self._loop)
             try:
                 self._loop.run_until_complete(self._run_server())
+            except RuntimeError as e:
+                # Common during forced shutdowns (e.g., test timeouts / SIGTERM)
+                if "Event loop stopped before Future completed" in str(e):
+                    logger.debug(f"[ExtBridge] Server stopped: {e}")
+                else:
+                    logger.error(f"[ExtBridge] Server error: {e}")
             except Exception as e:
                 logger.error(f"[ExtBridge] Server error: {e}")
             finally:
+                # Ensure we don't leak pending tasks (prevents 'coroutine was never awaited')
+                try:
+                    pending = asyncio.all_tasks(loop=self._loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        self._loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True)
+                        )
+                    self._loop.run_until_complete(self._loop.shutdown_asyncgens())
+                except Exception:
+                    pass
                 self._loop.close()
         
         self._thread = threading.Thread(target=run_loop, daemon=True)
@@ -373,10 +391,22 @@ class ExtensionBridge:
     def stop(self) -> None:
         """Stop the WebSocket server."""
         self._running = False
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._loop and self._loop.is_running():
+            # Wake up the loop so _run_server can observe _running == False
+            try:
+                self._loop.call_soon_threadsafe(lambda: None)
+            except Exception:
+                pass
+
         if self._thread:
             self._thread.join(timeout=2.0)
+
+        # If it's still alive, fall back to a hard stop.
+        if self._thread and self._thread.is_alive() and self._loop and self._loop.is_running():
+            try:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+            except Exception:
+                pass
         self._thread = None
         self._loop = None
         logger.info("[ExtBridge] WebSocket server stopped")

@@ -12,7 +12,10 @@ Issue #32 additions:
 
 from .core import Agent, AgentState, Step, Task
 from .planner import Planner
-from .tools import Tool, ToolRegistry as LegacyToolRegistry
+from .tools import Tool, ToolRegistry
+
+# Back-compat alias (older code/tests may refer to LegacyToolRegistry)
+LegacyToolRegistry = ToolRegistry
 
 from .controller import (
     AgentController,
@@ -77,6 +80,7 @@ __all__ = [
     "Step",
     "Task",
     "Tool",
+    "ToolRegistry",
     "LegacyToolRegistry",
     "AgentController",
     "ControllerState",

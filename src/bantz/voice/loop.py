@@ -89,14 +89,23 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
     Eğer global key hook çalışmazsa (Wayland/X kısıtları), Enter tabanlı fallback var.
     """
 
-    from bantz.server import is_server_running, send_to_server
+    from bantz.server import is_server_running, send_to_server, ensure_server_running
     from bantz.llm import LLMMessage, OllamaClient
     from bantz.voice.asr import ASR, ASRConfig
     from bantz.voice.tts import PiperTTS, PiperTTSConfig
 
-    if not is_server_running(cfg.session):
-        print(f"❌ Daemon çalışmıyor (session={cfg.session}). Önce: ./scripts/service.sh restart")
+    # Ensure session server is running (auto-start for voice mode)
+    policy_path = os.environ.get("BANTZ_POLICY", "config/policy.json")
+    log_path = os.environ.get("BANTZ_LOG", "bantz.log.jsonl")
+    ok, started_here, msg = ensure_server_running(cfg.session, policy_path=policy_path, log_path=log_path)
+    if not ok:
+        print(f"❌ Session server başlatılamadı (session={cfg.session}): {msg}")
         return 1
+    if started_here:
+        from bantz.server import get_socket_path
+        print(f"ℹ️ Session server otomatik başlatıldı (session={cfg.session}).")
+        print(f"   Socket: {get_socket_path(cfg.session)}")
+        print(f"   Kapatmak için: bantz --session {cfg.session} --stop")
 
     tts = None
     if cfg.enable_tts:
@@ -110,6 +119,19 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
         print("   (TTS kapalı: --no-tts)")
     if not cfg.enable_llm_fallback:
         print("   (LLM fallback kapalı: --no-llm)")
+
+    # Preflight: if LLM is enabled but Ollama isn't reachable, disable it once and continue.
+    if cfg.enable_llm_fallback:
+        try:
+            probe = OllamaClient(base_url=cfg.ollama_url, model=cfg.ollama_model, timeout_seconds=2.0)
+            if not probe.is_available(timeout_seconds=1.5):
+                raise RuntimeError("unreachable")
+        except Exception:
+            print("⚠️  Ollama çalışmıyor veya erişilemiyor; LLM rewrite/fallback devre dışı.")
+            print(f"   URL: {cfg.ollama_url}")
+            print(f"   Başlat: ollama serve")
+            print(f"   Model indir: ollama pull {cfg.ollama_model}")
+            cfg.enable_llm_fallback = False
 
     # Lazily initialize heavy components so the loop feels responsive.
     asr: Optional[ASR] = None
@@ -524,15 +546,24 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
     
     Push-to-talk yerine sürekli dinleme modu.
     """
-    from bantz.server import is_server_running, send_to_server, get_ipc_overlay_hook
+    from bantz.server import is_server_running, send_to_server, get_ipc_overlay_hook, ensure_server_running
     from bantz.llm import LLMMessage, OllamaClient
     from bantz.voice.asr import ASR, ASRConfig
     from bantz.voice.tts import PiperTTS, PiperTTSConfig
     from bantz.voice.wakeword import WakeWordDetector, WakeWordConfig, VADRecorder
     
-    if not is_server_running(cfg.session):
-        print(f"❌ Daemon çalışmıyor (session={cfg.session}). Önce: ./scripts/service.sh restart")
+    # Ensure session server is running (auto-start for wake-word mode)
+    policy_path = os.environ.get("BANTZ_POLICY", "config/policy.json")
+    log_path = os.environ.get("BANTZ_LOG", "bantz.log.jsonl")
+    ok, started_here, msg = ensure_server_running(cfg.session, policy_path=policy_path, log_path=log_path)
+    if not ok:
+        print(f"❌ Session server başlatılamadı (session={cfg.session}): {msg}")
         return 1
+    if started_here:
+        from bantz.server import get_socket_path
+        print(f"ℹ️ Session server otomatik başlatıldı (session={cfg.session}).")
+        print(f"   Socket: {get_socket_path(cfg.session)}")
+        print(f"   Kapatmak için: bantz --session {cfg.session} --stop")
     
     # Setup TTS
     tts = None
@@ -540,6 +571,19 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
         if not cfg.piper_model_path:
             print("❌ Piper model path gerekli. Örn: --piper-model /path/to/tr.onnx  (veya geçici: --no-tts)")
             return 1
+
+    # Preflight: if LLM is enabled but Ollama isn't reachable, disable it once and continue.
+    if cfg.enable_llm_fallback:
+        try:
+            probe = OllamaClient(base_url=cfg.ollama_url, model=cfg.ollama_model, timeout_seconds=2.0)
+            if not probe.is_available(timeout_seconds=1.5):
+                raise RuntimeError("unreachable")
+        except Exception:
+            print("⚠️  Ollama çalışmıyor veya erişilemiyor; LLM rewrite/fallback devre dışı.")
+            print(f"   URL: {cfg.ollama_url}")
+            print(f"   Başlat: ollama serve")
+            print(f"   Model indir: ollama pull {cfg.ollama_model}")
+            cfg.enable_llm_fallback = False
         tts = PiperTTS(PiperTTSConfig(model_path=cfg.piper_model_path))
     
     # Setup ASR (lazy)

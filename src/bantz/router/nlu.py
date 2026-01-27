@@ -299,6 +299,10 @@ def parse_intent(text: str) -> Parsed:
         return Parsed(intent="job_cancel", slots={})
     
     # Job status: "ne yapıyorsun", "durum", "neredesin", "status"
+    # If the user explicitly says "agent ...", route to agent_status instead.
+    if re.search(r"\b(agent\s+durum(u)?|agent\s+status|agent\s+ne\s+yap[ıi]yor|agent\s+ne\s+yap[ıi]yorsun)\b", t):
+        return Parsed(intent="agent_status", slots={})
+
     if re.search(r"\b(ne\s+yap[ıi]yorsun|durum(un)?|neredesin|status|ne\s+i[şs]\s+yap[ıi]yorsun|hangi\s+a[şs]amaday[ıi]z)\b", t):
         return Parsed(intent="job_status", slots={})
 
@@ -326,9 +330,7 @@ def parse_intent(text: str) -> Parsed:
     if re.search(r"\b(plan[ıi]?\s+(tamam|onayla|ba[sş]lat)|agent[ıi]?\s+ba[sş]lat|plan[ıi]?\s+[cç]al[ıi][sş]t[ıi]r)\b", t):
         return Parsed(intent="agent_confirm_plan", slots={})
 
-    # Agent status
-    if re.search(r"\b(agent\s+durum(u)?|agent\s+status|agent\s+ne\s+yap[ıi]yor)\b", t):
-        return Parsed(intent="agent_status", slots={})
+    # Agent status (handled earlier to avoid conflict with generic "durum")
 
     # Agent history / plan listing
     m = re.search(r"\bson\s+(\d+)\s+(agent|ajan)\b", t)
