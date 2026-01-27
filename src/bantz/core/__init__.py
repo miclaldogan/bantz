@@ -14,6 +14,16 @@ from bantz.core.timing import (
 from bantz.core.job import Job, JobState, InvalidTransitionError, TRANSITIONS
 from bantz.core.job_manager import JobManager, get_job_manager
 from bantz.core.interrupt import InterruptManager, get_interrupt_manager
+from bantz.core.orchestrator import (
+    BantzOrchestrator,
+    OrchestratorConfig,
+    SystemState,
+    ComponentState,
+    ComponentStatus,
+    get_orchestrator,
+    start_jarvis,
+    stop_jarvis,
+)
 
 __all__ = [
     # Events
@@ -41,5 +51,14 @@ __all__ = [
     # Interrupt Management (V2-1)
     "InterruptManager",
     "get_interrupt_manager",
+    # Orchestrator (Full System Startup)
+    "BantzOrchestrator",
+    "OrchestratorConfig",
+    "SystemState",
+    "ComponentState",
+    "ComponentStatus",
+    "get_orchestrator",
+    "start_jarvis",
+    "stop_jarvis",
 ]
 
