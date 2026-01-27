@@ -185,6 +185,27 @@ class OverlayClient:
             logger.warning("[OverlayClient] Not connected, cannot send state")
             return False
 
+        try:
+            data = encode_message(msg)
+            self._writer.write(data)
+            await self._writer.drain()
+            
+            # Track pending ack
+            self._pending_acks[msg.id] = asyncio.get_event_loop().time()
+            
+            # Update local state
+            self._current_state = msg.state
+            if msg.position:
+                self._current_position = msg.position
+            
+            logger.debug(f"[OverlayClient] Sent state: {msg.state}, text: {msg.text[:30] if msg.text else 'None'}...")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[OverlayClient] State send error: {e}")
+            await self._handle_disconnect()
+            return False
+
     async def send_action(self, msg: ActionMessage) -> bool:
         """Send action message to overlay (ephemeral visuals)."""
         if not self._connected or not self._writer:
@@ -220,27 +241,6 @@ class OverlayClient:
     async def highlight_rect(self, x: int, y: int, w: int, h: int, duration_ms: int = 1200) -> bool:
         """Convenience: highlight a rectangle region."""
         return await self.send_action(action_highlight_rect(x=x, y=y, w=w, h=h, duration_ms=duration_ms))
-        
-        try:
-            data = encode_message(msg)
-            self._writer.write(data)
-            await self._writer.drain()
-            
-            # Track pending ack
-            self._pending_acks[msg.id] = asyncio.get_event_loop().time()
-            
-            # Update local state
-            self._current_state = msg.state
-            if msg.position:
-                self._current_position = msg.position
-            
-            logger.debug(f"[OverlayClient] Sent state: {msg.state}, text: {msg.text[:30] if msg.text else 'None'}...")
-            return True
-            
-        except Exception as e:
-            logger.error(f"[OverlayClient] Send error: {e}")
-            await self._handle_disconnect()
-            return False
     
     async def set_state(
         self,

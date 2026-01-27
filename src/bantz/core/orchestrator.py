@@ -562,6 +562,7 @@ class BantzOrchestrator:
                 language=self.config.language,
                 sample_rate=self.config.sample_rate,
                 allow_download=True,
+                vad_filter=False,  # VAD causes issues with short utterances
             ))
             
             self._set_component_state("asr", ComponentState.RUNNING)

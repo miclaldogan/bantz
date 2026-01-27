@@ -77,6 +77,18 @@ class ASR:
 
     def transcribe(self, audio_float32) -> tuple[str, dict[str, Any]]:
         # audio_float32: 1D numpy float32 array at cfg.sample_rate
+        import numpy as np
+        
+        # Check audio level - if too quiet, return empty
+        max_amplitude = np.max(np.abs(audio_float32))
+        if max_amplitude < 0.005:  # Minimum threshold
+            return "", {"language": self.cfg.language, "no_speech": True, "max_amplitude": float(max_amplitude)}
+        
+        # Normalize audio if needed (but not too aggressively to avoid noise amplification)
+        if max_amplitude < 0.1 and max_amplitude > 0.01:
+            # Gentle normalization
+            audio_float32 = audio_float32 * (0.3 / max_amplitude)
+            audio_float32 = np.clip(audio_float32, -1.0, 1.0)
 
         def once(lang: Optional[str]) -> tuple[str, dict[str, Any]]:
             segments_iter, info = self._model.transcribe(
@@ -149,5 +161,18 @@ class ASR:
                     best = max(candidates, key=score)
                     text, meta = best
                     meta["reranked"] = True
+
+        # Hallucination prevention - reject if no_speech_prob is too high
+        no_speech = meta.get("no_speech_prob")
+        if isinstance(no_speech, (int, float)) and no_speech > 0.6:
+            return "", {"language": self.cfg.language, "no_speech": True, "no_speech_prob": no_speech}
+        
+        # Detect repetitive hallucinations (e.g., "beğenmeyi beğenmeyi beğenmeyi...")
+        words = text.split()
+        if len(words) > 3:
+            unique_words = set(words)
+            if len(unique_words) <= 2 and len(words) > 5:
+                # Highly repetitive - likely hallucination
+                return "", {"language": self.cfg.language, "hallucination_detected": True}
 
         return text, meta

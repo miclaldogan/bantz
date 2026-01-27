@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import (
     Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve,
-    pyqtSignal, QObject, QRect
+    pyqtSignal, QObject, QRect, QRectF
 )
 from PyQt5.QtGui import (
     QPainter, QPainterPath, QColor, QLinearGradient,
@@ -292,8 +292,8 @@ class JarvisOverlay(QWidget):
         
         # Background path
         path = QPainterPath()
-        rect = self.rect().adjusted(2, 2, -2, -2)
-        path.addRoundedRect(rect, 15, 15)
+        rect = QRectF(self.rect().adjusted(2, 2, -2, -2))
+        path.addRoundedRect(rect, 15.0, 15.0)
         
         # Background fill
         bg_color = QColor(self.theme.background)
@@ -422,7 +422,11 @@ class JarvisOverlay(QWidget):
         
         # Update glow color
         glow_color = get_state_color(new_state.name.lower(), self.theme)
-        self._glow_effect.setColor(glow_color)
+        try:
+            if self._glow_effect is not None:
+                self._glow_effect.setColor(glow_color)
+        except RuntimeError:
+            pass  # Qt object may have been deleted
         
         # Show/hide if needed
         if new_state == JarvisState.HIDDEN:
