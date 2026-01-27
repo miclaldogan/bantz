@@ -2068,6 +2068,119 @@ class Router:
             return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up)
 
         # ─────────────────────────────────────────────────────────────
+        # News Briefing commands (Jarvis-style)
+        # ─────────────────────────────────────────────────────────────
+        if intent == "news_briefing":
+            from bantz.skills.news import NewsBriefing, extract_news_query
+            from bantz.llm.persona import JarvisPersona
+            from bantz.browser.extension_bridge import get_bridge
+            
+            persona = JarvisPersona()
+            query = str(slots.get("query", "gündem")).strip()
+            
+            # If query not explicitly set, try to extract from raw text
+            if query == "gündem" and "slots" in dir(slots) and slots.get("_raw_text"):
+                query = extract_news_query(slots.get("_raw_text", ""))
+            
+            # Get bridge for browser interaction
+            bridge = get_bridge()
+            news = NewsBriefing(extension_bridge=bridge)
+            
+            # Store news instance in context for follow-up commands
+            ctx.set_news_briefing(news)
+            
+            # Return thinking response - actual search happens async
+            searching_msg = persona.for_news_search(query if query != "gündem" else "")
+            ctx.last_intent = intent
+            ctx.set_pending_news_search(query)
+            
+            return RouterResult(
+                ok=True, 
+                intent=intent, 
+                user_text=searching_msg,
+                data={"query": query, "state": "searching"}
+            )
+
+        if intent == "news_open_result":
+            from bantz.llm.persona import JarvisPersona
+            
+            persona = JarvisPersona()
+            index = int(slots.get("index", 1))
+            
+            # Get news instance from context
+            news = ctx.get_news_briefing()
+            if not news or not news.has_results:
+                return RouterResult(
+                    ok=False, 
+                    intent=intent, 
+                    user_text="Önce haber araması yapmalısın efendim. 'Bugünkü haberler' diyebilirsin."
+                )
+            
+            # Open the result
+            import asyncio
+            loop = asyncio.get_event_loop()
+            success = loop.run_until_complete(news.open_result(index))
+            
+            if success:
+                msg = persona.for_opening_item(index)
+                ctx.last_intent = intent
+                return RouterResult(ok=True, intent=intent, user_text=msg + follow_up)
+            else:
+                return RouterResult(
+                    ok=False, 
+                    intent=intent, 
+                    user_text=f"Geçersiz numara efendim. 1 ile {news.result_count} arasında bir numara söyleyin."
+                )
+
+        if intent == "news_open_current":
+            from bantz.llm.persona import JarvisPersona
+            
+            persona = JarvisPersona()
+            
+            news = ctx.get_news_briefing()
+            if not news or not news.has_results:
+                return RouterResult(
+                    ok=False, 
+                    intent=intent, 
+                    user_text="Önce haber araması yapmalısın efendim."
+                )
+            
+            import asyncio
+            loop = asyncio.get_event_loop()
+            success = loop.run_until_complete(news.open_current())
+            
+            if success:
+                msg = persona.get_response("opening")
+                ctx.last_intent = intent
+                return RouterResult(ok=True, intent=intent, user_text=msg + follow_up)
+            else:
+                return RouterResult(ok=False, intent=intent, user_text="Açılacak haber bulunamadı efendim.")
+
+        if intent == "news_more":
+            from bantz.llm.persona import JarvisPersona
+            
+            persona = JarvisPersona()
+            
+            news = ctx.get_news_briefing()
+            if not news or not news.has_results:
+                return RouterResult(
+                    ok=False, 
+                    intent=intent, 
+                    user_text="Önce haber araması yapmalısın efendim."
+                )
+            
+            # Format more results for TTS
+            more_text = news.format_more_for_tts(start=4, count=3)
+            ctx.last_intent = intent
+            
+            return RouterResult(
+                ok=True, 
+                intent=intent, 
+                user_text=more_text,
+                data=news.format_for_overlay()
+            )
+
+        # ─────────────────────────────────────────────────────────────
         # Original daily skills
         # ─────────────────────────────────────────────────────────────
         if intent == "open_browser":
