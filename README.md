@@ -188,6 +188,22 @@ vim config/site_profiles.json
 
 Full v2 roadmap: [docs/jarvis-roadmap-v2.md](docs/jarvis-roadmap-v2.md)
 
+Acceptance tests: [docs/acceptance-tests.md](docs/acceptance-tests.md)
+
+### V2 Milestones
+
+| Milestone | Epic | Status |
+|-----------|------|--------|
+| V2-0 | [Product Definition](https://github.com/miclaldogan/bantz/issues/30) | 🔨 In Progress |
+| V2-1 | [Agent OS Core](https://github.com/miclaldogan/bantz/issues/31) | 📋 Planned |
+| V2-2 | [Tool Runtime](https://github.com/miclaldogan/bantz/issues/32) | 📋 Planned |
+| V2-3 | [Cite-first Research](https://github.com/miclaldogan/bantz/issues/33) | 📋 Planned |
+| V2-4 | [Memory System](https://github.com/miclaldogan/bantz/issues/36) | 📋 Planned |
+| V2-5 | [Privacy & Security](https://github.com/miclaldogan/bantz/issues/37) | 📋 Planned |
+| V2-6 | [Conversation Engine](https://github.com/miclaldogan/bantz/issues/38) | 📋 Planned |
+| V2-7 | [Document Pipeline](https://github.com/miclaldogan/bantz/issues/39) | 📋 Planned |
+| V2-8 | [Agentic Automation](https://github.com/miclaldogan/bantz/issues/40) | 📋 Planned |
+
 ### Phase 0 - Core (Current Focus)
 - [x] Voice recognition (Whisper)
 - [x] Wake word detection
