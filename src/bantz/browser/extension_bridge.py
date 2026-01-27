@@ -119,6 +119,24 @@ class ExtensionBridge:
             self._last_action_result = {"success": success, "message": message}
             return {"ok": True}
         
+        # Extract result - page content extraction for summarization
+        if msg_type == "extract_result":
+            url = data.get("url", "")
+            title = data.get("title", "")
+            content = data.get("content", "")
+            content_length = data.get("content_length", 0)
+            extracted_at = data.get("extracted_at", "")
+            logger.info(f"[ExtBridge] Extract result: {title[:50]}... ({content_length} chars)")
+            
+            self._extract_result = {
+                "url": url,
+                "title": title,
+                "content": content,
+                "content_length": content_length,
+                "extracted_at": extracted_at,
+            }
+            return {"ok": True, "message": f"Extracted {content_length} characters"}
+        
         # Profile activated
         if msg_type == "profile_activated":
             domain = data.get("domain", "")
@@ -269,6 +287,36 @@ class ExtensionBridge:
     def toggle_overlay(self, enabled: bool) -> bool:
         """Toggle overlay visibility."""
         return self.send_command("overlay", enabled=enabled)
+    
+    def request_extract(self) -> Optional[Dict[str, Any]]:
+        """Request page content extraction from extension.
+        
+        Extracts the main content from the current page including:
+        - title: Page title
+        - content: Main text content (max 8000 chars)
+        - url: Current page URL
+        - extracted_at: Timestamp
+        - content_length: Length of extracted content
+        
+        Returns:
+            Dict with extracted content or None if no extension connected
+        """
+        if not self.has_client():
+            logger.warning("[ExtBridge] No extension client connected for extract")
+            return None
+        
+        self._extract_result = None
+        self.send_command("extract")
+        
+        # Wait for response
+        import time
+        for _ in range(50):  # 5 seconds max
+            time.sleep(0.1)
+            if self._extract_result is not None:
+                return self._extract_result
+        
+        logger.warning("[ExtBridge] Extract request timed out")
+        return None
     
     def get_current_page(self) -> Optional[Dict[str, str]]:
         """Get current page info."""

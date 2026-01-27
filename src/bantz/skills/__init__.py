@@ -5,6 +5,7 @@ Provides various skills for Bantz assistant including:
 - daily: Basic daily tasks (browser, notifications, etc.)
 - pc: PC control (apps, mouse, keyboard)
 - news: Jarvis-style news briefing system
+- summarizer: Page content extraction and LLM summarization
 """
 
 from bantz.skills.daily import (
@@ -25,6 +26,14 @@ from bantz.skills.news import (
     is_news_intent,
 )
 
+from bantz.skills.summarizer import (
+    PageSummary,
+    ExtractedPage,
+    PageSummarizer,
+    MockPageSummarizer,
+    extract_question,
+)
+
 __all__ = [
     # Daily skills
     "open_btop",
@@ -40,4 +49,10 @@ __all__ = [
     "MockNewsBriefing",
     "extract_news_query",
     "is_news_intent",
+    # Summarizer skills
+    "PageSummary",
+    "ExtractedPage",
+    "PageSummarizer",
+    "MockPageSummarizer",
+    "extract_question",
 ]

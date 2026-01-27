@@ -63,6 +63,43 @@ JARVIS_RESPONSES: Dict[str, List[str]] = {
         "İşte bugünün haberleri efendim.",
     ],
     
+    # Page reading / extraction
+    "reading_page": [
+        "Sayfayı okuyorum efendim...",
+        "İçeriği analiz ediyorum efendim...",
+        "Sayfayı inceliyorum efendim...",
+        "Okuyorum efendim, bir saniye...",
+    ],
+    
+    # Summary ready
+    "summary_ready": [
+        "Buyurun efendim.",
+        "İşte özet efendim.",
+        "Özetledim efendim.",
+        "Analiz hazır efendim.",
+    ],
+    
+    # Answering question
+    "answering": [
+        "Bakayım efendim...",
+        "Kontrol ediyorum efendim...",
+        "Cevaplıyorum efendim...",
+    ],
+    
+    # Answer ready
+    "answer_ready": [
+        "Buyurun efendim.",
+        "Şöyle söyleyeyim efendim.",
+        "Evet efendim.",
+    ],
+    
+    # Content not found
+    "no_content": [
+        "Sayfadan içerik çıkaramadım efendim.",
+        "Bu sayfada özetlenecek içerik bulamadım efendim.",
+        "Sayfa içeriği okunamadı efendim.",
+    ],
+    
     # Opening something
     "opening": [
         "Açıyorum efendim.",
