@@ -258,6 +258,27 @@ def parse_intent(text: str) -> Parsed:
     t = _clean(text).lower()
 
     # ─────────────────────────────────────────────────────────────────
+    # Job Control intents (Issue #31 - V2-1: Agent OS Core)
+    # These have high priority as they control running jobs
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Job pause: "bekle", "dur", "bir saniye", "durakla"
+    if re.search(r"^(bekle|dur|bir\s*san[ıi]ye|durakla|pause|durdur|bekler\s*misin)$", t):
+        return Parsed(intent="job_pause", slots={})
+    
+    # Job resume: "devam et", "devam", "sürdür", "continue"
+    if re.search(r"^(devam(\s*et)?|s[üu]rd[üu]r|continue|devam\s*edelim|kald[ıi][ğg][ıi]n\s*yerden)$", t):
+        return Parsed(intent="job_resume", slots={})
+    
+    # Job cancel: "iptal", "vazgeç", "cancel", "bırak", "boşver"
+    if re.search(r"^([ıi]ptal|vazge[çc]|cancel|b[ıi]rak|bo[şs]ver|g[ıi]t|unut)$", t):
+        return Parsed(intent="job_cancel", slots={})
+    
+    # Job status: "ne yapıyorsun", "durum", "neredesin", "status"
+    if re.search(r"\b(ne\s+yap[ıi]yorsun|durum(un)?|neredesin|status|ne\s+i[şs]\s+yap[ıi]yorsun|hangi\s+a[şs]amaday[ıi]z)\b", t):
+        return Parsed(intent="job_status", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
     # Agent mode (Issue #3)
     # Explicit prefix to avoid changing existing behavior.
     # Examples:

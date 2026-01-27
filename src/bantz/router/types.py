@@ -97,6 +97,11 @@ Intent = Literal[
     # Query clarification intents (Issue #21)
     "vague_search",           # Belirsiz arama: "şurada kaza olmuş"
     "clarification_response", # Clarification yanıtı
+    # Job control intents (Issue #31 - V2-1)
+    "job_pause",              # "bekle", "dur" → pause current job
+    "job_resume",             # "devam et", "devam" → resume paused job
+    "job_cancel",             # "iptal", "vazgeç" → cancel current job
+    "job_status",             # "ne yapıyorsun", "durum" → job status query
     "unknown",
 ]
 
