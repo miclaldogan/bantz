@@ -428,6 +428,20 @@ class BantzOverlay(QWidget):
         self.action_label.setText("")
         self.action_label.hide()
 
+    def _on_timeout(self):
+        """Handle timeout - false wake."""
+        self._timeout_timer.stop()
+
+        # Show farewell message
+        self.set_state(AssistantState.SPEAKING, "Sanırım yanlış çağrı almışım, görüşmek üzere.")
+
+        # Hide after a moment
+        QTimer.singleShot(2000, self.hide_overlay)
+
+        # Callback
+        if self._timeout_callback:
+            self._timeout_callback()
+
 
 class CursorDotOverlay(QWidget):
     """Small always-on-top transparent widget to show a cursor dot/ring."""
@@ -521,20 +535,6 @@ class HighlightOverlay(QWidget):
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(self._rect, 6, 6)
-    
-    def _on_timeout(self):
-        """Handle timeout - false wake."""
-        self._timeout_timer.stop()
-        
-        # Show farewell message
-        self.set_state(AssistantState.SPEAKING, "Sanırım yanlış çağrı almışım, görüşmek üzere.")
-        
-        # Hide after a moment
-        QTimer.singleShot(2000, self.hide_overlay)
-        
-        # Callback
-        if self._timeout_callback:
-            self._timeout_callback()
 
 
 class OverlayManager:

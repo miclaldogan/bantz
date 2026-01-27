@@ -77,6 +77,31 @@ from bantz.voice.conversation import (
     MockConversationManager,
 )
 
+# Issue #35: Attention Gate (Voice-2)
+from bantz.voice.attention_gate import (
+    AttentionGate,
+    AttentionGateConfig,
+    ListeningMode,
+    create_attention_gate,
+)
+from bantz.voice.engaged_window import (
+    EngagedWindowManager,
+    EngagedWindowConfig,
+    create_engaged_window,
+)
+from bantz.voice.interrupt_handler import (
+    InterruptHandler,
+    InterruptAction,
+    InterruptResult,
+    create_interrupt_handler,
+)
+from bantz.voice.task_policy import (
+    TaskListeningPolicy,
+    INTENT_KEYWORDS,
+    classify_task_command,
+    create_task_policy,
+)
+
 __all__ = [
     # Advanced TTS
     "AdvancedTTS",
@@ -134,4 +159,23 @@ __all__ = [
     "ConversationContext",
     "ConversationState",
     "MockConversationManager",
+    # Attention Gate (Issue #35)
+    "AttentionGate",
+    "AttentionGateConfig",
+    "ListeningMode",
+    "create_attention_gate",
+    # Engaged Window
+    "EngagedWindowManager",
+    "EngagedWindowConfig",
+    "create_engaged_window",
+    # Interrupt Handler
+    "InterruptHandler",
+    "InterruptAction",
+    "InterruptResult",
+    "create_interrupt_handler",
+    # Task Policy
+    "TaskListeningPolicy",
+    "INTENT_KEYWORDS",
+    "classify_task_command",
+    "create_task_policy",
 ]
