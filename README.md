@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/assets/ChatGPT Image Jan 27, 2026, 11_55_12 AM.png" alt="Bantz Logo" width="200"/>
+  <img src=".github/assets/bson.png" alt="Bantz Logo" width="200"/>
 </p>
 
 <h1 align="center">🤖 Bantz</h1>
