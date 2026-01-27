@@ -490,6 +490,173 @@ class AuditLogger:
         
         logger.warning(f"Cleared {count} audit entries")
         return count
+    
+    def get_daily_summary(
+        self,
+        date: Optional[datetime] = None,
+        locale: str = "tr"
+    ) -> Dict[str, Any]:
+        """
+        Get daily activity summary.
+        
+        Provides a human-readable summary of what Bantz did today,
+        answering "Bantz bugün ne yaptı?" question.
+        
+        Args:
+            date: Date to summarize. Defaults to today.
+            locale: Language for summary text ("tr" or "en")
+            
+        Returns:
+            Summary dictionary with stats and human-readable text
+        """
+        if date is None:
+            date = datetime.now()
+        
+        # Get start and end of the day
+        start_of_day = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        entries = self.query(start_time=start_of_day, end_time=end_of_day)
+        
+        if not entries:
+            if locale == "tr":
+                return {
+                    "date": date.strftime("%Y-%m-%d"),
+                    "total_actions": 0,
+                    "summary_text": "Bugün herhangi bir aktivite kaydedilmedi.",
+                    "actions": {},
+                    "domains": [],
+                    "files_accessed": [],
+                    "tools_used": [],
+                    "success_rate": 0.0,
+                }
+            else:
+                return {
+                    "date": date.strftime("%Y-%m-%d"),
+                    "total_actions": 0,
+                    "summary_text": "No activity recorded today.",
+                    "actions": {},
+                    "domains": [],
+                    "files_accessed": [],
+                    "tools_used": [],
+                    "success_rate": 0.0,
+                }
+        
+        # Collect statistics
+        actions: Dict[str, int] = {}
+        domains: set = set()
+        files_accessed: set = set()
+        tools_used: set = set()
+        success_count = 0
+        failure_count = 0
+        
+        for entry in entries:
+            # Count actions
+            actions[entry.action] = actions.get(entry.action, 0) + 1
+            
+            # Track outcomes
+            if entry.outcome == "success":
+                success_count += 1
+            elif entry.outcome in ("failure", "denied", "error"):
+                failure_count += 1
+            
+            # Extract domains from resources (URLs)
+            if entry.resource and "://" in entry.resource:
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(entry.resource)
+                    if parsed.netloc:
+                        domains.add(parsed.netloc)
+                except Exception:
+                    pass
+            
+            # Track file operations
+            if entry.action in ("file_read", "file_write", "file_delete", "file_create"):
+                files_accessed.add(entry.resource)
+            
+            # Track tools from details
+            if entry.details:
+                if "tool" in entry.details:
+                    tools_used.add(entry.details["tool"])
+                if "command" in entry.details:
+                    tools_used.add(entry.details["command"].split()[0] if entry.details["command"] else "")
+                if "skill" in entry.details:
+                    tools_used.add(entry.details["skill"])
+        
+        # Calculate success rate
+        total_with_outcome = success_count + failure_count
+        success_rate = (success_count / total_with_outcome * 100) if total_with_outcome > 0 else 0.0
+        
+        # Generate human-readable summary
+        summary_parts = []
+        
+        if locale == "tr":
+            summary_parts.append(f"Bugün toplam {len(entries)} işlem gerçekleştirildi.")
+            
+            if "command_execute" in actions:
+                summary_parts.append(f"{actions['command_execute']} komut çalıştırıldı.")
+            
+            if "file_read" in actions or "file_write" in actions:
+                read_count = actions.get("file_read", 0)
+                write_count = actions.get("file_write", 0)
+                if read_count and write_count:
+                    summary_parts.append(f"{read_count} dosya okundu, {write_count} dosya yazıldı.")
+                elif read_count:
+                    summary_parts.append(f"{read_count} dosya okundu.")
+                elif write_count:
+                    summary_parts.append(f"{write_count} dosya yazıldı.")
+            
+            if domains:
+                domain_list = ", ".join(list(domains)[:5])
+                summary_parts.append(f"Ziyaret edilen siteler: {domain_list}.")
+            
+            if tools_used:
+                tool_list = ", ".join(list(tools_used)[:5])
+                summary_parts.append(f"Kullanılan araçlar: {tool_list}.")
+            
+            summary_parts.append(f"Başarı oranı: %{success_rate:.1f}.")
+        else:
+            summary_parts.append(f"Today, {len(entries)} actions were performed.")
+            
+            if "command_execute" in actions:
+                summary_parts.append(f"{actions['command_execute']} commands executed.")
+            
+            if "file_read" in actions or "file_write" in actions:
+                read_count = actions.get("file_read", 0)
+                write_count = actions.get("file_write", 0)
+                if read_count and write_count:
+                    summary_parts.append(f"{read_count} files read, {write_count} files written.")
+                elif read_count:
+                    summary_parts.append(f"{read_count} files read.")
+                elif write_count:
+                    summary_parts.append(f"{write_count} files written.")
+            
+            if domains:
+                domain_list = ", ".join(list(domains)[:5])
+                summary_parts.append(f"Visited sites: {domain_list}.")
+            
+            if tools_used:
+                tool_list = ", ".join(list(tools_used)[:5])
+                summary_parts.append(f"Tools used: {tool_list}.")
+            
+            summary_parts.append(f"Success rate: {success_rate:.1f}%.")
+        
+        return {
+            "date": date.strftime("%Y-%m-%d"),
+            "total_actions": len(entries),
+            "summary_text": " ".join(summary_parts),
+            "actions": actions,
+            "domains": list(domains),
+            "files_accessed": list(files_accessed),
+            "tools_used": list(tools_used),
+            "success_rate": success_rate,
+            "success_count": success_count,
+            "failure_count": failure_count,
+            "time_range": {
+                "first_action": entries[0].timestamp.isoformat(),
+                "last_action": entries[-1].timestamp.isoformat(),
+            }
+        }
 
 
 # =============================================================================
@@ -556,3 +723,73 @@ class MockAuditLogger(AuditLogger):
         """Get all logged entries."""
         with self._lock:
             return self._entries.copy()
+    
+    def get_daily_summary(
+        self,
+        date: Optional[datetime] = None,
+        locale: str = "tr"
+    ) -> Dict[str, Any]:
+        """Get daily summary from memory entries."""
+        if date is None:
+            date = datetime.now()
+        
+        start_of_day = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        entries = self.query(start_time=start_of_day, end_time=end_of_day)
+        
+        if not entries:
+            if locale == "tr":
+                return {
+                    "date": date.strftime("%Y-%m-%d"),
+                    "total_actions": 0,
+                    "summary_text": "Bugün herhangi bir aktivite kaydedilmedi.",
+                    "actions": {},
+                    "domains": [],
+                    "files_accessed": [],
+                    "tools_used": [],
+                    "success_rate": 0.0,
+                }
+            else:
+                return {
+                    "date": date.strftime("%Y-%m-%d"),
+                    "total_actions": 0,
+                    "summary_text": "No activity recorded today.",
+                    "actions": {},
+                    "domains": [],
+                    "files_accessed": [],
+                    "tools_used": [],
+                    "success_rate": 0.0,
+                }
+        
+        actions: Dict[str, int] = {}
+        success_count = 0
+        failure_count = 0
+        
+        for entry in entries:
+            actions[entry.action] = actions.get(entry.action, 0) + 1
+            if entry.outcome == "success":
+                success_count += 1
+            elif entry.outcome in ("failure", "denied", "error"):
+                failure_count += 1
+        
+        total_with_outcome = success_count + failure_count
+        success_rate = (success_count / total_with_outcome * 100) if total_with_outcome > 0 else 0.0
+        
+        if locale == "tr":
+            summary_text = f"Bugün toplam {len(entries)} işlem gerçekleştirildi. Başarı oranı: %{success_rate:.1f}."
+        else:
+            summary_text = f"Today, {len(entries)} actions were performed. Success rate: {success_rate:.1f}%."
+        
+        return {
+            "date": date.strftime("%Y-%m-%d"),
+            "total_actions": len(entries),
+            "summary_text": summary_text,
+            "actions": actions,
+            "domains": [],
+            "files_accessed": [],
+            "tools_used": [],
+            "success_rate": success_rate,
+            "success_count": success_count,
+            "failure_count": failure_count,
+        }
