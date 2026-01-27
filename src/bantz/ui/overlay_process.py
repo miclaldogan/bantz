@@ -22,13 +22,15 @@ from typing import Optional
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer, QObject, pyqtSignal
 
-# Import overlay components (relative import for module usage)
-from bantz.ui.overlay import (
-    BantzOverlay,
-    OverlayConfig,
-    AssistantState,
+# Import Jarvis overlay (Issue #5) as the primary UI.
+# Keep cursor/highlight visuals from overlay.py.
+from bantz.ui.jarvis_overlay import (
+    JarvisOverlay,
+    JarvisState,
     GridPosition,
     POSITION_ALIASES,
+)
+from bantz.ui.overlay import (
     CursorDotOverlay,
     HighlightOverlay,
 )
@@ -46,13 +48,13 @@ from bantz.ipc.protocol import (
 
 logger = logging.getLogger(__name__)
 
-# Map IPC states to overlay states
+# Map IPC states to Jarvis overlay states
 STATE_MAP = {
-    OverlayState.IDLE.value: AssistantState.IDLE,
-    OverlayState.WAKE.value: AssistantState.WAKE,
-    OverlayState.LISTENING.value: AssistantState.LISTENING,
-    OverlayState.THINKING.value: AssistantState.THINKING,
-    OverlayState.SPEAKING.value: AssistantState.SPEAKING,
+    OverlayState.IDLE.value: JarvisState.HIDDEN,
+    OverlayState.WAKE.value: JarvisState.WAKE,
+    OverlayState.LISTENING.value: JarvisState.LISTENING,
+    OverlayState.THINKING.value: JarvisState.THINKING,
+    OverlayState.SPEAKING.value: JarvisState.SPEAKING,
 }
 
 # Map IPC positions to grid positions
@@ -78,14 +80,24 @@ class OverlayBridge(QObject):
     hide_requested = pyqtSignal()
     quit_requested = pyqtSignal()
     
-    def __init__(self, overlay: BantzOverlay, server: OverlayServer):
+    def __init__(self, overlay: JarvisOverlay, server: OverlayServer):
         super().__init__()
         self.overlay = overlay
         self.server = server
 
+        # Resolve an accent color for cursor/highlight visuals.
+        # Legacy overlay used overlay.config.accent_color; JarvisOverlay uses theme.primary.
+        accent_color = "#6366f1"
+        try:
+            theme = getattr(self.overlay, "theme", None)
+            if theme is not None:
+                accent_color = str(getattr(theme, "primary", accent_color) or accent_color)
+        except Exception:
+            pass
+
         # Action visuals
-        self._cursor = CursorDotOverlay(color=self.overlay.config.accent_color)
-        self._highlight = HighlightOverlay(color=self.overlay.config.accent_color)
+        self._cursor = CursorDotOverlay(color=accent_color)
+        self._highlight = HighlightOverlay(color=accent_color)
         
         # Current state tracking
         self._current_state = OverlayState.IDLE.value
@@ -108,8 +120,12 @@ class OverlayBridge(QObject):
         server.set_action_callback(self._handle_action)
         server.set_disconnect_callback(self._handle_disconnect)
         
-        # Set overlay timeout callback
-        overlay.set_timeout_callback(self._on_overlay_timeout)
+        # Best-effort: keep overlay's internal timeout wired to IPC.
+        # JarvisOverlay uses set_timeout(seconds, callback).
+        try:
+            overlay.set_timeout(10.0, callback=self._on_overlay_timeout)
+        except Exception:
+            pass
     
     async def _handle_state(self, msg: StateMessage) -> None:
         """
@@ -166,10 +182,11 @@ class OverlayBridge(QObject):
         self._sticky = sticky
         
         # Map state
-        overlay_state = STATE_MAP.get(state, AssistantState.IDLE)
-        
-        # Handle idle - hide overlay
-        if overlay_state == AssistantState.IDLE:
+        overlay_state = STATE_MAP.get(state, JarvisState.HIDDEN)
+
+        # Handle idle/hidden - hide overlay
+        if overlay_state == JarvisState.HIDDEN:
+            self.overlay.set_state(JarvisState.HIDDEN.name, "")
             self.overlay.hide_overlay()
             self._timeout_timer.stop()
             return
@@ -178,8 +195,8 @@ class OverlayBridge(QObject):
         grid_position = POSITION_MAP.get(position, GridPosition.CENTER)
         
         # Update overlay
-        self.overlay.set_position(grid_position)
-        self.overlay.set_state(overlay_state, text)
+        self.overlay.set_position(grid_position.value)
+        self.overlay.set_state(overlay_state.name, text)
         self.overlay.show_overlay()
         
         # Handle timeout
@@ -260,7 +277,7 @@ class OverlayProcess:
     
     def __init__(self):
         self._app: Optional[QApplication] = None
-        self._overlay: Optional[BantzOverlay] = None
+        self._overlay: Optional[JarvisOverlay] = None
         self._server: Optional[OverlayServer] = None
         self._bridge: Optional[OverlayBridge] = None
         self._running = False
@@ -291,22 +308,24 @@ class OverlayProcess:
             if self._app is None:
                 self._app = QApplication(sys.argv)
             
-            # Create overlay window
-            self._overlay = BantzOverlay(OverlayConfig())
+            # Create Jarvis overlay window
+            self._overlay = JarvisOverlay()
             
             # Create IPC server
             self._server = get_overlay_server()
             
             # Create bridge
             self._bridge = OverlayBridge(self._overlay, self._server)
-            
+
+            # Mark running *before* starting asyncio thread.
+            # Otherwise the IPC server loop can exit immediately.
+            self._running = True
+
             # Setup asyncio integration
             self._setup_asyncio()
-            
+
             # Setup signal handlers
             self._setup_signals()
-            
-            self._running = True
             logger.info("[OverlayProcess] Running...")
             
             # Run Qt event loop
