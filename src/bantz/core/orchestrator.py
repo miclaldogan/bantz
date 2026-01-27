@@ -723,8 +723,9 @@ class BantzOrchestrator:
             # Convert bytes to float32
             audio_np = np.frombuffer(audio, dtype=np.float32)
             
-            result = self._asr.transcribe(audio_np)
-            text = result.text.strip()
+            # ASR returns (text, meta) tuple
+            text, meta = self._asr.transcribe(audio_np)
+            text = text.strip()
             
             if text:
                 self._process_command(text)

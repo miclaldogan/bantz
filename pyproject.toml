@@ -28,6 +28,7 @@ voice = [
 	"faster-whisper>=1.0.0",
 	"pynput>=1.7.6",
 	"rapidfuzz>=3.6.0",
+	"openwakeword>=0.6.0",
 ]
 system = [
 	"dbus-next>=0.2.3",
