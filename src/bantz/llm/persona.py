@@ -254,6 +254,51 @@ JARVIS_RESPONSES: Dict[str, List[str]] = {
         "Buyurun efendim, ne yapabilirim?",
         "Emrinizdeyim efendim.",
     ],
+    
+    # Follow-up questions (after completing a task)
+    "follow_up": [
+        "Başka bir şey var mı efendim?",
+        "Yardımcı olabileceğim başka bir konu var mı?",
+        "Devam edelim mi efendim?",
+        "Başka bir isteğiniz var mı efendim?",
+    ],
+    
+    # Goodbye responses (when user says thanks/bye)
+    "goodbye": [
+        "Rica ederim efendim. Emrinize amadeyim.",
+        "Ne demek efendim. İhtiyacınız olursa buradayım.",
+        "Başka bir şey olursa söyleyin efendim.",
+        "Rica ederim efendim.",
+        "Her zaman efendim.",
+    ],
+    
+    # Thanks acknowledgment
+    "thanks_response": [
+        "Rica ederim efendim.",
+        "Ne demek efendim.",
+        "Her zaman efendim.",
+        "Önemli değil efendim.",
+    ],
+    
+    # Engagement continue (staying in conversation)
+    "staying_engaged": [
+        "Dinliyorum efendim.",
+        "Buyurun efendim.",
+        "Evet efendim?",
+        "Sizi dinliyorum.",
+    ],
+    
+    # Timeout warning (before going idle)
+    "timeout_warning": [
+        "Hala buradayım efendim.",
+        "Dinliyorum efendim.",
+    ],
+    
+    # Going idle
+    "going_idle": [
+        "İhtiyacınız olursa 'Hey Bantz' deyin efendim.",
+        "Beklemedeyim efendim.",
+    ],
 }
 
 
@@ -496,6 +541,99 @@ class JarvisPersona:
         if template_name not in self.contextual:
             self.contextual[template_name] = []
         self.contextual[template_name].append(template)
+    
+    # ─────────────────────────────────────────────────────────────
+    # Conversation Flow Methods (Issue #20)
+    # ─────────────────────────────────────────────────────────────
+    
+    def get_follow_up(self) -> str:
+        """Get follow-up question after completing a task."""
+        return self.get_response("follow_up")
+    
+    def get_goodbye(self) -> str:
+        """Get goodbye response when user ends conversation."""
+        return self.get_response("goodbye")
+    
+    def get_thanks_response(self) -> str:
+        """Get response to user's thanks."""
+        return self.get_response("thanks_response")
+    
+    def get_staying_engaged(self) -> str:
+        """Get response when staying in conversation."""
+        return self.get_response("staying_engaged")
+    
+    def get_going_idle(self) -> str:
+        """Get response when going to idle mode."""
+        return self.get_response("going_idle")
+    
+    def wrap_response(
+        self,
+        content: str,
+        add_follow_up: bool = True,
+        separator: str = " ",
+    ) -> str:
+        """Wrap response with Jarvis style follow-up.
+        
+        Args:
+            content: Main response content
+            add_follow_up: Whether to add follow-up question
+            separator: Separator between content and follow-up
+            
+        Returns:
+            Wrapped response
+        """
+        if add_follow_up:
+            follow_up = self.get_follow_up()
+            return f"{content}{separator}{follow_up}"
+        return content
+    
+    def get_acknowledgment(self, action_type: str) -> str:
+        """Get acknowledgment for action type.
+        
+        Args:
+            action_type: Type of action (searching, opening, etc.)
+            
+        Returns:
+            Acknowledgment response
+        """
+        # Map action types to response categories
+        mapping = {
+            "search": "searching",
+            "searching": "searching",
+            "open": "opening",
+            "opening": "opening",
+            "read": "reading_page",
+            "reading": "reading_page",
+            "navigate": "navigating",
+            "navigating": "navigating",
+            "think": "thinking",
+            "thinking": "thinking",
+            "process": "thinking",
+            "processing": "thinking",
+        }
+        
+        category = mapping.get(action_type.lower(), "acknowledged")
+        return self.get_response(category)
+    
+    def get_result_response(self, result_type: str) -> str:
+        """Get result presentation response.
+        
+        Args:
+            result_type: Type of result (found, not_found, error)
+            
+        Returns:
+            Result response
+        """
+        mapping = {
+            "found": "results_found",
+            "success": "done",
+            "not_found": "not_found",
+            "error": "error",
+            "ready": "summary_ready",
+        }
+        
+        category = mapping.get(result_type.lower(), "results_found")
+        return self.get_response(category)
 
 
 # =============================================================================

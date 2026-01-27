@@ -1,4 +1,4 @@
-"""Voice module for TTS, ASR, wakeword detection, and continuous listening.
+"""Voice module for TTS, ASR, wakeword detection, continuous listening, and conversation flow.
 
 Includes:
 - Advanced TTS with emotion and speed control
@@ -9,6 +9,7 @@ Includes:
 - Noise filtering
 - Multi wake word detection
 - Continuous listening mode
+- Jarvis conversation flow management
 """
 from bantz.voice.advanced_tts import (
     AdvancedTTS,
@@ -68,6 +69,13 @@ from bantz.voice.continuous import (
     MockContinuousListener,
     get_continuous_listener,
 )
+from bantz.voice.conversation import (
+    ConversationManager,
+    ConversationConfig,
+    ConversationContext,
+    ConversationState,
+    MockConversationManager,
+)
 
 __all__ = [
     # Advanced TTS
@@ -120,4 +128,10 @@ __all__ = [
     "ListenerStats",
     "MockContinuousListener",
     "get_continuous_listener",
+    # Conversation Flow
+    "ConversationManager",
+    "ConversationConfig",
+    "ConversationContext",
+    "ConversationState",
+    "MockConversationManager",
 ]
