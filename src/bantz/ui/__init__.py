@@ -1,4 +1,4 @@
-"""Bantz UI components - Overlay and visual feedback (Issue #5).
+"""Bantz UI components - Overlay and visual feedback (Issue #5, #7).
 
 Provides Jarvis-style overlay with:
 - Arc reactor circular indicator
@@ -6,6 +6,12 @@ Provides Jarvis-style overlay with:
 - Action preview with progress
 - Mini terminal output
 - Multiple themes (Jarvis, Friday, Ultron)
+
+Live Action Streaming (Issue #7):
+- Mini preview window for target apps
+- Action highlighting with ripples
+- Progress tracking for tasks
+- Screen recording with annotations
 """
 
 from .themes import (
@@ -50,6 +56,35 @@ from .components import (
     StatusLevel,
 )
 
+# Issue #7: Live Action Streaming
+from .streaming import (
+    # Mini Preview
+    MiniPreviewWidget,
+    PreviewMode,
+    CaptureTarget,
+    # Highlighter
+    ActionHighlighter,
+    HighlightBox,
+    ClickRipple,
+    MouseTrail,
+    HighlightStyle,
+    # Progress Tracker
+    ProgressTracker,
+    TaskStep,
+    StepStatus,
+    ProgressStyle,
+    # Recorder
+    ActionRecorder,
+    RecordingAnnotation,
+    RecordingConfig,
+    RecordingState,
+    # Manager
+    StreamingManager,
+    StreamingConfig,
+    ActionEvent,
+    EventType,
+)
+
 __all__ = [
     # Themes
     "OverlayTheme",
@@ -85,4 +120,25 @@ __all__ = [
     "MiniTerminalWidget",
     "StatusBarWidget",
     "StatusLevel",
+    # Streaming (Issue #7)
+    "MiniPreviewWidget",
+    "PreviewMode",
+    "CaptureTarget",
+    "ActionHighlighter",
+    "HighlightBox",
+    "ClickRipple",
+    "MouseTrail",
+    "HighlightStyle",
+    "ProgressTracker",
+    "TaskStep",
+    "StepStatus",
+    "ProgressStyle",
+    "ActionRecorder",
+    "RecordingAnnotation",
+    "RecordingConfig",
+    "RecordingState",
+    "StreamingManager",
+    "StreamingConfig",
+    "ActionEvent",
+    "EventType",
 ]
