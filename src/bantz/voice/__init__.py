@@ -1,4 +1,49 @@
-"""Voice katmanı (v0.1 placeholder).
+"""Voice module for TTS, ASR, and wakeword detection.
 
-v0.2+: STT (whisper.cpp) ve TTS (piper) buraya bağlanacak.
+Includes:
+- Advanced TTS with emotion and speed control
+- Streaming audio playback
+- Emotion detection for expressive speech
 """
+from bantz.voice.advanced_tts import (
+    AdvancedTTS,
+    TTSConfig,
+    TTSResult,
+    TTSChunk,
+    Emotion,
+    TTSBackend,
+    MockTTS,
+)
+from bantz.voice.streaming import (
+    StreamingPlayer,
+    AudioBuffer,
+    MockStreamingPlayer,
+)
+from bantz.voice.emotion import (
+    EmotionSelector,
+    EmotionContext,
+    EmotionResult,
+    JarvisResponseFormatter,
+    MockEmotionSelector,
+)
+
+__all__ = [
+    # Advanced TTS
+    "AdvancedTTS",
+    "TTSConfig",
+    "TTSResult",
+    "TTSChunk",
+    "Emotion",
+    "TTSBackend",
+    "MockTTS",
+    # Streaming
+    "StreamingPlayer",
+    "AudioBuffer",
+    "MockStreamingPlayer",
+    # Emotion
+    "EmotionSelector",
+    "EmotionContext",
+    "EmotionResult",
+    "JarvisResponseFormatter",
+    "MockEmotionSelector",
+]
