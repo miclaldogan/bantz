@@ -99,6 +99,41 @@ from .streaming import (
     EventType,
 )
 
+# Issue #34: Jarvis Panel V2 (animations + cards + images + ticker)
+from .jarvis_panel_v2 import (
+    JarvisPanelV2,
+    PanelState,
+    PanelConfig,
+)
+
+from .panel_animator import (
+    PanelAnimator,
+    AnimationType,
+)
+
+from .source_card import (
+    SourceCard,
+    SourceCardData,
+    RELIABILITY_COLORS,
+    RELIABILITY_LABELS,
+)
+
+from .ticker import (
+    Ticker,
+    TickerMode,
+)
+
+from .image_slot import (
+    ImageSlot,
+    ImageLoader,
+)
+
+from .event_binding import (
+    PanelEventBinder,
+    PanelEventConfig,
+    create_panel_binder,
+)
+
 __all__ = [
     # Themes
     "OverlayTheme",
@@ -166,4 +201,21 @@ __all__ = [
     "StreamingConfig",
     "ActionEvent",
     "EventType",
+    # Panel V2 (Issue #34)
+    "JarvisPanelV2",
+    "PanelState",
+    "PanelConfig",
+    "PanelAnimator",
+    "AnimationType",
+    "SourceCard",
+    "SourceCardData",
+    "RELIABILITY_COLORS",
+    "RELIABILITY_LABELS",
+    "Ticker",
+    "TickerMode",
+    "ImageSlot",
+    "ImageLoader",
+    "PanelEventBinder",
+    "PanelEventConfig",
+    "create_panel_binder",
 ]
