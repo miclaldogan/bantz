@@ -436,4 +436,59 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    # ─────────────────────────────────────────────────────────────────
+    # Calendar Tools (Google)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.google.calendar import list_events as google_calendar_list_events
+    except Exception:  # pragma: no cover
+        google_calendar_list_events = None
+
+    reg.register(
+        Tool(
+            name="calendar.list_events",
+            description="List upcoming events from Google Calendar.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                    "max_results": {"type": "integer", "description": "Max results (default: 10)"},
+                    "time_min": {"type": "string", "description": "RFC3339 timeMin (default: now)"},
+                    "time_max": {"type": "string", "description": "RFC3339 timeMax"},
+                    "query": {"type": "string", "description": "Free-text search query"},
+                    "single_events": {"type": "boolean", "description": "Expand recurring events"},
+                    "show_deleted": {"type": "boolean", "description": "Include deleted events"},
+                    "order_by": {"type": "string", "description": "Order (default: startTime)"},
+                },
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "calendar_id": {"type": "string"},
+                    "count": {"type": "integer"},
+                    "events": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "summary": {"type": "string"},
+                                "start": {"type": "string"},
+                                "end": {"type": "string"},
+                                "location": {"type": "string"},
+                                "htmlLink": {"type": "string"},
+                                "status": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+                "required": ["ok", "calendar_id", "count", "events"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_calendar_list_events,
+        )
+    )
+
     return reg
