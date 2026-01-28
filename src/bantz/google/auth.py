@@ -69,6 +69,21 @@ def get_credentials(
             "pip install -e '.[calendar]'"
         ) from e
 
+    def _effective_scopes(granted: list[str] | None) -> set[str]:
+        granted_set = set(granted or [])
+        implied: dict[str, set[str]] = {
+            # Write scope implies read access, but Google represents them as
+            # distinct strings. Treat as satisfied to avoid re-consent loops.
+            "https://www.googleapis.com/auth/calendar.events": {
+                "https://www.googleapis.com/auth/calendar.readonly",
+            },
+        }
+
+        out = set(granted_set)
+        for s in list(granted_set):
+            out |= implied.get(s, set())
+        return out
+
     creds = None
     if cfg.token_path.exists():
         # Important: do NOT pass `scopes=` here.
@@ -81,7 +96,9 @@ def get_credentials(
         # Detect that early and force a re-consent flow to expand scopes.
         has_scopes = getattr(creds, "has_scopes", None)
         if callable(has_scopes) and not has_scopes(scopes):
-            creds = None
+            effective = _effective_scopes(getattr(creds, "scopes", None))
+            if not set(scopes).issubset(effective):
+                creds = None
 
     if creds is not None and getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
         creds.refresh(Request())
