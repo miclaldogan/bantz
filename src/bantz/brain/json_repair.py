@@ -32,6 +32,13 @@ def build_repair_prompt(*, raw_text: str, error_summary: str) -> str:
         "Aşağıdaki metinden sadece GEÇERLİ JSON OBJESİ döndür.\n"
         "- Markdown, backtick, açıklama, yorum, extra anahtar yazma.\n"
         "- Çıktın yalnızca tek bir JSON object olsun.\n\n"
+        "ZORUNLU ŞEKİL:\n"
+        "- JSON object içinde mutlaka 'type' alanı olmalı.\n"
+        "- type ∈ {SAY, CALL_TOOL, ASK_USER, FAIL}\n"
+        "- SAY => {\"type\":\"SAY\",\"text\":\"...\"}\n"
+        "- ASK_USER => {\"type\":\"ASK_USER\",\"question\":\"...\"}\n"
+        "- FAIL => {\"type\":\"FAIL\",\"error\":\"...\"}\n"
+        "- CALL_TOOL => {\"type\":\"CALL_TOOL\",\"name\":\"tool_name\",\"params\":{}}\n\n"
         f"Hata özeti: {error_summary}\n\n"
         "Orijinal metin:\n"
         f"{raw_text}\n"
@@ -78,31 +85,36 @@ def validate_or_repair_action(
     Raises ValidationError on deterministic failure.
     """
 
-    # First try: parse directly
-    try:
-        action = extract_first_json_object(raw_text)
-        _validate_action(action=action, tool_registry=tool_registry)
-        return action
-    except ValidationError as e:
-        last_error_type = e.error_type
-        last_error = str(e)
-    except JsonParseError as e:
-        last_error_type = "parse_error"
-        last_error = str(e)
-    except Exception as e:
-        last_error_type = "parse_error"
-        last_error = str(e)
+    current_text = raw_text
 
-    # Repair loop
-    result = repair_to_json_object(
-        llm=llm, raw_text=raw_text, max_attempts=max_attempts
-    )
-    if not result.ok or result.value is None:
-        raise ValidationError(last_error_type, last_error or "repair_failed")
+    last_error_type: str = "parse_error"
+    last_error: str = "parse_or_schema_error"
 
-    action = result.value
-    _validate_action(action=action, tool_registry=tool_registry)
-    return action
+    # Total attempts = 1 initial parse/validate + up to max_attempts repair rounds.
+    for attempt in range(0, max_attempts + 1):
+        try:
+            action = extract_first_json_object(current_text)
+            _validate_action(action=action, tool_registry=tool_registry)
+            return action
+        except ValidationError as e:
+            if e.error_type == "unknown_tool":
+                raise
+            last_error_type = e.error_type
+            last_error = str(e)
+        except JsonParseError as e:
+            last_error_type = "parse_error"
+            last_error = str(e)
+        except Exception as e:
+            last_error_type = "parse_error"
+            last_error = str(e)
+
+        if attempt >= max_attempts:
+            raise ValidationError(last_error_type, last_error or "repair_failed")
+
+        prompt = build_repair_prompt(raw_text=current_text, error_summary=last_error)
+        current_text = llm.complete_text(prompt=prompt)
+
+    raise ValidationError(last_error_type, last_error or "repair_failed")
 
 
 def _validate_action(*, action: dict[str, Any], tool_registry: Any) -> None:
