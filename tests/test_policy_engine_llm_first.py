@@ -25,7 +25,7 @@ class FakeLLM:
 
     def complete_json(self, *, messages: list[dict[str, str]], schema_hint: str) -> dict[str, Any]:
         tail = messages[-1]["content"] if messages else ""
-        if "Observation (tool sonucu):" in tail:
+        if "TOOL_OBSERVATION:" in tail or "Observation (tool sonucu):" in tail:
             return {"type": "SAY", "text": "Tamam efendim."}
         return {"type": "CALL_TOOL", "name": self.tool_name, "params": dict(self.params)}
 
