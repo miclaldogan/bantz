@@ -71,12 +71,14 @@ def get_credentials(
 
     creds = None
     if cfg.token_path.exists():
-        creds = Credentials.from_authorized_user_file(str(cfg.token_path), scopes=scopes)
+        # Important: do NOT pass `scopes=` here.
+        # Passing `scopes` can overwrite the loaded credential's scope set and
+        # prevent reliable detection of insufficient permissions.
+        creds = Credentials.from_authorized_user_file(str(cfg.token_path))
 
-    # A token minted for narrower scopes (e.g. read-only) can still be "valid"
-    # but will fail at runtime with insufficientPermissions. Detect that early
-    # and force a re-consent flow to expand scopes.
-    if creds is not None:
+        # A token minted for narrower scopes (e.g. read-only) can still be
+        # "valid" but will fail at runtime with insufficientPermissions.
+        # Detect that early and force a re-consent flow to expand scopes.
         has_scopes = getattr(creds, "has_scopes", None)
         if callable(has_scopes) and not has_scopes(scopes):
             creds = None
