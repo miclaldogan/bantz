@@ -302,7 +302,7 @@ class BrainLoop:
                     pass
                 return BrainResult(
                     kind="say",
-                    text="Anlaşıldı efendim, iptal ettim.",
+                    text="İptal ediyorum efendim.",
                     steps_used=0,
                     metadata={},
                 )
@@ -533,15 +533,34 @@ class BrainLoop:
                         requires_conf = bool(tool_obj.requires_confirmation)
 
                     if policy is not None and hasattr(policy, "check"):
+                        prompt = "Efendim, bu işlemi onaylıyor musunuz?"
+                        if name == "calendar.create_event":
+                            title = str(
+                                params.get("summary")
+                                or params.get("title")
+                                or "(etkinlik)"
+                            ).strip()
+                            if len(title) > 120:
+                                title = title[:119] + "…"
+                            start = str(params.get("start") or "").strip()
+                            end = str(params.get("end") or "").strip()
+                            if start and end:
+                                prompt = (
+                                    f"Efendim, takvime '{title}' etkinliğini {start}–{end} arasında "
+                                    "eklememi onaylıyor musunuz?"
+                                )
+                            else:
+                                prompt = (
+                                    f"Efendim, takvime '{title}' etkinliğini eklememi onaylıyor musunuz?"
+                                )
+
                         decision = policy.check(
                             session_id=session_id,
                             tool_name=name,
                             params=params,
                             risk_level=risk,
                             requires_confirmation=requires_conf,
-                            prompt_to_user=(
-                                f"Efendim '{name}' aracıyla bu işlemi yapmamı onaylıyor musunuz?"
-                            ),
+                            prompt_to_user=prompt,
                         )
 
                         if getattr(decision, "requires_confirmation", False) and not getattr(decision, "allowed", False):
@@ -555,7 +574,7 @@ class BrainLoop:
                             except Exception:
                                 pass
 
-                            q = str(getattr(decision, "prompt_to_user", "") or "Onaylıyor musunuz?").strip()
+                            q = str(getattr(decision, "prompt_to_user", "") or "Efendim, onaylıyor musunuz?").strip()
                             try:
                                 self._events.publish(
                                     EventType.QUESTION.value, {"question": q}, source="brain"
