@@ -507,6 +507,8 @@ def build_default_registry() -> ToolRegistry:
                     "time_max": {"type": "string", "description": "RFC3339 window end"},
                     "duration_minutes": {"type": "integer", "description": "Required duration in minutes"},
                     "suggestions": {"type": "integer", "description": "How many slots to return (default: 3)"},
+                    "preferred_start": {"type": "string", "description": "Preferred day start HH:MM (default: 07:30)"},
+                    "preferred_end": {"type": "string", "description": "Preferred day end HH:MM (default: 22:30; supports 24:00)"},
                     "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
                 },
                 "required": ["time_min", "time_max", "duration_minutes"],
