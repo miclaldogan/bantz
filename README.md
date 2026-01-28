@@ -257,6 +257,36 @@ Bantz is a **local-first, privacy-focused voice assistant** for Linux that aims 
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+---
+
+## Calendar (Google) Smoke Test
+
+This repo includes a simple smoke test that validates **real OAuth + real event fetch**.
+
+### Setup
+
+- Install deps: `pip install -e '.[calendar]'`
+- Put your OAuth client secret JSON outside the repo (recommended):
+  - Default: `~/.config/bantz/google/client_secret.json`
+  - Or set: `export BANTZ_GOOGLE_CLIENT_SECRET=~/.config/bantz/google/client_secret.json`
+- Optional:
+  - `export BANTZ_GOOGLE_TOKEN_PATH=~/.config/bantz/google/token.json`
+  - `export BANTZ_GOOGLE_CALENDAR_ID=primary`
+
+### Run
+
+```bash
+python3 scripts/smoke_calendar_list_events.py --today --max-results 10 --debug
+```
+
+Example output:
+
+```
+18:00–19:00 | Meeting …
+20:00–21:00 | …
+(no events)
+```
+
 ### Job State Machine
 
 ```
