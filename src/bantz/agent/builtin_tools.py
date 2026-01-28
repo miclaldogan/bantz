@@ -491,4 +491,48 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    try:
+        from bantz.google.calendar import find_free_slots as google_calendar_find_free_slots
+    except Exception:  # pragma: no cover
+        google_calendar_find_free_slots = None
+
+    reg.register(
+        Tool(
+            name="calendar.find_free_slots",
+            description="Find free time slots between time_min and time_max for a given duration.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "time_min": {"type": "string", "description": "RFC3339 window start"},
+                    "time_max": {"type": "string", "description": "RFC3339 window end"},
+                    "duration_minutes": {"type": "integer", "description": "Required duration in minutes"},
+                    "suggestions": {"type": "integer", "description": "How many slots to return (default: 3)"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                },
+                "required": ["time_min", "time_max", "duration_minutes"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "slots": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "start": {"type": "string"},
+                                "end": {"type": "string"},
+                            },
+                            "required": ["start", "end"],
+                        },
+                    },
+                },
+                "required": ["ok", "slots"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_calendar_find_free_slots,
+        )
+    )
+
     return reg
