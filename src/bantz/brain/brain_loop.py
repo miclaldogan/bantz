@@ -18,8 +18,9 @@ class LLMClient(Protocol):
     BrainLoop protocol (see `LLMOutput`).
     """
 
-    def complete_json(self, *, messages: list[dict[str, str]], schema_hint: str) -> dict[str, Any]:
-        ...
+    def complete_json(
+        self, *, messages: list[dict[str, str]], schema_hint: str
+    ) -> dict[str, Any]: ...
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -63,7 +64,9 @@ def _parse_llm_output(raw: Any) -> tuple[Optional[LLMOutput], str]:
     if typ == "SAY":
         return Say(type="SAY", text=str(raw.get("text") or "").strip()), "ok"
     if typ == "ASK_USER":
-        return AskUser(type="ASK_USER", question=str(raw.get("question") or "").strip()), "ok"
+        return AskUser(
+            type="ASK_USER", question=str(raw.get("question") or "").strip()
+        ), "ok"
     if typ == "FAIL":
         err = str(raw.get("error") or "unknown_error").strip()
         return Fail(type="FAIL", error=err), "ok"
@@ -193,7 +196,9 @@ class BrainLoop:
     ) -> BrainResult:
         user_text = (turn_input or "").strip()
         if not user_text:
-            return BrainResult(kind="fail", text="empty_input", steps_used=0, metadata={})
+            return BrainResult(
+                kind="fail", text="empty_input", steps_used=0, metadata={}
+            )
 
         # Backward compatible alias: older callers may pass `context=`.
         ctx: dict[str, Any] = {}
@@ -220,7 +225,9 @@ class BrainLoop:
 
         # Emit quick ACK.
         try:
-            self._events.publish(EventType.ACK.value, {"text": "Anladım efendim."}, source="brain")
+            self._events.publish(
+                EventType.ACK.value, {"text": "Anladım efendim."}, source="brain"
+            )
         except Exception:
             pass
 
@@ -236,12 +243,16 @@ class BrainLoop:
                 "tools": self._tools.as_schema(),
                 "policy_summary": _summarize_policy(policy),
                 "session_context": _shorten_jsonable(ctx, max_chars=1200),
-                "conversation_context": _short_conversation(messages, max_messages=12, max_chars=1200),
+                "conversation_context": _short_conversation(
+                    messages, max_messages=12, max_chars=1200
+                ),
                 "observations": observations[-6:],
             }
             schema_hint = json.dumps(schema_obj, ensure_ascii=False)
 
-            out_raw = self._llm.complete_json(messages=messages, schema_hint=schema_hint)
+            out_raw = self._llm.complete_json(
+                messages=messages, schema_hint=schema_hint
+            )
             action, status = _parse_llm_output(out_raw)
 
             if self._config.debug:
@@ -249,7 +260,9 @@ class BrainLoop:
                     step=step_idx,
                     messages=_mask_messages(messages[-12:]),
                     schema=_mask_jsonable(schema_obj),
-                    output=_mask_jsonable(out_raw if isinstance(out_raw, dict) else {"_raw": str(out_raw)}),
+                    output=_mask_jsonable(
+                        out_raw if isinstance(out_raw, dict) else {"_raw": str(out_raw)}
+                    ),
                 )
                 transcript.append(masked_turn)
                 try:
@@ -271,10 +284,20 @@ class BrainLoop:
 
             if action is None:
                 if status == "llm_output_not_object":
-                    return BrainResult(kind="fail", text="llm_output_not_object", steps_used=step_idx, metadata=_meta(transcript))
+                    return BrainResult(
+                        kind="fail",
+                        text="llm_output_not_object",
+                        steps_used=step_idx,
+                        metadata=_meta(transcript),
+                    )
 
                 # Unknown type: ask LLM to restate.
-                messages.append({"role": "assistant", "content": json.dumps(out_raw, ensure_ascii=False)})
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(out_raw, ensure_ascii=False),
+                    }
+                )
                 messages.append(
                     {
                         "role": "user",
@@ -286,26 +309,47 @@ class BrainLoop:
             if isinstance(action, Say):
                 text = action.text
                 try:
-                    self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
+                    self._events.publish(
+                        EventType.RESULT.value, {"text": text}, source="brain"
+                    )
                 except Exception:
                     pass
-                return BrainResult(kind="say", text=text, steps_used=step_idx, metadata=_meta(transcript, raw=out_raw))
+                return BrainResult(
+                    kind="say",
+                    text=text,
+                    steps_used=step_idx,
+                    metadata=_meta(transcript, raw=out_raw),
+                )
 
             if isinstance(action, AskUser):
                 q = action.question
                 try:
-                    self._events.publish(EventType.QUESTION.value, {"question": q}, source="brain")
+                    self._events.publish(
+                        EventType.QUESTION.value, {"question": q}, source="brain"
+                    )
                 except Exception:
                     pass
-                return BrainResult(kind="ask_user", text=q, steps_used=step_idx, metadata=_meta(transcript, raw=out_raw))
+                return BrainResult(
+                    kind="ask_user",
+                    text=q,
+                    steps_used=step_idx,
+                    metadata=_meta(transcript, raw=out_raw),
+                )
 
             if isinstance(action, Fail):
                 err = action.error
                 try:
-                    self._events.publish(EventType.ERROR.value, {"error": err}, source="brain")
+                    self._events.publish(
+                        EventType.ERROR.value, {"error": err}, source="brain"
+                    )
                 except Exception:
                     pass
-                return BrainResult(kind="fail", text=err, steps_used=step_idx, metadata=_meta(transcript, raw=out_raw))
+                return BrainResult(
+                    kind="fail",
+                    text=err,
+                    steps_used=step_idx,
+                    metadata=_meta(transcript, raw=out_raw),
+                )
 
             if isinstance(action, CallTool):
                 name = action.name
@@ -339,20 +383,33 @@ class BrainLoop:
 
                 tool = self._tools.get(name)
                 if tool is None or tool.function is None:
-                    observations.append({"tool": name, "ok": False, "error": "tool_not_executable"})
+                    observations.append(
+                        {"tool": name, "ok": False, "error": "tool_not_executable"}
+                    )
                 else:
                     try:
                         result = tool.function(**params)
-                        observations.append({"tool": name, "ok": True, "result": result})
+                        observations.append(
+                            {"tool": name, "ok": True, "result": result}
+                        )
                     except Exception as e:
-                        observations.append({"tool": name, "ok": False, "error": str(e)})
+                        observations.append(
+                            {"tool": name, "ok": False, "error": str(e)}
+                        )
 
                 try:
-                    self._events.publish(EventType.FOUND.value, {"tool": name}, source="brain")
+                    self._events.publish(
+                        EventType.FOUND.value, {"tool": name}, source="brain"
+                    )
                 except Exception:
                     pass
 
-                messages.append({"role": "assistant", "content": json.dumps(out_raw, ensure_ascii=False)})
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(out_raw, ensure_ascii=False),
+                    }
+                )
                 messages.append(
                     {
                         "role": "user",
@@ -389,7 +446,9 @@ def _summarize_policy(policy: Any) -> str:
     return str(policy)
 
 
-def _short_conversation(messages: list[dict[str, str]], *, max_messages: int, max_chars: int) -> list[dict[str, str]]:
+def _short_conversation(
+    messages: list[dict[str, str]], *, max_messages: int, max_chars: int
+) -> list[dict[str, str]]:
     tail = list(messages[-max_messages:])
     out: list[dict[str, str]] = []
     used = 0
@@ -439,7 +498,13 @@ def _mask_jsonable(value: Any) -> Any:
 
 
 def _mask_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
-    return [{"role": str(m.get("role") or ""), "content": str(_mask_jsonable(m.get("content") or ""))} for m in messages]
+    return [
+        {
+            "role": str(m.get("role") or ""),
+            "content": str(_mask_jsonable(m.get("content") or "")),
+        }
+        for m in messages
+    ]
 
 
 def _shorten_jsonable(value: Any, *, max_chars: int) -> Any:

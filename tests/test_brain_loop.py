@@ -10,7 +10,9 @@ class FakeLLM:
         self._outputs = list(outputs)
         self.calls: int = 0
 
-    def complete_json(self, *, messages: list[dict[str, str]], schema_hint: str) -> dict:
+    def complete_json(
+        self, *, messages: list[dict[str, str]], schema_hint: str
+    ) -> dict:
         self.calls += 1
         if not self._outputs:
             return {"type": "FAIL", "error": "no_more_outputs"}
@@ -53,11 +55,13 @@ def test_brain_loop_tool_then_say():
 
 def test_brain_loop_max_steps_exceeded():
     tools = ToolRegistry()
-    llm = FakeLLM([
-        {"type": "CALL_TOOL", "name": "missing", "params": {}},
-        {"type": "CALL_TOOL", "name": "missing", "params": {}},
-        {"type": "CALL_TOOL", "name": "missing", "params": {}},
-    ])
+    llm = FakeLLM(
+        [
+            {"type": "CALL_TOOL", "name": "missing", "params": {}},
+            {"type": "CALL_TOOL", "name": "missing", "params": {}},
+            {"type": "CALL_TOOL", "name": "missing", "params": {}},
+        ]
+    )
 
     loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2))
     result = loop.run(turn_input="hi")
@@ -67,9 +71,11 @@ def test_brain_loop_max_steps_exceeded():
 
 def test_brain_loop_ask_user():
     tools = ToolRegistry()
-    llm = FakeLLM([
-        {"type": "ASK_USER", "question": "Hangi tarihe hatırlatma koyayım?"},
-    ])
+    llm = FakeLLM(
+        [
+            {"type": "ASK_USER", "question": "Hangi tarihe hatırlatma koyayım?"},
+        ]
+    )
 
     loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=3))
     result = loop.run(turn_input="Bana hatırlatma kur")
@@ -80,11 +86,15 @@ def test_brain_loop_ask_user():
 
 def test_brain_loop_debug_transcript_masks_sensitive_fields():
     tools = ToolRegistry()
-    llm = FakeLLM([
-        {"type": "SAY", "text": "Tamam."},
-    ])
+    llm = FakeLLM(
+        [
+            {"type": "SAY", "text": "Tamam."},
+        ]
+    )
 
-    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=True))
+    loop = BrainLoop(
+        llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=True)
+    )
     result = loop.run(
         turn_input="Selam",
         session_context={
@@ -106,11 +116,15 @@ def test_brain_loop_debug_transcript_masks_sensitive_fields():
 
 def test_brain_loop_back_compat_context_alias():
     tools = ToolRegistry()
-    llm = FakeLLM([
-        {"type": "SAY", "text": "OK"},
-    ])
+    llm = FakeLLM(
+        [
+            {"type": "SAY", "text": "OK"},
+        ]
+    )
 
-    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=True))
+    loop = BrainLoop(
+        llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=True)
+    )
     result = loop.run(
         turn_input="hi",
         context={"token": "should_not_leak"},
@@ -118,4 +132,6 @@ def test_brain_loop_back_compat_context_alias():
 
     assert result.kind == "say"
     assert result.metadata.get("transcript")
-    assert result.metadata["transcript"][0]["schema"]["session_context"]["token"] == "***"
+    assert (
+        result.metadata["transcript"][0]["schema"]["session_context"]["token"] == "***"
+    )
