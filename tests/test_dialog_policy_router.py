@@ -110,6 +110,98 @@ def test_calendar_route_allows_llm_and_renders_list_events_deterministically() -
     assert res.metadata.get("action_type") == "list_events"
     assert res.metadata.get("events_count") == 0
 
+    trace = res.metadata.get("trace")
+    assert isinstance(trace, dict)
+    assert trace.get("intent") == "calendar.query"
+    slots = trace.get("slots")
+    assert isinstance(slots, dict)
+    assert slots.get("date") in {"evening", "none"}
+    assert trace.get("safety") == []
+
+
+def test_trace_create_event_slot_fill_then_confirmation_is_structured_and_stable() -> None:
+    tools = ToolRegistry()
+    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    state: dict = {"session_id": "t"}
+
+    r1 = loop.run(
+        turn_input="Bugün 23.50'ye kitap okuma saati ekle",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+    assert r1.kind == "ask_user"
+    trace1 = r1.metadata.get("trace")
+    assert isinstance(trace1, dict)
+    assert trace1.get("intent") == "calendar.create"
+    assert trace1.get("next_action") == "ask_slot_fill"
+    assert "write_requires_confirmation" in (trace1.get("safety") or [])
+    slots1 = trace1.get("slots")
+    assert isinstance(slots1, dict)
+    assert "23:50" in str(slots1.get("start_time") or "")
+
+    r2 = loop.run(
+        turn_input="30 dk",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+    assert r2.kind == "ask_user"
+    assert r2.metadata.get("menu_id") == "pending_confirmation"
+    trace2 = r2.metadata.get("trace")
+    assert isinstance(trace2, dict)
+    # user_goal should stay frozen on the original intent across follow-ups.
+    assert "kitap" in str(trace2.get("user_goal") or "").lower()
+    assert trace2.get("intent") == "calendar.create"
+    assert trace2.get("next_action") == "ask_confirmation"
+    slots2 = trace2.get("slots")
+    assert isinstance(slots2, dict)
+    assert "23:50" in str(slots2.get("start_time") or "")
+    assert int(slots2.get("duration_min") or 0) == 30
+    assert "kitap" in str(slots2.get("title") or "").lower()
+
+
+def test_calendar_planner_optional_trace_is_emitted_when_enabled() -> None:
+    tools = ToolRegistry()
+    llm = _QueueLLM(
+        outputs=[
+            {
+                "intent": "create",
+                "slots": {"day_hint": "today", "start_time": "23:50", "duration_min": 30, "title": "kitap okuma", "ref": "none"},
+            }
+        ]
+    )
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    state: dict = {"session_id": "t"}
+
+    res = loop.run(
+        turn_input="Bugün 23:50 kitap okuma ekle 30 dk",
+        session_context={
+            "deterministic_render": True,
+            "enable_calendar_planner": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+
+    assert llm.calls == 1
+    assert res.kind == "ask_user"
+    trace = res.metadata.get("trace")
+    assert isinstance(trace, dict)
+    planner = trace.get("planner")
+    assert isinstance(planner, dict)
+    assert planner.get("intent") == "create"
+
 
 def test_llm_ask_user_is_ignored_and_replaced_with_brainloop_menu_in_deterministic_mode() -> None:
     tools = ToolRegistry()

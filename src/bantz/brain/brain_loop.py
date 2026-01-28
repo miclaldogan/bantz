@@ -35,6 +35,8 @@ _REPROMPT_COUNT_KEY = "_dialog_reprompt_count"
 _CALENDAR_PENDING_INTENT_KEY = "_calendar_pending_intent"
 _CALENDAR_LAST_EVENTS_KEY = "_calendar_last_events"
 
+_TRACE_KEY = "_dialog_trace"
+
 
 def _action_type_from_tool_name(tool_name: str) -> str:
     """Map a tool name like 'calendar.create_event' -> 'create_event'."""
@@ -59,6 +61,11 @@ def _std_metadata(
     """Stable metadata for tests/clients (persona-independent)."""
 
     meta: dict[str, Any] = {}
+
+    trace = ctx.get("trace")
+    if isinstance(trace, dict) and trace:
+        # Short, structured, testable trace (never chain-of-thought).
+        meta["trace"] = dict(trace)
 
     route = str(ctx.get("route") or "").strip()
     if route:
@@ -920,7 +927,7 @@ def _detect_route(
 
     create_verbs = {"ekle", "olustur", "oluştur", "koy", "ayarla", "planla", "hatirlat", "hatırlat"}
     cancel_verbs = {"iptal", "iptal et", "sil", "kaldir", "kaldır"}
-    modify_verbs = {"tasi", "taşı", "kaydir", "kayd31r", "ertele", "guncelle", "güncelle", "degistir", "değiştir"}
+    modify_verbs = {"tasi", "taşı", "kaydir", "ertele", "guncelle", "güncelle", "degistir", "değiştir"}
     query_verbs = {"bak", "listele", "goster", "göster"}
 
     has_create = any(v in nt for v in create_verbs)
@@ -938,7 +945,7 @@ def _detect_route(
     )
 
     has_ref = bool(re.search(r"#\s*\d+\b", user_text or "")) or any(w in nt for w in ["birinci", "ikinci", "ucuncu"])
-    has_ref_move_al = bool("#" in (user_text or "") and re.search(r"\b(al|alin|al31n)\b", nt))
+    has_ref_move_al = bool("#" in (user_text or "") and re.search(r"\b(al|alin)\b", nt))
 
     # Strong reference rule: (#N or ordinal) + (cancel/modify) => calendar.
     if has_ref and (has_cancel or has_modify or has_ref_move_al):
@@ -1180,6 +1187,74 @@ class BrainLoop:
             (ctx.get("session_id") or ctx.get("user") or "default")
         ).strip() or "default"
 
+        def _ensure_trace() -> dict[str, Any]:
+            existing = state.get(_TRACE_KEY) if isinstance(state, dict) else None
+            trace: dict[str, Any] = existing if isinstance(existing, dict) else {}
+            # Freeze user_goal across follow-ups when we have a pending calendar intent/action.
+            frozen_goal: Optional[str] = None
+            try:
+                pending_intent = state.get(_CALENDAR_PENDING_INTENT_KEY) if isinstance(state, dict) else None
+                if isinstance(pending_intent, dict):
+                    frozen_goal = str(pending_intent.get("source_text") or "").strip() or None
+            except Exception:
+                frozen_goal = None
+            if not frozen_goal:
+                try:
+                    pending_action = state.get(_PENDING_ACTION_KEY) if isinstance(state, dict) else None
+                    if isinstance(pending_action, dict):
+                        frozen_goal = str(pending_action.get("original_user_input") or "").strip() or None
+                except Exception:
+                    frozen_goal = None
+
+            trace["user_goal"] = frozen_goal or str(user_text or "").strip()
+            ctx["trace"] = trace
+            if isinstance(state, dict):
+                state[_TRACE_KEY] = trace
+            return trace
+
+        def _route_reason_tokens(
+            *,
+            user_text_in: str,
+            normalized_text: str,
+            last_intent_in: Optional[str],
+            last_tool_in: Optional[str],
+        ) -> list[str]:
+            reasons: list[str] = []
+            if _TIME_HHMM_RE.search(user_text_in or ""):
+                reasons.append("explicit_time")
+            if any(w in normalized_text for w in ["bugun", "yarin", "obur gun"]):
+                reasons.append("date_word")
+            if any(w in normalized_text for w in ["takvim", "calendar", "ajanda"]):
+                reasons.append("calendar_noun")
+            if any(w in normalized_text for w in ["plan", "program"]):
+                reasons.append("plan_noun")
+            if any(w in normalized_text for w in ["ekle", "olustur", "koy", "ayarla", "planla", "hatirlat"]):
+                reasons.append("create_verb")
+            if any(w in normalized_text for w in ["iptal", "sil", "kaldir"]):
+                reasons.append("cancel_verb")
+            if any(w in normalized_text for w in ["tasi", "kaydir", "ertele", "guncelle", "degistir"]):
+                reasons.append("modify_verb")
+            if any(w in normalized_text for w in ["bak", "listele", "goster"]):
+                reasons.append("query_verb")
+            if bool(re.search(r"#\s*\d+\b", user_text_in or "")):
+                reasons.append("ref_hash")
+            if any(w in normalized_text for w in ["birinci", "ikinci", "ucuncu"]):
+                reasons.append("ref_ordinal")
+            if _is_calendar_route(last_intent_in):
+                reasons.append("context_last_intent")
+            if isinstance(last_tool_in, str) and last_tool_in.startswith("calendar."):
+                reasons.append("context_last_tool")
+
+            seen: set[str] = set()
+            out: list[str] = []
+            for r in reasons:
+                if r not in seen:
+                    seen.add(r)
+                    out.append(r)
+            return out
+
+        trace = _ensure_trace()
+
         def _llm_route_classifier(user_text_in: str) -> tuple[str, str, float]:
             """Return (route, calendar_intent, confidence) using the LLM."""
 
@@ -1239,6 +1314,91 @@ class BrainLoop:
             if intent_out == "modify":
                 return _ROUTE_CALENDAR_MODIFY, intent_out, conf
             return _ROUTE_CALENDAR_QUERY, intent_out, conf
+
+        def _llm_calendar_planner(user_text_in: str) -> tuple[dict[str, Any], str]:
+            """Extract a calendar plan/slots for trace + deterministic slot-filling.
+
+            This is intentionally NOT a tool-calling interface.
+            """
+
+            schema = {
+                "intent": "create|modify|cancel|query|none",
+                "slots": {
+                    "day_hint": "today|tomorrow|day_after_tomorrow|this_week|none",
+                    "start_time": "HH:MM|none",
+                    "duration_min": 0,
+                    "title": "",
+                    "ref": "#N|ordinal|none",
+                },
+            }
+
+            try:
+                prompt = (
+                    "Sen bir takvim istek çözücüsüsün. SADECE şu JSON'u döndür:\n"
+                    + json.dumps(schema, ensure_ascii=False)
+                    + "\n\nKurallar:\n"
+                    + "- intent sadece create|modify|cancel|query|none\n"
+                    + "- day_hint sadece today|tomorrow|day_after_tomorrow|this_week|none\n"
+                    + "- start_time HH:MM formatında ya da none\n"
+                    + "- duration_min sayı ya da 0\n"
+                    + "- ref '#2' ya da 'ordinal' ya da 'none'\n"
+                    + "- Ek alan ekleme, açıklama yazma.\n"
+                )
+                raw = self._llm.complete_json(
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": str(user_text_in or "").strip()},
+                    ],
+                    schema_hint=json.dumps(schema, ensure_ascii=False),
+                )
+            except Exception:
+                return {}, "planner_llm_error"
+
+            if not isinstance(raw, dict):
+                return {}, "planner_not_object"
+
+            intent_out = str(raw.get("intent") or "").strip().lower()
+            if intent_out not in {"create", "modify", "cancel", "query", "none"}:
+                intent_out = "none"
+
+            slots_raw = raw.get("slots")
+            slots = slots_raw if isinstance(slots_raw, dict) else {}
+
+            day_hint = str(slots.get("day_hint") or "").strip().lower()
+            if day_hint not in {"today", "tomorrow", "day_after_tomorrow", "this_week", "none"}:
+                day_hint = "none"
+
+            start_time = str(slots.get("start_time") or "").strip()
+            if start_time.lower() == "none":
+                start_time = ""
+            if start_time and not re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", start_time):
+                start_time = ""
+
+            dur_raw = slots.get("duration_min")
+            try:
+                duration_min = int(dur_raw)
+            except Exception:
+                duration_min = 0
+            duration_min = max(0, min(24 * 60, duration_min))
+
+            title = str(slots.get("title") or "").strip()
+            ref = str(slots.get("ref") or "").strip()
+            if ref.lower() in {"none", ""}:
+                ref = "none"
+            if ref != "none" and ref != "ordinal" and not re.match(r"^#\d+$", ref):
+                ref = "none"
+
+            plan = {
+                "intent": intent_out,
+                "slots": {
+                    "day_hint": day_hint,
+                    "start_time": start_time or "none",
+                    "duration_min": duration_min,
+                    "title": title,
+                    "ref": ref,
+                },
+            }
+            return plan, "ok"
 
         # Deterministic state machine: confirmation > choice > router.
         # If we have a pending confirmation, do NOT consume pending choice menus.
@@ -2179,6 +2339,7 @@ class BrainLoop:
             locked = _hard_lock_calendar_route(state) if isinstance(state, dict) else None
             route = ""
             if isinstance(locked, str) and locked:
+                trace["route_reason"] = ["hard_lock"]
                 route = locked
             else:
                 # If we have recent calendar events cached, interpret cancel/modify follow-ups
@@ -2195,6 +2356,7 @@ class BrainLoop:
                             or any(w in tnorm for w in ["birinci", "ikinci", "ucuncu"])
                         )
                     ):
+                        trace["route_reason"] = ["last_events_guard"]
                         route = _calendar_route_from_text(user_text)
                 except Exception:
                     route = ""
@@ -2207,10 +2369,23 @@ class BrainLoop:
             )
             if route == _ROUTE_UNKNOWN:
                 llm_route, _llm_intent, llm_conf = _llm_route_classifier(user_text)
+                trace["route_reason"] = ["llm_classifier"]
+                trace["classifier"] = {"route": llm_route, "calendar_intent": _llm_intent, "confidence": llm_conf}
                 if llm_conf >= 0.65:
                     route = llm_route
                 else:
                     route = _ROUTE_UNKNOWN
+            else:
+                try:
+                    nt = _normalize_text_for_match(user_text)
+                except Exception:
+                    nt = ""
+                trace["route_reason"] = _route_reason_tokens(
+                    user_text_in=user_text,
+                    normalized_text=nt,
+                    last_intent_in=(str(last_intent) if isinstance(last_intent, str) else None),
+                    last_tool_in=(str(last_tool_used) if isinstance(last_tool_used, str) else None),
+                )
             ctx["route"] = route
             try:
                 if isinstance(state, dict):
@@ -2247,6 +2422,18 @@ class BrainLoop:
                 route in {_ROUTE_CALENDAR_CREATE, _ROUTE_CALENDAR_CANCEL, _ROUTE_CALENDAR_MODIFY}
                 or has_pending_write_intent
             ):
+
+                planner_plan: Optional[dict[str, Any]] = None
+                try:
+                    planner_enabled = bool(ctx.get("enable_calendar_planner"))
+                except Exception:
+                    planner_enabled = False
+                # Planner is only allowed when we're not already in a pending intent (hard-lock).
+                if planner_enabled and not isinstance(pending_intent, dict):
+                    plan, status = _llm_calendar_planner(user_text)
+                    if status == "ok" and isinstance(plan, dict):
+                        planner_plan = plan
+                        trace["planner"] = plan
 
                 follow_text = user_text
                 base_text = user_text
@@ -2318,6 +2505,37 @@ class BrainLoop:
                     except Exception:
                         pass
 
+                    # Trace for slot fill prompt.
+                    try:
+                        missing_to_trace = list(missing_list) if isinstance(missing_list, list) else list(intent.missing)
+                    except Exception:
+                        missing_to_trace = []
+                    if intent.type == "create_event":
+                        trace["intent"] = "calendar.create"
+                        trace["safety"] = ["write_requires_confirmation"]
+                        slots: dict[str, Any] = {}
+                        try:
+                            snap = state.get(_CALENDAR_PENDING_INTENT_KEY) if isinstance(state, dict) else None
+                            if isinstance(snap, dict):
+                                slots["date"] = str(snap.get("day_hint") or "none") or "none"
+                                slots["start_time"] = str(snap.get("start_hhmm") or "none") or "none"
+                                slots["duration_min"] = snap.get("duration_minutes")
+                                slots["title"] = str(snap.get("title") or "")
+                        except Exception:
+                            slots = {}
+                        trace["slots"] = slots
+                    elif intent.type == "cancel_event":
+                        trace["intent"] = "calendar.cancel"
+                        trace["safety"] = ["write_requires_confirmation"]
+                    elif intent.type == "move_event":
+                        trace["intent"] = "calendar.modify"
+                        trace["safety"] = ["write_requires_confirmation"]
+                    else:
+                        trace["intent"] = "calendar.unknown"
+                        trace["safety"] = []
+                    trace["missing"] = missing_to_trace
+                    trace["next_action"] = "ask_slot_fill"
+
                     try:
                         self._events.publish(EventType.QUESTION.value, {"question": prompt}, source="brain")
                     except Exception:
@@ -2368,6 +2586,15 @@ class BrainLoop:
                     day_hint = intent.params.get("day_hint")
                     if not isinstance(day_hint, str) or not day_hint:
                         day_hint = frozen_day_hint
+                    if (not isinstance(day_hint, str) or not day_hint) and isinstance(planner_plan, dict):
+                        try:
+                            pslots = planner_plan.get("slots")
+                            if isinstance(pslots, dict):
+                                ph = str(pslots.get("day_hint") or "").strip()
+                                if ph and ph != "none":
+                                    day_hint = ph
+                        except Exception:
+                            pass
                     if not isinstance(day_hint, str) or not day_hint:
                         try:
                             day_hint = parse_day_hint(follow_text)
@@ -2377,6 +2604,15 @@ class BrainLoop:
                     hhmm = str(intent.params.get("start_hhmm") or "").strip() or None
                     if not hhmm:
                         hhmm = frozen_start_hhmm
+                    if not hhmm and isinstance(planner_plan, dict):
+                        try:
+                            pslots = planner_plan.get("slots")
+                            if isinstance(pslots, dict):
+                                pst = str(pslots.get("start_time") or "").strip()
+                                if pst and pst != "none":
+                                    hhmm = pst
+                        except Exception:
+                            pass
                     if not hhmm:
                         try:
                             hhmm = parse_hhmm(base_text)
@@ -2391,6 +2627,15 @@ class BrainLoop:
                     dur = intent.params.get("duration_minutes")
                     if dur is None:
                         dur = frozen_duration
+                    if dur is None and isinstance(planner_plan, dict):
+                        try:
+                            pslots = planner_plan.get("slots")
+                            if isinstance(pslots, dict):
+                                pd = pslots.get("duration_min")
+                                if pd is not None:
+                                    dur = int(pd)
+                        except Exception:
+                            pass
                     if dur is None:
                         try:
                             dur = parse_duration_minutes(follow_text)
@@ -2400,6 +2645,15 @@ class BrainLoop:
                     summary = frozen_title
                     if not summary:
                         summary = str(intent.params.get("summary") or "").strip() or None
+                    if not summary and isinstance(planner_plan, dict):
+                        try:
+                            pslots = planner_plan.get("slots")
+                            if isinstance(pslots, dict):
+                                pt = str(pslots.get("title") or "").strip()
+                                if pt:
+                                    summary = pt
+                        except Exception:
+                            pass
 
                     missing_now: list[str] = []
                     if str(day_hint or "") == "this_week":
@@ -2427,6 +2681,16 @@ class BrainLoop:
                         except Exception:
                             pass
                         # Ask only the first missing slot.
+                        trace["intent"] = "calendar.create"
+                        trace["slots"] = {
+                            "date": str(day_hint or "none") or "none",
+                            "start_time": str(hhmm or "none") or "none",
+                            "duration_min": (int(dur) if dur is not None else 0),
+                            "title": str(summary or "").strip(),
+                        }
+                        trace["missing"] = list(missing_now)
+                        trace["next_action"] = "ask_slot_fill"
+                        trace["safety"] = ["write_requires_confirmation"]
                         return _ask_slot_fill(missing_now[0], missing_list=missing_now)
 
                     # Clear pending intent.
@@ -2451,6 +2715,17 @@ class BrainLoop:
                     start = iso_from_date_hhmm(date_iso=date_iso, hhmm=hhmm, offset=offset)
                     end = add_minutes(start, int(duration_minutes))
 
+                    trace["intent"] = "calendar.create"
+                    trace["slots"] = {
+                        "date": str(day_hint or "none") or "none",
+                        "start_time": str(hhmm or "none") or "none",
+                        "duration_min": int(duration_minutes),
+                        "title": summary,
+                    }
+                    trace["missing"] = []
+                    trace["next_action"] = "ask_confirmation"
+                    trace["safety"] = ["write_requires_confirmation"]
+
                     # Save pending action for the next user turn.
                     try:
                         state[_DIALOG_STATE_KEY] = "PENDING_CONFIRMATION"
@@ -2470,6 +2745,17 @@ class BrainLoop:
                     sh = _format_hhmm(start, tz_name=tz_name)
                     eh = _format_hhmm(end, tz_name=tz_name)
                     prompt = JarvisVoice.format_confirmation(summary, sh, eh)
+
+                    trace["intent"] = "calendar.create"
+                    trace["slots"] = {
+                        "date": str(day_hint or "none") or "none",
+                        "start_time": hhmm or "none",
+                        "duration_min": int(duration_minutes),
+                        "title": summary,
+                    }
+                    trace["missing"] = []
+                    trace["next_action"] = "ask_confirmation"
+                    trace["safety"] = ["write_requires_confirmation"]
                     try:
                         self._events.publish(EventType.QUESTION.value, {"question": prompt}, source="brain")
                     except Exception:
@@ -3403,6 +3689,16 @@ class BrainLoop:
                                 if isinstance(ctx, dict):
                                     tz_name = str(ctx.get("tz_name") or "") or None
                                 text = _render_calendar_list_events(result=res, intent=intent, tz_name=tz_name)
+
+                                # Trace for auditability/tests.
+                                try:
+                                    trace["intent"] = "calendar.query"
+                                    trace["slots"] = {"date": (str(intent or "none") or "none")}
+                                    trace["missing"] = []
+                                    trace["next_action"] = "say_result"
+                                    trace["safety"] = []
+                                except Exception:
+                                    pass
                                 mini_ack = False
                                 if _has_smalltalk_clause(user_text):
                                     mini_ack = True
