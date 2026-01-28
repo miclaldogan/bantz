@@ -155,10 +155,19 @@ def _extract_first_json_object(text: str) -> dict[str, Any]:
 class BrainLoop:
     """LLM-first brain loop.
 
+    Minimal usage:
+
+        tools = ToolRegistry()
+        tools.register(Tool(name="add", description="...", parameters={...}, function=add))
+
+        loop = BrainLoop(llm=my_llm_adapter, tools=tools, config=BrainLoopConfig(debug=True))
+        result = loop.run(turn_input="2 ile 3 topla", session_context={...}, policy={...})
+
     Contract:
     - Uses `ToolRegistry` as the tool catalog and executor.
-    - Emits minimal events (ACK/PROGRESS/FOUND/RESULT) via EventBus.
+    - Emits minimal events (ACK/PROGRESS/FOUND/RESULT/QUESTION/ERROR) via EventBus.
     - Stops on SAY / ASK_USER / FAIL or on max_steps.
+
     """
 
     def __init__(
@@ -408,6 +417,7 @@ _SENSITIVE_KEYS = {
     "secret",
     "authorization",
     "cookie",
+    "set-cookie",
 }
 
 

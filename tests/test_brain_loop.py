@@ -102,3 +102,20 @@ def test_brain_loop_debug_transcript_masks_sensitive_fields():
     assert transcript[0]["schema"]["session_context"]["api_key"] == "***"
     assert transcript[0]["schema"]["session_context"]["nested"]["token"] == "***"
     assert "***" in transcript[0]["schema"]["policy_summary"]
+
+
+def test_brain_loop_back_compat_context_alias():
+    tools = ToolRegistry()
+    llm = FakeLLM([
+        {"type": "SAY", "text": "OK"},
+    ])
+
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=True))
+    result = loop.run(
+        turn_input="hi",
+        context={"token": "should_not_leak"},
+    )
+
+    assert result.kind == "say"
+    assert result.metadata.get("transcript")
+    assert result.metadata["transcript"][0]["schema"]["session_context"]["token"] == "***"
