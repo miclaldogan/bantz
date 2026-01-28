@@ -136,13 +136,21 @@ def _normalize_choice(reply: str, overrides: Optional[dict[str, str]] = None) ->
 
 def _ask_choice(prompt: str, allowed: set[str], *, overrides: Optional[dict[str, str]] = None) -> str:
     while True:
-        reply = _normalize_choice(input(prompt), overrides=overrides)
+        try:
+            raw = input(prompt)
+        except EOFError:
+            return "0" if "0" in allowed else next(iter(sorted(allowed)))
+        reply = _normalize_choice(raw, overrides=overrides)
         if reply in allowed:
             return reply
 
 
 def _ask_confirm(prompt: str) -> bool:
-    reply = input(prompt).strip().lower()
+    try:
+        reply = input(prompt)
+    except EOFError:
+        return False
+    reply = reply.strip().lower()
     return reply in {"tamam", "evet", "ok", "yes", "y"}
 
 
