@@ -97,6 +97,116 @@ def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[d
     return merged
 
 
+def _parse_hhmm(value: Optional[str], *, default: time) -> tuple[time, bool]:
+    """Parse an HH:MM string into a time.
+
+    Returns (t, is_24h_end) where is_24h_end is True only for the special
+    end value "24:00".
+    """
+
+    if value is None:
+        return default, False
+    v = str(value).strip()
+    if not v:
+        return default, False
+    if v == "24:00":
+        return time(0, 0), True
+    parts = v.split(":")
+    if len(parts) != 2:
+        raise ValueError("invalid_hhmm")
+    h = int(parts[0])
+    m = int(parts[1])
+    if h < 0 or h > 23 or m < 0 or m > 59:
+        raise ValueError("invalid_hhmm")
+    return time(h, m), False
+
+
+def _sleep_busy_intervals(
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    preferred_start: time,
+    preferred_end: time,
+    preferred_end_is_24: bool,
+) -> list[tuple[datetime, datetime]]:
+    """Generate synthetic busy intervals outside preferred hours.
+
+    Default intent: prevent suggestions like 00:00–02:00 by treating sleep
+    hours as busy.
+    """
+
+    if window_end <= window_start:
+        return []
+
+    if not preferred_end_is_24 and preferred_end <= preferred_start:
+        # Overnight preferred windows (e.g. 22:30–02:00) are out of scope for P0.
+        raise ValueError("preferred_end_must_be_after_preferred_start")
+
+    tzinfo = window_start.tzinfo or timezone.utc
+    if not isinstance(tzinfo, timezone):
+        tzinfo = timezone.utc
+
+    day_cursor = datetime.combine(window_start.date(), time(0, 0), tzinfo=tzinfo)
+    intervals: list[tuple[datetime, datetime]] = []
+
+    while day_cursor < window_end:
+        day_start = day_cursor
+        day_end = day_start + timedelta(days=1)
+
+        allowed_start = datetime.combine(day_start.date(), preferred_start, tzinfo=tzinfo)
+        allowed_end = day_end if preferred_end_is_24 else datetime.combine(day_start.date(), preferred_end, tzinfo=tzinfo)
+
+        # Busy before allowed_start.
+        if allowed_start > day_start:
+            intervals.append((day_start, allowed_start))
+        # Busy after allowed_end.
+        if allowed_end < day_end:
+            intervals.append((allowed_end, day_end))
+
+        day_cursor = day_end
+
+    # Clip to the requested window.
+    clipped: list[tuple[datetime, datetime]] = []
+    for s, e in intervals:
+        if e <= window_start or s >= window_end:
+            continue
+        clipped.append((max(s, window_start), min(e, window_end)))
+
+    return _merge_intervals(clipped)
+
+
+def _dedupe_normalized_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Dedupe normalized event dicts.
+
+    Prefers stable `id` when present, otherwise falls back to (start,end,summary).
+    """
+
+    seen_ids: set[str] = set()
+    seen_keys: set[tuple[str, str, str]] = set()
+    deduped: list[dict[str, Any]] = []
+
+    for ev in events:
+        ev_id = ev.get("id")
+        if isinstance(ev_id, str) and ev_id:
+            if ev_id in seen_ids:
+                continue
+            seen_ids.add(ev_id)
+            deduped.append(ev)
+            continue
+
+        s = ev.get("start")
+        e = ev.get("end")
+        summary = ev.get("summary") or ""
+        if isinstance(s, str) and isinstance(e, str):
+            key = (s, e, str(summary))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+        deduped.append(ev)
+
+    return deduped
+
+
 def _compute_free_slots(
     *,
     events: list[dict[str, Any]],
@@ -104,6 +214,8 @@ def _compute_free_slots(
     time_max: str,
     duration_minutes: int,
     suggestions: int,
+    preferred_start: Optional[str] = None,
+    preferred_end: Optional[str] = None,
 ) -> list[dict[str, str]]:
     if duration_minutes <= 0:
         raise ValueError("duration_minutes_must_be_positive")
@@ -121,6 +233,20 @@ def _compute_free_slots(
         tzinfo = timezone.utc
 
     busy = _merge_intervals(_extract_busy_intervals(events, tz=tzinfo))
+
+    # Human hours: treat sleep hours as busy by default.
+    pref_start_t, _ = _parse_hhmm(preferred_start, default=time(7, 30))
+    pref_end_t, pref_end_is_24 = _parse_hhmm(preferred_end, default=time(22, 30))
+    busy.extend(
+        _sleep_busy_intervals(
+            window_start=window_start,
+            window_end=window_end,
+            preferred_start=pref_start_t,
+            preferred_end=pref_end_t,
+            preferred_end_is_24=pref_end_is_24,
+        )
+    )
+    busy = _merge_intervals(busy)
 
     # Clip busy intervals to the window.
     clipped: list[tuple[datetime, datetime]] = []
@@ -225,6 +351,8 @@ def list_events(
             }
         )
 
+    events = _dedupe_normalized_events(events)
+
     return {
         "ok": True,
         "calendar_id": cal_id,
@@ -240,6 +368,8 @@ def find_free_slots(
     duration_minutes: int,
     suggestions: int = 3,
     calendar_id: Optional[str] = None,
+    preferred_start: Optional[str] = None,
+    preferred_end: Optional[str] = None,
 ) -> dict[str, Any]:
     """Find free time slots within a window.
 
@@ -269,6 +399,8 @@ def find_free_slots(
         time_max=time_max,
         duration_minutes=int(duration_minutes),
         suggestions=int(suggestions),
+        preferred_start=preferred_start,
+        preferred_end=preferred_end,
     )
 
     return {

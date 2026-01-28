@@ -279,14 +279,13 @@ def main() -> int:
         window_start = max(base_start, now)
     window_end = base_end
 
-    if window_end <= window_start:
-        print("BANTZ: 20:00\'ye kadar uygun bir pencere tanımlayamadım efendim.")
-        return 1
+    can_search_before_20 = window_end > window_start
 
     if args.debug:
         print("[debug] find_free_slots time_min:", _rfc3339(window_start))
         print("[debug] find_free_slots time_max:", _rfc3339(window_end))
         print("[debug] find_free_slots duration_minutes:", 120)
+        print("[debug] find_free_slots can_search_before_20:", can_search_before_20)
         print()
 
     params2: dict[str, Any] = {
@@ -294,13 +293,19 @@ def main() -> int:
         "time_max": _rfc3339(window_end),
         "duration_minutes": 120,
         "suggestions": 3,
+        "preferred_start": "07:30",
+        "preferred_end": "22:30",
     }
     if cfg.calendar_id:
         params2["calendar_id"] = cfg.calendar_id
 
-    _print_tool_call("calendar.find_free_slots", params2)
-    out2 = tool2.function(**params2)
-    slots = (out2 or {}).get("slots") or []
+    if can_search_before_20:
+        _print_tool_call("calendar.find_free_slots", params2)
+        out2 = tool2.function(**params2)
+        slots = (out2 or {}).get("slots") or []
+    else:
+        print("BANTZ: Efendim saat 20:00'yi geçmiş; 20:00'den önce 2 saatlik bir koşu için bugün artık geç kaldık.")
+        slots = []
     if args.debug:
         print("[debug] find_free_slots count:", len(slots) if isinstance(slots, list) else "?")
     if not slots:
