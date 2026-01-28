@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 import os
-
-from bantz.google.auth import get_credentials
 
 
 DEFAULT_CALENDAR_ID = "primary"
@@ -13,6 +11,142 @@ READONLY_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 def _now_rfc3339() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_rfc3339(value: str) -> datetime:
+    v = (value or "").strip()
+    if not v:
+        raise ValueError("empty_datetime")
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    dt = datetime.fromisoformat(v)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _parse_date(value: str) -> date:
+    v = (value or "").strip()
+    if not v:
+        raise ValueError("empty_date")
+    return date.fromisoformat(v)
+
+
+def _to_all_day_range(d: date, *, tz: timezone) -> tuple[datetime, datetime]:
+    start = datetime.combine(d, time(0, 0), tzinfo=tz)
+    end = start + timedelta(days=1)
+    return start, end
+
+
+def _extract_busy_intervals(
+    events: list[dict[str, Any]],
+    *,
+    tz: timezone,
+) -> list[tuple[datetime, datetime]]:
+    intervals: list[tuple[datetime, datetime]] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+
+        s = ev.get("start")
+        e = ev.get("end")
+        if not isinstance(s, str) or not isinstance(e, str):
+            continue
+
+        # All-day events show up as YYYY-MM-DD.
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
+            try:
+                sd = _parse_date(s)
+                # Calendar API often returns end date as next day for all-day.
+                ed = _parse_date(e)
+                start_dt, _ = _to_all_day_range(sd, tz=tz)
+                end_dt, _ = _to_all_day_range(ed, tz=tz)
+                intervals.append((start_dt, end_dt))
+            except Exception:
+                continue
+            continue
+
+        try:
+            start_dt = _parse_rfc3339(s)
+            end_dt = _parse_rfc3339(e)
+        except Exception:
+            continue
+
+        if end_dt <= start_dt:
+            continue
+        intervals.append((start_dt, end_dt))
+
+    intervals.sort(key=lambda t: t[0])
+    return intervals
+
+
+def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    if not intervals:
+        return []
+    merged: list[tuple[datetime, datetime]] = []
+    cur_s, cur_e = intervals[0]
+    for s, e in intervals[1:]:
+        if s <= cur_e:
+            if e > cur_e:
+                cur_e = e
+            continue
+        merged.append((cur_s, cur_e))
+        cur_s, cur_e = s, e
+    merged.append((cur_s, cur_e))
+    return merged
+
+
+def _compute_free_slots(
+    *,
+    events: list[dict[str, Any]],
+    time_min: str,
+    time_max: str,
+    duration_minutes: int,
+    suggestions: int,
+) -> list[dict[str, str]]:
+    if duration_minutes <= 0:
+        raise ValueError("duration_minutes_must_be_positive")
+    if suggestions <= 0:
+        return []
+
+    window_start = _parse_rfc3339(time_min)
+    window_end = _parse_rfc3339(time_max)
+    if window_end <= window_start:
+        raise ValueError("time_max_must_be_after_time_min")
+
+    tzinfo = window_start.tzinfo or timezone.utc
+    if not isinstance(tzinfo, timezone):
+        # Keep behavior predictable.
+        tzinfo = timezone.utc
+
+    busy = _merge_intervals(_extract_busy_intervals(events, tz=tzinfo))
+
+    # Clip busy intervals to the window.
+    clipped: list[tuple[datetime, datetime]] = []
+    for s, e in busy:
+        if e <= window_start or s >= window_end:
+            continue
+        clipped.append((max(s, window_start), min(e, window_end)))
+    clipped = _merge_intervals(clipped)
+
+    required = timedelta(minutes=int(duration_minutes))
+    slots: list[dict[str, str]] = []
+
+    cursor = window_start
+    for s, e in clipped:
+        if s > cursor and (s - cursor) >= required:
+            slot_end = cursor + required
+            slots.append({"start": cursor.isoformat(), "end": slot_end.isoformat()})
+            if len(slots) >= suggestions:
+                return slots
+        if e > cursor:
+            cursor = e
+
+    if window_end > cursor and (window_end - cursor) >= required:
+        slot_end = cursor + required
+        slots.append({"start": cursor.isoformat(), "end": slot_end.isoformat()})
+
+    return slots[:suggestions]
 
 
 def list_events(
@@ -40,6 +174,7 @@ def list_events(
     )
 
     # Get creds first (this will also validate secret file presence).
+    from bantz.google.auth import get_credentials
     creds = get_credentials(scopes=READONLY_SCOPES)
 
     # Lazy import to keep base installs light.
@@ -94,4 +229,48 @@ def list_events(
         "calendar_id": cal_id,
         "count": len(events),
         "events": events,
+    }
+
+
+def find_free_slots(
+    *,
+    time_min: str,
+    time_max: str,
+    duration_minutes: int,
+    suggestions: int = 3,
+    calendar_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Find free time slots within a window.
+
+    MVP behavior:
+    - Treats all-day events as busy.
+    - Uses Google Calendar events list with singleEvents=True.
+    - Returns the first N slots that fit duration.
+    """
+
+    resp = list_events(
+        calendar_id=calendar_id,
+        max_results=250,
+        time_min=time_min,
+        time_max=time_max,
+        query=None,
+        single_events=True,
+        show_deleted=False,
+        order_by="startTime",
+    )
+    events = resp.get("events") if isinstance(resp, dict) else None
+    if not isinstance(events, list):
+        events = []
+
+    slots = _compute_free_slots(
+        events=[e for e in events if isinstance(e, dict)],
+        time_min=time_min,
+        time_max=time_max,
+        duration_minutes=int(duration_minutes),
+        suggestions=int(suggestions),
+    )
+
+    return {
+        "ok": True,
+        "slots": slots,
     }
