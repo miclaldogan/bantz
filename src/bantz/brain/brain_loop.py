@@ -17,6 +17,8 @@ from bantz.brain.calendar_intent import (
     add_minutes,
     build_intent,
     iso_from_date_hhmm,
+    parse_day_hint,
+    parse_duration_minutes,
     parse_hash_ref_index,
     parse_hhmm,
 )
@@ -253,12 +255,21 @@ def _parse_user_confirmation(text: str) -> tuple[Optional[Literal["confirm", "de
     if not t:
         return None, ""
 
+    nt = _normalize_text_for_match(raw)
+    # Robust handling for common typos/variants.
+    if "onay" in nt:
+        return "confirm", ""
+
     confirm_prefixes = [
         "1",
         "evet",
         "tamam",
+        "tamamdır",
+        "tamamdir",
         "olur",
+        "peki",
         "yap",
+        "ekle",
         "uygula",
         "onay",
         "onayla",
@@ -770,7 +781,28 @@ _SMALLTALK_KEYWORDS = {
     "keyifsiz",
     "stres",
     "of",
+    "nasılsın",
+    "nasilsin",
 }
+
+
+def _cleanup_after_calendar_write(state: dict[str, Any]) -> None:
+    """Reset dialog state after a completed calendar write.
+
+    Next user turn should be treated as fresh: no pending menus, no calendar lock-in.
+    """
+
+    try:
+        state.pop(_PENDING_CHOICE_KEY, None)
+        state.pop(_PENDING_ACTION_KEY, None)
+        state.pop(_CALENDAR_PENDING_INTENT_KEY, None)
+        state.pop(_REPROMPT_COUNT_KEY, None)
+        state.pop(_CALENDAR_SOFT_EXIT_COUNT_KEY, None)
+        state[_DIALOG_STATE_KEY] = "IDLE"
+        state["last_intent"] = None
+        state["last_tool_used"] = None
+    except Exception:
+        pass
 
 
 _CALENDAR_EXIT_KEYWORDS = {
@@ -828,7 +860,33 @@ def _has_smalltalk_clause(user_text: str) -> bool:
     return any(k in t for k in _SMALLTALK_KEYWORDS)
 
 
-_TIME_HHMM_RE = re.compile(r"\b([01]?\d|2[0-3])\s*[:.,]\s*([0-5]\d)\b")
+_TIME_HHMM_RE = re.compile(r"\b([01]?\d|2[0-3])\s*[:., ]\s*([0-5]\d)\b")
+
+
+def _hard_lock_calendar_route(state: dict[str, Any]) -> Optional[str]:
+    """Return a calendar route if dialog state implies we must stay in calendar.
+
+    This is the deterministic ownership guarantee: pending intents/actions/menus
+    must not fall back to smalltalk/unknown.
+    """
+
+    try:
+        if isinstance(state.get(_CALENDAR_PENDING_INTENT_KEY), dict):
+            return _ROUTE_CALENDAR_QUERY
+        pending_action = state.get(_PENDING_ACTION_KEY)
+        if isinstance(pending_action, dict):
+            action = pending_action.get("action")
+            tool_name = str((action or {}).get("name") or "").strip()
+            if tool_name.startswith("calendar."):
+                return _ROUTE_CALENDAR_QUERY
+        pending_choice = state.get(_PENDING_CHOICE_KEY)
+        if isinstance(pending_choice, dict):
+            menu_id = str(pending_choice.get("menu_id") or "").strip()
+            if menu_id in {"event_pick", "free_slots", "calendar_next"}:
+                return _ROUTE_CALENDAR_QUERY
+    except Exception:
+        return None
+    return None
 
 
 def _detect_route(
@@ -839,41 +897,72 @@ def _detect_route(
 ) -> str:
     """Deterministic domain router.
 
-    Only route to calendar if the message is clearly about calendar operations
-    (plans/events/free time) or contains an explicit time.
+    Minimal calendar triggers only.
 
-    Relative time words alone (today/tomorrow/evening) are intentionally NOT
-    enough, to avoid dragging normal smalltalk into calendar flow.
+    Smalltalk/unknown (and other grey areas) are intentionally NOT handled here;
+    they should go to an LLM classifier when enabled.
     """
 
     t = str(user_text or "").strip().lower()
     if not t:
         return _ROUTE_UNKNOWN
 
-    has_calendar_strong = any(k in t for k in _CALENDAR_STRONG_KEYWORDS)
-    has_explicit_time = bool(_TIME_HHMM_RE.search(t)) or (
-        "saat" in t and bool(re.search(r"\b\d{1,2}\b", t))
+    nt = _normalize_text_for_match(user_text)
+
+    has_time = bool(_TIME_HHMM_RE.search(user_text or ""))
+    has_date = any(w in nt for w in ["bugun", "yarin", "obur gun"])
+    has_time_or_date = bool(has_time or has_date)
+
+    strong_nouns = {"takvim", "calendar", "ajanda"}
+    soft_nouns = {"program", "plan"}
+    has_calendar_object_strong = any(w in nt for w in strong_nouns)
+    has_calendar_object_soft = any(w in nt for w in soft_nouns)
+
+    create_verbs = {"ekle", "olustur", "oluştur", "koy", "ayarla", "planla", "hatirlat", "hatırlat"}
+    cancel_verbs = {"iptal", "iptal et", "sil", "kaldir", "kaldır"}
+    modify_verbs = {"tasi", "taşı", "kaydir", "kayd31r", "ertele", "guncelle", "güncelle", "degistir", "değiştir"}
+    query_verbs = {"bak", "listele", "goster", "göster"}
+
+    has_create = any(v in nt for v in create_verbs)
+    has_cancel = any(v in nt for v in cancel_verbs)
+    has_modify = any(v in nt for v in modify_verbs)
+    has_query = any(v in nt for v in query_verbs)
+    has_any_cal_verb = bool(has_create or has_cancel or has_modify or has_query)
+
+    has_calendar_context = bool(
+        has_calendar_object_strong
+        or (has_calendar_object_soft and has_time_or_date)
+        or has_time_or_date
+        or _is_calendar_route(last_intent)
+        or (isinstance(last_tool_used, str) and last_tool_used.startswith("calendar."))
     )
-    has_smalltalk = any(k in t for k in _SMALLTALK_KEYWORDS)
 
-    has_modify = any(k in t for k in _CALENDAR_MODIFY_KEYWORDS)
+    has_ref = bool(re.search(r"#\s*\d+\b", user_text or "")) or any(w in nt for w in ["birinci", "ikinci", "ucuncu"])
+    has_ref_move_al = bool("#" in (user_text or "") and re.search(r"\b(al|alin|al31n)\b", nt))
 
-    if has_calendar_strong or has_explicit_time:
-        # Route to specific calendar sub-domain when it's clear.
-        r = _calendar_route_from_text(t)
-        if r == _ROUTE_CALENDAR_QUERY and has_modify:
+    # Strong reference rule: (#N or ordinal) + (cancel/modify) => calendar.
+    if has_ref and (has_cancel or has_modify or has_ref_move_al):
+        if has_cancel:
+            return _ROUTE_CALENDAR_CANCEL
+        return _ROUTE_CALENDAR_MODIFY
+
+    # Strong calendar objects imply calendar query.
+    if has_calendar_object_strong and not has_any_cal_verb:
+        return _ROUTE_CALENDAR_QUERY
+
+    # Soft objects like "plan/program" require time/date or an explicit query verb.
+    if has_calendar_object_soft and not has_any_cal_verb and has_time_or_date:
+        return _ROUTE_CALENDAR_QUERY
+
+    # Verb + calendar context => calendar.
+    if has_any_cal_verb and has_calendar_context:
+        if has_cancel:
+            return _ROUTE_CALENDAR_CANCEL
+        if has_modify:
             return _ROUTE_CALENDAR_MODIFY
-        return r
-
-    # Soft bias: if we were already in a calendar flow, keep it.
-    if _is_calendar_route(last_intent):
+        if has_create:
+            return _ROUTE_CALENDAR_CREATE
         return _ROUTE_CALENDAR_QUERY
-    if isinstance(last_tool_used, str) and last_tool_used.startswith("calendar."):
-        return _ROUTE_CALENDAR_QUERY
-
-    # Only allow smalltalk routing when we're not already in calendar flow.
-    if has_smalltalk:
-        return _ROUTE_SMALLTALK
 
     return _ROUTE_UNKNOWN
 
@@ -1090,6 +1179,66 @@ class BrainLoop:
         session_id = str(
             (ctx.get("session_id") or ctx.get("user") or "default")
         ).strip() or "default"
+
+        def _llm_route_classifier(user_text_in: str) -> tuple[str, str, float]:
+            """Return (route, calendar_intent, confidence) using the LLM."""
+
+            schema = {
+                "route": "calendar|smalltalk|unknown",
+                "calendar_intent": "create|modify|cancel|query|none",
+                "confidence": 0.0,
+            }
+            try:
+                prompt = (
+                    "Sen bir router sınıflandırıcısısın. SADECE şu JSON'u döndür:\n"
+                    + json.dumps(schema, ensure_ascii=False)
+                    + "\n\nKurallar:\n"
+                    + "- route sadece calendar|smalltalk|unknown\n"
+                    + "- calendar_intent sadece create|modify|cancel|query|none\n"
+                    + "- confidence 0.0-1.0 arası\n"
+                    + "- Ek alan ekleme, açıklama yazma.\n"
+                )
+                raw = self._llm.complete_json(
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": str(user_text_in or "").strip()},
+                    ],
+                    schema_hint=json.dumps(schema, ensure_ascii=False),
+                )
+            except Exception:
+                return _ROUTE_UNKNOWN, "none", 0.0
+
+            if not isinstance(raw, dict):
+                return _ROUTE_UNKNOWN, "none", 0.0
+
+            route_out = str(raw.get("route") or "").strip().lower()
+            intent_out = str(raw.get("calendar_intent") or "").strip().lower()
+            conf_raw = raw.get("confidence")
+
+            try:
+                conf = float(conf_raw)
+            except Exception:
+                conf = 0.0
+            conf = max(0.0, min(1.0, conf))
+
+            if route_out not in {"calendar", "smalltalk", "unknown"}:
+                route_out = "unknown"
+            if intent_out not in {"create", "modify", "cancel", "query", "none"}:
+                intent_out = "none"
+
+            if route_out == "smalltalk":
+                return _ROUTE_SMALLTALK, "none", conf
+            if route_out == "unknown":
+                return _ROUTE_UNKNOWN, "none", conf
+
+            # calendar
+            if intent_out == "create":
+                return _ROUTE_CALENDAR_CREATE, intent_out, conf
+            if intent_out == "cancel":
+                return _ROUTE_CALENDAR_CANCEL, intent_out, conf
+            if intent_out == "modify":
+                return _ROUTE_CALENDAR_MODIFY, intent_out, conf
+            return _ROUTE_CALENDAR_QUERY, intent_out, conf
 
         # Deterministic state machine: confirmation > choice > router.
         # If we have a pending confirmation, do NOT consume pending choice menus.
@@ -2027,11 +2176,41 @@ class BrainLoop:
                         ),
                     )
 
-            route = _detect_route(
+            locked = _hard_lock_calendar_route(state) if isinstance(state, dict) else None
+            route = ""
+            if isinstance(locked, str) and locked:
+                route = locked
+            else:
+                # If we have recent calendar events cached, interpret cancel/modify follow-ups
+                # as calendar intents (avoid bouncing to unknown/LLM).
+                try:
+                    last_events = state.get(_CALENDAR_LAST_EVENTS_KEY) if isinstance(state, dict) else None
+                    tnorm = _normalize_text_for_match(user_text)
+                    if (
+                        isinstance(last_events, list)
+                        and len(last_events) > 0
+                        and (
+                            any(k in tnorm for k in ["iptal", "sil", "kaldir", "tasi", "kaydir", "ertele", "guncelle", "degistir"])
+                            or bool(re.search(r"#\s*\d+\b", user_text or ""))
+                            or any(w in tnorm for w in ["birinci", "ikinci", "ucuncu"])
+                        )
+                    ):
+                        route = _calendar_route_from_text(user_text)
+                except Exception:
+                    route = ""
+
+            if not route:
+                route = _detect_route(
                 user_text,
                 last_intent=str(last_intent) if isinstance(last_intent, str) else None,
                 last_tool_used=str(last_tool_used) if isinstance(last_tool_used, str) else None,
             )
+            if route == _ROUTE_UNKNOWN:
+                llm_route, _llm_intent, llm_conf = _llm_route_classifier(user_text)
+                if llm_conf >= 0.65:
+                    route = llm_route
+                else:
+                    route = _ROUTE_UNKNOWN
             ctx["route"] = route
             try:
                 if isinstance(state, dict):
@@ -2069,15 +2248,22 @@ class BrainLoop:
                 or has_pending_write_intent
             ):
 
+                follow_text = user_text
                 base_text = user_text
                 if isinstance(pending_intent, dict):
                     prior = str(pending_intent.get("source_text") or "").strip()
+                    prior_type = str(pending_intent.get("type") or "").strip()
                     if prior:
-                        base_text = f"{prior} {user_text}".strip()
+                        # For create_event slot-filling, keep the title/source frozen from the first intent.
+                        # Follow-ups like "1 saat" or "30 dk" must not pollute the title.
+                        if prior_type == "create_event":
+                            base_text = prior
+                        else:
+                            base_text = f"{prior} {user_text}".strip()
 
                 intent = build_intent(base_text)
 
-                def _ask_slot_fill(missing_key: str) -> BrainResult:
+                def _ask_slot_fill(missing_key: str, *, missing_list: Optional[list[str]] = None) -> BrainResult:
                     prompt = ""
                     if missing_key == "start_time":
                         prompt = "Hangi saat olsun efendim? (örn. 15:45)"
@@ -2096,11 +2282,39 @@ class BrainLoop:
 
                     try:
                         if isinstance(state, dict):
-                            state[_CALENDAR_PENDING_INTENT_KEY] = {
+                            missing_to_store = list(missing_list) if isinstance(missing_list, list) else list(intent.missing)
+                            pending_snapshot: dict[str, Any] = {
                                 "type": intent.type,
                                 "source_text": base_text,
-                                "missing": list(intent.missing),
+                                "missing": missing_to_store,
                             }
+                            if intent.type == "create_event":
+                                title = None
+                                try:
+                                    title = str((intent.params or {}).get("summary") or "").strip() or None
+                                except Exception:
+                                    title = None
+                                if title:
+                                    pending_snapshot["title"] = title
+                                try:
+                                    dh = (intent.params or {}).get("day_hint")
+                                    if isinstance(dh, str) and dh:
+                                        pending_snapshot["day_hint"] = dh
+                                except Exception:
+                                    pass
+                                try:
+                                    sh = (intent.params or {}).get("start_hhmm")
+                                    if isinstance(sh, str) and sh:
+                                        pending_snapshot["start_hhmm"] = sh
+                                except Exception:
+                                    pass
+                                try:
+                                    dm = (intent.params or {}).get("duration_minutes")
+                                    if dm is not None:
+                                        pending_snapshot["duration_minutes"] = dm
+                                except Exception:
+                                    pass
+                            state[_CALENDAR_PENDING_INTENT_KEY] = pending_snapshot
                     except Exception:
                         pass
 
@@ -2121,14 +2335,99 @@ class BrainLoop:
                                 action_type=intent.type,
                                 requires_confirmation=(intent.type != "list_events"),
                             ),
-                            "missing": list(intent.missing),
+                            "missing": (list(missing_list) if isinstance(missing_list, list) else list(intent.missing)),
+                            "pending_intent": (state.get(_CALENDAR_PENDING_INTENT_KEY) if isinstance(state, dict) else None),
                         },
                     )
 
                 # ── CREATE ───────────────────────────────────────────────
                 if intent.type == "create_event":
-                    if intent.missing:
-                        return _ask_slot_fill(intent.missing[0])
+                    frozen_title = None
+                    frozen_day_hint = None
+                    frozen_start_hhmm = None
+                    frozen_duration = None
+                    if isinstance(pending_intent, dict):
+                        try:
+                            frozen_title = str(pending_intent.get("title") or "").strip() or None
+                        except Exception:
+                            frozen_title = None
+                        try:
+                            frozen_day_hint = str(pending_intent.get("day_hint") or "").strip() or None
+                        except Exception:
+                            frozen_day_hint = None
+                        try:
+                            frozen_start_hhmm = str(pending_intent.get("start_hhmm") or "").strip() or None
+                        except Exception:
+                            frozen_start_hhmm = None
+                        try:
+                            frozen_duration = pending_intent.get("duration_minutes")
+                        except Exception:
+                            frozen_duration = None
+
+                    # Fill missing slots from follow-up text without polluting the title.
+                    day_hint = intent.params.get("day_hint")
+                    if not isinstance(day_hint, str) or not day_hint:
+                        day_hint = frozen_day_hint
+                    if not isinstance(day_hint, str) or not day_hint:
+                        try:
+                            day_hint = parse_day_hint(follow_text)
+                        except Exception:
+                            day_hint = None
+
+                    hhmm = str(intent.params.get("start_hhmm") or "").strip() or None
+                    if not hhmm:
+                        hhmm = frozen_start_hhmm
+                    if not hhmm:
+                        try:
+                            hhmm = parse_hhmm(base_text)
+                        except Exception:
+                            hhmm = None
+                    if not hhmm:
+                        try:
+                            hhmm = parse_hhmm(follow_text)
+                        except Exception:
+                            hhmm = None
+
+                    dur = intent.params.get("duration_minutes")
+                    if dur is None:
+                        dur = frozen_duration
+                    if dur is None:
+                        try:
+                            dur = parse_duration_minutes(follow_text)
+                        except Exception:
+                            dur = None
+
+                    summary = frozen_title
+                    if not summary:
+                        summary = str(intent.params.get("summary") or "").strip() or None
+
+                    missing_now: list[str] = []
+                    if str(day_hint or "") == "this_week":
+                        missing_now.append("day_hint")
+                    if not hhmm:
+                        missing_now.append("start_time")
+                    if dur is None:
+                        missing_now.append("duration_minutes")
+                    if not summary:
+                        missing_now.append("summary")
+
+                    if missing_now:
+                        # Persist frozen intent state; do not append follow-up into source_text.
+                        try:
+                            if isinstance(state, dict):
+                                state[_CALENDAR_PENDING_INTENT_KEY] = {
+                                    "type": "create_event",
+                                    "source_text": base_text,
+                                    "missing": list(missing_now),
+                                    "title": summary,
+                                    "day_hint": day_hint,
+                                    "start_hhmm": hhmm,
+                                    "duration_minutes": dur,
+                                }
+                        except Exception:
+                            pass
+                        # Ask only the first missing slot.
+                        return _ask_slot_fill(missing_now[0], missing_list=missing_now)
 
                     # Clear pending intent.
                     try:
@@ -2137,15 +2436,13 @@ class BrainLoop:
                     except Exception:
                         pass
 
-                    day_hint = intent.params.get("day_hint")
-                    hhmm = str(intent.params.get("start_hhmm") or "").strip()
-                    dur = intent.params.get("duration_minutes")
-                    summary = str(intent.params.get("summary") or "(etkinlik)").strip()
+                    hhmm = str(hhmm or "").strip()
+                    summary = str(summary or "(etkinlik)").strip()
 
                     window = _window_from_ctx(ctx, day_hint=str(day_hint) if isinstance(day_hint, str) else None)
                     date_iso, offset = _date_and_offset_from_window(window)
                     if not date_iso or not hhmm:
-                        return _ask_slot_fill("start_time")
+                        return _ask_slot_fill("start_time", missing_list=["start_time"])
                     try:
                         duration_minutes = int(dur)
                     except Exception:
@@ -2538,6 +2835,11 @@ class BrainLoop:
                     state.pop(_REPROMPT_COUNT_KEY, None)
                 except Exception:
                     pass
+                try:
+                    if isinstance(state, dict):
+                        state[_DIALOG_STATE_KEY] = "IDLE"
+                except Exception:
+                    pass
                 return BrainResult(
                     kind="say",
                     text="Vazgeçtim.",
@@ -2595,6 +2897,19 @@ class BrainLoop:
                             observations.append({"tool": tool_name, "ok": True, "result": result})
                         except Exception as e:
                             observations.append({"tool": tool_name, "ok": False, "error": str(e)})
+
+                # If a calendar write succeeded, clean up dialog state so the next turn is fresh.
+                try:
+                    obs_last = observations[-1] if observations else None
+                    if (
+                        isinstance(state, dict)
+                        and tool_name in {"calendar.create_event", "calendar.update_event", "calendar.delete_event"}
+                        and isinstance(obs_last, dict)
+                        and obs_last.get("ok") is True
+                    ):
+                        _cleanup_after_calendar_write(state)
+                except Exception:
+                    pass
 
                 # Demo/Jarvis deterministic renderer: bypass LLM.
                 if isinstance(ctx, dict) and bool(ctx.get("deterministic_render")):

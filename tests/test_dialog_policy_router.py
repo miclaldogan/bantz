@@ -36,13 +36,16 @@ def test_smalltalk_routes_to_scripted_menu_and_bypasses_llm_and_tools() -> None:
         )
     )
 
-    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    llm = _QueueLLM(outputs=[{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.9}])
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
     res = loop.run(
         turn_input="uykuluyum okula gitmek istemiyorum",
         session_context={"deterministic_render": True},
         policy=None,
         context={"session_id": "t"},
     )
+
+    assert llm.calls == 1
 
     assert res.kind == "ask_user"
     assert res.metadata.get("menu_id") == "smalltalk_stage1"
@@ -54,13 +57,16 @@ def test_smalltalk_routes_to_scripted_menu_and_bypasses_llm_and_tools() -> None:
 
 def test_unknown_routes_to_domain_choice_menu_and_bypasses_llm() -> None:
     tools = ToolRegistry()
-    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    llm = _QueueLLM(outputs=[{"route": "unknown", "calendar_intent": "none", "confidence": 0.9}])
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
     res = loop.run(
         turn_input="asdf qwer",
         session_context={"deterministic_render": True},
         policy=None,
         context={"session_id": "t"},
     )
+
+    assert llm.calls == 1
 
     assert res.kind == "ask_user"
     assert res.metadata.get("menu_id") == "unknown"
@@ -85,7 +91,12 @@ def test_calendar_route_allows_llm_and_renders_list_events_deterministically() -
         )
     )
 
-    llm = _QueueLLM(outputs=[{"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}}])
+    llm = _QueueLLM(
+        outputs=[
+            {"route": "calendar", "calendar_intent": "query", "confidence": 0.9},
+            {"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}},
+        ]
+    )
     loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
     res = loop.run(
         turn_input="Bu akşam planım var mı?",
@@ -94,7 +105,7 @@ def test_calendar_route_allows_llm_and_renders_list_events_deterministically() -
         context={"session_id": "t"},
     )
 
-    assert llm.calls == 1
+    assert llm.calls == 2
     assert res.kind == "say"
     assert res.metadata.get("action_type") == "list_events"
     assert res.metadata.get("events_count") == 0
@@ -102,7 +113,12 @@ def test_calendar_route_allows_llm_and_renders_list_events_deterministically() -
 
 def test_llm_ask_user_is_ignored_and_replaced_with_brainloop_menu_in_deterministic_mode() -> None:
     tools = ToolRegistry()
-    llm = _QueueLLM(outputs=[{"type": "ASK_USER", "question": "Efendim, kaçta okula gitmek istemiyorsun?"}])
+    llm = _QueueLLM(
+        outputs=[
+            {"route": "calendar", "calendar_intent": "query", "confidence": 0.9},
+            {"type": "ASK_USER", "question": "Efendim, kaçta okula gitmek istemiyorsun?"},
+        ]
+    )
 
     loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=1, debug=False))
     res = loop.run(
@@ -111,6 +127,8 @@ def test_llm_ask_user_is_ignored_and_replaced_with_brainloop_menu_in_determinist
         policy=None,
         context={"session_id": "t"},
     )
+
+    assert llm.calls == 2
 
     assert res.kind == "ask_user"
     # Calendar route -> BrainLoop replaces LLM-authored question with deterministic next-step menu.
@@ -122,7 +140,8 @@ def test_llm_ask_user_is_ignored_and_replaced_with_brainloop_menu_in_determinist
 
 def test_weak_time_words_do_not_force_calendar_route_when_message_is_smalltalk() -> None:
     tools = ToolRegistry()
-    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    llm = _QueueLLM(outputs=[{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.9}])
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
     res = loop.run(
         turn_input="Yarın okula gitmek istemiyorum",
         session_context={"deterministic_render": True},
@@ -150,7 +169,12 @@ def test_calendar_keywords_force_calendar_route_even_with_time_words() -> None:
         )
     )
 
-    llm = _QueueLLM(outputs=[{"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}}])
+    llm = _QueueLLM(
+        outputs=[
+            {"route": "calendar", "calendar_intent": "query", "confidence": 0.9},
+            {"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}},
+        ]
+    )
     loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
     res = loop.run(
         turn_input="Yarın sabah boşluk var mı?",
@@ -159,7 +183,7 @@ def test_calendar_keywords_force_calendar_route_even_with_time_words() -> None:
         context={"session_id": "t"},
     )
 
-    assert llm.calls == 1
+    assert llm.calls == 2
     assert res.kind == "say"
 
 
@@ -357,6 +381,226 @@ def test_calendar_slot_fill_continues_even_if_followup_has_no_calendar_keywords(
     assert r2.metadata.get("action_type") == "create_event"
 
 
+def test_p1_calendar_title_freeze_prevents_followup_polluting_summary() -> None:
+    tools = ToolRegistry()
+    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    state: dict = {"session_id": "t"}
+
+    r1 = loop.run(
+        turn_input="Bugün 23.50'ye kitap okuma saati ekle",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+    assert r1.kind == "ask_user"
+    assert r1.metadata.get("menu_id") == "calendar_slot_fill"
+    pending_intent = r1.metadata.get("pending_intent")
+    assert isinstance(pending_intent, dict)
+    assert pending_intent.get("type") == "create_event"
+    title = str(pending_intent.get("title") or "")
+    assert "kitap" in title.lower()
+
+    r2 = loop.run(
+        turn_input="30 dk",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+    assert r2.kind == "ask_user"
+    assert r2.metadata.get("menu_id") == "pending_confirmation"
+    pending = state.get("_policy_pending_action")
+    assert isinstance(pending, dict)
+    action = pending.get("action")
+    assert isinstance(action, dict)
+    params = action.get("params")
+    assert isinstance(params, dict)
+    summary = str(params.get("summary") or "")
+    assert "dk" not in summary.lower()
+    assert "30" not in summary
+
+
+def test_p1_calendar_create_confirmation_accepts_peki_synonym() -> None:
+    tools = ToolRegistry()
+
+    def create_event(**params):
+        return {"ok": True, "summary": params.get("summary"), "start": params.get("start"), "end": params.get("end")}
+
+    tools.register(
+        Tool(
+            name="calendar.create_event",
+            description="create",
+            parameters={"type": "object", "properties": {}},
+            function=create_event,
+        )
+    )
+
+    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    state: dict = {"session_id": "t"}
+
+    r1 = loop.run(
+        turn_input="15:45 koşu ekle 30 dk",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+    assert r1.kind == "ask_user"
+    assert r1.metadata.get("menu_id") == "pending_confirmation"
+    assert isinstance(state.get("_policy_pending_action"), dict)
+
+    r2 = loop.run(
+        turn_input="peki",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+    assert r2.kind == "say"
+    assert state.get("_policy_pending_action") is None
+
+
+def test_p1_calendar_post_write_cleanup_clears_pending_keys() -> None:
+    tools = ToolRegistry()
+
+    def create_event(**params):
+        return {"ok": True, "summary": params.get("summary"), "start": params.get("start"), "end": params.get("end")}
+
+    tools.register(
+        Tool(
+            name="calendar.create_event",
+            description="create",
+            parameters={"type": "object", "properties": {}},
+            function=create_event,
+        )
+    )
+
+    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    state: dict = {"session_id": "t"}
+
+    _ = loop.run(
+        turn_input="15:45 koşu ekle 30 dk",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+
+    _ = loop.run(
+        turn_input="1",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+
+    assert state.get("_dialog_pending_choice") is None
+    assert state.get("_policy_pending_action") is None
+    assert state.get("_calendar_pending_intent") is None
+    assert state.get("_dialog_state") == "IDLE"
+
+
+def test_p1_domain_menu_bypassed_for_time_word_calendar_query() -> None:
+    tools = ToolRegistry()
+
+    def list_events(**params):
+        return {"ok": True, "count": 0, "events": []}
+
+    tools.register(
+        Tool(
+            name="calendar.list_events",
+            description="list",
+            parameters={"type": "object", "properties": {}},
+            function=list_events,
+        )
+    )
+
+    llm = _QueueLLM(
+        outputs=[
+            {"route": "calendar", "calendar_intent": "query", "confidence": 0.9},
+            {"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}},
+        ]
+    )
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    res = loop.run(
+        turn_input="Yarın sabah müsait miyim?",
+        session_context={"deterministic_render": True, "tz_name": "Europe/Istanbul"},
+        policy=None,
+        context={"session_id": "t"},
+    )
+    assert res.kind == "say"
+    assert res.metadata.get("route") == "calendar_query"
+
+
+def test_p1_after_calendar_write_smalltalk_does_not_show_calendar_next_menu() -> None:
+    tools = ToolRegistry()
+
+    def create_event(**params):
+        return {"ok": True, "summary": params.get("summary"), "start": params.get("start"), "end": params.get("end")}
+
+    tools.register(
+        Tool(
+            name="calendar.create_event",
+            description="create",
+            parameters={"type": "object", "properties": {}},
+            function=create_event,
+        )
+    )
+
+    llm = _QueueLLM(outputs=[{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.9}])
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    state: dict = {"session_id": "t"}
+
+    _ = loop.run(
+        turn_input="15:45 koşu ekle 30 dk",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+    _ = loop.run(
+        turn_input="1",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+
+    r3 = loop.run(
+        turn_input="uykuluyum",
+        session_context={"deterministic_render": True},
+        policy=None,
+        context=state,
+    )
+    assert r3.kind == "ask_user"
+    assert r3.metadata.get("menu_id") == "smalltalk_stage1"
+
+
 def test_p1_acceptance_list_then_reference_cancel_second() -> None:
     tools = ToolRegistry()
 
@@ -510,7 +754,8 @@ def test_p1_acceptance_ambiguity_event_pick_then_ordinal() -> None:
 
 def test_calendar_flow_hard_exit_resets_flow_and_clears_intent() -> None:
     tools = ToolRegistry()
-    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    llm = _QueueLLM(outputs=[{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.9}])
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
 
     state: dict = {"session_id": "t", "last_intent": "calendar_query", "last_tool_used": "calendar.list_events"}
     r1 = loop.run(
@@ -551,7 +796,12 @@ def test_calendar_list_events_with_smalltalk_clause_sets_mini_ack_metadata() -> 
         )
     )
 
-    llm = _QueueLLM(outputs=[{"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}}])
+    llm = _QueueLLM(
+        outputs=[
+            {"route": "calendar", "calendar_intent": "query", "confidence": 0.9},
+            {"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}},
+        ]
+    )
     loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
     res = loop.run(
         turn_input="Bu akşam planım var mı, bu arada moralim bozuk",
@@ -588,7 +838,8 @@ def test_smalltalk_two_stage_menu_then_free_slots_menu() -> None:
     )
 
     state: dict = {"session_id": "t"}
-    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    llm = _QueueLLM(outputs=[{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.9}])
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
 
     r1 = loop.run(
         turn_input="uykuluyum okula gitmek istemiyorum",
@@ -1087,7 +1338,12 @@ def test_list_events_renderer_shows_plus_more_for_many_events() -> None:
         )
     )
 
-    llm = _QueueLLM(outputs=[{"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}}])
+    llm = _QueueLLM(
+        outputs=[
+            {"route": "calendar", "calendar_intent": "query", "confidence": 0.9},
+            {"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}},
+        ]
+    )
     loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
     res = loop.run(
         turn_input="Bu akşam planım var mı?",
@@ -1105,7 +1361,8 @@ def test_list_events_renderer_shows_plus_more_for_many_events() -> None:
 def test_menus_are_concise_without_hint_lines() -> None:
     """Jarvis menus should be short - no long hint lines."""
     tools = ToolRegistry()
-    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=1, debug=False))
+    llm = _QueueLLM(outputs=[{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.9}])
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=1, debug=False))
     res = loop.run(
         turn_input="uykuluyum",
         session_context={"deterministic_render": True},
