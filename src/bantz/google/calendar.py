@@ -11,7 +11,18 @@ WRITE_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 
 def _now_rfc3339() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _normalize_rfc3339(value: str) -> str:
+    """Normalize a datetime string to RFC3339 with seconds.
+
+    LLMs often emit ISO strings without seconds (e.g. 2026-01-28T17:00+03:00).
+    Google Calendar APIs are strict and can reject these with HTTP 400.
+    """
+
+    dt = _parse_rfc3339(value)
+    return dt.replace(microsecond=0).isoformat()
 
 
 def _parse_rfc3339(value: str) -> datetime:
@@ -24,6 +35,18 @@ def _parse_rfc3339(value: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _validate_time_range(*, time_min: str, time_max: str) -> None:
+    """Validate that a time window is logically ordered.
+
+    This is intentionally strict to fail fast before hitting Google APIs.
+    """
+
+    min_dt = _parse_rfc3339(time_min)
+    max_dt = _parse_rfc3339(time_max)
+    if min_dt >= max_dt:
+        raise ValueError("time_min must be < time_max")
 
 
 def _parse_date(value: str) -> date:
@@ -315,7 +338,10 @@ def list_events(
 
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
 
-    tmn = time_min or _now_rfc3339()
+    tmn = _normalize_rfc3339(time_min) if time_min else _now_rfc3339()
+    tmx = _normalize_rfc3339(time_max) if time_max else None
+    if tmx is not None:
+        _validate_time_range(time_min=tmn, time_max=tmx)
     params: dict[str, Any] = {
         "calendarId": cal_id,
         "timeMin": tmn,
@@ -324,8 +350,8 @@ def list_events(
         "showDeleted": bool(show_deleted),
         "orderBy": order_by,
     }
-    if time_max:
-        params["timeMax"] = time_max
+    if tmx is not None:
+        params["timeMax"] = tmx
     if query:
         params["q"] = query
 
@@ -484,4 +510,109 @@ def create_event(
         "summary": created.get("summary") or summary.strip(),
         "start": start_obj.get("dateTime") or start_obj.get("date") or start_dt.isoformat(),
         "end": end_obj.get("dateTime") or end_obj.get("date") or end_dt.isoformat(),
+    }
+
+
+def delete_event(
+    *,
+    event_id: str,
+    calendar_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Delete a calendar event (write)."""
+
+    if not isinstance(event_id, str) or not event_id.strip():
+        raise ValueError("event_id_required")
+
+    cal_id = (
+        calendar_id
+        or os.getenv("BANTZ_GOOGLE_CALENDAR_ID")
+        or DEFAULT_CALENDAR_ID
+    )
+
+    from bantz.google.auth import get_credentials
+    creds = get_credentials(scopes=WRITE_SCOPES)
+
+    try:
+        from googleapiclient.discovery import build  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "Google calendar dependencies are not installed. Install with: "
+            "pip install -e '.[calendar]'"
+        ) from e
+
+    service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+    service.events().delete(calendarId=cal_id, eventId=str(event_id).strip()).execute()
+
+    return {"ok": True, "id": str(event_id).strip(), "calendar_id": cal_id}
+
+
+def update_event(
+    *,
+    event_id: str,
+    start: str,
+    end: str,
+    summary: Optional[str] = None,
+    calendar_id: Optional[str] = None,
+    description: Optional[str] = None,
+    location: Optional[str] = None,
+) -> dict[str, Any]:
+    """Update a calendar event (write).
+
+    MVP usage: moving an event by updating start/end.
+    """
+
+    if not isinstance(event_id, str) or not event_id.strip():
+        raise ValueError("event_id_required")
+
+    start_dt = _parse_rfc3339(start)
+    end_dt = _parse_rfc3339(end)
+    if end_dt <= start_dt:
+        raise ValueError("end_must_be_after_start")
+
+    cal_id = (
+        calendar_id
+        or os.getenv("BANTZ_GOOGLE_CALENDAR_ID")
+        or DEFAULT_CALENDAR_ID
+    )
+
+    from bantz.google.auth import get_credentials
+    creds = get_credentials(scopes=WRITE_SCOPES)
+
+    try:
+        from googleapiclient.discovery import build  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "Google calendar dependencies are not installed. Install with: "
+            "pip install -e '.[calendar]'"
+        ) from e
+
+    body: dict[str, Any] = {
+        "start": {"dateTime": start_dt.replace(microsecond=0).isoformat()},
+        "end": {"dateTime": end_dt.replace(microsecond=0).isoformat()},
+    }
+    if summary is not None:
+        s = str(summary).strip()
+        if s:
+            body["summary"] = s
+    if description is not None:
+        body["description"] = str(description)
+    if location is not None:
+        body["location"] = str(location)
+
+    service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+    updated = service.events().patch(calendarId=cal_id, eventId=str(event_id).strip(), body=body).execute()
+    if not isinstance(updated, dict):
+        raise RuntimeError("calendar_update_failed")
+
+    start_obj = updated.get("start") if isinstance(updated.get("start"), dict) else {}
+    end_obj = updated.get("end") if isinstance(updated.get("end"), dict) else {}
+
+    return {
+        "ok": True,
+        "id": updated.get("id") or str(event_id).strip(),
+        "htmlLink": updated.get("htmlLink"),
+        "summary": updated.get("summary") or (str(summary).strip() if summary else None),
+        "start": start_obj.get("dateTime") or start_obj.get("date") or start_dt.replace(microsecond=0).isoformat(),
+        "end": end_obj.get("dateTime") or end_obj.get("date") or end_dt.replace(microsecond=0).isoformat(),
+        "calendar_id": cal_id,
     }

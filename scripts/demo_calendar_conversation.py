@@ -135,11 +135,27 @@ def _normalize_choice(reply: str, overrides: Optional[dict[str, str]] = None) ->
 
 
 def _ask_choice(prompt: str, allowed: set[str], *, overrides: Optional[dict[str, str]] = None) -> str:
+    default = "0" if "0" in allowed else next(iter(sorted(allowed)))
+
+    # Non-interactive robustness: if input is piped (heredoc/CI), don't loop and
+    # don't spam the prompt. One attempt; invalid/empty/EOF => default.
+    if not sys.stdin.isatty():
+        try:
+            raw = input(prompt)
+        except EOFError:
+            return default
+        if not (raw or "").strip():
+            return default
+        reply = _normalize_choice(raw, overrides=overrides)
+        return reply if reply in allowed else default
+
     while True:
         try:
             raw = input(prompt)
         except EOFError:
-            return "0" if "0" in allowed else next(iter(sorted(allowed)))
+            return default
+        if not (raw or "").strip():
+            return default
         reply = _normalize_choice(raw, overrides=overrides)
         if reply in allowed:
             return reply
@@ -281,17 +297,22 @@ def main() -> int:
 
     can_search_before_20 = window_end > window_start
 
+    slots_today: list[dict[str, Any]] = []
+    slots_tomorrow: list[dict[str, Any]] = []
+
+    duration_minutes = 120
+
     if args.debug:
         print("[debug] find_free_slots time_min:", _rfc3339(window_start))
         print("[debug] find_free_slots time_max:", _rfc3339(window_end))
-        print("[debug] find_free_slots duration_minutes:", 120)
+        print("[debug] find_free_slots duration_minutes:", duration_minutes)
         print("[debug] find_free_slots can_search_before_20:", can_search_before_20)
         print()
 
     params2: dict[str, Any] = {
         "time_min": _rfc3339(window_start),
         "time_max": _rfc3339(window_end),
-        "duration_minutes": 120,
+        "duration_minutes": duration_minutes,
         "suggestions": 3,
         "preferred_start": "07:30",
         "preferred_end": "22:30",
@@ -303,20 +324,23 @@ def main() -> int:
         _print_tool_call("calendar.find_free_slots", params2)
         out2 = tool2.function(**params2)
         slots = (out2 or {}).get("slots") or []
+        slots_today = slots if isinstance(slots, list) else []
     else:
         print("BANTZ: Efendim saat 20:00'yi geçmiş; 20:00'den önce 2 saatlik bir koşu için bugün artık geç kaldık.")
         slots = []
     if args.debug:
         print("[debug] find_free_slots count:", len(slots) if isinstance(slots, list) else "?")
     if not slots:
-        print("BANTZ: Maalesef 20:00'den önce 2 saatlik boşluk bulamadım efendim.")
-        print("BANTZ: İsterseniz 20:00'den sonra ilk 2 saatlik boşluğu arayayım mı, yoksa yarın için mi bakayım efendim?")
+        duration_desc = "2 saatlik" if duration_minutes == 120 else f"{duration_minutes} dakikalık"
+        print(f"BANTZ: Maalesef 20:00'den önce {duration_desc} boşluk bulamadım efendim.")
+        print(f"BANTZ: İsterseniz 20:00'den sonra ilk {duration_desc} boşluğu arayayım mı, yoksa yarın için mi bakayım efendim?")
         print("- 1) 20:00'den sonra bak")
         print("- 2) Yarın için bak")
+        print("- 3) 60 dakika olsun")
         print("- 0) İptal")
         choice = _ask_choice(
             "USER (seçim): ",
-            {"0", "1", "2"},
+            {"0", "1", "2", "3"},
             overrides={
                 "yarın": "2",
                 "yarina": "2",
@@ -328,6 +352,10 @@ def main() -> int:
                 "20:00": "1",
                 "20den sonra": "1",
                 "20'den sonra": "1",
+                "1 saat": "3",
+                "60": "3",
+                "60 dk": "3",
+                "60 dakika": "3",
             },
         )
         if choice == "0":
@@ -348,9 +376,10 @@ def main() -> int:
             _print_tool_call("calendar.find_free_slots", params2_alt)
             out2_alt = tool2.function(**params2_alt)
             slots = (out2_alt or {}).get("slots") or []
+            slots_today = slots if isinstance(slots, list) else []
         elif choice == "2":
             d2 = cfg.d + timedelta(days=1)
-            alt_start = datetime.combine(d2, time(0, 0), tzinfo=tz)
+            alt_start = datetime.combine(d2, time(7, 30), tzinfo=tz)
             alt_end = datetime.combine(d2, time(20, 0), tzinfo=tz)
             params2_alt = dict(params2)
             params2_alt["time_min"] = _rfc3339(alt_start)
@@ -361,9 +390,37 @@ def main() -> int:
             _print_tool_call("calendar.find_free_slots", params2_alt)
             out2_alt = tool2.function(**params2_alt)
             slots = (out2_alt or {}).get("slots") or []
+            slots_tomorrow = slots if isinstance(slots, list) else []
+        elif choice == "3":
+            duration_minutes = 60
+            if can_search_before_20:
+                params2_alt = dict(params2)
+                params2_alt["duration_minutes"] = 60
+                if args.debug:
+                    print("[debug] find_free_slots (60min) time_min:", params2_alt["time_min"])
+                    print("[debug] find_free_slots (60min) time_max:", params2_alt["time_max"])
+                _print_tool_call("calendar.find_free_slots", params2_alt)
+                out2_alt = tool2.function(**params2_alt)
+                slots = (out2_alt or {}).get("slots") or []
+                slots_today = slots if isinstance(slots, list) else []
+            else:
+                print("BANTZ: Efendim bugün için artık geç; 60 dakikayı yarın için arıyorum.")
+                d2 = cfg.d + timedelta(days=1)
+                params2_alt = dict(params2)
+                params2_alt["time_min"] = _rfc3339(datetime.combine(d2, time(7, 30), tzinfo=tz))
+                params2_alt["time_max"] = _rfc3339(datetime.combine(d2, time(22, 30), tzinfo=tz))
+                params2_alt["duration_minutes"] = 60
+                if args.debug:
+                    print("[debug] find_free_slots (tomorrow 60min) time_min:", params2_alt["time_min"])
+                    print("[debug] find_free_slots (tomorrow 60min) time_max:", params2_alt["time_max"])
+                _print_tool_call("calendar.find_free_slots", params2_alt)
+                out2_alt = tool2.function(**params2_alt)
+                slots = (out2_alt or {}).get("slots") or []
+                slots_tomorrow = slots if isinstance(slots, list) else []
 
         if not slots:
-            print("BANTZ: Üzgünüm efendim, bu seçenekle de 2 saatlik boşluk bulamadım.")
+            duration_desc = "2 saatlik" if duration_minutes == 120 else f"{duration_minutes} dakikalık"
+            print(f"BANTZ: Üzgünüm efendim, bu seçenekle de {duration_desc} boşluk bulamadım.")
         else:
             print("BANTZ: Şu boşlukları buldum efendim:")
             for i, sl in enumerate(slots, start=1):
@@ -389,22 +446,23 @@ def main() -> int:
 
     requested_time = time(15, 45)
     start_dt = datetime.combine(cfg.d, requested_time, tzinfo=tz)
-    end_dt = start_dt + timedelta(minutes=120)
+    end_dt = start_dt + timedelta(minutes=duration_minutes)
 
     if cfg.d == now.date() and start_dt < now:
         print("BANTZ: Efendim bugün için bu saat geçti.")
 
-        options: list[str] = ["1) Yarın 15:45 olarak ayarla"]
-        has_slots = isinstance(slots, list) and bool(slots)
-        if has_slots:
-            options.append("2) Bugün en erken uygun boşluğu kullan")
+        options: list[str] = ["1) Yarın 15:45 olarak ayarla", "2) Yarın en erken uygun saat"]
+        has_slots_today = bool(slots_today)
+        if has_slots_today:
+            options.append("3) Bugün en erken uygun boşluğu kullan")
+        options.append("4) Haftalık tekrar (P1)")
         options.append("0) İptal")
 
         print("BANTZ: Ne yapmamı istersiniz efendim?")
         for o in options:
             print("-", o)
 
-        allowed = {"0", "1"} | ({"2"} if has_slots else set())
+        allowed = {"0", "1", "2", "4"} | ({"3"} if has_slots_today else set())
         choice = _ask_choice(
             "USER (seçim): ",
             allowed,
@@ -414,8 +472,13 @@ def main() -> int:
                 "yarına": "1",
                 "yarın yap": "1",
                 "yarin yap": "1",
-                "en erken": "2",
-                "en erkeni": "2",
+                "yarın en erken": "2",
+                "yarin en erken": "2",
+                "en erken": "3" if has_slots_today else "2",
+                "en erkeni": "3" if has_slots_today else "2",
+                "haftalık": "4",
+                "haftalik": "4",
+                "weekly": "4",
             },
         )
 
@@ -425,16 +488,46 @@ def main() -> int:
 
         if choice == "1":
             start_dt = datetime.combine(cfg.d + timedelta(days=1), requested_time, tzinfo=tz)
-            end_dt = start_dt + timedelta(minutes=120)
-        elif choice == "2" and has_slots:
-            first = slots[0] if isinstance(slots[0], dict) else None
+            end_dt = start_dt + timedelta(minutes=duration_minutes)
+        elif choice == "2":
+            if not slots_tomorrow:
+                d2 = cfg.d + timedelta(days=1)
+                params_tomorrow: dict[str, Any] = {
+                    "time_min": _rfc3339(datetime.combine(d2, time(7, 30), tzinfo=tz)),
+                    "time_max": _rfc3339(datetime.combine(d2, time(22, 30), tzinfo=tz)),
+                    "duration_minutes": duration_minutes,
+                    "suggestions": 1,
+                    "preferred_start": "07:30",
+                    "preferred_end": "22:30",
+                }
+                if cfg.calendar_id:
+                    params_tomorrow["calendar_id"] = cfg.calendar_id
+                _print_tool_call("calendar.find_free_slots", params_tomorrow)
+                out_t = tool2.function(**params_tomorrow)
+                slots_tomorrow = (out_t or {}).get("slots") or []
+
+            first = slots_tomorrow[0] if slots_tomorrow and isinstance(slots_tomorrow[0], dict) else None
+            s = first.get("start") if first else None
+            dt = _parse_rfc3339(s, tz) if isinstance(s, str) else None
+            if dt is None:
+                print("BANTZ: Üzgünüm efendim, yarın için uygun boşluğu okuyamadım.")
+                return 1
+            start_dt = dt
+            end_dt = start_dt + timedelta(minutes=duration_minutes)
+        elif choice == "3" and has_slots_today:
+            first = slots_today[0] if isinstance(slots_today[0], dict) else None
             s = first.get("start") if first else None
             dt = _parse_rfc3339(s, tz) if isinstance(s, str) else None
             if dt is None:
                 print("BANTZ: Üzgünüm efendim, uygun boşluğu okuyamadım.")
                 return 1
             start_dt = dt
-            end_dt = start_dt + timedelta(minutes=120)
+            end_dt = start_dt + timedelta(minutes=duration_minutes)
+        elif choice == "4":
+            print("BANTZ: Efendim, haftalık tekrar ekleme henüz bu demo sürümünde yok.")
+            print("BANTZ: İsterseniz yarın olarak ayarlayayım efendim.")
+            start_dt = datetime.combine(cfg.d + timedelta(days=1), requested_time, tzinfo=tz)
+            end_dt = start_dt + timedelta(minutes=duration_minutes)
 
     params3: dict[str, Any] = {
         "summary": "Bantz Demo: Koşu",

@@ -577,4 +577,77 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    try:
+        from bantz.google.calendar import delete_event as google_calendar_delete_event
+    except Exception:  # pragma: no cover
+        google_calendar_delete_event = None
+
+    reg.register(
+        Tool(
+            name="calendar.delete_event",
+            description="Delete a calendar event (write). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "string", "description": "Event ID"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                },
+                "required": ["event_id"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "id": {"type": "string"},
+                    "calendar_id": {"type": "string"},
+                },
+                "required": ["ok", "id", "calendar_id"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_calendar_delete_event,
+        )
+    )
+
+    try:
+        from bantz.google.calendar import update_event as google_calendar_update_event
+    except Exception:  # pragma: no cover
+        google_calendar_update_event = None
+
+    reg.register(
+        Tool(
+            name="calendar.update_event",
+            description="Update/move a calendar event (write). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "string", "description": "Event ID"},
+                    "start": {"type": "string", "description": "RFC3339 start datetime (with timezone)"},
+                    "end": {"type": "string", "description": "RFC3339 end datetime (with timezone)"},
+                    "summary": {"type": "string", "description": "Optional new summary/title"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                    "description": {"type": "string", "description": "Optional description"},
+                    "location": {"type": "string", "description": "Optional location"},
+                },
+                "required": ["event_id", "start", "end"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "id": {"type": "string"},
+                    "htmlLink": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                    "calendar_id": {"type": "string"},
+                },
+                "required": ["ok", "id", "start", "end", "calendar_id"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_calendar_update_event,
+        )
+    )
+
     return reg
