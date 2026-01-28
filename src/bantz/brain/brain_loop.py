@@ -12,48 +12,62 @@ logger = logging.getLogger(__name__)
 
 
 _PENDING_ACTION_KEY = "_policy_pending_action"
+_POLICY_CONFIRM_NOTE_KEY = "_policy_last_confirmation_note"
 
 
-def _is_affirmative(text: str) -> bool:
-    t = (text or "").strip().lower()
+def _parse_user_confirmation(text: str) -> tuple[Optional[Literal["confirm", "deny"]], str]:
+    """Parse a user reply to a confirmation prompt.
+
+    Returns (decision, note). `note` is any trailing text after the confirm keyword,
+    useful for "evet ama 3:45 olsun" style replies.
+    """
+
+    raw = (text or "").strip()
+    t = raw.lower()
     if not t:
-        return False
-    affirm = {
+        return None, ""
+
+    confirm_prefixes = [
         "evet",
         "tamam",
         "olur",
         "onay",
         "onayla",
+        "onaylıyorum",
+        "onayliyorum",
+        "hadi",
         "devam",
-        "devam et",
         "yes",
         "ok",
         "okay",
-        "y",
-    }
-    if t in affirm:
-        return True
-    return any(tok in t for tok in ["evet", "onay", "tamam", "yes"])
-
-
-def _is_negative(text: str) -> bool:
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    deny = {
+    ]
+    deny_prefixes = [
         "hayır",
         "hayir",
         "iptal",
         "vazgeç",
         "vazgec",
+        "şimdi değil",
+        "simdi degil",
+        "şimdi degil",
+        "değil",
+        "degil",
         "dur",
         "stop",
         "no",
-        "n",
-    }
-    if t in deny:
-        return True
-    return any(tok in t for tok in ["hay", "iptal", "vazge", "no"])
+    ]
+
+    for prefix in deny_prefixes:
+        if t == prefix or t.startswith(prefix + " "):
+            return "deny", ""
+
+    for prefix in confirm_prefixes:
+        if t == prefix or t.startswith(prefix + " "):
+            note = raw[len(prefix) :].strip()
+            note = note.lstrip(" ,.:;-—")
+            return "confirm", note
+
+    return None, ""
 
 
 class LLMClient(Protocol):
@@ -279,7 +293,9 @@ class BrainLoop:
             pending_action = pending.get("action")
             pending_decision = pending.get("decision")
 
-            if _is_negative(user_text):
+            decision, note = _parse_user_confirmation(user_text)
+
+            if decision == "deny":
                 try:
                     state.pop(_PENDING_ACTION_KEY, None)
                 except Exception:
@@ -291,12 +307,19 @@ class BrainLoop:
                     metadata={},
                 )
 
-            if _is_affirmative(user_text) and isinstance(pending_action, dict):
+            if decision == "confirm" and isinstance(pending_action, dict):
                 # Clear pending first to avoid loops if tool fails.
                 try:
                     state.pop(_PENDING_ACTION_KEY, None)
                 except Exception:
                     pass
+
+                # Preserve trailing note for slot-filling style followups.
+                if note:
+                    try:
+                        state[_POLICY_CONFIRM_NOTE_KEY] = note
+                    except Exception:
+                        pass
 
                 tool_name = str(pending_action.get("name") or "").strip()
                 params = pending_action.get("params")
@@ -329,6 +352,8 @@ class BrainLoop:
 
                 # Rebuild messages so LLM sees the tool + observation context.
                 original_user = str(pending.get("original_user_input") or "").strip() or "(previous request)"
+
+                note_line = f"\nKullanıcı notu: {note}" if note else ""
                 messages = [
                     messages[0],
                     {"role": "user", "content": original_user},
@@ -338,6 +363,7 @@ class BrainLoop:
                         "content": (
                             "Observation (tool sonucu): "
                             + json.dumps(observations[-1], ensure_ascii=False)
+                            + note_line
                             + "\n\nŞimdi sadece kısa bir SAY ile sonucu özetle."
                         ),
                     },

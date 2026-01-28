@@ -123,6 +123,111 @@ def test_brainloop_policy_blocks_tool_and_resumes_on_confirm(tmp_path: Path) -> 
         json.loads(line)
 
 
+def test_brainloop_policy_confirm_variant_tamam(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def write() -> dict[str, Any]:
+        calls.append({"ok": True})
+        return {"ok": True}
+
+    tools = ToolRegistry()
+    tools.register(
+        Tool(
+            name="write.med",
+            description="MED write",
+            parameters={"type": "object", "properties": {}, "required": []},
+            function=write,
+            risk_level="MED",
+            requires_confirmation=True,
+        )
+    )
+
+    p = PolicyEngine(risk_map=RiskMap({"write.med": "MED"}))
+    llm = FakeLLM(tool_name="write.med", params={})
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=3, debug=False))
+
+    state: dict[str, Any] = {"session_id": "s1"}
+    r1 = loop.run(turn_input="yap", session_context={"user": "demo"}, policy=p, context=state)
+    assert r1.kind == "ask_user"
+    assert calls == []
+
+    r2 = loop.run(turn_input="tamam", session_context={"user": "demo"}, policy=p, context=state)
+    assert r2.kind == "say"
+    assert len(calls) == 1
+
+
+def test_brainloop_policy_deny_variant_iptal(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def write() -> dict[str, Any]:
+        calls.append({"ok": True})
+        return {"ok": True}
+
+    tools = ToolRegistry()
+    tools.register(
+        Tool(
+            name="write.med",
+            description="MED write",
+            parameters={"type": "object", "properties": {}, "required": []},
+            function=write,
+            risk_level="MED",
+            requires_confirmation=True,
+        )
+    )
+
+    p = PolicyEngine(risk_map=RiskMap({"write.med": "MED"}))
+    llm = FakeLLM(tool_name="write.med", params={})
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=3, debug=False))
+
+    state: dict[str, Any] = {"session_id": "s1"}
+    r1 = loop.run(turn_input="yap", session_context={"user": "demo"}, policy=p, context=state)
+    assert r1.kind == "ask_user"
+    assert "_policy_pending_action" in state
+
+    r2 = loop.run(turn_input="iptal", session_context={"user": "demo"}, policy=p, context=state)
+    assert r2.kind == "say"
+    assert calls == []
+    assert "_policy_pending_action" not in state
+
+
+def test_brainloop_policy_mixed_intent_confirm_note_preserved(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def create_event(title: str) -> dict[str, Any]:
+        calls.append({"title": title})
+        return {"ok": True}
+
+    tools = ToolRegistry()
+    tools.register(
+        Tool(
+            name="calendar.create_event",
+            description="Create a calendar event",
+            parameters={
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "required": ["title"],
+            },
+            function=create_event,
+            risk_level="MED",
+            requires_confirmation=True,
+        )
+    )
+
+    p = PolicyEngine(risk_map=RiskMap({"calendar.create_event": "MED"}))
+    llm = FakeLLM(tool_name="calendar.create_event", params={"title": "Koşu"})
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=3, debug=False))
+
+    state: dict[str, Any] = {"session_id": "s1"}
+    r1 = loop.run(turn_input="Bu akşam koşu ekle", session_context={"user": "demo"}, policy=p, context=state)
+    assert r1.kind == "ask_user"
+
+    r2 = loop.run(turn_input="evet ama 3:45 olsun", session_context={"user": "demo"}, policy=p, context=state)
+    assert r2.kind == "say"
+    assert len(calls) == 1
+    assert "_policy_last_confirmation_note" in state
+    assert "3:45" in str(state["_policy_last_confirmation_note"])
+
+
 def test_policy_audit_masks_sensitive_fields(tmp_path: Path) -> None:
     audit = tmp_path / "audit.jsonl"
     p = PolicyEngine(audit_path=audit)
