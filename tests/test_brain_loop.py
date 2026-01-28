@@ -63,3 +63,42 @@ def test_brain_loop_max_steps_exceeded():
     result = loop.run(turn_input="hi")
     assert result.kind == "fail"
     assert result.text == "max_steps_exceeded"
+
+
+def test_brain_loop_ask_user():
+    tools = ToolRegistry()
+    llm = FakeLLM([
+        {"type": "ASK_USER", "question": "Hangi tarihe hatırlatma koyayım?"},
+    ])
+
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=3))
+    result = loop.run(turn_input="Bana hatırlatma kur")
+    assert result.kind == "ask_user"
+    assert "tarihe" in result.text.lower()
+    assert result.steps_used == 1
+
+
+def test_brain_loop_debug_transcript_masks_sensitive_fields():
+    tools = ToolRegistry()
+    llm = FakeLLM([
+        {"type": "SAY", "text": "Tamam."},
+    ])
+
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=True))
+    result = loop.run(
+        turn_input="Selam",
+        session_context={
+            "api_key": "should_not_leak",
+            "nested": {"token": "should_not_leak"},
+        },
+        policy={"authorization": "Bearer should_not_leak"},
+    )
+
+    assert result.kind == "say"
+    assert result.metadata.get("transcript")
+
+    transcript = result.metadata["transcript"]
+    assert isinstance(transcript, list)
+    assert transcript[0]["schema"]["session_context"]["api_key"] == "***"
+    assert transcript[0]["schema"]["session_context"]["nested"]["token"] == "***"
+    assert "***" in transcript[0]["schema"]["policy_summary"]

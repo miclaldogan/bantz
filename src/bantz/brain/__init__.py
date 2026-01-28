@@ -3,6 +3,11 @@ from bantz.brain.brain_loop import (
     BrainLoopConfig,
     BrainResult,
     LLMClient,
+    BrainTranscriptTurn,
+    Say,
+    AskUser,
+    CallTool,
+    Fail,
 )
 
 __all__ = [
@@ -10,4 +15,9 @@ __all__ = [
     "BrainLoopConfig",
     "BrainResult",
     "LLMClient",
+    "BrainTranscriptTurn",
+    "Say",
+    "AskUser",
+    "CallTool",
+    "Fail",
 ]
