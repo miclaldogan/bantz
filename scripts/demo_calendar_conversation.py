@@ -84,6 +84,7 @@ def main() -> int:
     ap.add_argument("--calendar-id", type=str, default=None, help="Calendar ID (default: env or primary)")
     ap.add_argument("--dry-run", action="store_true", help="Do not create events; just print what would happen")
     ap.add_argument("--run", action="store_true", help="Actually call write tools (will prompt for confirmation)")
+    ap.add_argument("--debug", action="store_true", help="Print debug info")
     args = ap.parse_args()
 
     if args.dry_run and args.run:
@@ -104,6 +105,15 @@ def main() -> int:
 
     reg = build_default_registry()
 
+    if args.debug:
+        print("[debug] date:", cfg.d.isoformat())
+        print("[debug] tz:", cfg.tz_name)
+        print("[debug] tzinfo:", str(tz))
+        print("[debug] calendar_id:", cfg.calendar_id)
+        print("[debug] run_mode:", cfg.run)
+        print("[debug] dry_run:", bool(args.dry_run))
+        print()
+
     print('USER: "Bu akşam planım var mı?"')
     print("BANTZ: Kontrol etmeme izin verin efendim…")
 
@@ -114,6 +124,11 @@ def main() -> int:
         now = datetime.now(tz)
         time_min = _rfc3339(now)
         time_max = _rfc3339(now + timedelta(hours=6))
+
+    if args.debug:
+        print("[debug] list_events time_min:", time_min)
+        print("[debug] list_events time_max:", time_max)
+        print()
 
     tool1 = reg.get("calendar.list_events")
     if not tool1 or not tool1.function:
@@ -126,6 +141,8 @@ def main() -> int:
     _print_tool_call("calendar.list_events", params1)
     out1 = tool1.function(**params1)
     events = (out1 or {}).get("events") or []
+    if args.debug:
+        print("[debug] list_events count:", len(events) if isinstance(events, list) else "?")
     if not events:
         print("BANTZ: Bu akşam takviminizde bir etkinlik görünmüyor efendim.")
     else:
@@ -154,6 +171,12 @@ def main() -> int:
         print("BANTZ: 20:00\'ye kadar uygun bir pencere tanımlayamadım efendim.")
         return 1
 
+    if args.debug:
+        print("[debug] find_free_slots time_min:", _rfc3339(window_start))
+        print("[debug] find_free_slots time_max:", _rfc3339(window_end))
+        print("[debug] find_free_slots duration_minutes:", 120)
+        print()
+
     params2: dict[str, Any] = {
         "time_min": _rfc3339(window_start),
         "time_max": _rfc3339(window_end),
@@ -166,6 +189,8 @@ def main() -> int:
     _print_tool_call("calendar.find_free_slots", params2)
     out2 = tool2.function(**params2)
     slots = (out2 or {}).get("slots") or []
+    if args.debug:
+        print("[debug] find_free_slots count:", len(slots) if isinstance(slots, list) else "?")
     if not slots:
         print("BANTZ: Maalesef 20:00\'den önce 2 saatlik boşluk bulamadım efendim.")
     else:
@@ -196,6 +221,13 @@ def main() -> int:
         params3["calendar_id"] = cfg.calendar_id
 
     preview = f"{_format_hhmm(params3['start'])}–{_format_hhmm(params3['end'])} | {params3['summary']}"
+
+    if args.debug:
+        print("[debug] create_event start:", params3["start"])
+        print("[debug] create_event end:", params3["end"])
+        print("[debug] create_event summary:", params3["summary"])
+        print("[debug] requires_confirmation:", bool(tool3.requires_confirmation))
+        print()
 
     if tool3.requires_confirmation:
         print(f"BANTZ: Efendim, takvime şu etkinliği eklememi onaylıyor musunuz? ({preview})")
