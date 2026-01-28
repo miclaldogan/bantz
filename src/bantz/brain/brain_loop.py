@@ -240,7 +240,7 @@ class BrainLoop:
                     "CALL_TOOL": {"name": "tool_name", "params": {}},
                     "FAIL": {"error": "..."},
                 },
-                "tools": self._tools.as_schema(),
+                "tools": self._tools.as_llm_catalog(format="short"),
                 "policy_summary": _summarize_policy(policy),
                 "session_context": _shorten_jsonable(ctx, max_chars=1200),
                 "conversation_context": _short_conversation(
