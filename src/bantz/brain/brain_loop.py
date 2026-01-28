@@ -11,6 +11,51 @@ from bantz.agent.tools import ToolRegistry
 logger = logging.getLogger(__name__)
 
 
+_PENDING_ACTION_KEY = "_policy_pending_action"
+
+
+def _is_affirmative(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    affirm = {
+        "evet",
+        "tamam",
+        "olur",
+        "onay",
+        "onayla",
+        "devam",
+        "devam et",
+        "yes",
+        "ok",
+        "okay",
+        "y",
+    }
+    if t in affirm:
+        return True
+    return any(tok in t for tok in ["evet", "onay", "tamam", "yes"])
+
+
+def _is_negative(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    deny = {
+        "hayır",
+        "hayir",
+        "iptal",
+        "vazgeç",
+        "vazgec",
+        "dur",
+        "stop",
+        "no",
+        "n",
+    }
+    if t in deny:
+        return True
+    return any(tok in t for tok in ["hay", "iptal", "vazge", "no"])
+
+
 class LLMClient(Protocol):
     """Minimal adapter interface for BrainLoop.
 
@@ -200,12 +245,19 @@ class BrainLoop:
                 kind="fail", text="empty_input", steps_used=0, metadata={}
             )
 
+        # State container (mutated to keep pending actions across turns).
+        state: dict[str, Any] = context if isinstance(context, dict) else {}
+
         # Backward compatible alias: older callers may pass `context=`.
         ctx: dict[str, Any] = {}
-        if isinstance(context, dict):
-            ctx.update(context)
+        if isinstance(state, dict):
+            ctx.update(state)
         if isinstance(session_context, dict):
             ctx.update(session_context)
+
+        session_id = str(
+            (ctx.get("session_id") or ctx.get("user") or "default")
+        ).strip() or "default"
 
         # Conversation messages for the adapter.
         messages: list[dict[str, str]] = [
@@ -220,6 +272,76 @@ class BrainLoop:
         ]
 
         observations: list[dict[str, Any]] = []
+
+        # If we have a pending action from a previous turn, handle user confirm/deny.
+        pending = state.get(_PENDING_ACTION_KEY) if isinstance(state, dict) else None
+        if isinstance(pending, dict):
+            pending_action = pending.get("action")
+            pending_decision = pending.get("decision")
+
+            if _is_negative(user_text):
+                try:
+                    state.pop(_PENDING_ACTION_KEY, None)
+                except Exception:
+                    pass
+                return BrainResult(
+                    kind="say",
+                    text="Anlaşıldı efendim, iptal ettim.",
+                    steps_used=0,
+                    metadata={},
+                )
+
+            if _is_affirmative(user_text) and isinstance(pending_action, dict):
+                # Clear pending first to avoid loops if tool fails.
+                try:
+                    state.pop(_PENDING_ACTION_KEY, None)
+                except Exception:
+                    pass
+
+                tool_name = str(pending_action.get("name") or "").strip()
+                params = pending_action.get("params")
+                if not isinstance(params, dict):
+                    params = {}
+
+                # Record confirmation for MED-risk (remember session).
+                try:
+                    if policy is not None and hasattr(policy, "confirm") and isinstance(pending_decision, dict):
+                        risk = str(pending_decision.get("risk_level") or "LOW").strip().upper()
+                        if risk in {"LOW", "MED", "HIGH"}:
+                            policy.confirm(session_id=session_id, tool_name=tool_name, risk_level=risk)  # type: ignore
+                except Exception:
+                    pass
+
+                # Execute tool once, then let LLM produce a final SAY.
+                ok, why = self._tools.validate_call(tool_name, params)
+                if not ok:
+                    observations.append({"tool": tool_name, "ok": False, "error": why})
+                else:
+                    tool = self._tools.get(tool_name)
+                    if tool is None or tool.function is None:
+                        observations.append({"tool": tool_name, "ok": False, "error": "tool_not_executable"})
+                    else:
+                        try:
+                            result = tool.function(**params)
+                            observations.append({"tool": tool_name, "ok": True, "result": result})
+                        except Exception as e:
+                            observations.append({"tool": tool_name, "ok": False, "error": str(e)})
+
+                # Rebuild messages so LLM sees the tool + observation context.
+                original_user = str(pending.get("original_user_input") or "").strip() or "(previous request)"
+                messages = [
+                    messages[0],
+                    {"role": "user", "content": original_user},
+                    {"role": "assistant", "content": json.dumps(pending_action, ensure_ascii=False)},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Observation (tool sonucu): "
+                            + json.dumps(observations[-1], ensure_ascii=False)
+                            + "\n\nŞimdi sadece kısa bir SAY ile sonucu özetle."
+                        ),
+                    },
+                ]
 
         transcript: list[BrainTranscriptTurn] = []
 
@@ -371,6 +493,58 @@ class BrainLoop:
                         }
                     )
                     continue
+
+                # Policy guardrail: gate tool execution.
+                try:
+                    tool_obj = self._tools.get(name)
+                    risk = "LOW"
+                    requires_conf = False
+                    if tool_obj is not None:
+                        if tool_obj.risk_level is not None:
+                            risk = str(tool_obj.risk_level).upper()
+                        else:
+                            risk = "HIGH" if bool(tool_obj.requires_confirmation) else "LOW"
+                        requires_conf = bool(tool_obj.requires_confirmation)
+
+                    if policy is not None and hasattr(policy, "check"):
+                        decision = policy.check(
+                            session_id=session_id,
+                            tool_name=name,
+                            params=params,
+                            risk_level=risk,
+                            requires_confirmation=requires_conf,
+                            prompt_to_user=(
+                                f"Efendim '{name}' aracıyla bu işlemi yapmamı onaylıyor musunuz?"
+                            ),
+                        )
+
+                        if getattr(decision, "requires_confirmation", False) and not getattr(decision, "allowed", False):
+                            # Save pending action for the next user turn.
+                            try:
+                                state[_PENDING_ACTION_KEY] = {
+                                    "action": {"type": "CALL_TOOL", "name": name, "params": params},
+                                    "decision": getattr(decision, "to_dict", lambda: {})(),
+                                    "original_user_input": user_text,
+                                }
+                            except Exception:
+                                pass
+
+                            q = str(getattr(decision, "prompt_to_user", "") or "Onaylıyor musunuz?").strip()
+                            try:
+                                self._events.publish(
+                                    EventType.QUESTION.value, {"question": q}, source="brain"
+                                )
+                            except Exception:
+                                pass
+                            return BrainResult(
+                                kind="ask_user",
+                                text=q,
+                                steps_used=step_idx,
+                                metadata=_meta(transcript, raw=out_raw),
+                            )
+                except Exception:
+                    # Policy must never crash the loop.
+                    pass
 
                 try:
                     self._events.publish(
