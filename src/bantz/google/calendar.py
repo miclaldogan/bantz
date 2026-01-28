@@ -7,6 +7,7 @@ import os
 
 DEFAULT_CALENDAR_ID = "primary"
 READONLY_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+WRITE_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 
 def _now_rfc3339() -> str:
@@ -273,4 +274,82 @@ def find_free_slots(
     return {
         "ok": True,
         "slots": slots,
+    }
+
+
+def create_event(
+    *,
+    summary: str,
+    start: str,
+    end: Optional[str] = None,
+    duration_minutes: Optional[int] = None,
+    calendar_id: Optional[str] = None,
+    description: Optional[str] = None,
+    location: Optional[str] = None,
+) -> dict[str, Any]:
+    """Create a calendar event (write).
+
+    - `start` and `end` must be RFC3339 strings (timezone offset recommended).
+    - If `end` is not provided, `duration_minutes` must be provided.
+    """
+
+    if not isinstance(summary, str) or not summary.strip():
+        raise ValueError("summary_required")
+
+    start_dt = _parse_rfc3339(start)
+
+    if end is not None and str(end).strip():
+        end_dt = _parse_rfc3339(end)
+    else:
+        if duration_minutes is None:
+            raise ValueError("end_or_duration_required")
+        if int(duration_minutes) <= 0:
+            raise ValueError("duration_minutes_must_be_positive")
+        end_dt = start_dt + timedelta(minutes=int(duration_minutes))
+
+    if end_dt <= start_dt:
+        raise ValueError("end_must_be_after_start")
+
+    cal_id = (
+        calendar_id
+        or os.getenv("BANTZ_GOOGLE_CALENDAR_ID")
+        or DEFAULT_CALENDAR_ID
+    )
+
+    from bantz.google.auth import get_credentials
+    creds = get_credentials(scopes=WRITE_SCOPES)
+
+    try:
+        from googleapiclient.discovery import build  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "Google calendar dependencies are not installed. Install with: "
+            "pip install -e '.[calendar]'"
+        ) from e
+
+    body: dict[str, Any] = {
+        "summary": summary.strip(),
+        "start": {"dateTime": start_dt.isoformat()},
+        "end": {"dateTime": end_dt.isoformat()},
+    }
+    if description:
+        body["description"] = str(description)
+    if location:
+        body["location"] = str(location)
+
+    service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+    created = service.events().insert(calendarId=cal_id, body=body).execute()
+    if not isinstance(created, dict):
+        raise RuntimeError("calendar_insert_failed")
+
+    start_obj = created.get("start") if isinstance(created.get("start"), dict) else {}
+    end_obj = created.get("end") if isinstance(created.get("end"), dict) else {}
+
+    return {
+        "ok": True,
+        "id": created.get("id"),
+        "htmlLink": created.get("htmlLink"),
+        "summary": created.get("summary") or summary.strip(),
+        "start": start_obj.get("dateTime") or start_obj.get("date") or start_dt.isoformat(),
+        "end": end_obj.get("dateTime") or end_obj.get("date") or end_dt.isoformat(),
     }
