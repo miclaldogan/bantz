@@ -535,4 +535,44 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    try:
+        from bantz.google.calendar import create_event as google_calendar_create_event
+    except Exception:  # pragma: no cover
+        google_calendar_create_event = None
+
+    reg.register(
+        Tool(
+            name="calendar.create_event",
+            description="Create a calendar event (write). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "Event summary/title"},
+                    "start": {"type": "string", "description": "RFC3339 start datetime (with timezone)"},
+                    "end": {"type": "string", "description": "RFC3339 end datetime (optional if duration_minutes provided)"},
+                    "duration_minutes": {"type": "integer", "description": "Duration in minutes (optional if end provided)"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                    "description": {"type": "string", "description": "Optional description"},
+                    "location": {"type": "string", "description": "Optional location"},
+                },
+                "required": ["summary", "start"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "id": {"type": "string"},
+                    "htmlLink": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                },
+                "required": ["ok", "id", "start", "end", "summary"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_calendar_create_event,
+        )
+    )
+
     return reg
