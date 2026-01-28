@@ -279,6 +279,12 @@ This repo includes a simple smoke test that validates **real OAuth + real event 
 python3 scripts/smoke_calendar_list_events.py --today --max-results 10 --debug
 ```
 
+Create (write) smoke (dry-run):
+
+```bash
+python3 scripts/smoke_calendar_create_event.py --dry-run --debug
+```
+
 Example output:
 
 ```
