@@ -943,7 +943,9 @@ def _detect_route(
     nt = _normalize_text_for_match(user_text)
 
     has_time = bool(_TIME_HHMM_RE.search(user_text or ""))
-    has_date = any(w in nt for w in ["bugun", "yarin", "obur gun"])
+    # Include common time-of-day hints so queries like "bu akşam planım var mı"
+    # can be routed deterministically without requiring an LLM.
+    has_date = any(w in nt for w in ["bugun", "yarin", "obur gun", "aksam", "sabah"])
     has_time_or_date = bool(has_time or has_date)
 
     strong_nouns = {"takvim", "calendar", "ajanda"}
@@ -3051,6 +3053,107 @@ class BrainLoop:
                                 requires_confirmation=True,
                             ),
                         )
+
+            # Deterministic calendar read: for common list-events queries with an
+            # explicit time hint, bypass the LLM and call the tool directly.
+            if route == _ROUTE_CALENDAR_QUERY and not isinstance(pending_action, dict):
+                intent_hint = _detect_time_intent_simple(user_text)
+                if intent_hint:
+                    window = _window_from_ctx(ctx, day_hint=intent_hint)
+                    time_min = window.get("time_min") if isinstance(window, dict) else None
+                    time_max = window.get("time_max") if isinstance(window, dict) else None
+
+                    if (
+                        isinstance(time_min, str)
+                        and isinstance(time_max, str)
+                        and time_min
+                        and time_max
+                    ):
+                        tool = self._tools.get("calendar.list_events")
+                        if tool is not None and tool.function is not None:
+                            try:
+                                res = tool.function(time_min=time_min, time_max=time_max)
+                            except Exception:
+                                res = {"ok": False}
+
+                            tz_name = str(ctx.get("tz_name") or "") or None
+                            text = _render_calendar_list_events(
+                                result=res if isinstance(res, dict) else {"ok": False},
+                                intent=intent_hint,
+                                tz_name=tz_name,
+                            )
+
+                            # Trace for auditability/tests.
+                            try:
+                                trace["intent"] = "calendar.query"
+                                trace["slots"] = {"date": (str(intent_hint or "none") or "none")}
+                                trace["missing"] = []
+                                trace["next_action"] = "say_result"
+                                trace["safety"] = []
+                            except Exception:
+                                pass
+
+                            mini_ack = False
+                            if _has_smalltalk_clause(user_text):
+                                mini_ack = True
+                                text = (str(text).rstrip() + "\n\nİsterseniz bununla ilgili konuşabiliriz.").strip()
+
+                            text = _role_sanitize_text(text)
+
+                            # Save recent events for deterministic disambiguation in later turns.
+                            try:
+                                evs = res.get("events") if isinstance(res, dict) and isinstance(res.get("events"), list) else []
+                                evs = [e for e in evs if isinstance(e, dict)]
+                                if isinstance(state, dict):
+                                    state[_CALENDAR_LAST_EVENTS_KEY] = evs[:10]
+                            except Exception:
+                                pass
+
+                            try:
+                                if isinstance(state, dict):
+                                    state[_DIALOG_STATE_KEY] = "AFTER_CALENDAR_STATUS"
+                                    state["last_tool_used"] = "calendar.list_events"
+                            except Exception:
+                                pass
+
+                            try:
+                                self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
+                            except Exception:
+                                pass
+
+                            count_val = None
+                            try:
+                                if isinstance(res, dict):
+                                    count_val = int(res.get("count") or 0)
+                            except Exception:
+                                count_val = None
+                            shown = None
+                            more = None
+                            try:
+                                if isinstance(count_val, int):
+                                    shown = min(3, max(0, count_val))
+                                    more = max(0, count_val - shown)
+                            except Exception:
+                                shown = None
+                                more = None
+
+                            return BrainResult(
+                                kind="say",
+                                text=text,
+                                steps_used=0,
+                                metadata={
+                                    **_std_metadata(
+                                        ctx=ctx,
+                                        state=state,
+                                        action_type="list_events",
+                                        requires_confirmation=False,
+                                    ),
+                                    "mini_ack": bool(mini_ack),
+                                    "events_count": count_val,
+                                    "events_shown": shown,
+                                    "events_more": more,
+                                },
+                            )
 
             if route == _ROUTE_SMALLTALK and not isinstance(pending_action, dict):
                 rendered = _render_smalltalk_stage1()
