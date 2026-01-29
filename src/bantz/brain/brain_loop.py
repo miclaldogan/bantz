@@ -22,6 +22,7 @@ from bantz.brain.calendar_intent import (
     parse_hash_ref_index,
     parse_hhmm,
 )
+from bantz.planning.plan_draft import build_plan_draft_from_text, looks_like_planning_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -3200,6 +3201,50 @@ class BrainLoop:
                                     "events_more": more,
                                 },
                             )
+
+            # Issue #115: PlanDraft proposal. For planning prompts, produce a
+            # structured plan preview without writing to the calendar.
+            if not isinstance(pending_action, dict) and looks_like_planning_prompt(user_text):
+                plan = build_plan_draft_from_text(user_text, ctx=ctx)
+                preview = plan.render_preview_tr()
+
+                # Trace for auditability/tests (never chain-of-thought).
+                try:
+                    trace["intent"] = "calendar.plan_draft"
+                    trace["slots"] = {
+                        "plan_window": plan.plan_window(),
+                        "item_count": len(plan.items) if isinstance(plan.items, list) else 0,
+                    }
+                    trace["missing"] = []
+                    trace["next_action"] = "say_result"
+                    trace["safety"] = []
+                except Exception:
+                    pass
+
+                _emit_ack()
+                _emit_progress(tool_name="planner.plan_draft")
+                preview = _role_sanitize_text(preview)
+                try:
+                    self._events.publish(EventType.RESULT.value, {"text": preview}, source="brain")
+                except Exception:
+                    pass
+
+                return BrainResult(
+                    kind="say",
+                    text=preview,
+                    steps_used=0,
+                    metadata={
+                        **_std_metadata(
+                            ctx=ctx,
+                            state=state,
+                            action_type="plan_draft",
+                            requires_confirmation=False,
+                        ),
+                        "plan_window": plan.plan_window(),
+                        "item_count": len(plan.items) if isinstance(plan.items, list) else 0,
+                        "plan_confidence": float(getattr(plan, "confidence", 0.0) or 0.0),
+                    },
+                )
 
             if route == _ROUTE_SMALLTALK and not isinstance(pending_action, dict):
                 rendered = _render_smalltalk_stage1()
