@@ -1215,6 +1215,34 @@ class BrainLoop:
             (ctx.get("session_id") or ctx.get("user") or "default")
         ).strip() or "default"
 
+        def _emit_ack(text: str = "Anladım efendim.") -> None:
+            try:
+                self._events.publish(EventType.ACK.value, {"text": text}, source="brain")
+            except Exception:
+                pass
+
+        def _emit_progress(*, tool_name: str) -> None:
+            try:
+                self._events.publish(
+                    EventType.PROGRESS.value,
+                    {"message": f"Tool çalıştırılıyor: {tool_name}"},
+                    source="brain",
+                )
+            except Exception:
+                pass
+
+        def _emit_found(*, tool_name: str) -> None:
+            try:
+                self._events.publish(EventType.FOUND.value, {"tool": tool_name}, source="brain")
+            except Exception:
+                pass
+
+        def _emit_summarizing(status: str) -> None:
+            try:
+                self._events.publish(EventType.SUMMARIZING.value, {"status": status}, source="brain")
+            except Exception:
+                pass
+
         def _ensure_trace() -> dict[str, Any]:
             existing = state.get(_TRACE_KEY) if isinstance(state, dict) else None
             trace: dict[str, Any] = existing if isinstance(existing, dict) else {}
@@ -2088,11 +2116,16 @@ class BrainLoop:
                         if tool is None or tool.function is None:
                             return BrainResult(kind="say", text="Takvim aracına erişemiyorum.", steps_used=0, metadata={})
                         try:
+                            _emit_ack()
+                            _emit_progress(tool_name="calendar.list_events")
                             res = tool.function(time_min=time_min, time_max=time_max)
+                            _emit_found(tool_name="calendar.list_events")
                         except Exception:
                             res = {"ok": False}
                         tz_name = str(ctx.get("tz_name") or "") or None
                         text = _render_calendar_list_events(result=res if isinstance(res, dict) else {"ok": False}, intent="tomorrow", tz_name=tz_name)
+                        text = _role_sanitize_text(text)
+                        _emit_summarizing("started")
                         # Save recent events for deterministic disambiguation.
                         try:
                             evs = res.get("events") if isinstance(res, dict) and isinstance(res.get("events"), list) else []
@@ -2103,9 +2136,14 @@ class BrainLoop:
                                 state[_DIALOG_STATE_KEY] = "AFTER_CALENDAR_STATUS"
                         except Exception:
                             pass
+                        try:
+                            self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
+                        except Exception:
+                            pass
+                        _emit_summarizing("complete")
                         return BrainResult(
                             kind="say",
-                            text=_role_sanitize_text(text),
+                            text=text,
                             steps_used=0,
                             metadata=_std_metadata(
                                 ctx=ctx,
@@ -2137,7 +2175,10 @@ class BrainLoop:
 
                     params = {"time_min": time_min, "time_max": time_max, "duration_minutes": dur}
                     try:
+                        _emit_ack()
+                        _emit_progress(tool_name="calendar.find_free_slots")
                         res = tool.function(**params)
+                        _emit_found(tool_name="calendar.find_free_slots")
                     except Exception:
                         res = {"ok": False}
 
@@ -3072,7 +3113,10 @@ class BrainLoop:
                         tool = self._tools.get("calendar.list_events")
                         if tool is not None and tool.function is not None:
                             try:
+                                _emit_ack()
+                                _emit_progress(tool_name="calendar.list_events")
                                 res = tool.function(time_min=time_min, time_max=time_max)
+                                _emit_found(tool_name="calendar.list_events")
                             except Exception:
                                 res = {"ok": False}
 
@@ -3116,10 +3160,12 @@ class BrainLoop:
                             except Exception:
                                 pass
 
+                            _emit_summarizing("started")
                             try:
                                 self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
                             except Exception:
                                 pass
+                            _emit_summarizing("complete")
 
                             count_val = None
                             try:
@@ -3342,8 +3388,11 @@ class BrainLoop:
                         observations.append({"tool": tool_name, "ok": False, "error": "tool_not_executable"})
                     else:
                         try:
+                            _emit_ack()
+                            _emit_progress(tool_name=tool_name)
                             result = tool.function(**params)
                             observations.append({"tool": tool_name, "ok": True, "result": result})
+                            _emit_found(tool_name=tool_name)
                         except Exception as e:
                             observations.append({"tool": tool_name, "ok": False, "error": str(e)})
 
@@ -3384,12 +3433,14 @@ class BrainLoop:
                     except Exception:
                         mini_ack = False
                     text = _role_sanitize_text(text)
+                    _emit_summarizing("started")
                     try:
                         self._events.publish(
                             EventType.RESULT.value, {"text": text}, source="brain"
                         )
                     except Exception:
                         pass
+                    _emit_summarizing("complete")
                     return BrainResult(
                         kind="say",
                         text=text,
@@ -3853,6 +3904,8 @@ class BrainLoop:
                                     tz_name = str(ctx.get("tz_name") or "") or None
                                 text = _render_calendar_list_events(result=res, intent=intent, tz_name=tz_name)
 
+                                _emit_summarizing("started")
+
                                 # Trace for auditability/tests.
                                 try:
                                     trace["intent"] = "calendar.query"
@@ -3887,6 +3940,7 @@ class BrainLoop:
                                     )
                                 except Exception:
                                     pass
+                                _emit_summarizing("complete")
                                 count_val = None
                                 try:
                                     if isinstance(res, dict):
