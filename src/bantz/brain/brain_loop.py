@@ -166,6 +166,32 @@ def _map_choice_from_text(*, menu_id: str, user_text: str) -> Optional[str]:
             return "3"
         return None
 
+    if mid == "unknown":
+        if has_any("iptal", "vazgec", "bosver"):
+            return "0"
+        # If the user already asks a calendar question, assume calendar.
+        if has_any(
+            "takvim",
+            "ajanda",
+            "plan",
+            "program",
+            "randevu",
+            "etkinlik",
+            "toplanti",
+            "musait",
+            "uygun",
+            "bosluk",
+            "bugun",
+            "yarin",
+            "aksam",
+            "sabah",
+        ):
+            return "1"
+        # Otherwise, common smalltalk openings.
+        if has_any("nasil", "nasilsin", "naber", "selam", "merhaba"):
+            return "2"
+        return None
+
     return None
 
 
@@ -2164,9 +2190,43 @@ class BrainLoop:
 
                 if menu_id == "unknown":
                     allowed = {"0", "1", "2"}
+                    mapped = _map_choice_from_text(menu_id=menu_id, user_text=user_text)
                     parsed = _parse_menu_choice(user_text, allowed=allowed, default="")
-                    is_explicit = parsed != ""
-                    choice = parsed if parsed in allowed else default
+                    is_explicit = mapped is not None or parsed != ""
+                    choice = (
+                        mapped
+                        if isinstance(mapped, str) and mapped in allowed
+                        else (parsed if parsed in allowed else default)
+                    )
+
+                    # UX: if the user already asked a calendar question while this
+                    # disambiguation menu is pending, don't force an extra turn.
+                    if (
+                        choice == "1"
+                        and parsed == ""
+                        and (user_text or "").strip() not in allowed
+                    ):
+                        try:
+                            last_intent = state.get("last_intent") if isinstance(state, dict) else None
+                            last_tool = state.get("last_tool_used") if isinstance(state, dict) else None
+                            guess_route = _detect_route(
+                                user_text,
+                                last_intent=str(last_intent) if last_intent is not None else None,
+                                last_tool_used=str(last_tool) if last_tool is not None else None,
+                            )
+                        except Exception:
+                            guess_route = _ROUTE_UNKNOWN
+
+                        if _is_calendar_route(guess_route):
+                            state.pop(_PENDING_CHOICE_KEY, None)
+                            state.pop(_REPROMPT_COUNT_KEY, None)
+                            state[_DIALOG_STATE_KEY] = "IDLE"
+                            return self.run(
+                                turn_input=user_text,
+                                session_context=session_context,
+                                policy=policy,
+                                context=state,
+                            )
 
                     # 2-stage reprompt: if unclear, first reprompt, then apply default
                     if not is_explicit:

@@ -1404,6 +1404,49 @@ def test_unknown_menu_choice_2_routes_to_smalltalk_stage1() -> None:
     assert state.get("_dialog_pending_choice", {}).get("menu_id") == "smalltalk_stage1"
 
 
+def test_unknown_menu_accepts_calendar_question_without_number() -> None:
+    tools = ToolRegistry()
+
+    def list_events(**params):
+        return {"ok": True, "count": 0, "events": []}
+
+    tools.register(
+        Tool(
+            name="calendar.list_events",
+            description="list",
+            parameters={"type": "object", "properties": {}},
+            function=list_events,
+        )
+    )
+
+    llm = _QueueLLM(outputs=[{"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}}])
+    loop = BrainLoop(llm=llm, tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    state: dict = {
+        "session_id": "t",
+        "_dialog_pending_choice": {"menu_id": "unknown", "default": "0"},
+    }
+
+    res = loop.run(
+        turn_input="bugün planımda ne var",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+
+    assert llm.calls == 1
+
+    # Should not reprompt the unknown menu; should proceed to calendar.
+    assert "_dialog_pending_choice" not in state
+    assert res.metadata.get("menu_id") != "unknown"
+    trace = res.metadata.get("trace")
+    assert isinstance(trace, dict)
+    assert trace.get("intent") == "calendar.query"
+
+
 def test_list_events_renderer_shows_plus_more_for_many_events() -> None:
     """list_events with >3 events should show '+N daha' indicator."""
     tools = ToolRegistry()
