@@ -21,6 +21,7 @@ from bantz.agent.tools import Tool, ToolRegistry
 from bantz.agent.builtin_tools import build_default_registry
 from bantz.brain.brain_loop import BrainLoop, BrainLoopConfig
 from bantz.brain.json_repair import RepairLLM, validate_or_repair_action
+from bantz.brain.llm_router import JarvisLLMRouter
 from bantz.core.events import Event, EventBus, EventType
 from bantz.llm.ollama_client import LLMMessage, OllamaClient
 from bantz.policy.engine import PolicyEngine
@@ -592,7 +593,7 @@ def main() -> int:
 
     # LLM Router: Always active (Issue #126)
     # Create a simple text-completion wrapper for router
-    class OllamaTextLLM:
+    class RouterLLMWrapper:
         def __init__(self, client: OllamaClient, temperature: float = 0.0):
             self._client = client
             self._temperature = temperature
@@ -606,11 +607,11 @@ def main() -> int:
                 seed=42,  # Deterministic for router
             )
     
-    router_llm = OllamaTextLLM(client=llm._client, temperature=0.0)
+    router_llm = RouterLLMWrapper(client=llm._client, temperature=0.0)
     router = JarvisLLMRouter(llm=router_llm)
     
     if args.debug:
-        print("[DEMO] LLM Router enabled (always active)")
+        print("[DEMO] LLM Router: ALWAYS ACTIVE - every conversation goes through LLM")
 
     loop = BrainLoop(
         llm=adapter,
@@ -685,6 +686,17 @@ def main() -> int:
             policy=policy,
             context=state,
         )
+
+        # Debug: Show LLM Router decision
+        if args.debug and result.metadata:
+            trace = result.metadata.get("trace")
+            if isinstance(trace, dict) and "llm_router_route" in trace:
+                print(f"\n[LLM ROUTER] Route: {trace.get('llm_router_route')} | "
+                      f"Intent: {trace.get('llm_router_intent')} | "
+                      f"Confidence: {trace.get('llm_router_confidence', 0):.2f}")
+                if trace.get('llm_router_reply'):
+                    print(f"[LLM ROUTER] Reply: {trace.get('llm_router_reply')}")
+                print()
 
         if result.kind == "say":
             print(f"BANTZ: {result.text}")
