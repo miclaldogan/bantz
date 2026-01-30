@@ -605,7 +605,7 @@ def main() -> int:
             return self._client.chat(
                 messages=messages,
                 temperature=self._temperature,
-                max_tokens=512,
+                max_tokens=200,  # Router JSON is small, 200 is plenty
             )
     
     router_llm = RouterLLMWrapper(client=llm._client, temperature=0.0)
@@ -620,6 +620,7 @@ def main() -> int:
             messages=[LLMMessage(role="user", content="test")],
             temperature=0.0,
             max_tokens=5,
+            num_predict=200,  # Match router settings
         )
         if args.debug:
             print("[DEMO] Ollama ready!")
