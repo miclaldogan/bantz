@@ -620,7 +620,6 @@ def main() -> int:
             messages=[LLMMessage(role="user", content="test")],
             temperature=0.0,
             max_tokens=5,
-            num_predict=200,  # Match router settings
         )
         if args.debug:
             print("[DEMO] Ollama ready!")
