@@ -794,12 +794,23 @@ def _llm_parse_confirmation(user_text: str, llm_wrapper: Any = None) -> str:
     """
     t = _normalize_text_for_match(user_text)
     
-    # Check for confirmation keywords
-    if any(w in t for w in ["evet", "tamam", "olur", "onay", "onayliyorum", "devam", "uygula", "ekle", "yap", "tamamdir"]):
+    # Check for confirmation keywords (EXPANDED)
+    confirm_keywords = [
+        "evet", "tamam", "olur", "onay", "onayliyorum", "devam", "uygula", 
+        "ekle", "yap", "tamamdir", "tabii", "tabiki", "elbette", 
+        "koy", "onayla", "kabul", "yapabilirsin", "git", "hadi",
+        "ok", "okay", "yes"
+    ]
+    if any(w in t for w in confirm_keywords):
         return "confirm"
     
     # Check for rejection keywords
-    if any(w in t for w in ["hayir", "hayır", "iptal", "vazgec", "vazgeç", "istemiyorum", "olmaz", "bosver", "boşver"]):
+    reject_keywords = [
+        "hayir", "hayır", "iptal", "vazgec", "vazgeç", "istemiyorum", 
+        "olmaz", "bosver", "boşver", "kalsin", "kalsın", "durma",
+        "no", "nope"
+    ]
+    if any(w in t for w in reject_keywords):
         return "reject"
     
     # If just a number "1" or similar, check context
@@ -1892,22 +1903,23 @@ class BrainLoop:
                 confirmation_result = _llm_parse_confirmation(user_text)
                 
                 if confirmation_result == "confirm":
-                    # User confirmed - let LLM handle tool execution
+                    # User confirmed - execute tool directly (bypass LLM)
                     intent = pending_action.get("intent")
                     slots = pending_action.get("slots")
                     original_user_text = pending_action.get("user_text", "")
                     
-                    # Clear confirmation state but keep action info for LLM
+                    # Clear confirmation state
                     state.pop("_pending_confirmation_action", None)
                     state[_DIALOG_STATE_KEY] = "IDLE"
                     
-                    # Store confirmed slots in trace for LLM to see
+                    # Update trace
                     trace = _ensure_trace()
                     trace["llm_confirmation"] = "confirmed"
-                    trace["confirmed_slots"] = slots
-                    trace["confirmed_intent"] = intent
                     
-                    # Build tool call parameters from slots
+                    # Acknowledge
+                    _emit_ack("Anladım efendim, ekliyorum.")
+                    
+                    # Build tool call from slots
                     if intent == "create" and isinstance(slots, dict):
                         # Build ISO timestamp from slots
                         start_time = None
@@ -1925,45 +1937,84 @@ class BrainLoop:
                             
                             if window and isinstance(window, dict):
                                 # Parse date from window start
-                                import datetime
                                 try:
                                     date_str = str(window.get("start", "")).split("T")[0]  # "2026-01-31"
                                     start_time = f"{date_str}T{time_str}:00+03:00"
                                 except Exception:
                                     pass
                         
-                        # Create calendar.create_event tool call
+                        if not start_time:
+                            # No time specified - ask user
+                            reply = "Hangi saat olsun efendim?"
+                            try:
+                                self._events.publish(EventType.QUESTION.value, {"question": reply}, source="brain")
+                            except Exception:
+                                pass
+                            return BrainResult(
+                                kind="ask_user",
+                                text=reply,
+                                steps_used=0,
+                                metadata={"trace": trace},
+                            )
+                        
+                        # Execute calendar.create_event
+                        tool_name = "calendar.create_event"
                         tool_params = {
                             "summary": slots.get("title", "Etkinlik"),
+                            "start": start_time,
                         }
-                        
-                        if start_time:
-                            tool_params["start"] = start_time
-                        elif slots.get("day_hint"):
-                            # Let LLM figure out the exact time
-                            pass
                         
                         if slots.get("duration"):
                             tool_params["duration_minutes"] = int(slots["duration"])
                         
-                        # Store tool call in state
-                        state["_confirmed_tool_call"] = {
-                            "name": "calendar.create_event",
-                            "params": tool_params,
-                        }
-                        
-                        # Acknowledge
-                        _emit_ack("Anladım efendim, ekliyorum.")
-                        
-                        # Now continue to LLM with enriched context
-                        # The LLM will see the confirmed tool call in session_context
-                        # and will execute it directly
-                        # Don't return, let execution continue to LLM step below
-                    else:
-                        # Unknown intent or no slots
-                        _emit_ack("Anladım efendim.")
+                        # Call tool directly
+                        _emit_progress(tool_name=tool_name)
+                        try:
+                            result = self._tools.call_function(tool_name, tool_params)
+                            _emit_found(tool_name=tool_name)
+                            
+                            if result.get("ok"):
+                                reply = f"Tamam efendim, '{slots.get('title', 'etkinlik')}' eklendi."
+                            else:
+                                error = result.get("error", "unknown")
+                                reply = f"Üzgünüm efendim, hata oluştu: {error}"
+                            
+                            try:
+                                self._events.publish(EventType.RESULT.value, {"text": reply}, source="brain")
+                            except Exception:
+                                pass
+                            
+                            return BrainResult(
+                                kind="say",
+                                text=reply,
+                                steps_used=1,
+                                metadata={"trace": trace, "tool_executed": tool_name},
+                            )
+                        except Exception as e:
+                            reply = f"Üzgünüm efendim, hata oluştu: {e}"
+                            try:
+                                self._events.publish(EventType.ERROR.value, {"error": str(e)}, source="brain")
+                            except Exception:
+                                pass
+                            return BrainResult(
+                                kind="fail",
+                                text=reply,
+                                steps_used=1,
+                                metadata={"trace": trace, "error": str(e)},
+                            )
                     
-                    # Continue execution - will hit LLM step below
+                    # If not create intent, just acknowledge
+                    reply = "Anlaşıldı efendim."
+                    try:
+                        self._events.publish(EventType.RESULT.value, {"text": reply}, source="brain")
+                    except Exception:
+                        pass
+                    return BrainResult(
+                        kind="say",
+                        text=reply,
+                        steps_used=0,
+                        metadata={"trace": trace},
+                    )
                 
                 elif confirmation_result == "reject":
                     # User rejected - cancel
