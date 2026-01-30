@@ -17,7 +17,58 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Callable, Dict, List, Optional, Any
+
+
+class EventType(Enum):
+    """
+    Standard event types for the Bantz system.
+    
+    Categories:
+    - Acknowledgment: Initial response events
+    - Progress: Task progress updates
+    - Interaction: User interaction events
+    - Errors: Error and retry events
+    - Control: Job control events
+    - Legacy: Existing event types for compatibility
+    """
+    
+    # === Acknowledgment ===
+    ACK = "ack"  # "Anladım efendim, başlıyorum"
+    
+    # === Progress ===
+    PROGRESS = "progress"  # {"current": 3, "total": 5, "message": "..."}
+    FOUND = "found"  # {"source": "url", "title": "..."}
+    SUMMARIZING = "summarizing"  # {"status": "started/complete"}
+    
+    # === Interaction ===
+    QUESTION = "question"  # {"question": "...", "options": [...]}
+    RESULT = "result"  # {"summary": "...", "confidence": 0.85}
+    
+    # === Errors ===
+    ERROR = "error"  # {"code": "...", "message": "..."}
+    RETRY = "retry"  # {"attempt": 2, "reason": "timeout"}
+    
+    # === Control ===
+    PAUSE = "pause"  # Job duraklatıldı
+    RESUME = "resume"  # Job devam ediyor
+    CANCEL = "cancel"  # Job iptal edildi
+    
+    # === Job Lifecycle ===
+    JOB_CREATED = "job.created"  # New job created
+    JOB_STARTED = "job.started"  # Job started running
+    JOB_COMPLETED = "job.completed"  # Job completed successfully
+    JOB_FAILED = "job.failed"  # Job failed
+    JOB_PAUSED = "job.paused"  # Job paused
+    JOB_RESUMED = "job.resumed"  # Job resumed
+    JOB_CANCELLED = "job.cancelled"  # Job cancelled
+    
+    # === Legacy (for backward compatibility) ===
+    REMINDER_FIRED = "reminder_fired"
+    CHECKIN_TRIGGERED = "checkin_triggered"
+    BANTZ_MESSAGE = "bantz_message"
+    COMMAND_RESULT = "command_result"
 
 
 @dataclass

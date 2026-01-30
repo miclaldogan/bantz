@@ -24,7 +24,8 @@ const KNOWN_MESSAGE_TYPES = new Set([
   'type',
   'navigate',
   'overlay',
-  'profile'
+  'profile',
+  'extract'
 ]);
 
 /**
@@ -167,6 +168,11 @@ function handleDaemonMessage(message) {
         profile: message.profile 
       });
       break;
+    
+    case 'extract':
+      // Extract page content for summarization
+      sendToActiveTab({ type: 'bantz:extract' });
+      break;
       
     default:
       console.log('[Bantz] Unknown message type');
@@ -239,6 +245,18 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         type: 'click_result',
         success: message.success,
         message: message.message,
+      });
+      break;
+    
+    case 'bantz:extract_result':
+      // Forward extracted content to daemon
+      sendToDaemon({
+        type: 'extract_result',
+        url: message.url,
+        title: message.title,
+        content: message.content,
+        extracted_at: message.extracted_at,
+        content_length: message.content_length,
       });
       break;
       

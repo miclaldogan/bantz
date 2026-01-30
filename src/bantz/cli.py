@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import os
 import socket
-import os
 import sys
 import shutil
 import threading
@@ -19,10 +18,100 @@ from collections import deque
 from datetime import datetime
 from typing import Optional
 
+import logging
+
 from bantz.router.engine import Router
 from bantz.router.policy import Policy
 from bantz.router.context import ConversationContext
 from bantz.logs.logger import JsonlLogger
+from bantz.time_windows import evening_window
+
+
+def run_brainloop_demo_once(command: str) -> int:
+    """Minimal BrainLoop CLI demo with Jarvis-like event stream.
+
+    Issue #103 scope: render ACK/PROGRESS/FOUND/SUMMARIZING/RESULT in-order.
+    This is intentionally a deterministic, dependency-light demo.
+    """
+
+    from datetime import timedelta
+
+    from bantz.agent.tools import Tool, ToolRegistry
+    from bantz.brain.brain_loop import BrainLoop, BrainLoopConfig
+    from bantz.core.events import Event, EventBus, EventType
+
+    class _FailingLLM:
+        def complete_json(self, *, messages, schema_hint):  # type: ignore[no-untyped-def]
+            raise AssertionError("LLM should not be called in brainloop demo")
+
+    # Deterministic windows (stable enough for CLI demo).
+    now = datetime.now().astimezone().replace(microsecond=0)
+    day_end = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0)
+    today_date = now.date()
+    tz = now.tzinfo
+    evening_start, evening_end = evening_window(today_date, tz) if tz else (None, None)
+    session_context = {
+        "deterministic_render": True,
+        "tz_name": "Europe/Istanbul",
+        "today_window": {"time_min": now.isoformat(), "time_max": day_end.isoformat()},
+    }
+    if evening_start and evening_end:
+        session_context["evening_window"] = {"time_min": evening_start, "time_max": evening_end}
+
+    tools = ToolRegistry()
+
+    def list_events(**params):
+        # Demo-friendly stub: empty calendar.
+        _ = params
+        return {"ok": True, "count": 0, "events": []}
+
+    tools.register(
+        Tool(
+            name="calendar.list_events",
+            description="list",
+            parameters={"type": "object", "properties": {}},
+            function=list_events,
+        )
+    )
+
+    bus = EventBus()
+
+    def on_event(ev: Event) -> None:
+        et = str(ev.event_type)
+        data = ev.data or {}
+
+        if et == EventType.ACK.value or et == EventType.PROGRESS.value:
+            msg = str(data.get("text") or data.get("message") or "").strip()
+            prefix = "Kontrol ediyorum efendim…"
+            if msg:
+                print(f"{Colors.DIM}{prefix}{Colors.RESET} {Colors.DIM}({msg}){Colors.RESET}")
+            else:
+                print(f"{Colors.DIM}{prefix}{Colors.RESET}")
+            return
+
+        if et == EventType.FOUND.value:
+            tool = str(data.get("tool") or data.get("name") or "").strip()
+            suffix = f" ({tool})" if tool else ""
+            print(f"{Colors.DIM}Buldum efendim…{suffix}{Colors.RESET}")
+            return
+
+        if et == EventType.SUMMARIZING.value:
+            status = str(data.get("status") or "").strip() or "started"
+            if status == "complete":
+                return
+            print(f"{Colors.DIM}Özetliyorum efendim…{Colors.RESET}")
+            return
+
+        if et == EventType.RESULT.value:
+            text = str(data.get("text") or data.get("summary") or "").strip()
+            print(text)
+            return
+
+    bus.subscribe_all(on_event)
+
+    loop = BrainLoop(llm=_FailingLLM(), tools=tools, event_bus=bus, config=BrainLoopConfig(max_steps=2, debug=False))
+    _ = loop.run(turn_input=command, session_context=session_context, policy=None, context={"session_id": "cli-demo"})
+    return 0
 
 
 # ANSI colors
@@ -379,6 +468,21 @@ Kullanım örnekleri:
     parser.add_argument("--serve", action="store_true", help="Interactive server modu başlat")
     parser.add_argument("--once", default=None, metavar="CMD", help="Tek seferlik komut")
     parser.add_argument("--stop", action="store_true", help="Çalışan session'ı kapat")
+    parser.add_argument(
+        "--brainloop-demo",
+        action="store_true",
+        help="BrainLoop event stream CLI demo (Issue #103). Kullanım: --once \"...\" --brainloop-demo",
+    )
+
+    # Compatibility flags (README/back-compat)
+    parser.add_argument("--text", action="store_true", help="Text mod (varsayılan). (Uyumluluk)")
+    parser.add_argument("--ptt", action="store_true", help="Push-to-talk alias'ı (== --voice). (Uyumluluk)")
+    parser.add_argument("--debug", action="store_true", help="Debug logları aç. (Uyumluluk)")
+    parser.add_argument(
+        "--overlay",
+        action="store_true",
+        help="Overlay UI. (Not: tam overlay için orchestrator önerilir). (Uyumluluk)",
+    )
 
     # Voice mode (PTT)
     parser.add_argument("--voice", action="store_true", help="Sesli mod (PTT: SPACE basılı tut)")
@@ -397,6 +501,30 @@ Kullanım örnekleri:
 
     args = parser.parse_args(argv)
 
+    # Apply compatibility flag mappings
+    if args.ptt:
+        args.voice = True
+
+    if args.debug:
+        os.environ["BANTZ_DEBUG"] = "1"
+        logging.basicConfig(level=logging.DEBUG)
+
+    if args.overlay:
+        # Keep CLI stable: accept the flag and continue.
+        # Full overlay experience is implemented in bantz.core.orchestrator.
+        print(
+            "ℹ️ --overlay bayrağı alındı. Tam overlay için öneri: "
+            "python -m bantz.core.orchestrator (veya ./scripts/jarvis.sh start --foreground)",
+            file=sys.stderr,
+        )
+
+    # Make Ollama settings available to all components (server thread, router, agent).
+    # CLI flags should take precedence for this run.
+    if getattr(args, "ollama_url", None):
+        os.environ["BANTZ_OLLAMA_URL"] = str(args.ollama_url)
+    if getattr(args, "ollama_model", None):
+        os.environ["BANTZ_OLLAMA_MODEL"] = str(args.ollama_model)
+
     def _can_connect(host: str, port: int, timeout_s: float = 3.0) -> bool:
         try:
             sock = socket.create_connection((host, port), timeout=timeout_s)
@@ -412,6 +540,10 @@ Kullanım örnekleri:
     # Voice mode runs as a client: ASR -> daemon -> TTS
     # Warmup is also handled here (no daemon needed).
     if args.voice or args.wake or args.voice_warmup:
+        # Pass policy/log through env for voice auto-start.
+        os.environ["BANTZ_POLICY"] = str(args.policy)
+        os.environ["BANTZ_LOG"] = str(args.log)
+
         from bantz.voice.loop import VoiceLoopConfig, run_voice_loop, run_wake_word_loop
         from bantz.voice.asr import ASR, ASRConfig
 
@@ -487,6 +619,13 @@ Kullanım örnekleri:
         os.environ["BANTZ_ASR_CACHE_DIR"] = args.asr_cache_dir
         os.environ["BANTZ_ASR_ALLOW_DOWNLOAD"] = "1" if args.asr_allow_download else "0"
         return run_voice_loop(cfg)
+
+    # BrainLoop CLI demo (deterministic, local).
+    if args.brainloop_demo:
+        if not args.once:
+            print("❌ --brainloop-demo için --once gerekli.")
+            return 1
+        return run_brainloop_demo_once(str(args.once))
 
     # Stop session
     if args.stop:

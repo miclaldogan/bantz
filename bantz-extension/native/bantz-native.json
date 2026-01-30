@@ -1,0 +1,7 @@
+{
+  "name": "bantz_native",
+  "description": "Bantz Native Messaging Host",
+  "path": "/usr/local/bin/bantz-native",
+  "type": "stdio",
+  "allowed_extensions": ["bantz@bantz.local"]
+}
