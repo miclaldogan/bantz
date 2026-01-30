@@ -46,6 +46,100 @@ class PlanDraft:
         return "\n".join(lines).strip()
 
 
+def plan_draft_to_dict(draft: PlanDraft) -> dict[str, Any]:
+    return {
+        "title": draft.title,
+        "goal": draft.goal,
+        "day_hint": draft.day_hint,
+        "time_of_day": draft.time_of_day,
+        "confidence": float(draft.confidence or 0.0),
+        "items": [
+            {
+                "label": i.label,
+                "duration_minutes": i.duration_minutes,
+                "location": i.location,
+            }
+            for i in (draft.items or [])
+            if isinstance(i, PlanItem)
+        ],
+    }
+
+
+def plan_draft_from_dict(raw: dict[str, Any]) -> PlanDraft:
+    if not isinstance(raw, dict):
+        return PlanDraft(title="Gün planı", goal=None, day_hint=None, time_of_day=None, items=[])
+
+    items_raw = raw.get("items")
+    items: list[PlanItem] = []
+    if isinstance(items_raw, list):
+        for it in items_raw:
+            if not isinstance(it, dict):
+                continue
+            label = str(it.get("label") or "").strip()
+            if not label:
+                continue
+            dur = it.get("duration_minutes")
+            try:
+                duration_minutes = int(dur) if dur is not None else None
+            except Exception:
+                duration_minutes = None
+            location = str(it.get("location") or "").strip() or None
+            items.append(PlanItem(label=label, duration_minutes=duration_minutes, location=location))
+
+    conf = raw.get("confidence")
+    try:
+        confidence = float(conf) if conf is not None else 0.6
+    except Exception:
+        confidence = 0.6
+
+    return PlanDraft(
+        title=str(raw.get("title") or "Gün planı").strip() or "Gün planı",
+        goal=str(raw.get("goal") or "").strip() or None,
+        day_hint=str(raw.get("day_hint") or "").strip() or None,
+        time_of_day=str(raw.get("time_of_day") or "").strip() or None,
+        items=items,
+        confidence=confidence,
+    )
+
+
+def apply_plan_edit_instruction(draft: PlanDraft, instruction: str) -> PlanDraft:
+    """Deterministic minimal editor.
+
+    Supported edits:
+    - "şunu 30 dk yap" -> set first item's duration to 30
+    """
+
+    if not isinstance(draft, PlanDraft):
+        return draft
+
+    t = _norm(instruction)
+    new_dur = _extract_single_duration_minutes(t)
+    if new_dur is None:
+        return draft
+    if not isinstance(draft.items, list) or not draft.items:
+        return draft
+
+    updated_items: list[PlanItem] = []
+    for idx, it in enumerate(draft.items):
+        if not isinstance(it, PlanItem):
+            continue
+        if idx == 0:
+            updated_items.append(
+                PlanItem(label=it.label, duration_minutes=int(new_dur), location=it.location)
+            )
+        else:
+            updated_items.append(it)
+
+    return PlanDraft(
+        title=draft.title,
+        goal=draft.goal,
+        day_hint=draft.day_hint,
+        time_of_day=draft.time_of_day,
+        items=updated_items,
+        confidence=float(draft.confidence or 0.0),
+    )
+
+
 _DURATION_RE = re.compile(
     r"(?P<num>\d{1,3})\s*(?P<unit>saat|sa|dk|dakika)\b",
     re.IGNORECASE,
@@ -210,3 +304,18 @@ def _format_window_tr(window: str) -> str:
 
 def _norm(s: str) -> str:
     return str(s or "").strip().lower()
+
+
+def _extract_single_duration_minutes(t: str) -> Optional[int]:
+    m = _DURATION_RE.search(t or "")
+    if not m:
+        return None
+    try:
+        num = int(m.group("num"))
+    except Exception:
+        return None
+    unit = str(m.group("unit") or "").lower()
+    minutes = num * 60 if unit.startswith("sa") or unit.startswith("saat") else num
+    if minutes <= 0:
+        return None
+    return int(minutes)
