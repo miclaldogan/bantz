@@ -20,8 +20,79 @@ from unittest.mock import Mock, patch, MagicMock
 from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
 from bantz.brain.orchestrator_loop import OrchestratorLoop, OrchestratorConfig
 from bantz.brain.orchestrator_state import OrchestratorState
-from bantz.agent.tools import ToolRegistry
+from bantz.agent.tools import ToolRegistry, Tool
 from bantz.core.events import EventBus
+
+
+# ========================================================================
+# Mock Tools
+# ========================================================================
+
+def mock_list_events(time_min: str = "", time_max: str = "", **kwargs) -> dict:
+    """Mock calendar.list_events tool."""
+    return {
+        "items": [
+            {
+                "id": "evt1",
+                "summary": "Team Meeting",
+                "start": {"dateTime": time_min or "2026-01-30T10:00:00+03:00"},
+                "end": {"dateTime": time_min or "2026-01-30T11:00:00+03:00"},
+            }
+        ],
+        "count": 1,
+    }
+
+
+def mock_create_event(title: str, start_time: str, end_time: str = "", **kwargs) -> dict:
+    """Mock calendar.create_event tool."""
+    return {
+        "id": f"evt_{title.lower().replace(' ', '_')}",
+        "summary": title,
+        "start": {"dateTime": start_time},
+        "end": {"dateTime": end_time or start_time},
+        "status": "confirmed",
+    }
+
+
+def build_mock_tool_registry() -> ToolRegistry:
+    """Build mock tool registry for testing."""
+    registry = ToolRegistry()
+    
+    # Calendar list_events
+    list_tool = Tool(
+        name="calendar.list_events",
+        description="List calendar events in time range",
+        parameters={
+            "type": "object",
+            "properties": {
+                "time_min": {"type": "string", "description": "Start time (ISO)"},
+                "time_max": {"type": "string", "description": "End time (ISO)"},
+            },
+            "required": ["time_min", "time_max"],
+        },
+        function=mock_list_events,
+    )
+    registry.register(list_tool)
+    
+    # Calendar create_event
+    create_tool = Tool(
+        name="calendar.create_event",
+        description="Create calendar event",
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Event title"},
+                "start_time": {"type": "string", "description": "Start time (ISO)"},
+                "end_time": {"type": "string", "description": "End time (ISO)"},
+            },
+            "required": ["title", "start_time"],
+        },
+        function=mock_create_event,
+        requires_confirmation=True,
+    )
+    registry.register(create_tool)
+    
+    return registry
 
 
 # ========================================================================
@@ -40,16 +111,18 @@ class MockLLMClient:
         """Return mock JSON response based on user input in prompt."""
         self.calls.append(prompt)
         
-        # Extract user input from prompt (look for "USER:" line)
-        user_input = ""
+        # Extract LAST user input from prompt (not examples in SYSTEM_PROMPT)
+        user_lines = []
         for line in prompt.split("\n"):
             if line.startswith("USER:"):
-                user_input = line[5:].strip()
-                break
+                user_lines.append(line[5:].strip())
+        
+        # Take the last USER line (actual input, not examples)
+        user_input = user_lines[-1].lower() if user_lines else ""
         
         # Find matching scenario
         for keyword, response_dict in self.scenario_responses.items():
-            if keyword.lower() in user_input.lower():
+            if keyword.lower() in user_input:
                 import json
                 return json.dumps(response_dict, ensure_ascii=False)
         
@@ -123,7 +196,7 @@ def test_scenario_2_calendar_query_today():
         "bugün": {
             "route": "calendar",
             "calendar_intent": "query",
-            "slots": {"window_hint": "today"},
+            "slots": {"window_hint": "today", "time_min": "2026-01-30T00:00:00+03:00", "time_max": "2026-01-30T23:59:59+03:00"},
             "confidence": 0.9,
             "tool_plan": ["calendar.list_events"],
             "assistant_reply": "",
@@ -138,7 +211,7 @@ def test_scenario_2_calendar_query_today():
     
     mock_llm = MockLLMClient(mock_responses)
     orchestrator = JarvisLLMOrchestrator(llm=mock_llm)
-    tools = ToolRegistry()
+    tools = build_mock_tool_registry()  # Use mock tools
     event_bus = EventBus()
     config = OrchestratorConfig(debug=True)
     
@@ -160,6 +233,7 @@ def test_scenario_2_calendar_query_today():
     assert state.trace.get("route") == "calendar"
     assert state.trace.get("intent") == "query"
     assert state.trace.get("tool_plan_len") >= 1
+    assert state.trace.get("tools_executed") >= 1  # Tool should have been executed
 
 
 # ========================================================================

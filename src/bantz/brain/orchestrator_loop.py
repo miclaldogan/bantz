@@ -162,17 +162,20 @@ class OrchestratorLoop:
         # Build context for LLM
         context = state.get_context_for_llm()
         conversation_history = context.get("recent_conversation", [])
+        rolling_summary = context.get("rolling_summary", "")
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Planning Phase:")
             logger.debug(f"  User: {user_input}")
-            logger.debug(f"  Rolling Summary: {context.get('rolling_summary', 'None')}")
+            logger.debug(f"  Rolling Summary: {rolling_summary or 'None'}")
             logger.debug(f"  Recent History: {len(conversation_history)} turns")
             logger.debug(f"  Tool Results: {len(context.get('last_tool_results', []))}")
         
-        # Call orchestrator (Note: current route() method doesn't support conversation_history yet)
-        # TODO: Extend route() to accept rolling summary and conversation history
-        output = self.orchestrator.route(user_input=user_input)
+        # Call orchestrator with context (dialog_summary = rolling summary)
+        output = self.orchestrator.route(
+            user_input=user_input,
+            dialog_summary=rolling_summary if rolling_summary else None,
+        )
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Decision:")
@@ -255,15 +258,18 @@ class OrchestratorLoop:
             
             # Execute tool
             try:
-                tool = self.tools.get_tool(tool_name)
+                tool = self.tools.get(tool_name)
                 if tool is None:
                     raise ValueError(f"Tool not found: {tool_name}")
+                
+                if tool.function is None:
+                    raise ValueError(f"Tool {tool_name} has no function implementation")
                 
                 # Build parameters from slots
                 params = self._build_tool_params(tool_name, output.slots)
                 
                 # Execute
-                result = tool.execute(**params)
+                result = tool.function(**params)
                 
                 tool_results.append({
                     "tool": tool_name,
@@ -325,39 +331,25 @@ class OrchestratorLoop:
         failed_tools = [r for r in tool_results if not r.get("success", False)]
         
         if failed_tools:
-            # Generate error response
+            # Generate error response (preserve orchestrator fields)
             error_msg = "Üzgünüm efendim, bazı işlemler başarısız oldu:\n"
             for result in failed_tools:
                 error_msg += f"- {result['tool']}: {result.get('error', 'Unknown error')}\n"
             
-            return OrchestratorOutput(
-                route=orchestrator_output.route,
-                calendar_intent=orchestrator_output.calendar_intent,
-                slots=orchestrator_output.slots,
-                confidence=orchestrator_output.confidence,
-                tool_plan=orchestrator_output.tool_plan,
-                assistant_reply=error_msg.strip(),
-                raw_output=orchestrator_output.raw_output,
-            )
+            from dataclasses import replace
+            return replace(orchestrator_output, assistant_reply=error_msg.strip())
         
         # Tools succeeded - use original response or generate success message
         if orchestrator_output.assistant_reply:
             return orchestrator_output
         
-        # Generate generic success message
+        # Generate generic success message (preserve orchestrator fields)
         success_msg = "Tamamlandı efendim."
         if len(tool_results) > 1:
             success_msg = f"{len(tool_results)} işlem tamamlandı efendim."
         
-        return OrchestratorOutput(
-            route=orchestrator_output.route,
-            calendar_intent=orchestrator_output.calendar_intent,
-            slots=orchestrator_output.slots,
-            confidence=orchestrator_output.confidence,
-            tool_plan=orchestrator_output.tool_plan,
-            assistant_reply=success_msg,
-            raw_output=orchestrator_output.raw_output,
-        )
+        from dataclasses import replace
+        return replace(orchestrator_output, assistant_reply=success_msg)
     
     def _update_state_phase(
         self,
