@@ -771,6 +771,19 @@ def _calendar_route_from_text(user_text: str) -> str:
     return _ROUTE_CALENDAR_QUERY
 
 
+def _calendar_route_from_intent(intent: str) -> str:
+    """Map LLM Router calendar intent to internal route constant."""
+    if intent == "create":
+        return _ROUTE_CALENDAR_CREATE
+    if intent == "modify":
+        return _ROUTE_CALENDAR_MODIFY
+    if intent == "cancel":
+        return _ROUTE_CALENDAR_CANCEL
+    if intent == "query":
+        return _ROUTE_CALENDAR_QUERY
+    return _ROUTE_CALENDAR_QUERY  # Default to query for calendar route
+
+
 def _window_from_ctx(ctx: dict[str, Any], *, day_hint: Optional[str]) -> Optional[dict[str, Any]]:
     if day_hint == "today":
         w = ctx.get("today_window")
@@ -1298,11 +1311,13 @@ class BrainLoop:
         tools: ToolRegistry,
         event_bus: Optional[EventBus] = None,
         config: Optional[BrainLoopConfig] = None,
+        router: Optional[Any] = None,
     ):
         self._llm = llm
         self._tools = tools
         self._events = event_bus or get_event_bus()
         self._config = config or BrainLoopConfig()
+        self._router = router
 
     def run(
         self,
@@ -2849,6 +2864,46 @@ class BrainLoop:
                         route = _calendar_route_from_text(user_text)
                 except Exception:
                     route = ""
+
+            # LLM Router: If available, use it FIRST (always active)
+            if self._router is not None and not route:
+                try:
+                    # Get dialog summary for context
+                    dialog_summary = state.get(_DIALOG_SUMMARY_KEY) if isinstance(state, dict) else ""
+                    if not isinstance(dialog_summary, str):
+                        dialog_summary = ""
+                    
+                    # Call router
+                    router_output = self._router.route(
+                        user_input=user_text,
+                        dialog_summary=dialog_summary,
+                        session_context=ctx,
+                    )
+                    
+                    # Map router output to trace
+                    trace["llm_router_route"] = router_output.route
+                    trace["llm_router_intent"] = router_output.calendar_intent
+                    trace["llm_router_confidence"] = router_output.confidence
+                    trace["llm_router_tool_plan"] = router_output.tool_plan
+                    trace["llm_router_slots"] = router_output.slots
+                    if router_output.assistant_reply:
+                        trace["llm_router_reply"] = router_output.assistant_reply
+                    
+                    # Use router decision
+                    if router_output.route == "smalltalk":
+                        route = _ROUTE_SMALLTALK
+                    elif router_output.route == "calendar":
+                        route = _calendar_route_from_intent(router_output.calendar_intent)
+                    else:
+                        route = _ROUTE_UNKNOWN
+                    
+                    trace["route_reason"] = ["llm_router"]
+                    
+                    if self._config.debug:
+                        logger.info(f"[Router] route={router_output.route}, intent={router_output.calendar_intent}, confidence={router_output.confidence:.2f}")
+                except Exception as e:
+                    logger.warning(f"Router failed: {e}")
+                    # Fallback to deterministic routing
 
             if not route:
                 route = _detect_route(
