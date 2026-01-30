@@ -23,7 +23,7 @@ from bantz.brain.brain_loop import BrainLoop, BrainLoopConfig
 from bantz.brain.json_repair import RepairLLM, validate_or_repair_action
 from bantz.brain.llm_router import JarvisLLMRouter
 from bantz.core.events import Event, EventBus, EventType
-from bantz.llm.ollama_client import LLMMessage, OllamaClient
+from bantz.llm.base import LLMMessage, create_client
 from bantz.policy.engine import PolicyEngine
 from bantz.policy.risk_map import RiskMap
 
@@ -256,11 +256,14 @@ class OllamaTextLLM(RepairLLM):
         timeout_seconds: float,
         temperature: float = 0.2,
         max_tokens: int = 768,
+        backend: str = "ollama",
     ):
-        self._client = OllamaClient(
+        # Use factory to create appropriate client
+        self._client = create_client(
+            backend=backend,
             base_url=base_url,
             model=model,
-            timeout_seconds=timeout_seconds,
+            timeout=timeout_seconds,
         )
         self._temperature = float(temperature)
         self._max_tokens = int(max_tokens)
@@ -268,11 +271,11 @@ class OllamaTextLLM(RepairLLM):
 
     @property
     def base_url(self) -> str:
-        return self._client.base_url
+        return self._client.base_url if hasattr(self._client, 'base_url') else "unknown"
 
     @property
     def model(self) -> str:
-        return self._client.model
+        return self._client.model_name
 
     def is_available(self) -> bool:
         return self._client.is_available()
@@ -492,8 +495,14 @@ def _iter_input_lines() -> Iterable[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Jarvis-like BrainLoop Calendar demo (Issue #100)")
+    
+    # LLM Backend Configuration
+    parser.add_argument("--llm-backend", default="ollama", choices=["ollama", "vllm"],
+                        help="LLM backend: ollama (default) or vllm")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    parser.add_argument("--vllm-url", default="http://127.0.0.1:8000")
     parser.add_argument("--ollama-model", default="qwen2.5:3b-instruct")
+    parser.add_argument("--vllm-model", default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--max-tokens", type=int, default=768)
@@ -571,19 +580,36 @@ def main() -> int:
         })
     )
 
-    # LLM client.
+    # Determine backend-specific URL and model
+    backend = args.llm_backend.lower()
+    if backend == "vllm":
+        llm_url = args.vllm_url
+        llm_model = args.vllm_model
+        print(f"[DEMO] Using vLLM backend: {llm_url} model={llm_model}")
+    else:
+        llm_url = args.ollama_url
+        llm_model = args.ollama_model
+        print(f"[DEMO] Using Ollama backend: {llm_url} model={llm_model}")
+
+    # LLM client (backend-agnostic).
     llm = OllamaTextLLM(
-        base_url=args.ollama_url,
-        model=args.ollama_model,
+        base_url=llm_url,
+        model=llm_model,
         timeout_seconds=float(args.timeout),
         temperature=float(args.temperature),
         max_tokens=int(args.max_tokens),
+        backend=backend,
     )
 
     if not llm.is_available():
-        print(f"Ollama erişilemedi: {llm.base_url}")
-        print("- Başlat: ollama serve")
-        print(f"- Model indir: ollama pull {args.ollama_model}")
+        print(f"LLM backend erişilemedi: {llm_url}")
+        if backend == "ollama":
+            print("- Başlat: ollama serve")
+            print(f"- Model indir: ollama pull {llm_model}")
+        else:
+            print(f"- Başlat: python -m vllm.entrypoints.openai.api_server --model {llm_model} --port 8000")
+            print(f"- Veya mock server: python scripts/vllm_mock_server.py")
+        return 2
         return 2
 
     adapter = JarvisRepairingLLMAdapter(llm=llm, tools=tools)
@@ -592,15 +618,14 @@ def main() -> int:
     bus.subscribe_all(_print_event_stream)
 
     # LLM Router: Always active (Issue #126)
-    # Create a simple text-completion wrapper for router
+    # Router uses same client for consistent backend
     class RouterLLMWrapper:
-        def __init__(self, client: OllamaClient, temperature: float = 0.0):
+        def __init__(self, client, temperature: float = 0.0):
             self._client = client
             self._temperature = temperature
         
         def complete_text(self, prompt: str) -> str:
             """Simple text completion for router (no JSON mode)."""
-            from bantz.llm.ollama_client import LLMMessage
             messages = [LLMMessage(role="user", content=prompt)]
             return self._client.chat(
                 messages=messages,
@@ -611,18 +636,17 @@ def main() -> int:
     router_llm = RouterLLMWrapper(client=llm._client, temperature=0.0)
     router = JarvisLLMRouter(llm=router_llm)
     
-    # Warm-up Ollama to speed up first real request
+    # Warm-up LLM to speed up first real request
     if args.debug:
-        print("[DEMO] Warming up Ollama...")
+        print(f"[DEMO] Warming up {backend} backend...")
     try:
-        from bantz.llm.ollama_client import LLMMessage
         llm._client.chat(
             messages=[LLMMessage(role="user", content="test")],
             temperature=0.0,
             max_tokens=5,
         )
         if args.debug:
-            print("[DEMO] Ollama ready!")
+            print(f"[DEMO] {backend} backend ready!")
     except Exception as e:
         if args.debug:
             print(f"[DEMO] Warm-up warning: {e}")
