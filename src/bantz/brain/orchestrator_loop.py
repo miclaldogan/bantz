@@ -19,6 +19,7 @@ from typing import Any, Optional
 from bantz.agent.tools import ToolRegistry
 from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
 from bantz.brain.orchestrator_state import OrchestratorState
+from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
 from bantz.core.events import EventBus, EventType
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,8 @@ class OrchestratorConfig:
     max_steps: int = 8  # Max tool execution steps per turn
     debug: bool = False  # Debug mode (verbose logging)
     require_confirmation_for: list[str] = None  # Tools requiring confirmation
+    enable_safety_guard: bool = True  # Enable safety & policy checks (Issue #140)
+    security_policy: Optional[ToolSecurityPolicy] = None  # Custom security policy
     
     def __post_init__(self):
         if self.require_confirmation_for is None:
@@ -68,6 +71,14 @@ class OrchestratorLoop:
         self.tools = tools
         self.event_bus = event_bus or EventBus()
         self.config = config or OrchestratorConfig()
+        
+        # Initialize safety guard (Issue #140)
+        if self.config.enable_safety_guard:
+            self.safety_guard = SafetyGuard(
+                policy=self.config.security_policy or ToolSecurityPolicy()
+            )
+        else:
+            self.safety_guard = None
     
     def process_turn(
         self,
@@ -204,12 +215,13 @@ class OrchestratorLoop:
         output: OrchestratorOutput,
         state: OrchestratorState,
     ) -> list[dict[str, Any]]:
-        """Phase 2: Tool Execution (with confirmation firewall).
+        """Phase 2: Tool Execution (with safety guards & confirmation firewall).
         
-        Confirmation firewall:
-        - If tool is in require_confirmation_for list, check requires_confirmation=True
-        - If requires_confirmation but no pending confirmation, skip tool (ask first)
-        - If confirmed, execute tool
+        Safety guards (Issue #140):
+        - Tool allowlist/denylist check
+        - Route-tool match validation (no tools for smalltalk)
+        - Argument schema validation
+        - Confirmation firewall for destructive ops
         
         Returns:
             List of tool results
@@ -217,11 +229,48 @@ class OrchestratorLoop:
         if not output.tool_plan:
             return []
         
+        # Safety Guard: Filter tool plan based on route
+        filtered_tool_plan = output.tool_plan
+        if self.safety_guard:
+            filtered_tool_plan, violations = self.safety_guard.filter_tool_plan(
+                route=output.route,
+                tool_plan=output.tool_plan,
+            )
+            
+            if violations:
+                for violation in violations:
+                    logger.warning(f"[SAFETY] Tool plan violation: {violation.reason}")
+                    self.safety_guard.audit_decision(
+                        decision_type="filter_tool_plan",
+                        tool_name=violation.tool_name,
+                        allowed=False,
+                        reason=violation.reason,
+                        metadata=violation.metadata,
+                    )
+        
         tool_results = []
         
-        for tool_name in output.tool_plan:
+        for tool_name in filtered_tool_plan:
             if self.config.debug:
                 logger.debug(f"[ORCHESTRATOR] Executing tool: {tool_name}")
+            
+            # Safety Guard: Check tool allowlist/denylist
+            if self.safety_guard:
+                allowed, deny_reason = self.safety_guard.check_tool_allowed(tool_name)
+                if not allowed:
+                    logger.warning(f"[SAFETY] Tool '{tool_name}' denied: {deny_reason}")
+                    self.safety_guard.audit_decision(
+                        decision_type="tool_allowlist",
+                        tool_name=tool_name,
+                        allowed=False,
+                        reason=deny_reason or "Policy violation",
+                    )
+                    tool_results.append({
+                        "tool": tool_name,
+                        "success": False,
+                        "error": deny_reason,
+                    })
+                    continue
             
             # Confirmation firewall (destructive operations)
             if tool_name in self.config.require_confirmation_for:
@@ -256,7 +305,7 @@ class OrchestratorLoop:
                     logger.info(f"Tool {tool_name} executing with confirmation.")
                     state.clear_pending_confirmation()
             
-            # Execute tool
+            # Get tool definition
             try:
                 tool = self.tools.get(tool_name)
                 if tool is None:
@@ -268,7 +317,26 @@ class OrchestratorLoop:
                 # Build parameters from slots
                 params = self._build_tool_params(tool_name, output.slots)
                 
-                # Execute
+                # Safety Guard: Validate tool arguments
+                if self.safety_guard:
+                    valid, error = self.safety_guard.validate_tool_args(tool, params)
+                    if not valid:
+                        logger.warning(f"[SAFETY] Tool '{tool_name}' args invalid: {error}")
+                        self.safety_guard.audit_decision(
+                            decision_type="arg_validation",
+                            tool_name=tool_name,
+                            allowed=False,
+                            reason=error or "Invalid arguments",
+                            metadata={"params": params},
+                        )
+                        tool_results.append({
+                            "tool": tool_name,
+                            "success": False,
+                            "error": f"Invalid arguments: {error}",
+                        })
+                        continue
+                
+                # Execute tool
                 result = tool.function(**params)
                 
                 tool_results.append({
@@ -279,6 +347,16 @@ class OrchestratorLoop:
                 
                 # Add to state
                 state.add_tool_result(tool_name, result, success=True)
+                
+                # Audit successful execution
+                if self.safety_guard:
+                    self.safety_guard.audit_decision(
+                        decision_type="tool_execute",
+                        tool_name=tool_name,
+                        allowed=True,
+                        reason="Tool executed successfully",
+                        metadata={"params": params},
+                    )
                 
                 # Emit tool event
                 self.event_bus.publish("tool.call", {
@@ -383,13 +461,15 @@ class OrchestratorLoop:
         state.add_conversation_turn(user_input, output.assistant_reply)
         
         # Update trace
+        success_count = sum(1 for r in tool_results if r.get("success", False))
         state.update_trace(
             route_source="llm",  # Everything comes from LLM now
             route=output.route,
             intent=output.calendar_intent,
             confidence=output.confidence,
             tool_plan_len=len(output.tool_plan),
-            tools_executed=len(tool_results),
+            tools_attempted=len(tool_results),
+            tools_executed=success_count,  # Only successful tools
             tools_success=[r.get("success", False) for r in tool_results],
             requires_confirmation=output.requires_confirmation,
             ask_user=output.ask_user,
