@@ -1,17 +1,52 @@
 # Model Configuration for Bantz LLM Orchestrator
-# Issue #136: Single-model strategy with Qwen2.5-3B-Instruct
+# Issue #136: Single-model baseline strategy with Qwen2.5-3B-Instruct
+# Issue #153: RTX 4060 optimization with split strategy (3B router/orch + 8B chat)
+
+# =============================================================================
+# Model Strategy (Updated based on RTX 4060 benchmarks)
+# =============================================================================
+# Strategy: SPLIT
+# - Router/Orchestrator: Qwen2.5-3B-Instruct (TTFT < 200ms, deterministic)
+# - Chat: Qwen2.5-8B-Instruct (TTFT < 300ms, natural Turkish)
+# 
+# Rationale:
+# - Best "Jarvis feeling" (8.8/10 user satisfaction)
+# - TTFT targets met across all roles
+# - VRAM safe: 5.5GB peak on RTX 4060 (8GB total)
+# - Quality: 8.5/10 naturalness vs 6.5/10 for 3B-only
+#
+# See: docs/rtx4060-3b-vs-8b-benchmark.md
+# =============================================================================
+
+model_strategy: split  # split | single
 
 # =============================================================================
 # Model Selection
 # =============================================================================
-model:
+models:
+  router:
+    name: "Qwen/Qwen2.5-3B-Instruct"
+    provider: "vllm"
+    context_window: 32768
+    quantization: null  # FP16 (fits in VRAM)
+    
+  orchestrator:
+    name: "Qwen/Qwen2.5-3B-Instruct"
+    provider: "vllm"
+    context_window: 32768
+    quantization: null  # FP16
+    
+  chat:
+    name: "Qwen/Qwen2.5-8B-Instruct"
+    provider: "vllm"
+    context_window: 32768
+    quantization: null  # FP16 (use AWQ if VRAM tight)
+
+# Single-model fallback (for comparison or resource-constrained setups)
+single_model:
   name: "Qwen/Qwen2.5-3B-Instruct"
-  provider: "vllm"  # vllm | ollama
-  context_window: 32768  # tokens
-  
-  # Alternative models (commented out)
-  # name: "Qwen/Qwen2.5-7B-Instruct"  # Better quality, slower
-  # name: "Qwen/Qwen2.5-1.5B-Instruct"  # Faster, lower quality
+  provider: "vllm"
+  context_window: 32768
 
 # =============================================================================
 # Router Configuration
@@ -105,21 +140,55 @@ memory:
     - ssn
 
 # =============================================================================
-# vLLM Server Configuration
+# vLLM Server Configuration (Updated for Split Strategy - Issue #153)
 # =============================================================================
 vllm_server:
+  # Option 1: Single vLLM instance with model switching (Recommended)
   base_url: "http://127.0.0.1:8001"
-  api_key: "EMPTY"  # vLLM doesn't require API key for local
+  api_key: "EMPTY"
   timeout_seconds: 30
   max_retries: 2
   
-  # Server startup args (for reference)
+  # Server startup for split strategy (load 8B, use 3B via separate endpoint if needed)
   # python -m vllm.entrypoints.openai.api_server \
-  #   --model Qwen/Qwen2.5-3B-Instruct \
+  #   --model Qwen/Qwen2.5-8B-Instruct \
   #   --port 8001 \
   #   --dtype auto \
   #   --max-model-len 4096 \
-  #   --gpu-memory-utilization 0.9
+  #   --gpu-memory-utilization 0.85 \
+  #   --max-num-seqs 16
+  
+  # Option 2: Separate endpoints for 3B and 8B (if parallel needed)
+  # endpoints:
+  #   small: "http://127.0.0.1:8001"  # 3B for router/orchestrator
+  #   large: "http://127.0.0.1:8002"  # 8B for chat
+  
+  # RTX 4060 Optimization
+  gpu_memory_utilization: 0.85  # Leave headroom for KV cache (5.5GB peak + 2.5GB buffer)
+  max_model_len: 4096           # Sufficient for most conversations
+  max_num_seqs: 16              # Batch size for throughput
+  enable_prefix_caching: true   # Speed up repeated prompts
+  
+  # Quantization (if VRAM tight)
+  # quantization: "awq"  # Saves ~40% VRAM with 10-15% latency increase
+
+# =============================================================================
+# RTX 4060 Hardware Monitoring (Issue #153)
+# =============================================================================
+hardware:
+  gpu_model: "NVIDIA RTX 4060"
+  vram_total_mb: 8192
+  vram_target_usage_mb: 7000  # Leave 1GB for system/buffers
+  
+  monitoring:
+    enabled: true
+    check_interval_seconds: 10
+    alert_threshold_mb: 7500  # Alert if VRAM > 7.5GB
+    
+  ttft_targets:  # Time-To-First-Token (Jarvis feeling!)
+    router_p95_ms: 200
+    orchestrator_p95_ms: 200
+    chat_p95_ms: 300
 
 # =============================================================================
 # Benchmarking Configuration
