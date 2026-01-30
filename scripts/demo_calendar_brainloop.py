@@ -590,11 +590,34 @@ def main() -> int:
     bus = EventBus()
     bus.subscribe_all(_print_event_stream)
 
+    # LLM Router: Always active (Issue #126)
+    # Create a simple text-completion wrapper for router
+    class OllamaTextLLM:
+        def __init__(self, client: OllamaClient, temperature: float = 0.0):
+            self._client = client
+            self._temperature = temperature
+        
+        def complete_text(self, prompt: str) -> str:
+            """Simple text completion for router (no JSON mode)."""
+            messages = [{"role": "user", "content": prompt}]
+            return self._client.complete(
+                messages=messages,
+                temperature=self._temperature,
+                seed=42,  # Deterministic for router
+            )
+    
+    router_llm = OllamaTextLLM(client=llm._client, temperature=0.0)
+    router = JarvisLLMRouter(llm=router_llm)
+    
+    if args.debug:
+        print("[DEMO] LLM Router enabled (always active)")
+
     loop = BrainLoop(
         llm=adapter,
         tools=tools,
         event_bus=bus,
         config=BrainLoopConfig(max_steps=int(args.max_steps), debug=bool(args.debug)),
+        router=router,
     )
 
     # Shared state across turns: keeps policy pending action + session confirmation memory.

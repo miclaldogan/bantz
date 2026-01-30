@@ -66,3 +66,44 @@ def test_event_stream_for_deterministic_list_events_is_ordered() -> None:
     assert joined.find(EventType.FOUND.value) > joined.find(EventType.PROGRESS.value)
     assert joined.find(EventType.SUMMARIZING.value) > joined.find(EventType.FOUND.value)
     assert joined.find(EventType.RESULT.value) > joined.find(EventType.SUMMARIZING.value)
+
+
+def test_evening_window_uses_correct_time_range() -> None:
+    """Issue #101: evening window (18:00-24:00) for 'bu akşam' queries."""
+
+    tools = ToolRegistry()
+    received_params = {}
+
+    def list_events(**params):
+        received_params.update(params)
+        return {"ok": True, "count": 0, "events": []}
+
+    tools.register(
+        Tool(
+            name="calendar.list_events",
+            description="list",
+            parameters={"type": "object", "properties": {}},
+            function=list_events,
+        )
+    )
+
+    bus = EventBus()
+    loop = BrainLoop(llm=_FailingLLM(), tools=tools, event_bus=bus, config=BrainLoopConfig(max_steps=1, debug=False))
+    res = loop.run(
+        turn_input="Bu akşam planım var mı?",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T00:00:00+03:00", "time_max": "2026-01-29T00:00:00+03:00"},
+            "evening_window": {"time_min": "2026-01-28T18:00:00+03:00", "time_max": "2026-01-29T00:00:00+03:00"},
+        },
+        policy=None,
+        context={"session_id": "t"},
+    )
+
+    assert res.kind == "say"
+    # Verify that evening_window was used (18:00-24:00), not today_window (00:00-24:00)
+    assert "time_min" in received_params
+    assert "time_max" in received_params
+    assert received_params["time_min"] == "2026-01-28T18:00:00+03:00"
+    assert received_params["time_max"] == "2026-01-29T00:00:00+03:00"
