@@ -784,44 +784,31 @@ def _calendar_route_from_intent(intent: str) -> str:
     return _ROUTE_CALENDAR_QUERY  # Default to query for calendar route
 
 
-def _llm_parse_confirmation(user_text: str, llm_wrapper: Any) -> str:
+def _llm_parse_confirmation(user_text: str, llm_wrapper: Any = None) -> str:
     """
     Use LLM to parse user's response to a confirmation question.
     Returns: 'confirm', 'reject', or 'unclear'
+    
+    For now, uses keyword matching (simple and reliable).
+    Future: Can enhance with LLM call for ambiguous cases.
     """
-    prompt = f"""Kullanıcıya bir onay sorusu soruldu. Kullanıcının cevabı onay mı, red mi, yoksa belirsiz mi?
-
-Kullanıcı cevabı: "{user_text}"
-
-Sadece şu kelimeleri kullanarak cevap ver:
-- "confirm" (onayladı: evet, tamam, olur, onaylıyorum, devam, uygula, ekle, yap vb.)
-- "reject" (reddetti: hayır, iptal, vazgeç, istemiyorum, olmaz vb.)
-- "unclear" (belirsiz: anlaşılmıyor veya alakasız cevap)
-
-Cevap:"""
-
-    try:
-        from bantz.llm.ollama_client import LLMMessage
-        response = llm_wrapper.chat(
-            messages=[LLMMessage(role="user", content=prompt)],
-            temperature=0.0,
-            max_tokens=10,
-        )
-        result = response.content.strip().lower()
-        if "confirm" in result:
-            return "confirm"
-        if "reject" in result:
-            return "reject"
-        return "unclear"
-    except Exception as e:
-        logger.warning(f"LLM confirmation parse failed: {e}")
-        # Fallback to simple keyword matching
-        t = _normalize_text_for_match(user_text)
-        if any(w in t for w in ["evet", "tamam", "olur", "onay", "devam", "uygula", "ekle", "yap"]):
-            return "confirm"
-        if any(w in t for w in ["hayir", "hayır", "iptal", "vazgec", "vazgeç", "istemiyorum", "olmaz"]):
-            return "reject"
-        return "unclear"
+    t = _normalize_text_for_match(user_text)
+    
+    # Check for confirmation keywords
+    if any(w in t for w in ["evet", "tamam", "olur", "onay", "onayliyorum", "devam", "uygula", "ekle", "yap", "tamamdir"]):
+        return "confirm"
+    
+    # Check for rejection keywords
+    if any(w in t for w in ["hayir", "hayır", "iptal", "vazgec", "vazgeç", "istemiyorum", "olmaz", "bosver", "boşver"]):
+        return "reject"
+    
+    # If just a number "1" or similar, check context
+    if t.strip() in ["1", "bir"]:
+        return "confirm"
+    if t.strip() in ["0", "sifir", "sıfır"]:
+        return "reject"
+    
+    return "unclear"
 
 
 def _window_from_ctx(ctx: dict[str, Any], *, day_hint: Optional[str]) -> Optional[dict[str, Any]]:
@@ -1901,8 +1888,8 @@ class BrainLoop:
         if isinstance(state, dict) and state.get(_DIALOG_STATE_KEY) == "PENDING_LLM_CONFIRMATION":
             pending_action = state.get("_pending_confirmation_action")
             if isinstance(pending_action, dict):
-                # Use LLM to parse user's confirmation/rejection
-                confirmation_result = _llm_parse_confirmation(user_text, self._router._llm if self._router else None)
+                # Parse user's confirmation/rejection (keyword-based)
+                confirmation_result = _llm_parse_confirmation(user_text)
                 
                 if confirmation_result == "confirm":
                     # User confirmed - execute the action
