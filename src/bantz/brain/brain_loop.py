@@ -45,6 +45,7 @@ _CALENDAR_PENDING_INTENT_KEY = "_calendar_pending_intent"
 _CALENDAR_LAST_EVENTS_KEY = "_calendar_last_events"
 
 _TRACE_KEY = "_dialog_trace"
+_DIALOG_SUMMARY_KEY = "_dialog_summary"
 
 _PLANNING_PENDING_DRAFT_KEY = "_planning_pending_plan_draft"
 _PLANNING_CONFIRMED_DRAFT_KEY = "_planning_confirmed_plan_draft"
@@ -770,6 +771,19 @@ def _calendar_route_from_text(user_text: str) -> str:
     return _ROUTE_CALENDAR_QUERY
 
 
+def _calendar_route_from_intent(intent: str) -> str:
+    """Map LLM Router calendar intent to internal route constant."""
+    if intent == "create":
+        return _ROUTE_CALENDAR_CREATE
+    if intent == "modify":
+        return _ROUTE_CALENDAR_MODIFY
+    if intent == "cancel":
+        return _ROUTE_CALENDAR_CANCEL
+    if intent == "query":
+        return _ROUTE_CALENDAR_QUERY
+    return _ROUTE_CALENDAR_QUERY  # Default to query for calendar route
+
+
 def _window_from_ctx(ctx: dict[str, Any], *, day_hint: Optional[str]) -> Optional[dict[str, Any]]:
     if day_hint == "today":
         w = ctx.get("today_window")
@@ -787,6 +801,9 @@ def _window_from_ctx(ctx: dict[str, Any], *, day_hint: Optional[str]) -> Optiona
         w = ctx.get("tomorrow_window")
         return w if isinstance(w, dict) else None
     if day_hint == "evening":
+        w = ctx.get("evening_window")
+        if isinstance(w, dict):
+            return w
         w = ctx.get("today_window")
         return w if isinstance(w, dict) else None
     w = ctx.get("today_window")
@@ -1294,11 +1311,13 @@ class BrainLoop:
         tools: ToolRegistry,
         event_bus: Optional[EventBus] = None,
         config: Optional[BrainLoopConfig] = None,
+        router: Optional[Any] = None,
     ):
         self._llm = llm
         self._tools = tools
         self._events = event_bus or get_event_bus()
         self._config = config or BrainLoopConfig()
+        self._router = router
 
     def run(
         self,
@@ -1380,6 +1399,42 @@ class BrainLoop:
             if isinstance(state, dict):
                 state[_TRACE_KEY] = trace
             return trace
+
+        def _update_dialog_summary(
+            *,
+            user_input: str,
+            result_kind: str,
+            result_text: str,
+            tool_calls: Optional[list[str]] = None,
+        ) -> None:
+            """Update rolling dialog summary (memory layer).
+            
+            Keeps last N turns in 1-2 sentence format.
+            Format: "User asked X. Assistant did Y. Tool Z returned W."
+            """
+            try:
+                if not isinstance(state, dict):
+                    return
+
+                # Get existing summary
+                existing = state.get(_DIALOG_SUMMARY_KEY)
+                summary_lines: list[str] = []
+                if isinstance(existing, str) and existing.strip():
+                    summary_lines = [line.strip() for line in existing.strip().split("\n") if line.strip()]
+
+                # Build new turn summary
+                turn_summary = f"User: {user_input[:80]}"
+                if tool_calls:
+                    turn_summary += f" | Tools: {', '.join(tool_calls)}"
+                turn_summary += f" | Result: {result_kind}"
+
+                # Keep last 3 turns
+                summary_lines.append(turn_summary)
+                summary_lines = summary_lines[-3:]
+
+                state[_DIALOG_SUMMARY_KEY] = "\n".join(summary_lines)
+            except Exception as e:
+                logger.debug(f"Dialog summary update failed: {e}")
 
         def _route_reason_tokens(
             *,
@@ -2810,6 +2865,61 @@ class BrainLoop:
                 except Exception:
                     route = ""
 
+            # LLM Router: If available, use it FIRST (always active)
+            if self._router is not None and not route:
+                try:
+                    # Get dialog summary for context
+                    dialog_summary = state.get(_DIALOG_SUMMARY_KEY) if isinstance(state, dict) else ""
+                    if not isinstance(dialog_summary, str):
+                        dialog_summary = ""
+                    
+                    # Call router
+                    router_output = self._router.route(
+                        user_input=user_text,
+                        dialog_summary=dialog_summary,
+                        session_context=ctx,
+                    )
+                    
+                    # Map router output to trace
+                    trace["llm_router_route"] = router_output.route
+                    trace["llm_router_intent"] = router_output.calendar_intent
+                    trace["llm_router_confidence"] = router_output.confidence
+                    trace["llm_router_tool_plan"] = router_output.tool_plan
+                    trace["llm_router_slots"] = router_output.slots
+                    if router_output.assistant_reply:
+                        trace["llm_router_reply"] = router_output.assistant_reply
+                    
+                    # Use router decision
+                    if router_output.route == "smalltalk":
+                        route = _ROUTE_SMALLTALK
+                    elif router_output.route == "calendar":
+                        route = _calendar_route_from_intent(router_output.calendar_intent)
+                    else:
+                        route = _ROUTE_UNKNOWN
+                    
+                    trace["route_reason"] = ["llm_router"]
+                    
+                    if self._config.debug:
+                        logger.info(f"[Router] route={router_output.route}, intent={router_output.calendar_intent}, confidence={router_output.confidence:.2f}")
+                    
+                    # If router provides assistant reply for smalltalk, return immediately (no menu)
+                    if router_output.route == "smalltalk" and router_output.assistant_reply:
+                        reply_text = str(router_output.assistant_reply).strip()
+                        if reply_text:
+                            try:
+                                self._events.publish(EventType.RESULT.value, {"text": reply_text}, source="brain")
+                            except Exception:
+                                pass
+                            return BrainResult(
+                                kind="say",
+                                text=reply_text,
+                                steps_used=0,
+                                metadata={"trace": trace, "route": "smalltalk", "router": "llm"},
+                            )
+                except Exception as e:
+                    logger.warning(f"Router failed: {e}")
+                    # Fallback to deterministic routing
+
             if not route:
                 route = _detect_route(
                 user_text,
@@ -3775,7 +3885,7 @@ class BrainLoop:
                     pass
                 return BrainResult(
                     kind="say",
-                    text="Vazgeçtim.",
+                    text="İptal ediyorum efendim.",
                     steps_used=0,
                     metadata=_std_metadata(
                         ctx=ctx,
