@@ -2901,6 +2901,21 @@ class BrainLoop:
                     
                     if self._config.debug:
                         logger.info(f"[Router] route={router_output.route}, intent={router_output.calendar_intent}, confidence={router_output.confidence:.2f}")
+                    
+                    # If router provides assistant reply for smalltalk, return immediately (no menu)
+                    if router_output.route == "smalltalk" and router_output.assistant_reply:
+                        reply_text = str(router_output.assistant_reply).strip()
+                        if reply_text:
+                            try:
+                                self._events.publish(EventType.RESULT.value, {"text": reply_text}, source="brain")
+                            except Exception:
+                                pass
+                            return BrainResult(
+                                kind="say",
+                                text=reply_text,
+                                steps_used=0,
+                                metadata={"trace": trace, "route": "smalltalk", "router": "llm"},
+                            )
                 except Exception as e:
                     logger.warning(f"Router failed: {e}")
                     # Fallback to deterministic routing
