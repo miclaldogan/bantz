@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from typing import List, Optional
 
-
-@dataclass(frozen=True)
-class LLMMessage:
-    role: str  # "system" | "user" | "assistant"
-    content: str
+# Import base interface (new abstraction)
+from bantz.llm.base import (
+    LLMClient,
+    LLMMessage,
+    LLMResponse,
+    LLMConnectionError,
+    LLMModelNotFoundError,
+    LLMTimeoutError,
+    LLMInvalidResponseError,
+)
 
 
 class OllamaClient:
@@ -127,3 +131,80 @@ class OllamaClient:
 
         data = r.json() or {}
         return (data.get("message") or {}).get("content", "").strip()
+
+
+class OllamaClientAdapter(LLMClient):
+    """Adapter that makes OllamaClient conform to LLMClient interface.
+    
+    This allows existing code to work unchanged while enabling backend abstraction.
+    """
+    
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:11434",
+        model: str = "qwen2.5:3b-instruct",
+        timeout_seconds: float = 120.0,
+    ):
+        self._client = OllamaClient(
+            base_url=base_url,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
+    
+    def is_available(self, *, timeout_seconds: float = 1.5) -> bool:
+        return self._client.is_available(timeout_seconds=timeout_seconds)
+    
+    def chat(
+        self,
+        messages: List[LLMMessage],
+        *,
+        temperature: float = 0.4,
+        max_tokens: int = 512,
+    ) -> str:
+        try:
+            return self._client.chat(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except RuntimeError as e:
+            msg = str(e).lower()
+            if "model" in msg and "not found" in msg:
+                raise LLMModelNotFoundError(str(e)) from e
+            elif "bağlanamadım" in msg or "connection" in msg:
+                raise LLMConnectionError(str(e)) from e
+            elif "timeout" in msg:
+                raise LLMTimeoutError(str(e)) from e
+            else:
+                raise LLMInvalidResponseError(str(e)) from e
+    
+    def chat_detailed(
+        self,
+        messages: List[LLMMessage],
+        *,
+        temperature: float = 0.4,
+        max_tokens: int = 512,
+        seed: Optional[int] = None,
+    ) -> LLMResponse:
+        # Ollama doesn't return detailed metadata by default
+        # We'll just wrap the simple response
+        content = self.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        return LLMResponse(
+            content=content,
+            model=self._client.model,
+            tokens_used=-1,  # Ollama doesn't expose this easily
+            finish_reason="stop",
+        )
+    
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
+        """Simple text completion (used by Router)."""
+        messages = [LLMMessage(role="user", content=prompt)]
+        return self.chat(messages, temperature=temperature, max_tokens=max_tokens)
+    
+    @property
+    def model_name(self) -> str:
+        return self._client.model
+    
+    @property
+    def backend_name(self) -> str:
+        return "ollama"
