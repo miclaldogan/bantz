@@ -13,10 +13,10 @@ While the source code is publicly visible for educational purposes, we are **not
 ✅ **View & Learn**: Study the code to learn about voice assistants, browser automation, and LLM integration.
 
 ✅ **Report Issues**: If you find bugs or security vulnerabilities, please report them:
-- Bugs: [Open an issue](https://github.com/miclaldogan/bantz/issues)
+- Bugs: [Open a bug report](https://github.com/miclaldogan/bantz/issues/new?template=bug_report.md)
 - Security: See [SECURITY.md](SECURITY.md)
 
-✅ **Suggest Features**: Open an issue with the `enhancement` label to suggest features.
+✅ **Suggest Features**: [Open a feature planning issue](https://github.com/miclaldogan/bantz/issues/new?template=feature_planning.md) to suggest features.
 
 ✅ **Star the Repo**: Show your support by starring the repository! ⭐
 
