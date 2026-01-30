@@ -457,7 +457,7 @@ def run_benchmark(
     if backend == "ollama":
         client = create_client("ollama", base_url="http://127.0.0.1:11434", model="qwen2.5:3b-instruct")
     elif backend == "vllm":
-        client = create_client("vllm", base_url="http://127.0.0.1:8000", model="Qwen/Qwen2.5-3B-Instruct")
+        client = create_client("vllm", base_url="http://127.0.0.1:8001", model="Qwen/Qwen2.5-3B-Instruct")
     else:
         raise ValueError(f"Unknown backend: {backend}")
     
