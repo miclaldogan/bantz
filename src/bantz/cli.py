@@ -24,6 +24,7 @@ from bantz.router.engine import Router
 from bantz.router.policy import Policy
 from bantz.router.context import ConversationContext
 from bantz.logs.logger import JsonlLogger
+from bantz.time_windows import evening_window
 
 
 def run_brainloop_demo_once(command: str) -> int:
@@ -46,11 +47,16 @@ def run_brainloop_demo_once(command: str) -> int:
     # Deterministic windows (stable enough for CLI demo).
     now = datetime.now().astimezone().replace(microsecond=0)
     day_end = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0)
+    today_date = now.date()
+    tz = now.tzinfo
+    evening_start, evening_end = evening_window(today_date, tz) if tz else (None, None)
     session_context = {
         "deterministic_render": True,
         "tz_name": "Europe/Istanbul",
         "today_window": {"time_min": now.isoformat(), "time_max": day_end.isoformat()},
     }
+    if evening_start and evening_end:
+        session_context["evening_window"] = {"time_min": evening_start, "time_max": evening_end}
 
     tools = ToolRegistry()
 

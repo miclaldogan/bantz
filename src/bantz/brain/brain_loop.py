@@ -787,6 +787,9 @@ def _window_from_ctx(ctx: dict[str, Any], *, day_hint: Optional[str]) -> Optiona
         w = ctx.get("tomorrow_window")
         return w if isinstance(w, dict) else None
     if day_hint == "evening":
+        w = ctx.get("evening_window")
+        if isinstance(w, dict):
+            return w
         w = ctx.get("today_window")
         return w if isinstance(w, dict) else None
     w = ctx.get("today_window")
