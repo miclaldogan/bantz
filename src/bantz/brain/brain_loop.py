@@ -784,6 +784,33 @@ def _calendar_route_from_intent(intent: str) -> str:
     return _ROUTE_CALENDAR_QUERY  # Default to query for calendar route
 
 
+def _llm_parse_confirmation(user_text: str, llm_wrapper: Any = None) -> str:
+    """
+    Use LLM to parse user's response to a confirmation question.
+    Returns: 'confirm', 'reject', or 'unclear'
+    
+    For now, uses keyword matching (simple and reliable).
+    Future: Can enhance with LLM call for ambiguous cases.
+    """
+    t = _normalize_text_for_match(user_text)
+    
+    # Check for confirmation keywords
+    if any(w in t for w in ["evet", "tamam", "olur", "onay", "onayliyorum", "devam", "uygula", "ekle", "yap", "tamamdir"]):
+        return "confirm"
+    
+    # Check for rejection keywords
+    if any(w in t for w in ["hayir", "hayır", "iptal", "vazgec", "vazgeç", "istemiyorum", "olmaz", "bosver", "boşver"]):
+        return "reject"
+    
+    # If just a number "1" or similar, check context
+    if t.strip() in ["1", "bir"]:
+        return "confirm"
+    if t.strip() in ["0", "sifir", "sıfır"]:
+        return "reject"
+    
+    return "unclear"
+
+
 def _window_from_ctx(ctx: dict[str, Any], *, day_hint: Optional[str]) -> Optional[dict[str, Any]]:
     if day_hint == "today":
         w = ctx.get("today_window")
@@ -1857,6 +1884,89 @@ class BrainLoop:
                     },
                 )
 
+        # Handle PENDING_LLM_CONFIRMATION state (from LLM Router)
+        if isinstance(state, dict) and state.get(_DIALOG_STATE_KEY) == "PENDING_LLM_CONFIRMATION":
+            pending_action = state.get("_pending_confirmation_action")
+            if isinstance(pending_action, dict):
+                # Parse user's confirmation/rejection (keyword-based)
+                confirmation_result = _llm_parse_confirmation(user_text)
+                
+                if confirmation_result == "confirm":
+                    # User confirmed - execute the action
+                    intent = pending_action.get("intent")
+                    slots = pending_action.get("slots")
+                    route = pending_action.get("route")
+                    
+                    # Clear confirmation state
+                    state.pop("_pending_confirmation_action", None)
+                    state[_DIALOG_STATE_KEY] = "IDLE"
+                    
+                    # Build calendar intent from router slots
+                    if intent == "create" and isinstance(slots, dict):
+                        pending_intent = {
+                            "action": "create",
+                            "source_text": pending_action.get("user_text", ""),
+                        }
+                        
+                        # Map router slots to calendar intent format
+                        if slots.get("time"):
+                            pending_intent["start"] = slots["time"]
+                        if slots.get("duration"):
+                            pending_intent["duration_minutes"] = int(slots["duration"])
+                        if slots.get("title"):
+                            pending_intent["summary"] = slots["title"]
+                        if slots.get("day_hint"):
+                            pending_intent["day_hint"] = slots["day_hint"]
+                        
+                        state[_CALENDAR_PENDING_INTENT_KEY] = pending_intent
+                        state["last_intent"] = route
+                        
+                        # Continue with calendar create flow
+                        trace = _ensure_trace()
+                        trace["llm_confirmation"] = "confirmed"
+                        
+                        # Acknowledge and proceed
+                        _emit_ack("Anladım efendim, ekliyorum.")
+                        
+                        # Re-run with calendar route
+                        return self.run(
+                            turn_input=pending_action.get("user_text", user_text),
+                            session_context=session_context,
+                            policy=policy,
+                            context=state,
+                        )
+                
+                elif confirmation_result == "reject":
+                    # User rejected - cancel
+                    state.pop("_pending_confirmation_action", None)
+                    state[_DIALOG_STATE_KEY] = "IDLE"
+                    
+                    reply = "Anlaşıldı efendim, iptal ediyorum."
+                    try:
+                        self._events.publish(EventType.RESULT.value, {"text": reply}, source="brain")
+                    except Exception:
+                        pass
+                    return BrainResult(
+                        kind="say",
+                        text=reply,
+                        steps_used=0,
+                        metadata={"trace": _ensure_trace(), "llm_confirmation": "rejected"},
+                    )
+                
+                else:
+                    # Unclear response - ask again
+                    reply = "Efendim anlayamadım, 'evet' ya da 'hayır' diyebilir misiniz?"
+                    try:
+                        self._events.publish(EventType.QUESTION.value, {"question": reply}, source="brain")
+                    except Exception:
+                        pass
+                    return BrainResult(
+                        kind="ask_user",
+                        text=reply,
+                        steps_used=0,
+                        metadata={"trace": _ensure_trace(), "llm_confirmation": "unclear"},
+                    )
+        
         # Deterministic state machine: confirmation > choice > router.
         # If we have a pending confirmation, do NOT consume pending choice menus.
         if (
@@ -2916,6 +3026,60 @@ class BrainLoop:
                                 steps_used=0,
                                 metadata={"trace": trace, "route": "smalltalk", "router": "llm"},
                             )
+                    
+                    # If router provides calendar intent with high confidence and slots, ask for confirmation
+                    if (router_output.route == "calendar" 
+                        and router_output.confidence >= 0.7 
+                        and router_output.slots
+                        and router_output.calendar_intent in ["create", "modify"]):
+                        
+                        # Store router slots in pending confirmation
+                        state["_pending_confirmation_action"] = {
+                            "intent": router_output.calendar_intent,
+                            "slots": router_output.slots,
+                            "route": route,
+                            "user_text": user_text,
+                        }
+                        state[_DIALOG_STATE_KEY] = "PENDING_LLM_CONFIRMATION"
+                        
+                        # Build confirmation message
+                        slots = router_output.slots
+                        if router_output.calendar_intent == "create":
+                            parts = ["Efendim"]
+                            
+                            # Time
+                            if slots.get("time"):
+                                parts.append(f"saat {slots['time']}'de")
+                            elif slots.get("day_hint"):
+                                parts.append(slots["day_hint"])
+                            
+                            # Duration
+                            if slots.get("duration"):
+                                parts.append(f"{slots['duration']} dakika sürecek")
+                            
+                            # Title
+                            title = slots.get("title", "etkinlik")
+                            parts.append(f"'{title}' etkinliğini ekliyorum")
+                            
+                            confirmation_msg = " ".join(parts) + ", onaylar mısınız?"
+                        
+                        elif router_output.calendar_intent == "modify":
+                            confirmation_msg = f"Efendim etkinliği değiştiriyorum, onaylar mısınız?"
+                        else:
+                            confirmation_msg = "Onaylar mısınız?"
+                        
+                        try:
+                            self._events.publish(EventType.RESULT.value, {"text": confirmation_msg}, source="brain")
+                        except Exception:
+                            pass
+                        
+                        return BrainResult(
+                            kind="say",
+                            text=confirmation_msg,
+                            steps_used=0,
+                            metadata={"trace": trace, "pending_confirmation": True},
+                        )
+                        
                 except Exception as e:
                     logger.warning(f"Router failed: {e}")
                     # Fallback to deterministic routing
