@@ -45,14 +45,12 @@ def list_models():
 
 @app.route("/v1/chat/completions", methods=["POST"])
 def chat_completions():
-    """Mock chat completions endpoint."""
+    """Handle chat completion requests."""
     data = request.json
-    
     messages = data.get("messages", [])
     temperature = data.get("temperature", 0.0)
-    max_tokens = data.get("max_tokens", 200)
     
-    # Get last user message
+    # Extract last user message
     user_message = ""
     for msg in reversed(messages):
         if msg.get("role") == "user":
@@ -64,6 +62,14 @@ def chat_completions():
     
     # Simulate processing time
     time.sleep(0.1)  # Mock latency
+    
+    # FIX: Token estimation - use full messages for prompt length
+    # Construct approximate prompt from all messages
+    full_prompt = "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages])
+    
+    # Realistic token estimation (rough approximation: 1 token ≈ 4 chars for Turkish)
+    prompt_tokens = max(len(full_prompt.split()), len(full_prompt) // 4)
+    completion_tokens = max(len(response_content.split()), len(response_content) // 4)
     
     return jsonify({
         "id": f"chatcmpl-mock-{int(time.time())}",
@@ -81,9 +87,9 @@ def chat_completions():
             }
         ],
         "usage": {
-            "prompt_tokens": len(user_message.split()),
-            "completion_tokens": len(response_content.split()),
-            "total_tokens": len(user_message.split()) + len(response_content.split())
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens
         }
     })
 

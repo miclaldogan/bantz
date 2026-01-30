@@ -213,11 +213,19 @@ def benchmark_router(
         # Check if JSON was valid (if we got an output, it was valid)
         success = output is not None
         
+        # Estimate tokens (fallback if client doesn't expose usage)
+        # Router prompt is typically: system prompt (~200 words) + user input
+        prompt_tokens = len(orchestrator.SYSTEM_PROMPT.split()) + len(prompt.split())
+        completion_tokens = len(json.dumps(output.raw_output).split()) if output else 0
+        
         return BenchmarkResult(
             scenario=f"router:{prompt[:30]}",
             backend=backend,
             latency_ms=elapsed_ms,
             success=success,
+            tokens_input=prompt_tokens,
+            tokens_output=completion_tokens,
+            tokens_total=prompt_tokens + completion_tokens,
         )
     except Exception as e:
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -250,11 +258,18 @@ def benchmark_orchestrator(
         
         success = output.route is not None
         
+        # Estimate tokens (system prompt + user input + output JSON)
+        prompt_tokens = len(orchestrator.SYSTEM_PROMPT.split()) + len(user_input.split())
+        completion_tokens = len(json.dumps(output.raw_output).split()) if output else 0
+        
         return BenchmarkResult(
             scenario=f"orchestrator:{scenario_name}",
             backend=backend,
             latency_ms=elapsed_ms,
             success=success,
+            tokens_input=prompt_tokens,
+            tokens_output=completion_tokens,
+            tokens_total=prompt_tokens + completion_tokens,
         )
     except Exception as e:
         elapsed_ms = (time.perf_counter() - start) * 1000
