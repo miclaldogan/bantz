@@ -14,6 +14,7 @@
   <a href="#installation">Installation</a> •
   <a href="#usage">Usage</a> •
   <a href="#roadmap">Roadmap</a> •
+  <a href="#contributing">Contributing</a> •
   <a href="#license">License</a>
 </p>
 
@@ -726,7 +727,19 @@ tail -f bantz.log.jsonl | jq
 
 ---
 
-## 📄 License
+## � Contributing
+
+**Bantz is currently a private/proprietary project**, but we welcome:
+
+- 🐛 **Bug Reports**: [Open a bug report](https://github.com/miclaldogan/bantz/issues/new?template=bug_report.md)
+- 💡 **Feature Suggestions**: [Open a feature planning issue](https://github.com/miclaldogan/bantz/issues/new?template=feature_planning.md)
+- 🔒 **Security Issues**: See [SECURITY.md](SECURITY.md)
+
+For more details, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+## �📄 License
 
 **Proprietary - All Rights Reserved**
 
