@@ -4,12 +4,12 @@ Epic: [#131 - vLLM Backend ile GPU Hızlı Jarvis LLM Katmanı](https://github.c
 
 ## Progress Overview
 
-**Overall: 1/10 issues completed (10%)**
+**Overall: 2/10 issues completed (20%)**
 
 | Issue | Status | Priority | Description |
 |-------|--------|----------|-------------|
 | [#132](https://github.com/miclaldogan/bantz/issues/132) | ✅ **DONE** | P0 | vLLM PoC — OpenAI-compatible server |
-| [#133](https://github.com/miclaldogan/bantz/issues/133) | 🚧 **IN PROGRESS** | P0 | LLM Backend Abstraction |
+| [#133](https://github.com/miclaldogan/bantz/issues/133) | ✅ **DONE** | P0 | LLM Backend Abstraction |
 | [#134](https://github.com/miclaldogan/bantz/issues/134) | ⏳ TODO | P0 | Router vLLM entegrasyonu (LLM-first) |
 | [#137](https://github.com/miclaldogan/bantz/issues/137) | ⏳ TODO | P0 | Demo Script Update |
 | [#140](https://github.com/miclaldogan/bantz/issues/140) | ⏳ TODO | P0 | Safety & Policy |
@@ -23,7 +23,7 @@ Epic: [#131 - vLLM Backend ile GPU Hızlı Jarvis LLM Katmanı](https://github.c
 
 **Must-have (P0):**
 - [x] #132: vLLM PoC ✅
-- [ ] #133: Backend Abstraction 🚧
+- [x] #133: Backend Abstraction ✅
 - [ ] #134: Router Integration
 - [ ] #137: Demo Update
 - [ ] #140: Safety & Policy
@@ -50,28 +50,48 @@ Epic: [#131 - vLLM Backend ile GPU Hızlı Jarvis LLM Katmanı](https://github.c
 - ✅ Determinism: 100% (10 requests identical)
 - ✅ Mock server fully functional
 
+### ✅ Issue #133: Backend Abstraction (PR #144)
+**Merged:** January 30, 2026
+
+**Deliverables:**
+- `src/bantz/llm/base.py` - LLMClient ABC interface
+- `src/bantz/llm/ollama_client.py` - OllamaClientAdapter (preserves existing behavior)
+- `src/bantz/llm/vllm_openai_client.py` - VLLMOpenAIClient (OpenAI-compatible)
+- `scripts/demo_calendar_brainloop.py` - Added `--llm-backend` flag
+- `tests/test_llm_clients.py` - 17 tests, all passing ✅
+
+**Backend Features:**
+- Consistent interface: `chat()`, `complete_text()`, `is_available()`
+- Factory function: `create_client(backend, base_url, model)`
+- Error types: `LLMConnectionError`, `LLMModelNotFoundError`, `LLMTimeoutError`
+- Detailed responses: `LLMResponse` with content, model, tokens, finish_reason
+- Router/BrainLoop work with any backend
+
+**Usage:**
+```bash
+# Ollama (default)
+python scripts/demo_calendar_brainloop.py --run
+
+# vLLM
+python scripts/demo_calendar_brainloop.py --llm-backend vllm --vllm-url http://127.0.0.1:8001 --run
+```
+
 ## Current Work
 
-### 🚧 Issue #133: Backend Abstraction
-**Status:** Starting now
-**Branch:** `feature/backend-abstraction-133`
+### ⏳ Issue #134: Router vLLM Integration
+**Status:** Ready to start
+**Branch:** Not yet created
 
 **Scope:**
-- Create `LLMClient` interface
-- Adapt `OllamaClient` to interface
-- Implement `VLLMOpenAIClient`
-- BrainLoop backend switching
-
-**Acceptance Criteria:**
-- [ ] BrainLoop works with `--llm-backend vllm|ollama`
-- [ ] Same test suite for both backends
-- [ ] Config-based backend selection
+- Router uses vLLM for classification (target <500ms)
+- Deterministic routing with seed
+- Fallback to Ollama if vLLM unavailable
 
 ## Next Steps
 
-1. **Complete #133** (Backend Abstraction) - Current
-2. **Start #134** (Router Integration) - After #133
-3. **Implement #137** (Demo Update) - After #133
+1. **Start #134** (Router Integration) - Next priority
+2. **Implement #137** (Demo Update) - After #134 (already has `--llm-backend` flag ✅)
+3. **Design #140** (Safety & Policy) - After #134
 
 ## Documents
 
