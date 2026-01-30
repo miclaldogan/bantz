@@ -111,6 +111,14 @@ TIME AWARENESS:
 - "yarın sabah" → window_hint="morning"
 - "bugün" → window_hint="today"
 - "bu hafta" → window_hint="week"
+- Türkçe saat formatları:
+  - "sekize" / "sekizde" → time="20:00" (akşam context'inde)
+  - "dokuza" / "dokuzda" → time="09:00" veya "21:00" (context'e göre)
+  - "beşe" / "beşte" → time="17:00"
+  - "altıya" / "altıda" → time="18:00"
+  - "on ikiye" → time="12:00" veya "00:00"
+  - "sabah 9" → time="09:00"
+  - "akşam 8" / "akşam sekiz" → time="20:00"
 
 ÖRNEKLER:
 USER: hey bantz nasılsın
@@ -170,6 +178,16 @@ USER: bu akşam neler yapacağız
   "slots": {"window_hint": "evening"},
   "confidence": 0.9,
   "tool_plan": ["calendar.list_events"],
+  "assistant_reply": ""
+}
+
+USER: bu akşam sekize parti ekle
+→ {
+  "route": "calendar",
+  "calendar_intent": "create",
+  "slots": {"time": "20:00", "title": "parti", "window_hint": "evening", "duration": null},
+  "confidence": 0.7,
+  "tool_plan": ["calendar.create_event"],
   "assistant_reply": ""
 }
 """
