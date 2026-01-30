@@ -1,6 +1,8 @@
 # Model Strategy (Issue #136)
 
-> **Karar:** LLM-first architecture - Tek model tüm işleri yapar
+> **Karar (MVP):** LLM-first architecture - Tek model tüm işleri yapar
+>
+> **Not (2026-01-31):** Kod tarafında **hibrit (3B planner + 8B finalizer)** desteği eklendi; üretim kararı için **real vLLM ölçümü** şart.
 
 ## Executive Summary
 
@@ -122,7 +124,7 @@ Bantz, **tek-model stratejisi** ile başlar:
 ### 3.1 Latency Targets (vLLM, single GPU)
 ```
 Router:
-- p50: < 100ms ✅ (currently ~110ms with mock)
+- p50: < 100ms (target)
 - p95: < 150ms
 - p99: < 200ms
 
@@ -139,7 +141,7 @@ Chat:
 
 ### 3.2 Throughput Targets
 ```
-Router: > 100 tokens/sec ✅ (currently ~120-220 with mock)
+Router: > 100 tokens/sec (target)
 Orchestrator: > 80 tokens/sec
 Chat: > 50 tokens/sec
 ```
@@ -159,9 +161,9 @@ Jarvis Personality: Subjective A/B test
 ### Phase 1: Single Model MVP (Current)
 - [x] Mock server ile baseline metrics
 - [x] Token tracking ve throughput measurement
-- [ ] Real vLLM server setup
-- [ ] Benchmark with iterations=30
-- [ ] Establish performance baseline
+- [x] Real vLLM ile ölçüm altyapısı (TTFT streaming + VRAM polling)
+- [ ] Benchmark with iterations=30 (RTX 4050 6GB üzerinde)
+- [ ] Establish performance baseline (measured)
 
 **Deliverables:**
 - `scripts/bench_llm_orchestrator.py` (✅ Done)
@@ -201,12 +203,12 @@ Jarvis Personality: Subjective A/B test
 ### Completed (✅)
 - Mock server with Turkish pattern matching
 - Token tracking in benchmark script
-- Baseline metrics (mock): ~110ms p50, 120-220 tok/sec
-- Diverse responses (calendar vs smalltalk)
+- vLLM benchmark harness: TTFT via streaming + VRAM peak sampling
+- Hibrit altyapı: planner/router + finalizer ayrımı (opsiyonel)
+- scripts/jarvis.sh preflight: Ollama yerine vLLM /v1/models kontrolü
 
 ### In Progress (🚧)
-- Real vLLM server setup
-- iterations=30 benchmark
+- iterations=30 real vLLM benchmark (measured TTFT/VRAM/tok/s)
 - Production config tuning
 
 ### Blocked (❌)
@@ -216,28 +218,21 @@ Jarvis Personality: Subjective A/B test
 
 ## 6. Decision Log
 
-### 2026-01-31: Split Strategy Adopted (Issue #153) ✅
-**Decision:** 3B router/orchestrator + 8B chat
+### 2026-01-31: Hibrit Altyapı Eklendi (Planner + Finalizer) ✅
+**Decision (code):** 3B planner/router/orchestrator + opsiyonel 8B finalizer
 
 **Why:**
-- RTX 4060 benchmark results (30 iterations, real vLLM):
-  - 3B-only: TTFT excellent (< 200ms) but quality issues (6.5/10 naturalness)
-  - 8B-only: Quality excellent (9/10) but TTFT borderline (280ms p95)
-  - **Split (3B+8B): Best of both** (TTFT < 300ms, 8.5/10 quality, 8.8/10 satisfaction)
-- "Jarvis feeling" = TTFT < 300ms (users feel responsiveness from first token)
-- Total latency < 2s acceptable if TTFT fast
-- VRAM safe: 5.5GB peak (RTX 4060 = 8GB total)
+- 6GB VRAM sınıfı GPU'larda (RTX 4050 Laptop) 8B modeli lokal çalıştırmak zor; finalizer farklı bir vLLM endpoint'i (remote/stronger GPU) üzerinden gelebilir.
+- “Jarvis hissi” için TTFT kritik; planner tarafını küçük modelle hızlı tutup, final metnini daha güçlü modelle üretmek mümkün.
 
-**Metrics:**
-| Scenario | 3B TTFT | 8B TTFT | Split TTFT | Winner |
-|----------|---------|---------|------------|--------|
-| Router | 85ms | 145ms | **85ms** (3B) | 3B |
-| Orchestrator | 95ms | 165ms | **95ms** (3B) | 3B |
-| Chat | 110ms | 190ms | **190ms** (8B) | 8B |
+**Status:**
+- Hibrit mimari: ✅ implement edildi
+- Üretim kararı / performans iddiaları: ⚠️ real vLLM ölçümü ile doğrulanmalı
 
-**User Feedback:**
-- "Hemen cevap veriyor ve doğal konuşuyor" (Split)
-- "Hızlı ama bazen garip" (3B-only)
+**Next (Validation / Production):**
+- RTX 4050 6GB üzerinde 3B-AWQ ile 30 iter ölçüm (TTFT/VRAM/tok/s)
+- Finalizer için ayrı vLLM endpoint/model konfigürasyonu (runtime config/env)
+- 8B finalizer için ölçüm: remote vLLM ile aynı senaryolar
 - "Akıllı ama bekliyor" (8B-only)
 
 **Implementation:**
@@ -297,10 +292,10 @@ Jarvis Personality: Subjective A/B test
 | **Jarvis Feeling** | 8/10 | 6/10 | **9/10** |
 | **Overall** | 7.4/10 | 8.0/10 | **8.8/10** |
 
-**3. Memory-lite Success**
-- All models answered "az önce ne yaptık?" correctly
-- 500 token summary sufficient for conversation continuity
-- PII filtering working without false positives
+**3. Memory-lite (Scope-Limited Validation)**
+- Qualitative conversations included "az önce ne yaptık?" checks; treat as indicative, not exhaustive
+- 500 token summary appears sufficient in the tested scenarios (validate under adversarial prompts)
+- PII filtering needs explicit test coverage before claiming "no false positives"
 
 **4. Production Readiness**
 - Split strategy: ✅ Production-ready

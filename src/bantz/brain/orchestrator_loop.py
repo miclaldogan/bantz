@@ -67,11 +67,13 @@ class OrchestratorLoop:
         tools: ToolRegistry,
         event_bus: Optional[EventBus] = None,
         config: Optional[OrchestratorConfig] = None,
+        finalizer_llm: Optional[Any] = None,
     ):
         self.orchestrator = orchestrator
         self.tools = tools
         self.event_bus = event_bus or EventBus()
         self.config = config or OrchestratorConfig()
+        self.finalizer_llm = finalizer_llm
         
         # Initialize memory-lite (Issue #141)
         self.memory = DialogSummaryManager(
@@ -412,6 +414,84 @@ class OrchestratorLoop:
         
         TODO: Implement proper LLM finalization call
         """
+        # If LLM asked a clarifying question, ensure we have a user-visible reply.
+        if orchestrator_output.ask_user and orchestrator_output.question and not orchestrator_output.assistant_reply:
+            from dataclasses import replace
+
+            return replace(orchestrator_output, assistant_reply=orchestrator_output.question)
+
+        # Hybrid mode: if a finalizer LLM is provided, generate the user-facing reply
+        # using that model (e.g., 8B), while keeping planning/tool decisions from the
+        # planner model (e.g., 3B).
+        if self.finalizer_llm is not None:
+            try:
+                context = state.get_context_for_llm()
+                dialog_summary = self.memory.to_prompt_block()
+
+                prompt_lines = [
+                    "Kimlik / Roller:",
+                    "- Sen BANTZ'sın. Kullanıcı USER'dır.",
+                    "- Türkçe konuş; 'Efendim' hitabını kullan.",
+                    "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
+                    "",
+                ]
+
+                if dialog_summary:
+                    prompt_lines.append(f"DIALOG_SUMMARY:\n{dialog_summary}\n")
+
+                prompt_lines.append("PLANNER_DECISION (JSON):")
+                prompt_lines.append(
+                    json.dumps(
+                        {
+                            "route": orchestrator_output.route,
+                            "calendar_intent": orchestrator_output.calendar_intent,
+                            "slots": orchestrator_output.slots,
+                            "tool_plan": orchestrator_output.tool_plan,
+                            "requires_confirmation": orchestrator_output.requires_confirmation,
+                            "confirmation_prompt": orchestrator_output.confirmation_prompt,
+                            "ask_user": orchestrator_output.ask_user,
+                            "question": orchestrator_output.question,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+
+                if tool_results:
+                    prompt_lines.append("\nTOOL_RESULTS (JSON):")
+                    prompt_lines.append(json.dumps(tool_results, ensure_ascii=False))
+
+                recent = context.get("recent_conversation")
+                if isinstance(recent, list) and recent:
+                    prompt_lines.append("\nRECENT_TURNS:")
+                    for turn in recent[-2:]:
+                        if isinstance(turn, dict):
+                            u = str(turn.get("user") or "").strip()
+                            a = str(turn.get("assistant") or "").strip()
+                            if u:
+                                prompt_lines.append(f"USER: {u}")
+                            if a:
+                                prompt_lines.append(f"ASSISTANT: {a}")
+
+                prompt_lines.append(f"\nUSER: {user_input}\nASSISTANT:")
+
+                try:
+                    final_text = self.finalizer_llm.complete_text(
+                        prompt="\n".join(prompt_lines),
+                        temperature=0.2,
+                        max_tokens=256,
+                    )
+                except TypeError:
+                    final_text = self.finalizer_llm.complete_text(prompt="\n".join(prompt_lines))
+
+                final_text = str(final_text or "").strip()
+                if final_text:
+                    from dataclasses import replace
+
+                    return replace(orchestrator_output, assistant_reply=final_text)
+            except Exception:
+                # Fall back to non-hybrid behavior below.
+                pass
+
         if not tool_results:
             return orchestrator_output
         
@@ -482,6 +562,14 @@ class OrchestratorLoop:
         
         # Update trace
         success_count = sum(1 for r in tool_results if r.get("success", False))
+        # Best-effort capture of which models were used.
+        planner_llm = getattr(self.orchestrator, "_llm", None)
+        planner_model = getattr(planner_llm, "model_name", None) if planner_llm is not None else None
+        planner_backend = getattr(planner_llm, "backend_name", None) if planner_llm is not None else None
+
+        finalizer_model = getattr(self.finalizer_llm, "model_name", None) if self.finalizer_llm is not None else None
+        finalizer_backend = getattr(self.finalizer_llm, "backend_name", None) if self.finalizer_llm is not None else None
+
         state.update_trace(
             route_source="llm",  # Everything comes from LLM now
             route=output.route,
@@ -494,6 +582,10 @@ class OrchestratorLoop:
             requires_confirmation=output.requires_confirmation,
             ask_user=output.ask_user,
             reasoning_summary=output.reasoning_summary,
+            planner_model=planner_model,
+            planner_backend=planner_backend,
+            finalizer_model=finalizer_model,
+            finalizer_backend=finalizer_backend,
         )
         
         if self.config.debug:
@@ -502,6 +594,9 @@ class OrchestratorLoop:
             logger.debug(f"  Memory-lite: {len(self.memory)} turns")
             logger.debug(f"  Conversation Turns: {len(state.conversation_history)}")
             logger.debug(f"  Tool Results: {len(state.last_tool_results)}")
+
+        # Advance turn counter (used by memory-lite summaries)
+        state.turn_count += 1
     
     # =========================================================================
     # Memory-lite Helper Methods (Issue #141)
