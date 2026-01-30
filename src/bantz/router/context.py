@@ -150,6 +150,20 @@ class ConversationContext:
 
     # Pending agent plan (for preview before execution)
     _pending_agent_plan: Optional[dict] = field(default=None, repr=False)
+    
+    # News briefing state
+    _news_briefing: Any = field(default=None, repr=False)
+    _pending_news_search: Optional[str] = field(default=None, repr=False)
+    
+    # Page summarizer state
+    _page_summarizer: Any = field(default=None, repr=False)
+    _pending_page_summarize: Optional[str] = field(default=None, repr=False)
+    _pending_page_question: Optional[str] = field(default=None, repr=False)
+    
+    # Jarvis panel state
+    _panel_controller: Any = field(default=None, repr=False)
+    _panel_results: list = field(default_factory=list, repr=False)
+    _panel_visible: bool = field(default=False, repr=False)
 
     def set_pending_agent_plan(self, *, task_id: str, steps: list[QueueStep]) -> None:
         """Store a planned agent task awaiting user confirmation."""
@@ -167,6 +181,108 @@ class ConversationContext:
         """Clear the pending agent plan."""
         self._pending_agent_plan = None
 
+    # News briefing management
+    def set_news_briefing(self, news: Any) -> None:
+        """Store news briefing instance for follow-up commands."""
+        self._news_briefing = news
+
+    def get_news_briefing(self) -> Any:
+        """Get the current news briefing instance."""
+        return self._news_briefing
+
+    def clear_news_briefing(self) -> None:
+        """Clear the news briefing state."""
+        self._news_briefing = None
+        self._pending_news_search = None
+
+    def set_pending_news_search(self, query: str) -> None:
+        """Mark that a news search is pending."""
+        self._pending_news_search = query
+
+    def get_pending_news_search(self) -> Optional[str]:
+        """Get pending news search query."""
+        return self._pending_news_search
+
+    def clear_pending_news_search(self) -> None:
+        """Clear pending news search."""
+        self._pending_news_search = None
+
+    # Page summarizer management
+    def set_page_summarizer(self, summarizer: Any) -> None:
+        """Store page summarizer instance for follow-up commands."""
+        self._page_summarizer = summarizer
+
+    def get_page_summarizer(self) -> Any:
+        """Get the current page summarizer instance."""
+        return self._page_summarizer
+
+    def clear_page_summarizer(self) -> None:
+        """Clear the page summarizer state."""
+        self._page_summarizer = None
+        self._pending_page_summarize = None
+        self._pending_page_question = None
+
+    def set_pending_page_summarize(self, detail_level: str = "short") -> None:
+        """Mark that a page summarization is pending."""
+        self._pending_page_summarize = detail_level
+
+    def get_pending_page_summarize(self) -> Optional[str]:
+        """Get pending page summarize detail level."""
+        return self._pending_page_summarize
+
+    def clear_pending_page_summarize(self) -> None:
+        """Clear pending page summarize."""
+        self._pending_page_summarize = None
+
+    def set_pending_page_question(self, question: str) -> None:
+        """Mark that a page question is pending."""
+        self._pending_page_question = question
+
+    def get_pending_page_question(self) -> Optional[str]:
+        """Get pending page question."""
+        return self._pending_page_question
+
+    def clear_pending_page_question(self) -> None:
+        """Clear pending page question."""
+        self._pending_page_question = None
+
+    # Jarvis Panel management
+    def set_panel_controller(self, controller: Any) -> None:
+        """Store panel controller instance for commands."""
+        self._panel_controller = controller
+
+    def get_panel_controller(self) -> Any:
+        """Get the current panel controller instance."""
+        return self._panel_controller
+
+    def set_panel_results(self, results: list) -> None:
+        """Store results currently displayed in panel."""
+        self._panel_results = results
+        self._panel_visible = True
+
+    def get_panel_results(self) -> list:
+        """Get results currently displayed in panel."""
+        return self._panel_results
+
+    def get_panel_result_by_index(self, index: int) -> Optional[dict]:
+        """Get a specific result by 1-indexed number."""
+        if 1 <= index <= len(self._panel_results):
+            return self._panel_results[index - 1]
+        return None
+
+    def is_panel_visible(self) -> bool:
+        """Check if panel is currently visible."""
+        return self._panel_visible
+
+    def set_panel_visible(self, visible: bool) -> None:
+        """Set panel visibility state."""
+        self._panel_visible = visible
+
+    def clear_panel(self) -> None:
+        """Clear panel state."""
+        self._panel_results = []
+        self._panel_visible = False
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
@@ -180,4 +296,11 @@ class ConversationContext:
             "queue_source": self.queue_source,
             "current_agent_task_id": self.current_agent_task_id,
             "pending_agent_plan": bool(self._pending_agent_plan),
+            "has_news_briefing": self._news_briefing is not None,
+            "pending_news_search": self._pending_news_search,
+            "has_page_summarizer": self._page_summarizer is not None,
+            "pending_page_summarize": self._pending_page_summarize,
+            "pending_page_question": self._pending_page_question,
+            "panel_visible": self._panel_visible,
+            "panel_results_count": len(self._panel_results),
         }

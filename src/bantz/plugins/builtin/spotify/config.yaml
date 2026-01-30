@@ -1,0 +1,14 @@
+# Spotify Plugin Configuration
+
+# Spotify API credentials
+# Get these from https://developer.spotify.com/dashboard
+client_id: ""
+client_secret: ""
+redirect_uri: "http://localhost:8888/callback"
+
+# Default device to use (optional)
+# device_id: ""
+
+# Playback settings
+default_volume: 50
+shuffle_by_default: false

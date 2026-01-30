@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bantz Bridge</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      width: 320px;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e0e0e0;
+      padding: 16px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+
+    .title {
+      flex: 1;
+    }
+
+    .title h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .title .version {
+      font-size: 11px;
+      color: #888;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot.connected {
+      background: #4CAF50;
+      box-shadow: 0 0 8px #4CAF50;
+    }
+
+    .status-dot.disconnected {
+      background: #F44336;
+      box-shadow: 0 0 8px #F44336;
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .status-text {
+      flex: 1;
+      font-size: 13px;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+    }
+
+    .control-label {
+      font-size: 13px;
+    }
+
+    .toggle {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    .toggle.active {
+      background: #ff6b35;
+    }
+
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.3s;
+    }
+
+    .toggle.active::after {
+      transform: translateX(20px);
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 16px;
+      background: rgba(255,107,53,0.2);
+      border: 1px solid rgba(255,107,53,0.3);
+      color: #ff6b35;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn:hover {
+      background: rgba(255,107,53,0.3);
+      border-color: #ff6b35;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+      border: none;
+      color: white;
+    }
+
+    .btn.primary:hover {
+      opacity: 0.9;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .stat {
+      text-align: center;
+      padding: 12px 8px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 600;
+      color: #ff6b35;
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .actions .btn {
+      flex: 1;
+    }
+
+    .footer {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      text-align: center;
+      font-size: 11px;
+      color: #666;
+    }
+
+    .footer a {
+      color: #ff6b35;
+      text-decoration: none;
+    }
+
+    .page-info {
+      padding: 12px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .page-info-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+
+    .page-info-url {
+      font-size: 11px;
+      color: #888;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .quick-actions {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .quick-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 12px 8px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .quick-btn:hover {
+      background: rgba(255,107,53,0.1);
+      border-color: rgba(255,107,53,0.3);
+    }
+
+    .quick-btn .icon {
+      font-size: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">🎤</div>
+    <div class="title">
+      <h1>Bantz Bridge</h1>
+      <div class="version">v2.0.0</div>
+    </div>
+  </div>
+
+  <div class="status" id="status">
+    <div class="status-dot disconnected" id="status-dot"></div>
+    <div class="status-text" id="status-text">Bağlanıyor...</div>
+  </div>
+
+  <div class="page-info" id="page-info">
+    <div class="page-info-title" id="page-title">Yükleniyor...</div>
+    <div class="page-info-url" id="page-url">-</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value" id="element-count">-</div>
+      <div class="stat-label">Element</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="form-count">-</div>
+      <div class="stat-label">Form</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="link-count">-</div>
+      <div class="stat-label">Link</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="control-row">
+      <span class="control-label">Overlay Göster</span>
+      <div class="toggle" id="overlay-toggle"></div>
+    </div>
+  </div>
+
+  <div class="quick-actions">
+    <button class="quick-btn" id="btn-scan">
+      <span class="icon">🔍</span>
+      <span>Tara</span>
+    </button>
+    <button class="quick-btn" id="btn-forms">
+      <span class="icon">📝</span>
+      <span>Formlar</span>
+    </button>
+    <button class="quick-btn" id="btn-screenshot">
+      <span class="icon">📷</span>
+      <span>Ekran Görüntüsü</span>
+    </button>
+    <button class="quick-btn" id="btn-extract">
+      <span class="icon">📄</span>
+      <span>İçerik Çıkar</span>
+    </button>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="btn-reconnect">🔄 Yeniden Bağlan</button>
+    <button class="btn primary" id="btn-settings">⚙️ Ayarlar</button>
+  </div>
+
+  <div class="footer">
+    <a href="https://github.com/miclaldogan/bantz" target="_blank">GitHub</a>
+    • Bantz Voice Assistant
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -12,6 +12,9 @@ def build_default_registry() -> ToolRegistry:
 
     reg = ToolRegistry()
 
+    # ─────────────────────────────────────────────────────────────────
+    # Browser Tools
+    # ─────────────────────────────────────────────────────────────────
     reg.register(
         Tool(
             name="browser_open",
@@ -210,6 +213,533 @@ def build_default_registry() -> ToolRegistry:
             name="clipboard_get",
             description="Read current clipboard text.",
             parameters={"type": "object", "properties": {}},
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────
+    # Coding Agent Tools (Issue #4)
+    # ─────────────────────────────────────────────────────────────────
+    
+    # File operations
+    reg.register(
+        Tool(
+            name="file_read",
+            description="Read contents of a file. Can read specific line ranges.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path"},
+                    "start_line": {"type": "integer", "description": "Starting line (1-indexed)"},
+                    "end_line": {"type": "integer", "description": "Ending line (inclusive)"},
+                },
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_write",
+            description="Write content to a file. Creates backup automatically.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path"},
+                    "content": {"type": "string", "description": "File content"},
+                },
+                "required": ["path", "content"],
+            },
+            requires_confirmation=True,
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_edit",
+            description="Replace a specific string in a file. Include enough context for unique match.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path"},
+                    "old_string": {"type": "string", "description": "Exact text to find"},
+                    "new_string": {"type": "string", "description": "Replacement text"},
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_create",
+            description="Create a new file with optional initial content.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path"},
+                    "content": {"type": "string", "description": "Initial content"},
+                },
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_undo",
+            description="Undo the last edit to a file by restoring from backup.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="file_search",
+            description="Search for files by name pattern, optionally matching content.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.py')"},
+                    "content": {"type": "string", "description": "Search within file content (regex)"},
+                },
+                "required": ["pattern"],
+            },
+        )
+    )
+    
+    # Terminal operations
+    reg.register(
+        Tool(
+            name="terminal_run",
+            description="Run a shell command. Some commands require confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Shell command to run"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds"},
+                },
+                "required": ["command"],
+            },
+            requires_confirmation=True,
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="terminal_background",
+            description="Start a command in background. For servers, watch, etc.",
+            parameters={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="terminal_background_list",
+            description="List all running background processes.",
+            parameters={"type": "object", "properties": {}},
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="terminal_background_kill",
+            description="Kill a background process by ID.",
+            parameters={
+                "type": "object",
+                "properties": {"id": {"type": "integer"}},
+                "required": ["id"],
+            },
+        )
+    )
+    
+    # Code editing
+    reg.register(
+        Tool(
+            name="code_format",
+            description="Format code using appropriate formatter (black, prettier, etc.).",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="code_replace_function",
+            description="Replace an entire function in a file.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "function_name": {"type": "string"},
+                    "new_code": {"type": "string"},
+                },
+                "required": ["path", "function_name", "new_code"],
+            },
+        )
+    )
+    
+    # Project context
+    reg.register(
+        Tool(
+            name="project_info",
+            description="Get project information (type, name, dependencies).",
+            parameters={"type": "object", "properties": {}},
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="project_tree",
+            description="Get project file tree structure.",
+            parameters={
+                "type": "object",
+                "properties": {"max_depth": {"type": "integer"}},
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="project_symbols",
+            description="Get symbols (functions, classes) from a file.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        )
+    )
+    
+    reg.register(
+        Tool(
+            name="project_search_symbol",
+            description="Search for a symbol across the project.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Symbol name (partial match)"},
+                    "type": {"type": "string", "description": "Filter by type (function, class)"},
+                },
+                "required": ["name"],
+            },
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────
+    # Calendar Tools (Google)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.google.calendar import list_events as google_calendar_list_events
+    except Exception:  # pragma: no cover
+        google_calendar_list_events = None
+
+    reg.register(
+        Tool(
+            name="calendar.list_events",
+            description="List upcoming events from Google Calendar.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                    "max_results": {"type": "integer", "description": "Max results (default: 10)"},
+                    "time_min": {"type": "string", "description": "RFC3339 timeMin (default: now)"},
+                    "time_max": {"type": "string", "description": "RFC3339 timeMax"},
+                    "query": {"type": "string", "description": "Free-text search query"},
+                    "single_events": {"type": "boolean", "description": "Expand recurring events"},
+                    "show_deleted": {"type": "boolean", "description": "Include deleted events"},
+                    "order_by": {"type": "string", "description": "Order (default: startTime)"},
+                },
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "calendar_id": {"type": "string"},
+                    "count": {"type": "integer"},
+                    "events": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "summary": {"type": "string"},
+                                "start": {"type": "string"},
+                                "end": {"type": "string"},
+                                "location": {"type": "string"},
+                                "htmlLink": {"type": "string"},
+                                "status": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+                "required": ["ok", "calendar_id", "count", "events"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_calendar_list_events,
+        )
+    )
+
+    try:
+        from bantz.google.calendar import find_free_slots as google_calendar_find_free_slots
+    except Exception:  # pragma: no cover
+        google_calendar_find_free_slots = None
+
+    reg.register(
+        Tool(
+            name="calendar.find_free_slots",
+            description="Find free time slots between time_min and time_max for a given duration.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "time_min": {"type": "string", "description": "RFC3339 window start"},
+                    "time_max": {"type": "string", "description": "RFC3339 window end"},
+                    "duration_minutes": {"type": "integer", "description": "Required duration in minutes"},
+                    "suggestions": {"type": "integer", "description": "How many slots to return (default: 3)"},
+                    "preferred_start": {"type": "string", "description": "Preferred day start HH:MM (default: 07:30)"},
+                    "preferred_end": {"type": "string", "description": "Preferred day end HH:MM (default: 22:30; supports 24:00)"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                },
+                "required": ["time_min", "time_max", "duration_minutes"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "slots": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "start": {"type": "string"},
+                                "end": {"type": "string"},
+                            },
+                            "required": ["start", "end"],
+                        },
+                    },
+                },
+                "required": ["ok", "slots"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_calendar_find_free_slots,
+        )
+    )
+
+    try:
+        from bantz.google.calendar import create_event as google_calendar_create_event
+    except Exception:  # pragma: no cover
+        google_calendar_create_event = None
+
+    reg.register(
+        Tool(
+            name="calendar.create_event",
+            description="Create a calendar event (write). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "Event summary/title"},
+                    "start": {"type": "string", "description": "RFC3339 start datetime (with timezone)"},
+                    "end": {"type": "string", "description": "RFC3339 end datetime (optional if duration_minutes provided)"},
+                    "duration_minutes": {"type": "integer", "description": "Duration in minutes (optional if end provided)"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                    "description": {"type": "string", "description": "Optional description"},
+                    "location": {"type": "string", "description": "Optional location"},
+                },
+                "required": ["summary", "start"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "id": {"type": "string"},
+                    "htmlLink": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                },
+                "required": ["ok", "id", "start", "end", "summary"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_calendar_create_event,
+        )
+    )
+
+    try:
+        from bantz.google.calendar import delete_event as google_calendar_delete_event
+    except Exception:  # pragma: no cover
+        google_calendar_delete_event = None
+
+    reg.register(
+        Tool(
+            name="calendar.delete_event",
+            description="Delete a calendar event (write). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "string", "description": "Event ID"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                },
+                "required": ["event_id"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "id": {"type": "string"},
+                    "calendar_id": {"type": "string"},
+                },
+                "required": ["ok", "id", "calendar_id"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_calendar_delete_event,
+        )
+    )
+
+    try:
+        from bantz.google.calendar import update_event as google_calendar_update_event
+    except Exception:  # pragma: no cover
+        google_calendar_update_event = None
+
+    reg.register(
+        Tool(
+            name="calendar.update_event",
+            description="Update/move a calendar event (write). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "string", "description": "Event ID"},
+                    "start": {"type": "string", "description": "RFC3339 start datetime (with timezone)"},
+                    "end": {"type": "string", "description": "RFC3339 end datetime (with timezone)"},
+                    "summary": {"type": "string", "description": "Optional new summary/title"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                    "description": {"type": "string", "description": "Optional description"},
+                    "location": {"type": "string", "description": "Optional location"},
+                },
+                "required": ["event_id", "start", "end"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "id": {"type": "string"},
+                    "htmlLink": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                    "calendar_id": {"type": "string"},
+                },
+                "required": ["ok", "id", "start", "end", "calendar_id"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_calendar_update_event,
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────
+    # Planning Tools (Jarvis-Calendar)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.planning.executor import apply_plan_draft as _apply_plan_draft
+        from bantz.planning.executor import plan_events_from_draft as _plan_events_from_draft
+    except Exception:  # pragma: no cover
+        _apply_plan_draft = None
+        _plan_events_from_draft = None
+
+    reg.register(
+        Tool(
+            name="calendar.plan_events_from_draft",
+            description="Create a deterministic event plan from a PlanDraft (dry-run, no writes).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "draft": {"type": "object", "description": "PlanDraft dict"},
+                    "time_min": {"type": "string", "description": "RFC3339 window start"},
+                    "time_max": {"type": "string", "description": "RFC3339 window end"},
+                },
+                "required": ["draft", "time_min", "time_max"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "count": {"type": "integer"},
+                    "events": {"type": "array"},
+                    "warnings": {"type": "array"},
+                    "time_min": {"type": "string"},
+                    "time_max": {"type": "string"},
+                },
+                "required": ["ok"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=_plan_events_from_draft,
+        )
+    )
+
+    def _apply_plan_draft_with_google_backend(**params):
+        if _apply_plan_draft is None:
+            return {"ok": False, "error": "planner_not_available"}
+        dry_run = bool(params.get("dry_run"))
+        draft = params.get("draft")
+        time_min = params.get("time_min")
+        time_max = params.get("time_max")
+        calendar_id = str(params.get("calendar_id") or "primary")
+        return _apply_plan_draft(
+            draft=draft,
+            time_min=time_min,
+            time_max=time_max,
+            dry_run=dry_run,
+            calendar_id=calendar_id,
+            create_event_fn=google_calendar_create_event,
+        )
+
+    reg.register(
+        Tool(
+            name="calendar.apply_plan_draft",
+            description="Apply a PlanDraft by creating calendar events (supports dry-run). Requires confirmation if writing.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "draft": {"type": "object", "description": "PlanDraft dict"},
+                    "time_min": {"type": "string", "description": "RFC3339 window start"},
+                    "time_max": {"type": "string", "description": "RFC3339 window end"},
+                    "dry_run": {"type": "boolean", "description": "If true, do not write; return planned events"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                },
+                "required": ["draft", "time_min", "time_max"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "dry_run": {"type": "boolean"},
+                    "created_count": {"type": "integer"},
+                    "failed_index": {"type": "integer"},
+                    "events": {"type": "array"},
+                    "created": {"type": "array"},
+                    "error": {"type": "string"},
+                    "warnings": {"type": "array"},
+                },
+                "required": ["ok"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=_apply_plan_draft_with_google_backend,
         )
     )
 

@@ -12,6 +12,8 @@ import socket
 import sys
 import threading
 import atexit
+import time
+import traceback
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +30,100 @@ from bantz.core.events import get_event_bus, Event
 # Default socket path
 DEFAULT_SOCKET_DIR = Path("/tmp/bantz_sessions")
 DEFAULT_SESSION = "default"
+
+
+# Background server threads (used by voice mode for auto-start)
+_bg_server_threads: dict[str, threading.Thread] = {}
+_bg_server_errors: dict[str, str] = {}
+
+
+def start_server_in_background(
+    session_name: str = DEFAULT_SESSION,
+    policy_path: str = "config/policy.json",
+    log_path: str = "bantz.log.jsonl",
+) -> bool:
+    """Start a server for the given session in a daemon thread.
+
+    This is primarily used by voice mode so users can run `bantz --voice/--wake`
+    without separately starting the session server.
+
+    Returns:
+        True if a start was initiated (or already running), False if thread could
+        not be started.
+    """
+
+    if is_server_running(session_name):
+        return True
+
+    # Avoid double-start attempts for the same session.
+    t = _bg_server_threads.get(session_name)
+    if t is not None and t.is_alive():
+        return True
+
+    def _runner() -> None:
+        try:
+            start_server(session_name=session_name, policy_path=policy_path, log_path=log_path)
+        except Exception:
+            _bg_server_errors[session_name] = traceback.format_exc()
+
+    try:
+        thread = threading.Thread(target=_runner, name=f"bantz-server:{session_name}", daemon=True)
+        _bg_server_threads[session_name] = thread
+        thread.start()
+        return True
+    except Exception:
+        _bg_server_errors[session_name] = traceback.format_exc()
+        return False
+
+
+def ensure_server_running(
+    session_name: str = DEFAULT_SESSION,
+    policy_path: str = "config/policy.json",
+    log_path: str = "bantz.log.jsonl",
+    timeout_s: float = 8.0,
+) -> tuple[bool, bool, str]:
+    """Ensure a session server is running.
+
+    Returns:
+        (ok, started_here, message)
+    """
+
+    if is_server_running(session_name):
+        return True, False, "already_running"
+
+    def _format_err(raw: str) -> str:
+        raw = (raw or "").strip()
+        if not raw:
+            return ""
+        # Keep full traceback only in debug.
+        if os.environ.get("BANTZ_DEBUG", "").strip() in {"1", "true", "True"}:
+            return raw
+        # Otherwise, show the last non-empty line (most relevant exception).
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        return lines[-1] if lines else ""
+
+    started = start_server_in_background(session_name=session_name, policy_path=policy_path, log_path=log_path)
+    if not started:
+        err = _format_err(_bg_server_errors.get(session_name, ""))
+        hint = " (ipuçu: terminalde 'bantz --serve --session {s}' deneyebilirsin)".format(s=session_name)
+        return False, False, f"start_failed:{err}{hint}" if err else f"start_failed{hint}"
+
+    # Wait for socket to come up.
+    deadline = time.time() + float(timeout_s)
+    while time.time() < deadline:
+        if is_server_running(session_name):
+            return True, True, "started"
+
+        # If server thread crashed, surface its error.
+        err = _bg_server_errors.get(session_name)
+        if err:
+            short = _format_err(err)
+            hint = " (ipuçu: 'bantz --serve --session {s}' ile hata çıktısını gör)".format(s=session_name)
+            return False, True, f"crashed:{short}{hint}" if short else f"crashed{hint}"
+
+        time.sleep(0.1)
+
+    return False, True, "timeout (ipuçu: 'bantz --serve --session {s}' ile manuel başlatıp logu gör)".format(s=session_name)
 
 
 class InboxStore:
@@ -599,7 +695,7 @@ class BantzServer:
 
         print(f"🚀 Bantz Server başlatıldı (session: {self.session_name})")
         print(f"   Socket: {self.socket_path}")
-        print("   Kapatmak için: Ctrl+C veya başka terminalden 'bantz --session {self.session_name} --stop'")
+        print(f"   Kapatmak için: Ctrl+C veya başka terminalden 'bantz --session {self.session_name} --stop'")
 
         while self._running:
             try:

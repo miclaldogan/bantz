@@ -103,6 +103,10 @@ class Router:
         # Agent framework (lazy import usage)
         self._agent_history: list[dict] = []
         self._agent_history_by_id: dict[str, dict] = {}
+        
+        # Query clarification (Issue #21)
+        from bantz.router.clarifier import QueryClarifier
+        self._clarifier = QueryClarifier()
 
     def _agent_rec(self, task_id: str | None) -> Optional[dict]:
         if not task_id:
@@ -114,7 +118,72 @@ class Router:
         ctx.reset_pending_if_expired()
 
         ctx_before = ctx.snapshot()
-        parsed = parse_intent(text)
+        
+        # ─────────────────────────────────────────────────────────────
+        # Query Clarification Flow (Issue #21)
+        # If there's a pending clarification, process the response first
+        # ─────────────────────────────────────────────────────────────
+        if self._clarifier.has_pending_question():
+            # Process user response to clarification question
+            collected = self._clarifier.process_response(text)
+            
+            # Check if we need more clarification
+            analysis = self._clarifier.analyze_query(
+                self._clarifier._state.original_query,
+                intent="news_briefing",
+            )
+            
+            if analysis.needs_clarification and self._clarifier._state.clarification_count < 2:
+                # Ask another clarification question
+                question = analysis.clarification_question
+                self._clarifier._state.pending_question = question
+                self._clarifier._state.clarification_count += 1
+                
+                result = RouterResult(
+                    ok=True,
+                    intent="vague_search",
+                    user_text=question.question,
+                    needs_confirmation=True,
+                    confirmation_prompt=question.question,
+                    data={"clarification_type": question.type.value},
+                )
+                self._log(text, result, parse_intent(text), ctx_before, ctx)
+                return result
+            
+            # We have enough info, create search query
+            search_query = self._clarifier.get_search_query()
+            self._clarifier.reset()
+            
+            # Now execute news briefing with the clarified query
+            parsed = Parsed(intent="news_briefing", slots={"query": search_query})
+            # Fall through to normal handling
+        else:
+            parsed = parse_intent(text)
+            
+            # ─────────────────────────────────────────────────────────────
+            # Vague Search Detection (Issue #21)
+            # If query is vague, ask clarifying question
+            # ─────────────────────────────────────────────────────────────
+            if parsed.intent == "vague_search":
+                analysis = self._clarifier.analyze_query(text, intent="news_briefing")
+                
+                if analysis.needs_clarification:
+                    question = analysis.clarification_question
+                    self._clarifier.start_clarification(text, question)
+                    
+                    result = RouterResult(
+                        ok=True,
+                        intent="vague_search",
+                        user_text=question.question,
+                        needs_confirmation=True,
+                        confirmation_prompt=question.question,
+                        data={
+                            "clarification_type": question.type.value,
+                            "original_query": text,
+                        },
+                    )
+                    self._log(text, result, parsed, ctx_before, ctx)
+                    return result
 
         # ─────────────────────────────────────────────────────────────
         # Agent mode: plan -> queue (Issue #3)
@@ -888,6 +957,99 @@ class Router:
             dev_result = self._dev_bridge.handle(text=str(parsed.slots.get("text", text)), ctx=ctx)
             self._log(text, dev_result, parsed, ctx_before, ctx, bridge="dev_stub", executed={"intent": "dev_bridge", "slots": {"bridge": "dev_stub"}})
             return dev_result
+
+        # ─────────────────────────────────────────────────────────────
+        # Greeting intent: friendly response
+        # ─────────────────────────────────────────────────────────────
+        if intent == "greeting":
+            import random
+            greetings = [
+                "Merhaba efendim! Size nasıl yardımcı olabilirim?",
+                "Selam! Emrinize amadeyim.",
+                "Merhaba! Ne yapabilirim sizin için?",
+                "Hey! Dinliyorum sizi.",
+            ]
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=random.choice(greetings),
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
+
+        # ─────────────────────────────────────────────────────────────
+        # Help intent: show available commands
+        # ─────────────────────────────────────────────────────────────
+        if intent == "help":
+            help_text = (
+                "Size yardımcı olabileceğim bazı şeyler:\n"
+                "• 'discord aç' - Uygulama açma\n"
+                "• 'youtube aç' - Web sitesi açma\n"
+                "• 'hatırlat: 5 dakika sonra toplantı' - Hatırlatıcı ekleme\n"
+                "• 'google'da hava durumu ara' - Web araması\n"
+                "• 'saat kaç' - Saat sorma\n"
+                "Başka ne yapabilirim?"
+            )
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=help_text,
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
+
+        # ─────────────────────────────────────────────────────────────
+        # Time query intent
+        # ─────────────────────────────────────────────────────────────
+        if intent == "time_query":
+            from datetime import datetime
+            now = datetime.now()
+            time_str = now.strftime("%H:%M")
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=f"Saat şu an {time_str}.",
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
+
+        # ─────────────────────────────────────────────────────────────
+        # Date query intent
+        # ─────────────────────────────────────────────────────────────
+        if intent == "date_query":
+            from datetime import datetime
+            now = datetime.now()
+            days_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+            months_tr = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", 
+                        "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+            day_name = days_tr[now.weekday()]
+            month_name = months_tr[now.month - 1]
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=f"Bugün {day_name}, {now.day} {month_name} {now.year}.",
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
+
+        # ─────────────────────────────────────────────────────────────
+        # Goodbye intent
+        # ─────────────────────────────────────────────────────────────
+        if intent == "goodbye":
+            import random
+            goodbyes = [
+                "Rica ederim! İhtiyacınız olursa buradayım.",
+                "Güle güle! Yine beklerim.",
+                "İyi günler dilerim!",
+                "Hoşça kalın efendim!",
+            ]
+            result = RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=random.choice(goodbyes),
+            )
+            self._log(text, result, parsed, ctx_before, ctx)
+            return result
 
         # ─────────────────────────────────────────────────────────────
         # Unknown intent: ask to repeat instead of policy deny
@@ -2068,6 +2230,431 @@ class Router:
             return RouterResult(ok=ok, intent=intent, user_text=msg + follow_up)
 
         # ─────────────────────────────────────────────────────────────
+        # News Briefing commands (Jarvis-style)
+        # ─────────────────────────────────────────────────────────────
+        if intent == "news_briefing":
+            from bantz.skills.news import NewsBriefing, extract_news_query
+            from bantz.llm.persona import JarvisPersona
+            from bantz.browser.extension_bridge import get_bridge
+            
+            persona = JarvisPersona()
+            query = str(slots.get("query", "gündem")).strip()
+            
+            # If query not explicitly set, try to extract from raw text
+            if query == "gündem" and "slots" in dir(slots) and slots.get("_raw_text"):
+                query = extract_news_query(slots.get("_raw_text", ""))
+            
+            # Get bridge for browser interaction
+            bridge = get_bridge()
+            news = NewsBriefing(extension_bridge=bridge)
+            
+            # Store news instance in context for follow-up commands
+            ctx.set_news_briefing(news)
+            
+            # Return thinking response - actual search happens async
+            searching_msg = persona.for_news_search(query if query != "gündem" else "")
+            ctx.last_intent = intent
+            ctx.set_pending_news_search(query)
+            
+            return RouterResult(
+                ok=True, 
+                intent=intent, 
+                user_text=searching_msg,
+                data={"query": query, "state": "searching"}
+            )
+
+        if intent == "news_open_result":
+            from bantz.llm.persona import JarvisPersona
+            
+            persona = JarvisPersona()
+            index = int(slots.get("index", 1))
+            
+            # Get news instance from context
+            news = ctx.get_news_briefing()
+            if not news or not news.has_results:
+                return RouterResult(
+                    ok=False, 
+                    intent=intent, 
+                    user_text="Önce haber araması yapmalısın efendim. 'Bugünkü haberler' diyebilirsin."
+                )
+            
+            # Open the result
+            import asyncio
+            loop = asyncio.get_event_loop()
+            success = loop.run_until_complete(news.open_result(index))
+            
+            if success:
+                msg = persona.for_opening_item(index)
+                ctx.last_intent = intent
+                return RouterResult(ok=True, intent=intent, user_text=msg + follow_up)
+            else:
+                return RouterResult(
+                    ok=False, 
+                    intent=intent, 
+                    user_text=f"Geçersiz numara efendim. 1 ile {news.result_count} arasında bir numara söyleyin."
+                )
+
+        if intent == "news_open_current":
+            from bantz.llm.persona import JarvisPersona
+            
+            persona = JarvisPersona()
+            
+            news = ctx.get_news_briefing()
+            if not news or not news.has_results:
+                return RouterResult(
+                    ok=False, 
+                    intent=intent, 
+                    user_text="Önce haber araması yapmalısın efendim."
+                )
+            
+            import asyncio
+            loop = asyncio.get_event_loop()
+            success = loop.run_until_complete(news.open_current())
+            
+            if success:
+                msg = persona.get_response("opening")
+                ctx.last_intent = intent
+                return RouterResult(ok=True, intent=intent, user_text=msg + follow_up)
+            else:
+                return RouterResult(ok=False, intent=intent, user_text="Açılacak haber bulunamadı efendim.")
+
+        if intent == "news_more":
+            from bantz.llm.persona import JarvisPersona
+            
+            persona = JarvisPersona()
+            
+            news = ctx.get_news_briefing()
+            if not news or not news.has_results:
+                return RouterResult(
+                    ok=False, 
+                    intent=intent, 
+                    user_text="Önce haber araması yapmalısın efendim."
+                )
+            
+            # Format more results for TTS
+            more_text = news.format_more_for_tts(start=4, count=3)
+            ctx.last_intent = intent
+            
+            return RouterResult(
+                ok=True, 
+                intent=intent, 
+                user_text=more_text,
+                data=news.format_for_overlay()
+            )
+
+        # ─────────────────────────────────────────────────────────────
+        # Page Summarization commands (Jarvis-style)
+        # ─────────────────────────────────────────────────────────────
+        if intent == "page_summarize":
+            from bantz.skills.summarizer import PageSummarizer
+            from bantz.llm.persona import JarvisPersona
+            from bantz.llm.ollama_client import OllamaClient
+            from bantz.browser.extension_bridge import get_bridge
+            
+            persona = JarvisPersona()
+            
+            # Get bridge for page extraction
+            bridge = get_bridge()
+            if not bridge or not bridge.has_client():
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Tarayıcı bağlantısı yok efendim. Firefox eklentisi aktif mi?"
+                )
+            
+            # Create LLM client and summarizer
+            try:
+                llm = OllamaClient()
+                summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
+                
+                # Store in context for follow-up commands
+                ctx.set_page_summarizer(summarizer)
+                
+                # Return thinking response - actual summarization will happen
+                thinking_msg = persona.get_response("thinking")
+                ctx.last_intent = intent
+                ctx.set_pending_page_summarize(detail_level="short")
+                
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=thinking_msg,
+                    data={"state": "extracting", "detail_level": "short"}
+                )
+            except Exception as e:
+                logger.error(f"[Router] Page summarize error: {e}")
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text=persona.get_response("error")
+                )
+
+        if intent == "page_summarize_detailed":
+            from bantz.skills.summarizer import PageSummarizer
+            from bantz.llm.persona import JarvisPersona
+            from bantz.llm.ollama_client import OllamaClient
+            from bantz.browser.extension_bridge import get_bridge
+            
+            persona = JarvisPersona()
+            
+            # Check if we have existing summary - can just expand
+            summarizer = ctx.get_page_summarizer()
+            if summarizer and summarizer.has_summary:
+                # Already have content, just need detailed summary
+                summary = summarizer.last_summary
+                if summary and summary.detailed_summary:
+                    # Already have detailed summary
+                    overlay_data = summarizer.format_for_overlay(summary, detailed=True)
+                    ctx.last_intent = intent
+                    return RouterResult(
+                        ok=True,
+                        intent=intent,
+                        user_text=persona.get_response("results_found"),
+                        data=overlay_data
+                    )
+            
+            # Need to extract and generate detailed summary
+            bridge = get_bridge()
+            if not bridge or not bridge.has_client():
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Tarayıcı bağlantısı yok efendim."
+                )
+            
+            try:
+                llm = OllamaClient()
+                summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
+                ctx.set_page_summarizer(summarizer)
+                
+                thinking_msg = persona.get_response("thinking")
+                ctx.last_intent = intent
+                ctx.set_pending_page_summarize(detail_level="detailed")
+                
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=thinking_msg,
+                    data={"state": "extracting", "detail_level": "detailed"}
+                )
+            except Exception as e:
+                logger.error(f"[Router] Page summarize detailed error: {e}")
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text=persona.get_response("error")
+                )
+
+        if intent == "page_question":
+            from bantz.skills.summarizer import PageSummarizer
+            from bantz.llm.persona import JarvisPersona
+            from bantz.llm.ollama_client import OllamaClient
+            from bantz.browser.extension_bridge import get_bridge
+            
+            persona = JarvisPersona()
+            question = str(slots.get("question", "")).strip()
+            
+            if not question:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Ne sormak istiyorsun efendim?"
+                )
+            
+            # Check if we have existing summarizer with content
+            summarizer = ctx.get_page_summarizer()
+            
+            if not summarizer or not summarizer.has_content:
+                # Need to extract first
+                bridge = get_bridge()
+                if not bridge or not bridge.has_client():
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text="Tarayıcı bağlantısı yok efendim."
+                    )
+                
+                try:
+                    llm = OllamaClient()
+                    summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
+                    ctx.set_page_summarizer(summarizer)
+                except Exception as e:
+                    logger.error(f"[Router] Page question setup error: {e}")
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text=persona.get_response("error")
+                    )
+            
+            thinking_msg = persona.get_response("thinking")
+            ctx.last_intent = intent
+            ctx.set_pending_page_question(question)
+            
+            return RouterResult(
+                ok=True,
+                intent=intent,
+                user_text=thinking_msg,
+                data={"state": "answering", "question": question}
+            )
+
+        # ─────────────────────────────────────────────────────────────
+        # Jarvis Panel Control (Issue #19)
+        # ─────────────────────────────────────────────────────────────
+        if intent == "panel_move":
+            position = str(slots.get("position", "")).strip()
+            if not position:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Nereye taşıyayım efendim?"
+                )
+            
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.move_panel(position)
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=f"Panel {position} tarafına taşındı efendim."
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Panel henüz açık değil efendim."
+                )
+
+        if intent == "panel_hide":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.hide_panel()
+                ctx.set_panel_visible(False)
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text="Panel kapatıldı efendim."
+                )
+            else:
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text="Panel zaten kapalı efendim."
+                )
+
+        if intent == "panel_minimize":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.minimize_panel()
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text="Panel küçültüldü efendim."
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Panel açık değil efendim."
+                )
+
+        if intent == "panel_maximize":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.maximize_panel()
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text="Panel büyütüldü efendim."
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Panel açık değil efendim."
+                )
+
+        if intent == "panel_next_page":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.next_page()
+                page = controller.current_page
+                total = controller.total_pages
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=f"Sayfa {page}/{total} efendim.",
+                    data={"page": page, "total": total}
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Gösterilecek sonuç yok efendim."
+                )
+
+        if intent == "panel_prev_page":
+            controller = ctx.get_panel_controller()
+            if controller:
+                controller.prev_page()
+                page = controller.current_page
+                total = controller.total_pages
+                return RouterResult(
+                    ok=True,
+                    intent=intent,
+                    user_text=f"Sayfa {page}/{total} efendim.",
+                    data={"page": page, "total": total}
+                )
+            else:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Gösterilecek sonuç yok efendim."
+                )
+
+        if intent == "panel_select_item":
+            index = slots.get("index", 0)
+            if not index:
+                return RouterResult(
+                    ok=False,
+                    intent=intent,
+                    user_text="Kaçıncı sonucu açayım efendim?"
+                )
+            
+            # Get item from context
+            item = ctx.get_panel_result_by_index(index)
+            if item:
+                url = item.get("url", "")
+                if url:
+                    ok, msg = open_url(url)
+                    ctx.last_intent = intent
+                    return RouterResult(
+                        ok=ok,
+                        intent=intent,
+                        user_text=f"{index}. sonuç açılıyor efendim.",
+                        data={"index": index, "url": url}
+                    )
+                else:
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text=f"{index}. sonuçta URL yok efendim."
+                    )
+            else:
+                total = len(ctx.get_panel_results())
+                if total > 0:
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text=f"Geçersiz numara. 1 ile {total} arasında bir sayı söyleyin efendim."
+                    )
+                else:
+                    return RouterResult(
+                        ok=False,
+                        intent=intent,
+                        user_text="Gösterilecek sonuç yok efendim."
+                    )
+
+        # ─────────────────────────────────────────────────────────────
         # Original daily skills
         # ─────────────────────────────────────────────────────────────
         if intent == "open_browser":
@@ -2365,6 +2952,48 @@ class Router:
                 ctx.clear_active_app()
                 return RouterResult(ok=True, intent=intent, user_text=f"✅ {old_app} oturumundan çıktım. Normal moda döndüm." + follow_up)
             return RouterResult(ok=True, intent=intent, user_text="Zaten aktif uygulama oturumu yok." + follow_up)
+
+        # ─────────────────────────────────────────────────────────────────
+        # Coding Agent intents (Issue #4)
+        # ─────────────────────────────────────────────────────────────────
+        coding_intents = {
+            "file_read", "file_write", "file_edit", "file_create", "file_delete",
+            "file_undo", "file_list", "file_search",
+            "terminal_run", "terminal_background", "terminal_background_output",
+            "terminal_background_kill", "terminal_background_list",
+            "code_apply_diff", "code_replace_function", "code_replace_class",
+            "code_insert_lines", "code_delete_lines", "code_format", "code_search_replace",
+            "project_info", "project_tree", "project_symbols", "project_search_symbol",
+            "project_related_files", "project_imports",
+        }
+        
+        if intent in coding_intents:
+            try:
+                from bantz.coding import CodingToolExecutor
+                
+                # Initialize executor (lazily cached)
+                if not hasattr(self, "_coding_executor"):
+                    from pathlib import Path
+                    workspace = Path.cwd()
+                    self._coding_executor = CodingToolExecutor(workspace_root=workspace)
+                
+                import asyncio
+                
+                # Run async execute
+                loop = asyncio.new_event_loop()
+                try:
+                    ok, result_text = loop.run_until_complete(
+                        self._coding_executor.execute(intent, slots)
+                    )
+                finally:
+                    loop.close()
+                
+                ctx.last_intent = intent
+                return RouterResult(ok=ok, intent=intent, user_text=result_text + follow_up)
+                
+            except Exception as e:
+                ctx.last_intent = intent
+                return RouterResult(ok=False, intent=intent, user_text=f"❌ Coding agent hatası: {e}" + follow_up)
 
         ctx.last_intent = "unknown"
         return RouterResult(

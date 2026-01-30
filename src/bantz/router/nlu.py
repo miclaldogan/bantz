@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .types import Intent
 
@@ -16,7 +16,183 @@ class Parsed:
     slots: dict
 
 
+@dataclass(frozen=True)
+class ContextualParsed:
+    """Context-aware parse result for conversation flow."""
+    intent: str
+    slots: dict
+    requires_context: bool = False  # True if this makes sense only in conversation
+
+
 _TURKISH_QUOTES = "'\"""''"
+
+# ─────────────────────────────────────────────────────────────────
+# Context-aware patterns for Jarvis Conversation Flow (Issue #20)
+# These patterns match short responses that only make sense when
+# the user is already engaged in a conversation.
+# ─────────────────────────────────────────────────────────────────
+
+# Confirmation patterns
+_CONTEXT_CONFIRM_PATTERNS = [
+    r"^(evet|ehe|olur|tamam|ok|okey|tabii|tabi|elbette|kesinlikle|ay[nı]en|do[ğg]ru)$",
+    r"^(evet\s+evet|tamam\s+tamam|elbette\s+efendim)$",
+]
+
+# Rejection patterns
+_CONTEXT_REJECT_PATTERNS = [
+    r"^(hay[ıi]r|yok|olmaz|istemiyorum|gerek\s+yok|vazge[çc]|iptal)$",
+    r"^(hay[ıi]r\s+te[şs]ekk[üu]rler|yok\s+gerek\s+yok)$",
+]
+
+# Number selection patterns
+_CONTEXT_NUMBER_PATTERNS = [
+    r"^(\d+)$",  # Just a number: "3"
+    r"^(\d+)\.\s*(sonu[çc]|[şs]ey|madde|se[çc]enek)?$",  # "3. sonuç" or "3."
+    r"^(birinci|ikinci|[üu][çc][üu]nc[üu]|d[öo]rd[üu]nc[üu]|be[şs]inci|alt[ıi]nc[ıi]|yedinci|sekizinci|dokuzuncu|onuncu)$",
+    r"^(ilk|son)$",  # "ilk" = 1, "son" = -1 (last)
+    r"^(ilkini|sonuncuyu|birincisini|ikincisini|[üu][çc][üu]nc[üu]s[üu]n[üu])$",
+]
+
+# Navigation patterns (within results/lists)
+_CONTEXT_NAV_PATTERNS = [
+    r"^(sonraki|[ıi]leri|devam|next|ilerle|bir\s+sonraki)$",
+    r"^([öo]nceki|geri|back|previous|geriye|bir\s+[öo]nceki)$",
+    r"^(a[şs]a[ğg][ıi]|yukar[ıi]|down|up)$",
+]
+
+# Follow-up question patterns
+_CONTEXT_FOLLOWUP_PATTERNS = [
+    r"^(peki|ya|bir\s+de|ayr[ıi]ca|hem\s+de)$",
+    r"^(ba[şs]ka)(\s+bir\s+[şs]ey)?$",
+    r"^(bunu|[şs]unu|onu)(\s+da)?$",
+]
+
+# Goodbye/thanks patterns
+_CONTEXT_GOODBYE_PATTERNS = [
+    r"^(te[şs]ekk[üu]rler|sa[ğg]\s*ol|mersi|eyvallah)$",
+    r"^(tamam\s+bu\s+kadar|yeter|bu\s+kadar|bitti|tamamd[ıi]r)$",
+    r"^(g[öo]r[üu][şs][üu]r[üu]z|ho[şs][çc]a\s*kal|bay\s*bay|bye)$",
+    r"^(iyi\s+geceler|iyi\s+g[üu]nler|iyi\s+ak[şs]amlar)$",
+]
+
+# Compiled context patterns
+_COMPILED_CONTEXT_PATTERNS: dict[str, list[re.Pattern]] = {}
+
+
+def _compile_context_patterns() -> None:
+    """Compile context patterns once."""
+    global _COMPILED_CONTEXT_PATTERNS
+    if _COMPILED_CONTEXT_PATTERNS:
+        return
+    
+    _COMPILED_CONTEXT_PATTERNS = {
+        "context_confirm": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_CONFIRM_PATTERNS],
+        "context_reject": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_REJECT_PATTERNS],
+        "context_select_number": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_NUMBER_PATTERNS],
+        "context_navigate": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_NAV_PATTERNS],
+        "context_followup": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_FOLLOWUP_PATTERNS],
+        "context_goodbye": [re.compile(p, re.IGNORECASE) for p in _CONTEXT_GOODBYE_PATTERNS],
+    }
+
+
+def parse_contextual_intent(text: str) -> Optional[ContextualParsed]:
+    """Parse short responses that only make sense in conversation context.
+    
+    This is used by ConversationManager to detect quick responses
+    when the user is already engaged.
+    
+    Args:
+        text: User's utterance
+        
+    Returns:
+        ContextualParsed if a context pattern matches, None otherwise
+    """
+    _compile_context_patterns()
+    t = text.strip()
+    
+    # Skip if too long - context responses are short
+    if len(t.split()) > 6:
+        return None
+    
+    for intent, patterns in _COMPILED_CONTEXT_PATTERNS.items():
+        for pattern in patterns:
+            m = pattern.match(t)
+            if m:
+                slots: dict = {}
+                
+                # Extract number for selection
+                if intent == "context_select_number":
+                    num = _extract_number_from_text(t)
+                    if num is not None:
+                        slots["number"] = num
+                
+                # Extract navigation direction
+                if intent == "context_navigate":
+                    direction = _extract_nav_direction(t)
+                    if direction:
+                        slots["direction"] = direction
+                
+                return ContextualParsed(
+                    intent=intent,
+                    slots=slots,
+                    requires_context=True
+                )
+    
+    return None
+
+
+def _extract_number_from_text(text: str) -> Optional[int]:
+    """Extract a number from text, handling Turkish ordinals."""
+    t = text.strip().lower()
+    
+    # Direct digit
+    m = re.match(r"^(\d+)", t)
+    if m:
+        return int(m.group(1))
+    
+    # Turkish ordinals
+    ordinals = {
+        "birinci": 1, "ilk": 1, "ilkini": 1, "birincisini": 1,
+        "ikinci": 2, "ikincisini": 2,
+        "üçüncü": 3, "ucuncu": 3, "üçüncüsünü": 3,
+        "dördüncü": 4, "dorduncu": 4,
+        "beşinci": 5, "besinci": 5,
+        "altıncı": 6, "altinci": 6,
+        "yedinci": 7,
+        "sekizinci": 8,
+        "dokuzuncu": 9,
+        "onuncu": 10,
+        "son": -1, "sonuncu": -1, "sonuncuyu": -1,
+    }
+    
+    for word, num in ordinals.items():
+        if word in t:
+            return num
+    
+    return None
+
+
+def _extract_nav_direction(text: str) -> Optional[str]:
+    """Extract navigation direction from text."""
+    t = text.strip().lower()
+    
+    next_words = ["sonraki", "ileri", "devam", "next", "aşağı", "asagi", "down"]
+    prev_words = ["önceki", "onceki", "geri", "back", "previous", "yukarı", "yukari", "up"]
+    
+    for word in next_words:
+        if word in t:
+            return "next"
+    
+    for word in prev_words:
+        if word in t:
+            return "prev"
+    
+    return None
+
+
+def is_contextual_response(text: str) -> bool:
+    """Check if text looks like a contextual response (short, likely needs context)."""
+    return parse_contextual_intent(text) is not None
 
 # Bağlaçlar: cümleyi adımlara bölmek için
 # Not: "X dakika sonra" gibi zaman ifadelerini ayırmamalı, bu yüzden
@@ -82,6 +258,55 @@ def parse_intent(text: str) -> Parsed:
     t = _clean(text).lower()
 
     # ─────────────────────────────────────────────────────────────────
+    # Greeting / Conversational intents (Basic Jarvis interaction)
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Greeting: "merhaba", "selam", "selam jarvis", "hey", "naber"
+    if re.search(r"^(merhaba|selam(\s+jarvis)?|hey(\s+jarvis)?|naber|nas[ıi]ls[ıi]n|g[üu]nayd[ıi]n|iyi\s+ak[şs]amlar|iyi\s+g[üu]nler)$", t):
+        return Parsed(intent="greeting", slots={})
+    
+    # Help: "yardım", "help", "ne yapabilirsin", "komutlar"
+    if re.search(r"^(yard[ıi]m|help|ne\s+yapabilirsin|komutlar|yard[ıi]m\s+et|nas[ıi]l\s+kullan[ıi]r[ıi]m)$", t):
+        return Parsed(intent="help", slots={})
+    
+    # Time query: "saat kaç", "ne zaman", "bugün günlerden ne"
+    if re.search(r"^(saat\s+ka[çc]|saati?\s+s[öo]yle(r\s+misin)?|[şs]u\s+an(ki)?\s+saat)$", t):
+        return Parsed(intent="time_query", slots={})
+    
+    # Date query: "bugün ne", "hangi gün", "tarih ne"
+    if re.search(r"^(bug[üu]n\s+ne|hangi\s+g[üu]n|tarih\s+ne|bug[üu]n\s+g[üu]nlerden\s+ne)$", t):
+        return Parsed(intent="date_query", slots={})
+    
+    # Thanks/Goodbye: "teşekkürler", "sağ ol", "hoşça kal"
+    if re.search(r"^(te[şs]ekk[üu]rler|te[şs]ekk[üu]r\s+ederim|sa[ğg]\s*ol|eyvallah|ho[şs][çc]a\s*kal|g[öo]r[üu][şs][üu]r[üu]z|bay\s*bay|bye|iyi\s+geceler)$", t):
+        return Parsed(intent="goodbye", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
+    # Job Control intents (Issue #31 - V2-1: Agent OS Core)
+    # These have high priority as they control running jobs
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Job pause: "bekle", "dur", "bir saniye", "durakla"
+    if re.search(r"^(bekle|dur|bir\s*san[ıi]ye|durakla|pause|durdur|bekler\s*misin)$", t):
+        return Parsed(intent="job_pause", slots={})
+    
+    # Job resume: "devam et", "devam", "sürdür", "continue"
+    if re.search(r"^(devam(\s*et)?|s[üu]rd[üu]r|continue|devam\s*edelim|kald[ıi][ğg][ıi]n\s*yerden)$", t):
+        return Parsed(intent="job_resume", slots={})
+    
+    # Job cancel: "iptal", "vazgeç", "cancel", "bırak", "boşver"
+    if re.search(r"^([ıi]ptal|vazge[çc]|cancel|b[ıi]rak|bo[şs]ver|g[ıi]t|unut)$", t):
+        return Parsed(intent="job_cancel", slots={})
+    
+    # Job status: "ne yapıyorsun", "durum", "neredesin", "status"
+    # If the user explicitly says "agent ...", route to agent_status instead.
+    if re.search(r"\b(agent\s+durum(u)?|agent\s+status|agent\s+ne\s+yap[ıi]yor|agent\s+ne\s+yap[ıi]yorsun)\b", t):
+        return Parsed(intent="agent_status", slots={})
+
+    if re.search(r"\b(ne\s+yap[ıi]yorsun|durum(un)?|neredesin|status|ne\s+i[şs]\s+yap[ıi]yorsun|hangi\s+a[şs]amaday[ıi]z)\b", t):
+        return Parsed(intent="job_status", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
     # Agent mode (Issue #3)
     # Explicit prefix to avoid changing existing behavior.
     # Examples:
@@ -105,9 +330,7 @@ def parse_intent(text: str) -> Parsed:
     if re.search(r"\b(plan[ıi]?\s+(tamam|onayla|ba[sş]lat)|agent[ıi]?\s+ba[sş]lat|plan[ıi]?\s+[cç]al[ıi][sş]t[ıi]r)\b", t):
         return Parsed(intent="agent_confirm_plan", slots={})
 
-    # Agent status
-    if re.search(r"\b(agent\s+durum(u)?|agent\s+status|agent\s+ne\s+yap[ıi]yor)\b", t):
-        return Parsed(intent="agent_status", slots={})
+    # Agent status (handled earlier to avoid conflict with generic "durum")
 
     # Agent history / plan listing
     m = re.search(r"\bson\s+(\d+)\s+(agent|ajan)\b", t)
@@ -144,6 +367,57 @@ def parse_intent(text: str) -> Parsed:
     # Hide overlay: "bantz kapat", "overlay'i kapat", "gizlen"
     if re.search(r"\b(gizlen|overlay.*kapat|kendini\s+kapat|ekrandan\s+[cç][ıi]k)\b", t):
         return Parsed(intent="overlay_hide", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
+    # Jarvis Panel control (Issue #19)
+    # Note: These are specific panel commands that require "panel" keyword
+    # Generic pagination like "sonraki", "önceki" are handled later
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Panel move: "paneli sağa taşı", "paneli sol üste götür", "paneli ortaya al"
+    m = re.search(r"\bpanel[ie]?\s*(sa[ğg](a)?|sol(a)?|sa[ğg]\s*[üu]st(e)?|sol\s*[üu]st(e)?|orta(ya)?|merkez(e)?|sa[ğg]\s*alt(a)?|sol\s*alt(a)?)\s*(ta[şs][ıi]|g[oö]t[üu]r|al|git|ge[çc]|koy)\b", t)
+    if m:
+        position = m.group(1).strip()
+        return Parsed(intent="panel_move", slots={"position": position})
+    
+    # Alternative: "sağa taşı paneli", "sol üste al paneli"
+    m = re.search(r"\b(sa[ğg](a)?|sol(a)?|sa[ğg]\s*[üu]st(e)?|sol\s*[üu]st(e)?|orta(ya)?|merkez(e)?)\s*(ta[şs][ıi]|g[oö]t[üu]r|al)\s*panel[ie]?\b", t)
+    if m:
+        position = m.group(1).strip()
+        return Parsed(intent="panel_move", slots={"position": position})
+    
+    # Panel hide: "paneli kapat", "paneli gizle", "sonuçları kapat"
+    if re.search(r"\b(panel[ie]?\s*(kapat|gizle|hide)|sonu[çc]lar[ıi]?\s*kapat)\b", t):
+        return Parsed(intent="panel_hide", slots={})
+    
+    # Panel minimize: "paneli küçült", "paneli minimize et"
+    if re.search(r"\b(panel[ie]?\s*(k[üu][çc][üu]lt|minimize)|k[üu][çc][üu]lt\s*panel[ie]?)\b", t):
+        return Parsed(intent="panel_minimize", slots={})
+    
+    # Panel maximize/restore: "paneli büyüt", "paneli aç", "paneli göster"
+    if re.search(r"\b(panel[ie]?\s*(b[üu]y[üu]t|g[oö]ster|maximize|restore)|b[üu]y[üu]t\s*panel[ie]?)\b", t):
+        return Parsed(intent="panel_maximize", slots={})
+    
+    # Panel pagination: ONLY with explicit "panel" or "sayfa" keyword
+    # "panelde sonraki", "sonraki sayfa"
+    if re.search(r"\b(panel(de)?\s+sonraki|sonraki\s+sayfa)\b", t):
+        return Parsed(intent="panel_next_page", slots={})
+    
+    # Panel prev: ONLY with explicit "panel" or "sayfa" keyword
+    # "panelde önceki", "önceki sayfa"
+    if re.search(r"\b(panel(de)?\s+[öo]nceki|[öo]nceki\s+sayfa)\b", t):
+        return Parsed(intent="panel_prev_page", slots={})
+    
+    # Panel select item: "panelde 3. sonucu aç", "panelden 2. sonucu seç"
+    # Note: Without "panel" keyword, these go to news_open_result
+    m = re.search(r"\bpanel(de|den|deki)?\s*(\d+)\.\s*sonu[çc][uü]?\s*(a[çc]|se[çc]|g[öo]ster)?\b", t)
+    if m:
+        return Parsed(intent="panel_select_item", slots={"index": int(m.group(2))})
+    
+    # Alternative: "3. paneldeki sonucu aç"
+    m = re.search(r"\b(\d+)\.\s*panel(de|den|deki)\s*sonu[çc][uü]?\s*(a[çc]|se[çc]|g[öo]ster)?\b", t)
+    if m:
+        return Parsed(intent="panel_select_item", slots={"index": int(m.group(1))})
 
     # Queue control commands (highest priority)
     if t in {"duraklat", "bekle", "dur bir"}:
@@ -231,6 +505,8 @@ def parse_intent(text: str) -> Parsed:
             "ilk", "birinci", "ikinci", "üçüncü", "şu", "bu",
             # Music/media words that are usually browser targets
             "müzik", "müziği", "müziğini", "kanal", "kanalı", "kanalını", "playlist",
+            # News-related keywords - handled by news intents
+            "haber", "haberi", "haberin", "haberini", "haberleri",
         }
         if app not in browser_keywords:
             return Parsed(intent="app_open", slots={"app": app})
@@ -500,6 +776,97 @@ def parse_intent(text: str) -> Parsed:
         return Parsed(intent="browser_info", slots={})
 
     # ─────────────────────────────────────────────────────────────────
+    # News Briefing Commands (Jarvis-style news)
+    # Check specific patterns FIRST, then general patterns
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Open news result by index: "3. haberi aç", "3. haberi göster", "2. sonucu aç"
+    # MUST be checked BEFORE general "haberi göster" pattern
+    m = re.search(r"\b(\d+)\.\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster|oku)\b", t)
+    if m:
+        return Parsed(intent="news_open_result", slots={"index": int(m.group(1))})
+    
+    # Open by ordinal: "birinci haberi aç", "ikinci haberi aç", "üçüncü haberi aç"
+    m = re.search(r"\b(birinci|ilk)\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster)\b", t)
+    if m:
+        return Parsed(intent="news_open_result", slots={"index": 1})
+    m = re.search(r"\b(ikinci|second)\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster)\b", t)
+    if m:
+        return Parsed(intent="news_open_result", slots={"index": 2})
+    m = re.search(r"\b([üu][çc][üu]nc[üu]|third)\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster)\b", t)
+    if m:
+        return Parsed(intent="news_open_result", slots={"index": 3})
+    
+    # Open current news: "bu haberi aç", "şu haberi aç"
+    if re.search(r"\b([şs]u|bu)\s*(haber|sonu[çc])([uıiü])?([yn][uıiü])?\s*(a[çc]|g[öo]ster)\b", t):
+        return Parsed(intent="news_open_current", slots={})
+    
+    # More news: "daha fazla haber", "devamını göster", "diğer haberler"
+    if re.search(r"\b(daha\s+fazla\s+haber|devam[ıi]n[ıi]\s+g[öo]ster|di[ğg]er\s+haberler|sonraki\s+haberler)\b", t):
+        return Parsed(intent="news_more", slots={})
+    
+    # News briefing: "bugünkü haberlerde ne var", "günlük haberleri göster", "gündem ne"
+    if re.search(r"\b(bug[üu]nk[üu]|g[üu]nl[üu]k|son)?\s*(haberlerde?|g[üu]ndem)\s*(de|da)?\s*(ne\s+var|neler?\s+var|ne)\b", t):
+        return Parsed(intent="news_briefing", slots={"query": "gündem"})
+    
+    # News with topic: "teknoloji haberleri", "ekonomi haberi", "spor haberleri"
+    m = re.search(r"\b(teknoloji|ekonomi|spor|siyaset|sa[ğg]l[ıi]k|e[ğg]itim|k[üu]lt[üu]r|magazin|d[üu]nya|t[üu]rkiye)\s*(haber(ler)?i?)\b", t)
+    if m:
+        topic = m.group(1).strip()
+        return Parsed(intent="news_briefing", slots={"query": topic})
+    
+    # News search: "haberleri göster", "haberler oku", "haberleri getir", "haberleri aç"
+    # Only matches plural forms to avoid matching "X haberi aç"
+    if re.search(r"\bhaber(ler)[iı]?\s*(g[öo]ster|oku|getir|a[çc]|ver)\b", t):
+        return Parsed(intent="news_briefing", slots={"query": "gündem"})
+
+    # ─────────────────────────────────────────────────────────────────
+    # Page Summarization Commands (Jarvis-style)
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Question about page content: "Bu CEO kim?", "Fiyatı ne?", "Kim yazmış?"
+    # Must check BEFORE general summarize patterns
+    m = re.search(r"\b(bu|şu|o)\s+(.+?)(\s+kim|\s+ne\s+zaman|\s+neden|\s+nas[ıi]l|\s+nerede)\b.*\?", t)
+    if m:
+        question = text.strip()
+        return Parsed(intent="page_question", slots={"question": question})
+    
+    # Direct questions: "CEO kim?", "Fiyatı ne?", "Kaç para?", "Ne zaman?"
+    if re.search(r"\b(kim|ne|neden|nas[ıi]l|nerede|ka[çc])\b.*\?$", t):
+        question = text.strip()
+        return Parsed(intent="page_question", slots={"question": question})
+    
+    # Detailed summarize: "detaylı anlat", "tam anlat", "daha detaylı özetle"
+    if re.search(r"\b(tam|daha\s+)?(detayl[ıi]|uzun)\s*(anlat|[öo]zetle|a[çc][ıi]kla)\b", t):
+        return Parsed(intent="page_summarize_detailed", slots={})
+    
+    # Detailed summarize: "detaylı olarak anlat", "ayrıntılı açıkla"
+    if re.search(r"\b(detayl[ıi]\s+olarak|ayr[ıi]nt[ıi]l[ıi])\s*(anlat|[öo]zetle|a[çc][ıi]kla)\b", t):
+        return Parsed(intent="page_summarize_detailed", slots={})
+    
+    # Short summarize: "bu sayfayı özetle", "bu haberi anlat", "şu makaleyi oku"
+    # Note: Turkish suffixes can be -ı/-i/-u/-ü or -yı/-yi/-yu/-yü or -nı/-ni/-nu/-nü
+    # içerik -> içeriği (k->ğ mutation)
+    if re.search(r"\b(bu|[şs]u)\s*(sayfa|haber|i[çc]eri[gğk]|makale|yaz[ıi])([yniıuü]+)?\s+([öo]zetle|anlat|a[çc][ıi]kla|oku)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+    
+    # Short summarize: "bunu özetle", "şunu anlat"
+    if re.search(r"\b(bunu|[şs]unu)\s*([öo]zetle|anlat|a[çc][ıi]kla)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+    
+    # Short summarize: "özetle", "anlat bakalım", "ne anlatıyor", "ne yazıyor"
+    if re.search(r"\b(ne\s+anlat[ıi]yor|ne\s+yaz[ıi]yor|ne\s+diyor|neler\s+var)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+    
+    # Short summarize: "anlayamadım anlat", "anlamadım açıkla"
+    if re.search(r"\b(anlaya?mad[ıi]m|anlamad[ıi]m).*(anlat|a[çc][ıi]kla|[öo]zetle)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+    
+    # Summarize with question marker: "bu ne anlatıyor bana?"
+    if re.search(r"\b(bu|[şs]u)\s+(ne\s+anlat|ne\s+yaz|ne\s+di)\b", t):
+        return Parsed(intent="page_summarize", slots={})
+
+    # ─────────────────────────────────────────────────────────────────
     # Original skills
     # ─────────────────────────────────────────────────────────────────
 
@@ -638,6 +1005,16 @@ def parse_intent(text: str) -> Parsed:
     m = re.search(r"\bhat[ıi]rlat\s*:\s*(\d+\s*(?:dakika|dk|saat|sa|saniye|sn)\s*sonra)\s+(.+)$", text, flags=re.IGNORECASE)
     if m:
         return Parsed(intent="reminder_add", slots={"time": m.group(1).strip(), "message": m.group(2).strip()})
+    
+    # Pattern: "hatırlat: yarın 10'da toplantı" (informal time with 'da/'de suffix)
+    m = re.search(r"\bhat[ıi]rlat\s*:\s*(yar[ıi]n\s*\d{1,2}['\s]*(da|de|'da|'de)?)\s+(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="reminder_add", slots={"time": m.group(1).strip(), "message": m.group(3).strip()})
+    
+    # Pattern: "hatırlat: message" (fallback - just message, no time specified = immediate/soon)
+    m = re.search(r"\bhat[ıi]rlat\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="reminder_add", slots={"time": "5 dakika sonra", "message": m.group(1).strip()})
 
     # ─────────────────────────────────────────────────────────────────
     # Check-in commands (Bantz proactive conversations)
@@ -688,6 +1065,80 @@ def parse_intent(text: str) -> Parsed:
     if m:
         return Parsed(intent="checkin_add", slots={"schedule": m.group(2).strip(), "prompt": m.group(3).strip()})
 
+    # ─────────────────────────────────────────────────────────────────
+    # Coding Agent Commands (Issue #4)
+    # File operations, terminal, code editing via natural language
+    # ─────────────────────────────────────────────────────────────────
+    
+    # File read: "dosya oku: path", "oku: file.py", "file.py dosyasını oku"
+    m = re.search(r"(dosya|file)\s*(oku|okuyabilir\s+misin|göster)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="file_read", slots={"path": m.group(3).strip()})
+    m = re.search(r"oku\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="file_read", slots={"path": m.group(1).strip()})
+    m = re.search(r"(.+?)\s+dosyas[ıi]n[ıi]\s+(oku|göster)", t)
+    if m:
+        return Parsed(intent="file_read", slots={"path": m.group(1).strip()})
+    
+    # File write/create: "dosya yaz: path", "oluştur: file.py"
+    m = re.search(r"(dosya|file)\s*(yaz|oluştur|olu[sş]tur|create)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="file_create", slots={"path": m.group(3).strip()})
+    m = re.search(r"olu[sş]tur\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="file_create", slots={"path": m.group(1).strip()})
+    
+    # File list/tree: "dosyaları listele", "proje yapısı", "tree", "ls"
+    if re.search(r"\b(dosyalar[ıi]?\s+(listele|g[öo]ster)|proje\s+yap[ıi]s[ıi]|tree|file\s+tree|klasör\s+yap[ıi]s[ıi])\b", t):
+        return Parsed(intent="project_tree", slots={})
+    
+    # File search: "dosya ara: *.py", "ara: config"
+    m = re.search(r"(dosya|file)?\s*ara\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m and m.group(2).strip():
+        return Parsed(intent="file_search", slots={"pattern": m.group(2).strip()})
+    
+    # Undo: "geri al", "undo", "son değişikliği geri al"
+    if re.search(r"\b(geri\s+al|undo|son\s+de[ğg]i[şs]ikli[ğg]i\s+geri\s+al)\b", t):
+        return Parsed(intent="file_undo", slots={})
+    
+    # Terminal run: "terminal: ls -la", "çalıştır: npm run dev", "run: pytest"
+    m = re.search(r"(terminal|[çc]al[ıi][şs]t[ıi]r|run|shell|exec)\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="terminal_run", slots={"command": m.group(2).strip()})
+    
+    # Background process: "arka planda: npm run dev", "background: python server.py"
+    m = re.search(r"(arka\s*planda?|background|bg)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="terminal_background", slots={"command": m.group(2).strip()})
+    
+    # Background list/kill: "arka plan işlemleri", "bg kill 1"
+    if re.search(r"\b(arka\s*plan\s*i[şs]lemleri?|background\s*processes?|bg\s+list)\b", t):
+        return Parsed(intent="terminal_background_list", slots={})
+    m = re.search(r"\b(bg\s+kill|arka\s*plan\s*kapat)\s+(\d+)\b", t)
+    if m:
+        return Parsed(intent="terminal_background_kill", slots={"id": int(m.group(2))})
+    
+    # Code format: "formatla: file.py", "format: src/", "kodu formatla"
+    m = re.search(r"(formatla|format|düzenle)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="code_format", slots={"path": m.group(2).strip()})
+    
+    # Project info: "proje bilgisi", "dependencies", "bağımlılıklar"
+    if re.search(r"\b(proje\s+bilgi(si)?|project\s+info|ba[ğg][ıi]ml[ıi]l[ıi]klar|dependencies)\b", t):
+        return Parsed(intent="project_info", slots={})
+    
+    # Symbol search: "fonksiyon bul: parse", "class ara: Router"
+    m = re.search(r"(fonksiyon|function|class|sembol|symbol)\s*(bul|ara)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        symbol_type = "function" if "fonk" in m.group(1).lower() or "func" in m.group(1).lower() else "class" if "class" in m.group(1).lower() else None
+        return Parsed(intent="project_search_symbol", slots={"name": m.group(3).strip(), "type": symbol_type})
+    
+    # Symbols in file: "semboller: file.py", "fonksiyonlar: engine.py"
+    m = re.search(r"(sembol|symbol|fonksiyon|function|class)ler[ıi]?\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    if m:
+        return Parsed(intent="project_symbols", slots={"path": m.group(2).strip()})
+
     # dev mode placeholder
     if re.search(r"\b(repo|test|build|branch|commit|pull request|pr|ci)\b", t):
         return Parsed(intent="dev_task", slots={"text": text})
@@ -696,4 +1147,44 @@ def parse_intent(text: str) -> Parsed:
     if re.search(r"\b(kill|pkill|killall|systemctl|service)\b", t):
         return Parsed(intent="unknown", slots={"text": text, "risky": True})
 
+    # ─────────────────────────────────────────────────────────────────
+    # Vague Search Detection (Issue #21)
+    # "şurada kaza olmuş", "geçenlerde birşey olmuş orada"
+    # These should trigger clarification flow
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Vague location indicators
+    VAGUE_LOCATION = r"\b([şs]urada|orada|burada|burda|[şs]urda|bir\s*yerde|[şs]uradaki|oradaki|o\s*taraf(ta|lar)?)\b"
+    
+    # Vague time indicators  
+    VAGUE_TIME = r"\b(ge[çc]enlerde|ge[çc]en\s*g[üu]n(lerde)?|d[üu]n|[şs]imdi|demin|az\s*[öo]nce|biraz\s*[öo]nce|son\s*zamanlarda)\b"
+    
+    # Vague subject indicators
+    VAGUE_SUBJECT = r"\b(bir\s*[şs]ey(ler)?|bi'?\s*[şs]i|neler|birisi|biri|adam|kad[ıi]n|bir\s*tip|kimse)\b"
+    
+    # Event patterns that may be vague
+    EVENT_WORDS = r"\b(kaza|yang[ıi]n|deprem|olay|sald[ıi]r[ıi]|patlama|sel|kavga|cinayet|h[ıi]rs[ıi]zl[ıi]k|olmu[şs]|ya[şs]an[ıi]yor)\b"
+    
+    # Check for vague patterns
+    has_vague_location = bool(re.search(VAGUE_LOCATION, t))
+    has_vague_time = bool(re.search(VAGUE_TIME, t))
+    has_vague_subject = bool(re.search(VAGUE_SUBJECT, t))
+    has_event = bool(re.search(EVENT_WORDS, t))
+    
+    # If there's an event with vague indicators, mark as vague_search
+    if has_event and (has_vague_location or has_vague_time or has_vague_subject):
+        vague_slots = {
+            "text": text,
+            "has_vague_location": has_vague_location,
+            "has_vague_time": has_vague_time,
+            "has_vague_subject": has_vague_subject,
+        }
+        return Parsed(intent="vague_search", slots=vague_slots)
+    
+    # Generic "neler olmuş" patterns
+    if re.search(r"\b(neler\s+olmu[şs]|ne\s+olmu[şs]|ne\s+var\s+ne\s+yok)\b", t):
+        if has_vague_location:
+            return Parsed(intent="vague_search", slots={"text": text, "has_vague_location": True})
+
     return Parsed(intent="unknown", slots={"text": text})
+

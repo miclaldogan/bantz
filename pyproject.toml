@@ -13,6 +13,7 @@ browser = [
 ]
 dev = [
 	"pytest>=7.4.0",
+	"pytest-asyncio>=0.23.0",
 	"tomli>=2.0.1",
 ]
 input = [
@@ -21,6 +22,12 @@ input = [
 llm = [
 	"requests>=2.31.0",
 ]
+
+calendar = [
+	"google-auth>=2.0.0",
+	"google-auth-oauthlib>=1.0.0",
+	"google-api-python-client>=2.0.0",
+]
 voice = [
 	"requests>=2.31.0",
 	"numpy>=1.24.0",
@@ -28,6 +35,42 @@ voice = [
 	"faster-whisper>=1.0.0",
 	"pynput>=1.7.6",
 	"rapidfuzz>=3.6.0",
+	"openwakeword>=0.6.0",
+]
+system = [
+	"dbus-next>=0.2.3",
+	"pynput>=1.7.6",
+	"PyQt5>=5.15.0",
+	"pystray>=0.19.0",
+	"Pillow>=10.0.0",
+]
+ui = [
+	"PyQt5>=5.15.0",
+	"pystray>=0.19.0",
+	"Pillow>=10.0.0",
+]
+vision = [
+	"Pillow>=10.0.0",
+	"mss>=9.0.0",
+	"PyMuPDF>=1.24.0",
+	"pytesseract>=0.3.10",
+]
+security = [
+	"cryptography>=42.0.0",
+]
+
+# Convenience meta extra for local dev installs.
+# Keep in sync with README.
+all = [
+	"bantz[browser]",
+	"bantz[dev]",
+	"bantz[input]",
+	"bantz[llm]",
+	"bantz[calendar]",
+	"bantz[voice]",
+	"bantz[system]",
+	"bantz[vision]",
+	"bantz[security]",
 ]
 
 [project.scripts]

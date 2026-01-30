@@ -510,6 +510,126 @@ function applyProfile(profile) {
 }
 
 /**
+ * Extract main page content for summarization.
+ * Returns title, content, and URL with 8000 character limit.
+ */
+function extractPageContent() {
+  const MAX_CONTENT_LENGTH = 8000;
+  const url = window.location.href;
+  const title = document.title || '';
+  
+  // Strategy 1: Try article/main content containers
+  const contentSelectors = [
+    'article',
+    '[role="main"]',
+    'main',
+    '.article-content',
+    '.post-content',
+    '.entry-content',
+    '.content-body',
+    '.story-body',
+    '#article-body',
+    '.article-body',
+    '.news-content',
+    '.main-content',
+  ];
+  
+  let mainContent = null;
+  
+  // Try each selector in order
+  for (const selector of contentSelectors) {
+    const el = document.querySelector(selector);
+    if (el) {
+      const text = getCleanText(el);
+      if (text.length > 200) {  // Must have substantial content
+        mainContent = el;
+        break;
+      }
+    }
+  }
+  
+  // Strategy 2: Fall back to body with cleanup
+  if (!mainContent) {
+    mainContent = document.body;
+  }
+  
+  // Extract clean text
+  let content = getCleanText(mainContent);
+  
+  // Truncate to max length (keep meaningful ending)
+  if (content.length > MAX_CONTENT_LENGTH) {
+    // Try to cut at sentence boundary
+    let cutPoint = content.lastIndexOf('. ', MAX_CONTENT_LENGTH);
+    if (cutPoint < MAX_CONTENT_LENGTH * 0.7) {
+      cutPoint = MAX_CONTENT_LENGTH;
+    }
+    content = content.slice(0, cutPoint + 1) + ' [...]';
+  }
+  
+  console.log(`[Bantz] Extracted content: ${title.slice(0, 50)}... (${content.length} chars)`);
+  
+  return {
+    url: url,
+    title: title,
+    content: content,
+    extracted_at: new Date().toISOString(),
+    content_length: content.length,
+  };
+}
+
+/**
+ * Get clean text from element, excluding navigation, ads, etc.
+ */
+function getCleanText(element) {
+  // Clone to avoid modifying original
+  const clone = element.cloneNode(true);
+  
+  // Remove unwanted elements
+  const unwantedSelectors = [
+    'script',
+    'style',
+    'noscript',
+    'nav',
+    'header',
+    'footer',
+    'aside',
+    '.nav',
+    '.navigation',
+    '.menu',
+    '.sidebar',
+    '.comments',
+    '.comment',
+    '.advertisement',
+    '.ad',
+    '.ads',
+    '.social-share',
+    '.share-buttons',
+    '.related-posts',
+    '.recommended',
+    '[role="navigation"]',
+    '[role="banner"]',
+    '[role="complementary"]',
+    '[aria-hidden="true"]',
+  ];
+  
+  for (const selector of unwantedSelectors) {
+    clone.querySelectorAll(selector).forEach(el => el.remove());
+  }
+  
+  // Get text and clean up whitespace
+  let text = clone.innerText || clone.textContent || '';
+  
+  // Normalize whitespace
+  text = text
+    .replace(/\s+/g, ' ')           // Multiple spaces -> single space
+    .replace(/\n\s*\n/g, '\n\n')    // Multiple newlines -> double newline
+    .replace(/^\s+|\s+$/gm, '')     // Trim lines
+    .trim();
+  
+  return text;
+}
+
+/**
  * Listen for messages from background script
  */
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -518,6 +638,18 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
     case 'bantz:connected':
       console.log('[Bantz] Daemon connected');
+      break;
+    
+    case 'bantz:extract':
+      // Extract page content for summarization
+      const extracted = extractPageContent();
+      
+      browser.runtime.sendMessage({
+        type: 'bantz:extract_result',
+        ...extracted,
+      });
+      
+      sendResponse({ success: true, content_length: extracted.content_length });
       break;
       
     case 'bantz:scan':
