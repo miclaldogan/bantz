@@ -3,7 +3,9 @@
 **Issue**: #153  
 **Date**: January 31, 2026  
 **GPU**: NVIDIA RTX 4060 (8GB VRAM)  
-**Purpose**: Determine optimal model strategy for "Jarvis feeling" with RTX 4060 hardware
+**Purpose**: Determine optimal model strategy for "Jarvis feeling" with RTX 4060-class hardware
+
+> **Reality check (2026-01-31):** Aktif geliştirme makinesi RTX 4050 Laptop (6GB VRAM). Bu doküman “4060/8GB” hedefini anlatır; değerler **ölçüm değilse açıkça ESTIMATED** kabul edilmelidir. 6GB VRAM üzerinde 8B lokal çalışmayabilir; hibrit finalizer genelde remote vLLM endpoint gerektirir.
 
 ---
 
@@ -62,7 +64,8 @@ This benchmark compares **Qwen2.5-3B-Instruct** and **Qwen2.5-8B-Instruct** on R
 **Weaknesses**:
 - 🤔 Occasional "anlamadı" moments in complex queries
 - 📝 Chat responses sometimes awkward or unnatural Turkish
-- 🧠 Struggles with mul (⚠️ ESTIMATED - Not Measured)
+
+### 8B-Instruct Results (⚠️ ESTIMATED - Not Measured)
 
 | Scenario | TTFT p50 | TTFT p95 | Latency p50 | Latency p95 | Throughput | JSON Valid | VRAM Peak |
 |----------|----------|----------|-------------|-------------|------------|------------|-----------|
@@ -71,8 +74,6 @@ This benchmark compares **Qwen2.5-3B-Instruct** and **Qwen2.5-8B-Instruct** on R
 | **Chat** | ~190 ms* | ~280 ms* | ~980 ms* | ~1350 ms* | ~82 tok/s* | N/A | ~5.5 GB* |
 
 *Estimated from mock server + scaling assumptions. Real measurements TBD.
-
-**Strengths** (Projected)190 ms | 280 ms | 980 ms | 1350 ms | 82 tok/s | N/A | 5.5 GB |
 
 **Strengths**:
 - 🧠 Significantly better reasoning and comprehension
@@ -90,9 +91,11 @@ This benchmark compares **Qwen2.5-3B-Instruct** and **Qwen2.5-8B-Instruct** on R
 
 | Scenario | TTFT p50 | TTFT p95 | Latency p50 | Latency p95 | Throughput | JSON Valid | VRAM Peak |
 |----------|----------|----------|-------------|-------------|------------|------------|-----------|
-| **Router (3B)** | 85 ms | 120 ms | 180 ms | 240 ms | 145 tok/s | 100% | 2.8 GB |
-| **Orchestrator (3B)** | 95 ms | 140 ms | 320 ms | 420 ms | 128 tok/s | 98% | 3.1 GB |
-| **Chat (8B)** | 190 ms | 280 ms | 980 ms | 1350 ms | 82 tok/s | N/A | 5.5 GB |
+| **Router (3B)** | ~85 ms* | ~120 ms* | ~180 ms* | ~240 ms* | ~145 tok/s* | ?% | ~2.8 GB* |
+| **Orchestrator (3B)** | ~95 ms* | ~140 ms* | ~320 ms* | ~420 ms* | ~128 tok/s* | ?% | ~3.1 GB* |
+| **Chat (8B)** | ~190 ms* | ~280 ms* | ~980 ms* | ~1350 ms* | ~82 tok/s* | N/A | ~5.5 GB* |
+
+*Split table values are estimated unless replaced by real vLLM streaming measurements.
 
 **Hybrid Analysis**:
 - ⚡ Router/Orchestrator: Lightning fast (TTFT < 200ms)
