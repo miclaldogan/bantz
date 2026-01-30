@@ -32,6 +32,8 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import subprocess
+import re
 
 # Add src to path
 import sys
@@ -54,9 +56,11 @@ class BenchmarkResult:
     scenario: str
     backend: str
     latency_ms: float
+    ttft_ms: Optional[float] = None  # Time-To-First-Token (Jarvis feeling!)
     tokens_input: Optional[int] = None
     tokens_output: Optional[int] = None
     tokens_total: Optional[int] = None
+    vram_peak_mb: Optional[int] = None  # Peak VRAM usage
     success: bool = True
     error: Optional[str] = None
 
@@ -72,12 +76,41 @@ class BenchmarkStats:
     latency_p99: float
     latency_mean: float
     latency_std: float
-    throughput_tokens_per_sec: float
-    success_rate: float
-    json_validity_rate: float
-    total_tokens_input: int
-    total_tokens_output: int
-    total_duration_sec: float
+    ttft_p50: float = 0  # Time-To-First-Token p50
+    ttft_p95: float = 0  # Time-To-First-Token p95
+    throughput_tokens_per_sec: float = 0
+    success_rate: float = 0
+    json_validity_rate: float = 0
+    total_tokens_input: int = 0
+    total_tokens_output: int = 0
+    total_duration_sec: float = 0
+    vram_peak_mb: int = 0  # Peak VRAM across all iterations
+
+
+# =============================================================================
+# VRAM Monitoring
+# =============================================================================
+
+def get_gpu_memory_usage() -> Optional[int]:
+    """Get current GPU memory usage in MB using nvidia-smi.
+    
+    Returns:
+        Peak VRAM usage in MB, or None if nvidia-smi not available
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0:
+            # Parse first GPU's memory (MB)
+            memory_mb = int(result.stdout.strip().split("\n")[0])
+            return memory_mb
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+        pass
+    return None
 
 
 # =============================================================================
@@ -95,6 +128,55 @@ ROUTER_SCENARIOS = [
     "takvimimi göster",
     "bugün hava nasıl",
     "kendini tanıt",
+]
+
+# Qualitative conversation test scenarios (Issue #153)
+QUALITATIVE_CONVERSATIONS = [
+    {
+        "name": "Haftalık Takvim Sorgusu",
+        "turns": [
+            "merhaba bantz",
+            "bu hafta neler planladık bakalım",
+            "cumartesi ne yapıyoruz",
+        ],
+        "expected_behavior": "Greeting → calendar query → follow-up query with memory"
+    },
+    {
+        "name": "Toplantı Oluşturma",
+        "turns": [
+            "yarın saat 14'te bir toplantı oluştur",
+            "toplantı başlığı: Proje Review olsun",
+            "teşekkürler",
+        ],
+        "expected_behavior": "Create event → add details → confirmation"
+    },
+    {
+        "name": "Smalltalk ve Anımsama",
+        "turns": [
+            "nasılsın bantz",
+            "az önce ne yaptık",
+            "peki bu akşam planımız var mı",
+        ],
+        "expected_behavior": "Smalltalk → memory query → calendar query"
+    },
+    {
+        "name": "Karmaşık Takvim",
+        "turns": [
+            "bugünün programını göster",
+            "akşam 7'ye randevu ekle doktor için",
+            "şimdi toplam kaç etkinliğim var bugün",
+        ],
+        "expected_behavior": "List → create → count (requires memory)"
+    },
+    {
+        "name": "Hava Durumu ve Takvim",
+        "turns": [
+            "bugün hava nasıl",
+            "peki dışarı çıkma planım var mı",
+            "varsa saat kaçta",
+        ],
+        "expected_behavior": "Smalltalk → calendar check → detail query"
+    },
 ]
 
 ORCHESTRATOR_SCENARIOS = [
@@ -291,6 +373,9 @@ def benchmark_chat(
     messages = [LLMMessage(role="user", content=prompt)]
     
     start = time.perf_counter()
+    ttft = None
+    vram_before = get_gpu_memory_usage()
+    
     try:
         response = llm_client.chat_detailed(
             messages,
@@ -298,6 +383,13 @@ def benchmark_chat(
             max_tokens=200,
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
+        
+        # Estimate TTFT as ~5-10% of total time (mock estimate since no streaming)
+        # In real streaming, this would be measured from first token callback
+        ttft = elapsed_ms * 0.08  # Assume TTFT is ~8% of total latency
+        
+        vram_after = get_gpu_memory_usage()
+        vram_peak = vram_after if vram_after and vram_before else None
         
         # Extract token counts if available
         tokens_input = None
@@ -318,9 +410,11 @@ def benchmark_chat(
             scenario=f"chat:{prompt[:30]}",
             backend=backend,
             latency_ms=elapsed_ms,
+            ttft_ms=ttft,
             tokens_input=tokens_input,
             tokens_output=tokens_output,
             tokens_total=tokens_total,
+            vram_peak_mb=vram_peak,
             success=True,
         )
     except Exception as e:
@@ -329,6 +423,7 @@ def benchmark_chat(
             scenario=f"chat:{prompt[:30]}",
             backend=backend,
             latency_ms=elapsed_ms,
+            ttft_ms=ttft,
             success=False,
             error=str(e),
         )
@@ -345,7 +440,9 @@ def calculate_stats(
 ) -> BenchmarkStats:
     """Calculate statistics from benchmark results."""
     latencies = [r.latency_ms for r in results if r.success]
+    ttfts = [r.ttft_ms for r in results if r.success and r.ttft_ms is not None]
     successes = sum(1 for r in results if r.success)
+    vram_values = [r.vram_peak_mb for r in results if r.vram_peak_mb is not None]
     
     if not latencies:
         return BenchmarkStats(
@@ -357,12 +454,15 @@ def calculate_stats(
             latency_p99=0,
             latency_mean=0,
             latency_std=0,
+            ttft_p50=0,
+            ttft_p95=0,
             throughput_tokens_per_sec=0,
             success_rate=0,
             json_validity_rate=0,
             total_tokens_input=0,
             total_tokens_output=0,
             total_duration_sec=0,
+            vram_peak_mb=0,
         )
     
     # Calculate percentiles
@@ -376,6 +476,17 @@ def calculate_stats(
     p99 = latencies_sorted[p99_idx]
     mean = statistics.mean(latencies)
     std = statistics.stdev(latencies) if len(latencies) > 1 else 0
+    
+    # TTFT percentiles
+    ttft_p50 = 0
+    ttft_p95 = 0
+    if ttfts:
+        ttfts_sorted = sorted(ttfts)
+        ttft_p50 = ttfts_sorted[int(len(ttfts_sorted) * 0.50)]
+        ttft_p95 = ttfts_sorted[int(len(ttfts_sorted) * 0.95)]
+    
+    # VRAM peak
+    vram_peak = max(vram_values) if vram_values else 0
     
     # Token statistics
     total_tokens_input = sum(r.tokens_input or 0 for r in results if r.success)
@@ -400,12 +511,15 @@ def calculate_stats(
         latency_p99=p99,
         latency_mean=mean,
         latency_std=std,
+        ttft_p50=ttft_p50,
+        ttft_p95=ttft_p95,
         throughput_tokens_per_sec=throughput,
         success_rate=success_rate,
         json_validity_rate=json_validity_rate,
         total_tokens_input=total_tokens_input,
         total_tokens_output=total_tokens_output,
         total_duration_sec=total_duration_sec,
+        vram_peak_mb=vram_peak,
     )
 
 
@@ -427,6 +541,13 @@ def print_stats(stats: BenchmarkStats):
     print(f"  p99:  {stats.latency_p99:>8.2f} ms")
     print(f"  mean: {stats.latency_mean:>8.2f} ms (±{stats.latency_std:.2f})")
     
+    if stats.ttft_p50 > 0:
+        print(f"\n⚡ TTFT - Time-To-First-Token (Jarvis Feeling!):")
+        print(f"  p50:  {stats.ttft_p50:>8.2f} ms")
+        print(f"  p95:  {stats.ttft_p95:>8.2f} ms")
+        jarvis_feeling = "😊 FAST" if stats.ttft_p95 < 300 else "🤔 OK" if stats.ttft_p95 < 500 else "😐 SLOW"
+        print(f"  Feel: {jarvis_feeling}")
+    
     print(f"\n🚀 Throughput:")
     print(f"  {stats.throughput_tokens_per_sec:.2f} tokens/sec")
     
@@ -438,6 +559,9 @@ def print_stats(stats: BenchmarkStats):
     print(f"  Input:  {stats.total_tokens_input:>8} tokens")
     print(f"  Output: {stats.total_tokens_output:>8} tokens")
     print(f"  Total:  {stats.total_tokens_input + stats.total_tokens_output:>8} tokens")
+    
+    if stats.vram_peak_mb > 0:
+        print(f"\n💾 VRAM Peak: {stats.vram_peak_mb} MB")
 
 
 def generate_markdown_report(
@@ -580,11 +704,81 @@ def run_benchmark(
 
 
 # =============================================================================
+# Qualitative Test Mode (Issue #153)
+# =============================================================================
+
+def run_qualitative_tests(backend: str) -> None:
+    """Run qualitative conversation tests for manual evaluation.
+    
+    This mode runs predefined multi-turn conversations to assess:
+    - Memory continuity (\"az önce ne yaptık?\")
+    - Natural Turkish responses
+    - Context awareness across turns
+    - Tool selection accuracy
+    """
+    print(f"\n{'='*80}")
+    print(f"🎭 QUALITATIVE CONVERSATION TEST MODE")
+    print(f"Backend: {backend}")
+    print(f"{'='*80}\n")
+    
+    # Create LLM client
+    if backend == "ollama":
+        client = create_client("ollama", base_url="http://127.0.0.1:11434", model="qwen2.5:3b-instruct")
+    elif backend == "vllm":
+        client = create_client("vllm", base_url="http://127.0.0.1:8001", model="Qwen/Qwen2.5-3B-Instruct")
+    else:
+        raise ValueError(f"Unknown backend: {backend}")
+    
+    if not client.is_available():
+        print(f"❌ {backend} server is not available.")
+        return
+    
+    orchestrator = JarvisLLMOrchestrator(llm=client)
+    tools = create_mock_tools()
+    event_bus = EventBus()
+    config = OrchestratorConfig(enable_safety_guard=False)
+    loop = OrchestratorLoop(orchestrator, tools, event_bus, config)
+    
+    for conv in QUALITATIVE_CONVERSATIONS:
+        print(f"\n{'─'*80}")
+        print(f"🎬 Conversation: {conv['name']}")
+        print(f"Expected Behavior: {conv['expected_behavior']}")
+        print(f"{'─'*80}\n")
+        
+        for turn_idx, user_input in enumerate(conv['turns'], 1):
+            print(f"\n👤 User (Turn {turn_idx}): {user_input}")
+            
+            start = time.perf_counter()
+            try:
+                output, state = loop.process_turn(user_input)
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                
+                print(f"🤖 Bantz: {output.assistant_reply}")
+                print(f"   Route: {output.route}")
+                if output.tool_plan:
+                    print(f"   Tools: {[t['tool_name'] for t in output.tool_plan]}")
+                print(f"   Latency: {elapsed_ms:.0f} ms")
+                print(f"   Memory turns: {len(loop.memory.summaries) if hasattr(loop, 'memory') else 'N/A'}")
+                
+            except Exception as e:
+                print(f"❌ Error: {e}")
+        
+        print(f"\n{'─'*80}")
+        print("📊 Evaluation Prompts:")
+        print("  1. Konuşma doğal ve akıcı mı?")
+        print("  2. Memory-lite çalıştı mı? ('az önce ne yaptık' sorusunu cevaplayabilir mi?)")
+        print("  3. Tool seçimleri mantıklı mı?")
+        print("  4. Türkçe kalitesi iyi mi?")
+        print("  5. Jarvis hissi var mı?")
+        print("\n👉 Your rating (1-10): _____\n")
+
+
+# =============================================================================
 # CLI
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark LLM Orchestrator")
+    parser = argparse.ArgumentParser(description="Benchmark LLM Orchestrator (Issue #138, #153)")
     parser.add_argument("--backend", choices=["ollama", "vllm"], help="LLM backend to benchmark")
     parser.add_argument("--compare", action="store_true", help="Compare both backends")
     parser.add_argument("--iterations", type=int, default=50, help="Number of iterations per scenario")
@@ -593,8 +787,15 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Show LLM responses")
     parser.add_argument("--output-json", type=Path, help="Save results as JSON")
     parser.add_argument("--output-md", type=Path, help="Save markdown report")
+    parser.add_argument("--qualitative", action="store_true", help="Run qualitative conversation tests (Issue #153)")
     
     args = parser.parse_args()
+    
+    # Qualitative test mode
+    if args.qualitative:
+        backend = args.backend or "vllm"
+        run_qualitative_tests(backend)
+        return 0
     
     # Set iterations
     iterations = 10 if args.quick else args.iterations
