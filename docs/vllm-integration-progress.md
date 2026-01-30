@@ -4,13 +4,13 @@ Epic: [#131 - vLLM Backend ile GPU Hızlı Jarvis LLM Katmanı](https://github.c
 
 ## Progress Overview
 
-**Overall: 2/10 issues completed (20%)**
+**Overall: 3/10 issues completed (30%)**
 
 | Issue | Status | Priority | Description |
 |-------|--------|----------|-------------|
 | [#132](https://github.com/miclaldogan/bantz/issues/132) | ✅ **DONE** | P0 | vLLM PoC — OpenAI-compatible server |
 | [#133](https://github.com/miclaldogan/bantz/issues/133) | ✅ **DONE** | P0 | LLM Backend Abstraction |
-| [#134](https://github.com/miclaldogan/bantz/issues/134) | ⏳ TODO | P0 | Router vLLM entegrasyonu (LLM-first) |
+| [#134](https://github.com/miclaldogan/bantz/issues/134) | ✅ **DONE** | P0 | LLM Orchestrator (LLM-first architecture) |
 | [#137](https://github.com/miclaldogan/bantz/issues/137) | ⏳ TODO | P0 | Demo Script Update |
 | [#140](https://github.com/miclaldogan/bantz/issues/140) | ⏳ TODO | P0 | Safety & Policy |
 | [#135](https://github.com/miclaldogan/bantz/issues/135) | ⏳ TODO | P1 | Calendar Planner LLM |
@@ -24,7 +24,7 @@ Epic: [#131 - vLLM Backend ile GPU Hızlı Jarvis LLM Katmanı](https://github.c
 **Must-have (P0):**
 - [x] #132: vLLM PoC ✅
 - [x] #133: Backend Abstraction ✅
-- [ ] #134: Router Integration
+- [x] #134: LLM Orchestrator ✅
 - [ ] #137: Demo Update
 - [ ] #140: Safety & Policy
 
@@ -76,22 +76,54 @@ python scripts/demo_calendar_brainloop.py --run
 python scripts/demo_calendar_brainloop.py --llm-backend vllm --vllm-url http://127.0.0.1:8001 --run
 ```
 
+### ✅ Issue #134: LLM Orchestrator (PR #146)
+**Merged:** January 30, 2026
+
+**Deliverables:**
+- `src/bantz/brain/llm_router.py` - OrchestratorOutput schema (expanded RouterOutput)
+- `src/bantz/brain/orchestrator_loop.py` - LLM-driven executor (4-phase turn processing)
+- `src/bantz/brain/orchestrator_state.py` - State management (rolling summary, tool results, trace)
+- `tests/test_llm_orchestrator.py` - 5 scenario tests (metadata-based, 1/7 passing)
+
+**Orchestrator Features:**
+- LLM controls everything: route, intent, tools, confirmation prompts, reasoning
+- 4-phase turn: LLM Planning → Tool Execution → LLM Finalization → State Update
+- Confirmation firewall: destructive tools require user approval (LLM generates prompt, executor enforces)
+- Rolling summary: 5-10 lines, updated by LLM each turn
+- Trace metadata: route_source='llm', confidence, tool_plan_len, reasoning_summary
+
+**Schema Extensions:**
+- `ask_user`: Need clarification?
+- `question`: Clarification question
+- `requires_confirmation`: Destructive operation?
+- `confirmation_prompt`: LLM-generated confirmation text
+- `memory_update`: 1-2 line summary for rolling memory
+- `reasoning_summary`: 1-3 bullet points (not raw CoT)
+
+**Test Scenarios (metadata-based):**
+1. ✅ Smalltalk: "nasılsın" → route=smalltalk, no tools
+2. Calendar query (today): "bugün" → route=calendar, list_events
+3. Calendar create: "saat 4 toplantı" → requires_confirmation=True
+4. Calendar query (evening): "bu akşam" → evening window
+5. Calendar query (week): "bu hafta" → week window
+
 ## Current Work
 
-### ⏳ Issue #134: Router vLLM Integration
-**Status:** Ready to start
+### ⏳ Issue #137: Demo Script Update
+**Status:** Ready to start (already has `--llm-backend` flag from #133)
 **Branch:** Not yet created
 
 **Scope:**
-- Router uses vLLM for classification (target <500ms)
-- Deterministic routing with seed
-- Fallback to Ollama if vLLM unavailable
+- Integrate OrchestratorLoop into demo script
+- Show reasoning_summary in debug mode
+- Test with both Ollama and vLLM backends
+- Document 5-scenario acceptance tests
 
 ## Next Steps
 
-1. **Start #134** (Router Integration) - Next priority
-2. **Implement #137** (Demo Update) - After #134 (already has `--llm-backend` flag ✅)
-3. **Design #140** (Safety & Policy) - After #134
+1. **Start #137** (Demo Script Update) - Next priority
+2. **Design #140** (Safety & Policy) - After #137
+3. **Implement #135** (Calendar Planner) - After P0 items complete
 
 ## Documents
 
