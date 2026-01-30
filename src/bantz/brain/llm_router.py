@@ -111,14 +111,24 @@ TIME AWARENESS:
 - "yarın sabah" → window_hint="morning"
 - "bugün" → window_hint="today"
 - "bu hafta" → window_hint="week"
-- Türkçe saat formatları:
-  - "sekize" / "sekizde" → time="20:00" (akşam context'inde)
-  - "dokuza" / "dokuzda" → time="09:00" veya "21:00" (context'e göre)
-  - "beşe" / "beşte" → time="17:00"
-  - "altıya" / "altıda" → time="18:00"
-  - "on ikiye" → time="12:00" veya "00:00"
-  - "sabah 9" → time="09:00"
-  - "akşam 8" / "akşam sekiz" → time="20:00"
+- Türkçe saat formatları (dikkat: context'e göre sabah/öğle/akşam):
+  - "bire" / "birde" → time="01:00" veya "13:00" (context)
+  - "ikiye" / "ikide" → time="02:00" veya "14:00" (context)
+  - "üçe" / "üçte" → time="03:00" veya "15:00" (context)
+  - "dörde" / "dörtte" → time="04:00" veya "16:00" (context)
+  - "beşe" / "beşte" → time="05:00" veya "17:00" (context)
+  - "altıya" / "altıda" → time="06:00" veya "18:00" (context)
+  - "yediye" / "yedide" → time="07:00" veya "19:00" (context)
+  - "sekize" / "sekizde" → time="08:00" veya "20:00" (context)
+  - "dokuza" / "dokuzda" → time="09:00" veya "21:00" (context)
+  - "ona" / "onda" → time="10:00" veya "22:00" (context)
+  - "on bire" / "on birde" → time="11:00" veya "23:00" (context)
+  - "on ikiye" / "on ikide" → time="12:00" veya "00:00" (context)
+  - DEFAULT: yarın/öğle/iş saatleri → 13:00-17:00 arası tahmin et
+  - "sabah" context → 07:00-11:00
+  - "öğle" context → 12:00-14:00
+  - "akşam" context → 17:00-21:00
+  - Belirsizse → time field boş bırak
 
 ÖRNEKLER:
 USER: hey bantz nasılsın
@@ -169,6 +179,26 @@ USER: saat 4 için bir toplantı oluştur
   "confidence": 0.5,
   "tool_plan": [],
   "assistant_reply": "Süre ne olsun efendim? (örn. 30 dk / 1 saat)"
+}
+
+USER: yarın ikide toplantım var
+→ {
+  "route": "calendar",
+  "calendar_intent": "create",
+  "slots": {"time": "14:00", "title": "toplantı", "window_hint": "tomorrow"},
+  "confidence": 0.85,
+  "tool_plan": ["calendar.create_event"],
+  "assistant_reply": ""
+}
+
+USER: öğlene doktor randevusu koy
+→ {
+  "route": "calendar",
+  "calendar_intent": "create",
+  "slots": {"time": "12:00", "title": "doktor randevusu"},
+  "confidence": 0.9,
+  "tool_plan": ["calendar.create_event"],
+  "assistant_reply": ""
 }
 
 USER: bu akşam neler yapacağız

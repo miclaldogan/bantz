@@ -1892,41 +1892,78 @@ class BrainLoop:
                 confirmation_result = _llm_parse_confirmation(user_text)
                 
                 if confirmation_result == "confirm":
-                    # User confirmed - execute the action via LLM (stay in LLM mode!)
+                    # User confirmed - let LLM handle tool execution
                     intent = pending_action.get("intent")
                     slots = pending_action.get("slots")
                     original_user_text = pending_action.get("user_text", "")
                     
-                    # Clear confirmation state
+                    # Clear confirmation state but keep action info for LLM
                     state.pop("_pending_confirmation_action", None)
                     state[_DIALOG_STATE_KEY] = "IDLE"
                     
-                    # Update trace
+                    # Store confirmed slots in trace for LLM to see
                     trace = _ensure_trace()
                     trace["llm_confirmation"] = "confirmed"
+                    trace["confirmed_slots"] = slots
+                    trace["confirmed_intent"] = intent
                     
-                    # Build enriched prompt with confirmation context
-                    # Tell LLM: user confirmed, now execute the action with these slots
-                    enriched_prompt = f"{original_user_text} (kullanıcı onayladı, işlemi gerçekleştir)"
+                    # Build tool call parameters from slots
+                    if intent == "create" and isinstance(slots, dict):
+                        # Build ISO timestamp from slots
+                        start_time = None
+                        if slots.get("time"):
+                            # e.g. "14:00" → "2026-01-31T14:00:00+03:00"
+                            day_hint = slots.get("day_hint", "today")
+                            time_str = slots["time"]
+                            
+                            # Get window for day_hint
+                            window = None
+                            if day_hint == "tomorrow":
+                                window = ctx.get("tomorrow_window")
+                            elif day_hint == "today":
+                                window = ctx.get("today_window")
+                            
+                            if window and isinstance(window, dict):
+                                # Parse date from window start
+                                import datetime
+                                try:
+                                    date_str = str(window.get("start", "")).split("T")[0]  # "2026-01-31"
+                                    start_time = f"{date_str}T{time_str}:00+03:00"
+                                except Exception:
+                                    pass
+                        
+                        # Create calendar.create_event tool call
+                        tool_params = {
+                            "summary": slots.get("title", "Etkinlik"),
+                        }
+                        
+                        if start_time:
+                            tool_params["start"] = start_time
+                        elif slots.get("day_hint"):
+                            # Let LLM figure out the exact time
+                            pass
+                        
+                        if slots.get("duration"):
+                            tool_params["duration_minutes"] = int(slots["duration"])
+                        
+                        # Store tool call in state
+                        state["_confirmed_tool_call"] = {
+                            "name": "calendar.create_event",
+                            "params": tool_params,
+                        }
+                        
+                        # Acknowledge
+                        _emit_ack("Anladım efendim, ekliyorum.")
+                        
+                        # Now continue to LLM with enriched context
+                        # The LLM will see the confirmed tool call in session_context
+                        # and will execute it directly
+                        # Don't return, let execution continue to LLM step below
+                    else:
+                        # Unknown intent or no slots
+                        _emit_ack("Anladım efendim.")
                     
-                    # Store router slots in state for LLM to access
-                    state["_confirmed_action"] = {
-                        "intent": intent,
-                        "slots": slots,
-                        "original_text": original_user_text,
-                    }
-                    
-                    # Acknowledge
-                    _emit_ack("Anladım efendim, ekliyorum.")
-                    
-                    # Continue with LLM - let it handle the tool call
-                    # Don't re-run BrainLoop (which goes to deterministic routing)
-                    # Instead, continue to LLM step below
-                    # We'll set user_text to enriched prompt and let LLM handle it
-                    user_text = enriched_prompt
-                    
-                    # Reset router to None so it doesn't run again (already confirmed)
-                    # Continue to LLM step...
+                    # Continue execution - will hit LLM step below
                 
                 elif confirmation_result == "reject":
                     # User rejected - cancel
