@@ -156,6 +156,44 @@ def create_mock_tools() -> ToolRegistry:
 
 
 # =============================================================================
+# Helper Functions for Verbose Mode
+# =============================================================================
+
+def get_router_response(llm_client: LLMClient, prompt: str) -> str:
+    """Get a single router response for display."""
+    try:
+        orchestrator = JarvisLLMOrchestrator(llm=llm_client)
+        output = orchestrator.route(user_input=prompt)
+        return f"route={output.route}, intent={output.calendar_intent}, reply={output.assistant_reply[:100] if output.assistant_reply else 'None'}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+def get_orchestrator_response(llm_client: LLMClient, user_input: str) -> str:
+    """Get a single orchestrator response for display."""
+    try:
+        orchestrator = JarvisLLMOrchestrator(llm=llm_client)
+        tools = create_mock_tools()
+        event_bus = EventBus()
+        config = OrchestratorConfig(enable_safety_guard=False)
+        loop = OrchestratorLoop(orchestrator, tools, event_bus, config)
+        output, state = loop.process_turn(user_input)
+        return f"route={output.route}, tools={len(output.tool_plan)}, reply={output.assistant_reply[:100] if output.assistant_reply else 'None'}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+def get_chat_response(llm_client: LLMClient, prompt: str) -> str:
+    """Get a single chat response for display."""
+    try:
+        messages = [LLMMessage(role="user", content=prompt)]
+        response = llm_client.chat(messages, temperature=0.7, max_tokens=100)
+        return response
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+# =============================================================================
 # Benchmark Functions
 # =============================================================================
 
@@ -445,6 +483,7 @@ def run_benchmark(
     backend: str,
     iterations: int = 50,
     scenarios: str = "all",
+    verbose: bool = False,
 ) -> List[BenchmarkStats]:
     """Run benchmarks for a backend."""
     print(f"\n{'='*80}")
@@ -474,9 +513,13 @@ def run_benchmark(
         for prompt in ROUTER_SCENARIOS:
             print(f"  Running: {prompt[:40]}...")
             results = []
-            for _ in range(iterations):
+            for i in range(iterations):
                 result = benchmark_router(client, prompt, backend)
                 results.append(result)
+                # Show first response in verbose mode
+                if verbose and i == 0:
+                    response = get_router_response(client, prompt)
+                    print(f"    🤖 Response: {response[:200]}...")
             
             stats = calculate_stats(results, f"router:{prompt[:30]}", backend)
             all_stats.append(stats)
@@ -488,9 +531,13 @@ def run_benchmark(
         for scenario_name, user_input in ORCHESTRATOR_SCENARIOS:
             print(f"  Running: {scenario_name}...")
             results = []
-            for _ in range(iterations):
+            for i in range(iterations):
                 result = benchmark_orchestrator(client, scenario_name, user_input, backend)
                 results.append(result)
+                # Show first response in verbose mode
+                if verbose and i == 0:
+                    response = get_orchestrator_response(client, user_input)
+                    print(f"    🤖 Response: {response[:200]}...")
             
             stats = calculate_stats(results, f"orchestrator:{scenario_name}", backend)
             all_stats.append(stats)
@@ -502,9 +549,13 @@ def run_benchmark(
         for prompt in CHAT_SCENARIOS:
             print(f"  Running: {prompt}...")
             results = []
-            for _ in range(iterations):
+            for i in range(iterations):
                 result = benchmark_chat(client, prompt, backend)
                 results.append(result)
+                # Show first response in verbose mode
+                if verbose and i == 0:
+                    response = get_chat_response(client, prompt)
+                    print(f"    🤖 Response: {response[:200]}...")
             
             stats = calculate_stats(results, f"chat:{prompt}", backend)
             all_stats.append(stats)
@@ -524,6 +575,7 @@ def main():
     parser.add_argument("--iterations", type=int, default=50, help="Number of iterations per scenario")
     parser.add_argument("--quick", action="store_true", help="Quick benchmark (10 iterations)")
     parser.add_argument("--scenarios", choices=["all", "router", "orchestrator", "chat"], default="all", help="Which scenarios to run")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show LLM responses")
     parser.add_argument("--output-json", type=Path, help="Save results as JSON")
     parser.add_argument("--output-md", type=Path, help="Save markdown report")
     
@@ -538,11 +590,11 @@ def main():
     if args.compare:
         # Run both backends
         for backend in ["ollama", "vllm"]:
-            stats = run_benchmark(backend, iterations, args.scenarios)
+            stats = run_benchmark(backend, iterations, args.scenarios, verbose=args.verbose)
             all_stats.extend(stats)
     elif args.backend:
         # Run single backend
-        stats = run_benchmark(args.backend, iterations, args.scenarios)
+        stats = run_benchmark(args.backend, iterations, args.scenarios, verbose=args.verbose)
         all_stats.extend(stats)
     else:
         print("Error: Either --backend or --compare must be specified")
