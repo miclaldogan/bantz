@@ -600,11 +600,12 @@ def main() -> int:
         
         def complete_text(self, prompt: str) -> str:
             """Simple text completion for router (no JSON mode)."""
-            messages = [{"role": "user", "content": prompt}]
-            return self._client.complete(
+            from bantz.llm.ollama_client import LLMMessage
+            messages = [LLMMessage(role="user", content=prompt)]
+            return self._client.chat(
                 messages=messages,
                 temperature=self._temperature,
-                seed=42,  # Deterministic for router
+                max_tokens=512,
             )
     
     router_llm = RouterLLMWrapper(client=llm._client, temperature=0.0)
