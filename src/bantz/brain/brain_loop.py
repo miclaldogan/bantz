@@ -1298,11 +1298,13 @@ class BrainLoop:
         tools: ToolRegistry,
         event_bus: Optional[EventBus] = None,
         config: Optional[BrainLoopConfig] = None,
+        router: Optional[Any] = None,
     ):
         self._llm = llm
         self._tools = tools
         self._events = event_bus or get_event_bus()
         self._config = config or BrainLoopConfig()
+        self._router = router
 
     def run(
         self,
@@ -1314,6 +1316,7 @@ class BrainLoop:
     ) -> BrainResult:
         user_text = (turn_input or "").strip()
         if not user_text:
+            # Early return - no dialog summary update needed for empty input
             return BrainResult(
                 kind="fail", text="empty_input", steps_used=0, metadata={}
             )
@@ -1462,7 +1465,44 @@ class BrainLoop:
                     out.append(r)
             return out
 
+        # LLM Router: If router is configured, call it first for route classification + trace.
+        router_output: Optional[Any] = None
+        if self._router is not None:
+            try:
+                # Get dialog summary for context
+                dialog_summary = state.get(_DIALOG_SUMMARY_KEY) if isinstance(state, dict) else None
+                if not isinstance(dialog_summary, str):
+                    dialog_summary = ""
+                
+                # Call router
+                router_output = self._router.route(
+                    user_input=user_text,
+                    dialog_summary=dialog_summary,
+                    session_context=ctx,
+                )
+                
+                # If debug, log router decision
+                if self._config.debug:
+                    logger.info(f"[Router] route={router_output.route}, intent={router_output.calendar_intent}, "
+                               f"confidence={router_output.confidence:.2f}, tool_plan={router_output.tool_plan}")
+            except Exception as e:
+                logger.warning(f"Router failed: {e}")
+                router_output = None
+
         trace = _ensure_trace()
+        
+        # If router provided output, update trace with router decision
+        if router_output is not None:
+            trace["llm_router_route"] = router_output.route
+            trace["llm_router_intent"] = router_output.calendar_intent
+            trace["llm_router_confidence"] = router_output.confidence
+            trace["llm_router_tool_plan"] = router_output.tool_plan
+            trace["llm_router_slots"] = router_output.slots
+            
+            # If router provides assistant reply, store it for potential use
+            if router_output.assistant_reply:
+                trace["llm_router_reply"] = router_output.assistant_reply
+
 
         def _llm_route_classifier(user_text_in: str) -> tuple[str, str, float]:
             """Return (route, calendar_intent, confidence) using the LLM."""

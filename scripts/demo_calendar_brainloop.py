@@ -21,6 +21,7 @@ from bantz.agent.tools import Tool, ToolRegistry
 from bantz.agent.builtin_tools import build_default_registry
 from bantz.brain.brain_loop import BrainLoop, BrainLoopConfig
 from bantz.brain.json_repair import RepairLLM, validate_or_repair_action
+from bantz.brain.llm_router import JarvisLLMRouter
 from bantz.core.events import Event, EventBus, EventType
 from bantz.llm.ollama_client import LLMMessage, OllamaClient
 from bantz.policy.engine import PolicyEngine
@@ -508,6 +509,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Never write; calendar.create_event is stubbed")
     parser.add_argument("--run", action="store_true", help="Allow real calendar writes (will ask confirmation)")
 
+    # LLM Router (Issue #126)
+    parser.add_argument("--llm-first-router", action="store_true", help="Use LLM Router for route classification + trace (Issue #126)")
+
     # Interactive mode: read from file or pipe (avoids heredoc issues)
     parser.add_argument("--script", type=str, default=None, help="Read conversation from file (one line per user message)")
     parser.add_argument("--interactive", action="store_true", help="Force interactive mode even if stdin is piped")
@@ -590,11 +594,36 @@ def main() -> int:
     bus = EventBus()
     bus.subscribe_all(_print_event_stream)
 
+    # LLM Router (Issue #126): If --llm-first-router flag is set, instantiate router
+    router = None
+    if args.llm_first_router:
+        # Create a simple text-completion wrapper for router
+        class OllamaTextLLM:
+            def __init__(self, client: OllamaClient, temperature: float = 0.0):
+                self._client = client
+                self._temperature = temperature
+            
+            def complete_text(self, prompt: str) -> str:
+                """Simple text completion for router (no JSON mode)."""
+                messages = [{"role": "user", "content": prompt}]
+                return self._client.complete(
+                    messages=messages,
+                    temperature=self._temperature,
+                    seed=42,  # Deterministic for router
+                )
+        
+        router_llm = OllamaTextLLM(client=llm._client, temperature=0.0)
+        router = JarvisLLMRouter(llm=router_llm)
+        
+        if args.debug:
+            print("[DEMO] LLM Router enabled (Issue #126)")
+
     loop = BrainLoop(
         llm=adapter,
         tools=tools,
         event_bus=bus,
         config=BrainLoopConfig(max_steps=int(args.max_steps), debug=bool(args.debug)),
+        router=router,
     )
 
     # Shared state across turns: keeps policy pending action + session confirmation memory.
@@ -662,6 +691,15 @@ def main() -> int:
             policy=policy,
             context=state,
         )
+
+        # Debug: Print trace if LLM Router is enabled
+        if args.debug and args.llm_first_router and result.metadata:
+            trace = result.metadata.get("trace")
+            if isinstance(trace, dict):
+                print(f"\n[TRACE] Route: {trace.get('llm_router_route')} | "
+                      f"Intent: {trace.get('llm_router_intent')} | "
+                      f"Confidence: {trace.get('llm_router_confidence'):.2f} | "
+                      f"Tool Plan: {trace.get('llm_router_tool_plan')}\n")
 
         if result.kind == "say":
             print(f"BANTZ: {result.text}")
