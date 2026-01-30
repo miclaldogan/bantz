@@ -1970,7 +1970,13 @@ class BrainLoop:
                         # Call tool directly
                         _emit_progress(tool_name=tool_name)
                         try:
-                            result = self._tools.call_function(tool_name, tool_params)
+                            # Get tool from registry
+                            tool = self._tools.get(tool_name)
+                            if not tool or not tool.function:
+                                raise Exception(f"Tool {tool_name} not found or has no function")
+                            
+                            # Call tool function
+                            result = tool.function(**tool_params)
                             _emit_found(tool_name=tool_name)
                             
                             if result.get("ok"):
