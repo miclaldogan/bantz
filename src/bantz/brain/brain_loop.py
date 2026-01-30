@@ -1892,49 +1892,41 @@ class BrainLoop:
                 confirmation_result = _llm_parse_confirmation(user_text)
                 
                 if confirmation_result == "confirm":
-                    # User confirmed - execute the action
+                    # User confirmed - execute the action via LLM (stay in LLM mode!)
                     intent = pending_action.get("intent")
                     slots = pending_action.get("slots")
-                    route = pending_action.get("route")
+                    original_user_text = pending_action.get("user_text", "")
                     
                     # Clear confirmation state
                     state.pop("_pending_confirmation_action", None)
                     state[_DIALOG_STATE_KEY] = "IDLE"
                     
-                    # Build calendar intent from router slots
-                    if intent == "create" and isinstance(slots, dict):
-                        pending_intent = {
-                            "action": "create",
-                            "source_text": pending_action.get("user_text", ""),
-                        }
-                        
-                        # Map router slots to calendar intent format
-                        if slots.get("time"):
-                            pending_intent["start"] = slots["time"]
-                        if slots.get("duration"):
-                            pending_intent["duration_minutes"] = int(slots["duration"])
-                        if slots.get("title"):
-                            pending_intent["summary"] = slots["title"]
-                        if slots.get("day_hint"):
-                            pending_intent["day_hint"] = slots["day_hint"]
-                        
-                        state[_CALENDAR_PENDING_INTENT_KEY] = pending_intent
-                        state["last_intent"] = route
-                        
-                        # Continue with calendar create flow
-                        trace = _ensure_trace()
-                        trace["llm_confirmation"] = "confirmed"
-                        
-                        # Acknowledge and proceed
-                        _emit_ack("Anladım efendim, ekliyorum.")
-                        
-                        # Re-run with calendar route
-                        return self.run(
-                            turn_input=pending_action.get("user_text", user_text),
-                            session_context=session_context,
-                            policy=policy,
-                            context=state,
-                        )
+                    # Update trace
+                    trace = _ensure_trace()
+                    trace["llm_confirmation"] = "confirmed"
+                    
+                    # Build enriched prompt with confirmation context
+                    # Tell LLM: user confirmed, now execute the action with these slots
+                    enriched_prompt = f"{original_user_text} (kullanıcı onayladı, işlemi gerçekleştir)"
+                    
+                    # Store router slots in state for LLM to access
+                    state["_confirmed_action"] = {
+                        "intent": intent,
+                        "slots": slots,
+                        "original_text": original_user_text,
+                    }
+                    
+                    # Acknowledge
+                    _emit_ack("Anladım efendim, ekliyorum.")
+                    
+                    # Continue with LLM - let it handle the tool call
+                    # Don't re-run BrainLoop (which goes to deterministic routing)
+                    # Instead, continue to LLM step below
+                    # We'll set user_text to enriched prompt and let LLM handle it
+                    user_text = enriched_prompt
+                    
+                    # Reset router to None so it doesn't run again (already confirmed)
+                    # Continue to LLM step...
                 
                 elif confirmation_result == "reject":
                     # User rejected - cancel

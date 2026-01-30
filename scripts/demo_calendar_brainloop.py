@@ -611,6 +611,22 @@ def main() -> int:
     router_llm = RouterLLMWrapper(client=llm._client, temperature=0.0)
     router = JarvisLLMRouter(llm=router_llm)
     
+    # Warm-up Ollama to speed up first real request
+    if args.debug:
+        print("[DEMO] Warming up Ollama...")
+    try:
+        from bantz.llm.ollama_client import LLMMessage
+        llm._client.chat(
+            messages=[LLMMessage(role="user", content="test")],
+            temperature=0.0,
+            max_tokens=5,
+        )
+        if args.debug:
+            print("[DEMO] Ollama ready!")
+    except Exception as e:
+        if args.debug:
+            print(f"[DEMO] Warm-up warning: {e}")
+    
     if args.debug:
         print("[DEMO] LLM Router: ALWAYS ACTIVE - every conversation goes through LLM")
 
