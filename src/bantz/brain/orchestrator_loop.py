@@ -20,6 +20,7 @@ from bantz.agent.tools import ToolRegistry
 from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
 from bantz.brain.orchestrator_state import OrchestratorState
 from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
+from bantz.brain.memory_lite import DialogSummaryManager, CompactSummary
 from bantz.core.events import EventBus, EventType
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,13 @@ class OrchestratorLoop:
         self.tools = tools
         self.event_bus = event_bus or EventBus()
         self.config = config or OrchestratorConfig()
+        
+        # Initialize memory-lite (Issue #141)
+        self.memory = DialogSummaryManager(
+            max_tokens=500,
+            max_turns=5,
+            pii_filter_enabled=True,
+        )
         
         # Initialize safety guard (Issue #140)
         if self.config.enable_safety_guard:
@@ -173,19 +181,21 @@ class OrchestratorLoop:
         # Build context for LLM
         context = state.get_context_for_llm()
         conversation_history = context.get("recent_conversation", [])
-        rolling_summary = context.get("rolling_summary", "")
+        
+        # Use memory-lite summary instead of rolling_summary from state (Issue #141)
+        dialog_summary = self.memory.to_prompt_block()
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Planning Phase:")
             logger.debug(f"  User: {user_input}")
-            logger.debug(f"  Rolling Summary: {rolling_summary or 'None'}")
+            logger.debug(f"  Dialog Summary (memory-lite): {dialog_summary or 'None'}")
             logger.debug(f"  Recent History: {len(conversation_history)} turns")
             logger.debug(f"  Tool Results: {len(context.get('last_tool_results', []))}")
         
-        # Call orchestrator with context (dialog_summary = rolling summary)
+        # Call orchestrator with memory-lite summary
         output = self.orchestrator.route(
             user_input=user_input,
-            dialog_summary=rolling_summary if rolling_summary else None,
+            dialog_summary=dialog_summary if dialog_summary else None,
         )
         
         if self.config.debug:
@@ -436,14 +446,24 @@ class OrchestratorLoop:
         tool_results: list[dict[str, Any]],
         state: OrchestratorState,
     ) -> None:
-        """Phase 4: Update State (rolling summary, conversation history, trace).
+        """Phase 4: Update State (memory-lite summary, conversation history, trace).
         
         Updates:
-        - Rolling summary (from LLM's memory_update)
+        - Memory-lite summary (Issue #141)
+        - Rolling summary (from LLM's memory_update - legacy)
         - Conversation history (user + assistant)
         - Trace metadata (for testing/debugging)
         """
-        # Update rolling summary
+        # Update memory-lite (Issue #141)
+        summary = CompactSummary(
+            turn_number=state.turn_count + 1,
+            user_intent=self._extract_user_intent(user_input, output),
+            action_taken=self._extract_action_taken(output),
+            pending_items=self._extract_pending_items(output),
+        )
+        self.memory.add_turn(summary)
+        
+        # Update rolling summary (legacy - for backward compatibility)
         if output.memory_update:
             # Append to existing summary
             if state.rolling_summary:
@@ -478,6 +498,51 @@ class OrchestratorLoop:
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] State Updated:")
-            logger.debug(f"  Rolling Summary: {state.rolling_summary[:100]}...")
+            logger.debug(f"  Rolling Summary: {state.rolling_summary[:100] if state.rolling_summary else 'None'}...")
+            logger.debug(f"  Memory-lite: {len(self.memory)} turns")
             logger.debug(f"  Conversation Turns: {len(state.conversation_history)}")
             logger.debug(f"  Tool Results: {len(state.last_tool_results)}")
+    
+    # =========================================================================
+    # Memory-lite Helper Methods (Issue #141)
+    # =========================================================================
+    
+    def _extract_user_intent(self, user_input: str, output: OrchestratorOutput) -> str:
+        """Extract concise user intent (1-3 words)."""
+        if output.route == "calendar":
+            return f"asked about {output.calendar_intent}"
+        elif output.route == "smalltalk":
+            # Check for common patterns
+            if any(word in user_input.lower() for word in ["merhaba", "selam", "hey", "nasılsın"]):
+                return "greeted"
+            elif any(word in user_input.lower() for word in ["kendini tanıt", "kimsin"]):
+                return "asked about identity"
+            else:
+                return "casual chat"
+        else:
+            return "unclear request"
+    
+    def _extract_action_taken(self, output: OrchestratorOutput) -> str:
+        """Extract action taken (1-3 words)."""
+        if output.tool_plan:
+            # Summarize tools
+            tool_names = [t.split(".")[-1] for t in output.tool_plan[:2]]  # First 2
+            tools_str = ", ".join(tool_names)
+            return f"called {tools_str}"
+        elif output.ask_user:
+            return "asked for clarification"
+        elif output.assistant_reply:
+            return "responded with chat"
+        else:
+            return "acknowledged"
+    
+    def _extract_pending_items(self, output: OrchestratorOutput) -> list[str]:
+        """Extract pending items from output."""
+        pending = []
+        if output.requires_confirmation:
+            pending.append("waiting for confirmation")
+        if output.ask_user and output.question:
+            # Truncate question
+            question_short = output.question[:30] + "..." if len(output.question) > 30 else output.question
+            pending.append(f"need: {question_short}")
+        return pending
