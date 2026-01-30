@@ -1,0 +1,187 @@
+# Model Configuration for Bantz LLM Orchestrator
+# Issue #136: Single-model strategy with Qwen2.5-3B-Instruct
+
+# =============================================================================
+# Model Selection
+# =============================================================================
+model:
+  name: "Qwen/Qwen2.5-3B-Instruct"
+  provider: "vllm"  # vllm | ollama
+  context_window: 32768  # tokens
+  
+  # Alternative models (commented out)
+  # name: "Qwen/Qwen2.5-7B-Instruct"  # Better quality, slower
+  # name: "Qwen/Qwen2.5-1.5B-Instruct"  # Faster, lower quality
+
+# =============================================================================
+# Router Configuration
+# =============================================================================
+router:
+  temperature: 0.0  # Deterministic routing
+  max_tokens: 128   # Sufficient for JSON output
+  top_p: 1.0
+  stop_sequences:
+    - "}"
+    - "\n\n"
+  
+  # Prompt budget
+  max_system_prompt_tokens: 500
+  max_user_input_tokens: 100
+  total_budget: 728  # system + user + output
+  
+  # Performance targets
+  targets:
+    p50_latency_ms: 100
+    p95_latency_ms: 150
+    json_validity_percent: 99
+    throughput_tokens_per_sec: 100
+
+# =============================================================================
+# Orchestrator Configuration  
+# =============================================================================
+orchestrator:
+  temperature: 0.0  # Deterministic planning
+  max_tokens: 256   # Extended JSON with reasoning
+  top_p: 1.0
+  stop_sequences:
+    - "}"
+  
+  # Prompt budget
+  max_system_prompt_tokens: 700
+  max_user_input_tokens: 100
+  max_dialog_summary_tokens: 200
+  total_budget: 1256
+  
+  # Performance targets
+  targets:
+    p50_latency_ms: 120
+    p95_latency_ms: 200
+    json_validity_percent: 98
+    throughput_tokens_per_sec: 80
+
+# =============================================================================
+# Chat Configuration
+# =============================================================================
+chat:
+  temperature: 0.2  # Slight creativity for natural responses
+  max_tokens: 200   # Short, concise responses (Jarvis style)
+  top_p: 0.9
+  top_k: 50
+  repetition_penalty: 1.1
+  
+  # Prompt budget
+  max_system_prompt_tokens: 400
+  max_conversation_history_tokens: 500
+  max_user_input_tokens: 100
+  total_budget: 1400
+  
+  # Performance targets
+  targets:
+    p50_latency_ms: 200
+    p95_latency_ms: 400
+    throughput_tokens_per_sec: 50
+
+# =============================================================================
+# Memory / Context Management
+# =============================================================================
+memory:
+  # Rolling dialog summary
+  max_dialog_summary_tokens: 500
+  summary_style: "compact"  # 1-2 sentences per turn
+  
+  # Tool results
+  max_tool_results_tokens: 300
+  summarize_threshold: 200  # Summarize if result > 200 tokens
+  
+  # Session context
+  max_session_context_tokens: 200
+  
+  # PII filtering
+  pii_filter_enabled: true
+  pii_patterns:
+    - email
+    - phone
+    - credit_card
+    - ssn
+
+# =============================================================================
+# vLLM Server Configuration
+# =============================================================================
+vllm_server:
+  base_url: "http://127.0.0.1:8001"
+  api_key: "EMPTY"  # vLLM doesn't require API key for local
+  timeout_seconds: 30
+  max_retries: 2
+  
+  # Server startup args (for reference)
+  # python -m vllm.entrypoints.openai.api_server \
+  #   --model Qwen/Qwen2.5-3B-Instruct \
+  #   --port 8001 \
+  #   --dtype auto \
+  #   --max-model-len 4096 \
+  #   --gpu-memory-utilization 0.9
+
+# =============================================================================
+# Benchmarking Configuration
+# =============================================================================
+benchmark:
+  default_iterations: 30
+  scenarios:
+    router:
+      - "hey bantz nasılsın"
+      - "bugün neler yapacağız"
+      - "saat 4 için toplantı oluştur"
+      - "bu akşam neler yapacağız"
+      - "kendini tanıt"
+    
+    orchestrator:
+      - name: "smalltalk"
+        input: "hey bantz nasılsın"
+      - name: "calendar_list_today"
+        input: "bugün neler yapacağız bakalım"
+      - name: "calendar_create"
+        input: "saat 4 için bir toplantı oluştur"
+    
+    chat:
+      - "merhaba"
+      - "nasılsın"
+      - "kim yarattı seni"
+  
+  # Metrics to track
+  metrics:
+    - latency_p50
+    - latency_p95
+    - latency_p99
+    - throughput_tokens_per_sec
+    - json_validity_percent
+    - success_rate_percent
+
+# =============================================================================
+# Two-Model Strategy (Future Upgrade)
+# =============================================================================
+# Uncomment this section when upgrading to two-model approach
+#
+# router_model:
+#   name: "Qwen/Qwen2.5-1.5B-Instruct"  # Smaller, faster for routing
+#   temperature: 0.0
+#   max_tokens: 64
+#   total_budget: 364
+#
+# orchestrator_chat_model:
+#   name: "Qwen/Qwen2.5-3B-Instruct"  # Keep current model for complex tasks
+#   # ... (use orchestrator/chat settings above)
+
+# =============================================================================
+# Notes
+# =============================================================================
+# 
+# Single-Model Rationale:
+# - Consistency: Same "personality" across all interactions
+# - Simplicity: 1 model = 1 GPU = easier deployment
+# - Speed: 3B model fast enough for Jarvis UX (<200ms p95)
+# - Cost: Lower than 7B, acceptable for MVP
+#
+# Future Considerations:
+# - If router latency > 150ms: Switch to 1.5B for router only
+# - If chat needs better quality: Upgrade to 7B for orchestrator/chat
+# - If multi-user: Implement batch inference or multiple instances
