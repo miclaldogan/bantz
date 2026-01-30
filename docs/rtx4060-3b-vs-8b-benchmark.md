@@ -22,22 +22,38 @@ This benchmark compares **Qwen2.5-3B-Instruct** and **Qwen2.5-8B-Instruct** on R
 
 ## 📊 Benchmark Results
 
-### Test Configuration
-- **Iterations**: 30 per scenario
-- **vLLM Version**: 0.6.x
+### ⚠️ IMPORTANT: Mock Estimates vs Real Measurements
+
+**Current Status**: 
+- ✅ Mock server baseline established
+- ⚠️ **Real vLLM measurements PENDING** (P0 priority)
+- 🔄 Tables below show **ESTIMATED** values based on mock server + projections
+
+**Real vLLM validation needed**:
+- [ ] Run with actual vLLM server (30 iterations)
+- [ ] Measure real TTFT via streaming callbacks
+- [ ] Track actual VRAM via nvidia-smi sampling
+- [ ] Validate token counts from vLLM usage stats
+- [ ] Update this report with measured values
+
+### Test Configuration (Mock Baseline)
+- **Iterations**: Mock projections (real run: TODO)
+- **vLLM Version**: Not yet tested (planned: 0.6.x)
 - **Quantization**: FP16 (baseline), AWQ (8GB optimization)
 - **Context**: 4096 max tokens
 - **Scenarios**: Router (deterministic), Orchestrator (planning), Chat (natural language)
 
-### 3B-Instruct Results
+### 3B-Instruct Results (⚠️ ESTIMATED - Not Measured)
 
 | Scenario | TTFT p50 | TTFT p95 | Latency p50 | Latency p95 | Throughput | JSON Valid | VRAM Peak |
 |----------|----------|----------|-------------|-------------|------------|------------|-----------|
-| **Router** | 85 ms | 120 ms | 180 ms | 240 ms | 145 tok/s | 100% | 2.8 GB |
-| **Orchestrator** | 95 ms | 140 ms | 320 ms | 420 ms | 128 tok/s | 98% | 3.1 GB |
-| **Chat** | 110 ms | 165 ms | 650 ms | 890 ms | 118 tok/s | N/A | 3.0 GB |
+| **Router** | ~85 ms* | ~120 ms* | ~180 ms* | ~240 ms* | ~145 tok/s* | ?% | ~2.8 GB* |
+| **Orchestrator** | ~95 ms* | ~140 ms* | ~320 ms* | ~420 ms* | ~128 tok/s* | ?% | ~3.1 GB* |
+| **Chat** | ~110 ms* | ~165 ms* | ~650 ms* | ~890 ms* | ~118 tok/s* | N/A | ~3.0 GB* |
 
-**Strengths**:
+*Estimated from mock server projections. Real measurements TBD.
+
+**Strengths** (Projected):
 - ⚡ **TTFT < 200ms** across all scenarios (meets Jarvis feeling target!)
 - 💾 Low VRAM (~3GB peak) - plenty of headroom for long conversations
 - 🚀 High throughput (118-145 tok/s)
@@ -46,15 +62,17 @@ This benchmark compares **Qwen2.5-3B-Instruct** and **Qwen2.5-8B-Instruct** on R
 **Weaknesses**:
 - 🤔 Occasional "anlamadı" moments in complex queries
 - 📝 Chat responses sometimes awkward or unnatural Turkish
-- 🧠 Struggles with multi-step reasoning
-
-### 8B-Instruct Results
+- 🧠 Struggles with mul (⚠️ ESTIMATED - Not Measured)
 
 | Scenario | TTFT p50 | TTFT p95 | Latency p50 | Latency p95 | Throughput | JSON Valid | VRAM Peak |
 |----------|----------|----------|-------------|-------------|------------|------------|-----------|
-| **Router** | 145 ms | 210 ms | 290 ms | 380 ms | 95 tok/s | 100% | 5.2 GB |
-| **Orchestrator** | 165 ms | 245 ms | 520 ms | 680 ms | 88 tok/s | 100% | 5.8 GB |
-| **Chat** | 190 ms | 280 ms | 980 ms | 1350 ms | 82 tok/s | N/A | 5.5 GB |
+| **Router** | ~145 ms* | ~210 ms* | ~290 ms* | ~380 ms* | ~95 tok/s* | ?% | ~5.2 GB* |
+| **Orchestrator** | ~165 ms* | ~245 ms* | ~520 ms* | ~680 ms* | ~88 tok/s* | ?% | ~5.8 GB* |
+| **Chat** | ~190 ms* | ~280 ms* | ~980 ms* | ~1350 ms* | ~82 tok/s* | N/A | ~5.5 GB* |
+
+*Estimated from mock server + scaling assumptions. Real measurements TBD.
+
+**Strengths** (Projected)190 ms | 280 ms | 980 ms | 1350 ms | 82 tok/s | N/A | 5.5 GB |
 
 **Strengths**:
 - 🧠 Significantly better reasoning and comprehension
@@ -84,12 +102,14 @@ This benchmark compares **Qwen2.5-3B-Instruct** and **Qwen2.5-8B-Instruct** on R
 
 ---
 
-## 🧪 Qualitative Test Results
+## ⚠️ STATUS: Planned - Not Yet Executed
 
-### Test Methodology
+### Test Methodology (Planned)
 - **Conversations**: 5 predefined multi-turn scenarios
-- **Evaluators**: 2 native Turkish speakers
+- **Evaluators**: 2 native Turkish speakers (TBD)
 - **Criteria**: Naturalness (1-10), Memory (pass/fail), Tool accuracy (%), Jarvis feeling (1-10)
+
+### Results (PROJECTED - Not Measured)a**: Naturalness (1-10), Memory (pass/fail), Tool accuracy (%), Jarvis feeling (1-10)
 
 ### Results
 
@@ -155,11 +175,13 @@ Evaluator feedback: "Çok doğal ve hızlı. Gerçekten Jarvis hissi var."
 - 8B-only: Chat total latency ~1s but TTFT 280ms → 6/10 Jarvis feeling
 - **Key insight**: TTFT is 70% of perceived responsiveness
 
----
+---Preliminary Recommendation (Pending Validation)
 
-## 🎯 Final Recommendation
+### Proposed Strategy: **Split (3B + 8B)** ⚠️ Not Yet Validated
 
-### Chosen Strategy: **Split (3B + 8B)**
+**IMPORTANT**: This recommendation is based on mock estimates and theoretical projections. Real vLLM validation (P0) must confirm these assumptions before production deployment.
+
+**Proposed # Chosen Strategy: **Split (3B + 8B)**
 
 **Production Configuration**:
 ```yaml
@@ -233,7 +255,58 @@ vllm_config:
 
 ---
 
-## 🚀 Next Steps
+## ⚠️ VALIDATION REQUIRED (P0 - Critical)
+
+### Current Status: Mock Baseline Only
+
+This report contains **ESTIMATED** values based on:
+1. Mock server measurements (~110ms latency baseline)
+2. Theoretical scaling factors (3B → 8B)
+3. Literature-based VRAM projections
+4. Assumed TTFT/latency ratios (8% for TTFT)
+
+### Real vLLM Validation Checklist
+
+**P0 Tasks (Required before production)**:
+- [ ] Setup real vLLM server with Qwen2.5-3B-Instruct on RTX 4060
+- [ ] Run `bench_llm_orchestrator.py --backend vllm --iterations 30 --scenarios all`
+- [ ] Implement streaming callbacks for accurate TTFT measurement
+- [ ] Add nvidia-smi VRAM sampling during benchmark
+- [ ] Collect real metrics:
+  - [ ] TTFT p50/p95 (from first token timestamp)
+  - [ ] Total latency p50/p95
+  - [ ] Throughput (from vLLM usage stats)
+  - [ ] VRAM peak (from nvidia-smi)
+  - [ ] JSON validity rate
+- [ ] Repeat with Qwen2.5-8B-Instruct
+- [ ] Update comparison tables with MEASURED vs ESTIMATED columns
+- [ ] Validate or revise split strategy decision
+
+**P1 Tasks (Implementation)**:
+- [ ] Implement model switching logic in OrchestratorLoop
+- [ ] Add 3B endpoint for router/orchestrator
+- [ ] Add 8B endpoint for chat
+- [ ] Test end-to-end conversation flow with split strategy
+
+**P2 Tasks (Documentation)**:
+- [ ] Label all estimates as "ESTIMATED" or "MEASURED"
+- [ ] Add measurement methodology section
+- [ ] Document any deviations from projections
+- [ ] Create runbook for future benchmarks
+
+### Why This Matters
+
+**Risk**: If real vLLM measurements differ significantly from estimates:
+- TTFT might exceed 300ms → "Jarvis feeling" lost
+- VRAM might exceed 8GB → OOM crashes
+- Throughput might be lower → unacceptable latency
+- JSON validity might drop → system failures
+
+**Mitigation**: Run real validation BEFORE claiming strategy is production-ready.
+
+---
+
+## 🚀 Next Steps (Updated)
 
 1. **Immediate**: Update `config/model-settings.yaml` with split strategy
 2. **Short-term**: Implement model switching in orchestrator
