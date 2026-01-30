@@ -179,7 +179,7 @@ class JarvisVoice:
         seed: str = "default",
     ) -> str:
         """Format event creation confirmation - Jarvis style."""
-        return f'{start_time}–{end_time} "{summary}" ekleyeyim mi? (1/0)'
+        return f'Efendim, takvime {start_time}–{end_time} "{summary}" ekliyorum. Onaylıyor musunuz? (1/0)'
 
     @staticmethod
     def format_event_added(
