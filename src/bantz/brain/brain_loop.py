@@ -59,6 +59,16 @@ def _render_plan_confirm_menu() -> str:
     ).strip()
 
 
+def _render_plan_apply_confirm(*, count: int) -> str:
+    n = int(count) if isinstance(count, int) else 0
+    n = max(0, min(50, n))
+    if n <= 0:
+        return "Planı takvime uygulayayım mı? (1/0)"
+    if n == 1:
+        return "1 etkinlik oluşturacağım. Uygulayayım mı? (1/0)"
+    return f"{n} etkinlik oluşturacağım. Uygulayayım mı? (1/0)"
+
+
 def _is_plan_accept(user_text: str) -> bool:
     t = _normalize_text_for_match(user_text)
     if not t:
@@ -333,6 +343,50 @@ def _render_calendar_create_event_result(
         return JarvisVoice.format_dry_run(summary, sh, eh)
 
     return JarvisVoice.format_event_added(summary, sh, eh)
+
+
+def _render_calendar_apply_plan_draft_result(
+    *,
+    obs: dict[str, Any],
+    tz_name: Optional[str],
+) -> str:
+    if not isinstance(obs, dict) or obs.get("ok") is not True:
+        err = str(obs.get("error") or "unknown_error").strip()
+        return f"Planı uygulayamadım: {err}"
+
+    result = obs.get("result")
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        err = str((result or {}).get("error") or "unknown_error").strip()
+        return f"Planı uygulayamadım: {err}"
+
+    dry_run = bool(result.get("dry_run"))
+    events = result.get("events")
+    if not isinstance(events, list):
+        events = []
+
+    if dry_run:
+        lines: list[str] = []
+        lines.append(f"Dry-run: {len(events)} etkinlik önerisi")
+        for i, ev in enumerate([e for e in events if isinstance(e, dict)][:5], start=1):
+            summary = str(ev.get("summary") or "(etkinlik)").strip() or "(etkinlik)"
+            sh = _format_hhmm(str(ev.get("start") or ""), tz_name=tz_name)
+            eh = _format_hhmm(str(ev.get("end") or ""), tz_name=tz_name)
+            when = f"{sh}–{eh}" if sh and eh else ""
+            lines.append(f"{i}. {when} | {summary}".strip(" |"))
+        if len(events) > 5:
+            lines.append(f"… (+{len(events) - 5} daha)")
+        return "\n".join([l for l in lines if str(l).strip()]).strip()
+
+    created_count = result.get("created_count")
+    try:
+        cc = int(created_count) if created_count is not None else 0
+    except Exception:
+        cc = 0
+    if cc <= 0:
+        return "Planı uyguladım, ama etkinlik oluşturulmadı."
+    if cc == 1:
+        return "Planı takvime uyguladım: 1 etkinlik oluşturuldu."
+    return f"Planı takvime uyguladım: {cc} etkinlik oluşturuldu."
 
 
 def _parse_user_confirmation(text: str) -> tuple[Optional[Literal["confirm", "deny"]], str]:
@@ -1552,17 +1606,138 @@ class BrainLoop:
                         state[_DIALOG_STATE_KEY] = "IDLE"
                 except Exception:
                     pass
-                _emit_ack()
-                text = "Tamam efendim, planı onayladım. (Bir sonraki adım: uygulama/dry-run)"
+
+                # Issue #117: On accept, run a dry-run apply preview (no writes),
+                # then queue a pending apply action that requires explicit confirmation.
+                tool_name = "calendar.apply_plan_draft"
+                w_day_hint: Optional[str] = None
                 try:
-                    self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
+                    if draft is not None:
+                        day = str(draft.day_hint or "").strip() or None
+                        tod = str(draft.time_of_day or "").strip() or None
+                        # Map {tomorrow+morning} -> 'morning' window, etc.
+                        if (day == "tomorrow" and tod == "morning") or (day is None and tod == "morning"):
+                            w_day_hint = "morning"
+                        elif (day == "today" and tod == "evening") or (day is None and tod == "evening"):
+                            w_day_hint = "evening"
+                        else:
+                            w_day_hint = day
+                except Exception:
+                    w_day_hint = None
+
+                window = _window_from_ctx(ctx, day_hint=w_day_hint)
+                time_min = str((window or {}).get("time_min") or "").strip()
+                time_max = str((window or {}).get("time_max") or "").strip()
+                if not (time_min and time_max):
+                    try:
+                        time_min = str(pending_plan.get("time_min") or "").strip()
+                        time_max = str(pending_plan.get("time_max") or "").strip()
+                    except Exception:
+                        time_min = time_min
+                        time_max = time_max
+
+                _emit_ack()
+                if not (isinstance(raw_draft, dict) and time_min and time_max):
+                    text = "Tamam efendim. Ama plan penceresini belirleyemedim. (Bugün/yayın sabah gibi bir zaman aralığı söyleyin.)"
+                    try:
+                        self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
+                    except Exception:
+                        pass
+                    return BrainResult(
+                        kind="say",
+                        text=text,
+                        steps_used=0,
+                        metadata=_std_metadata(ctx=ctx, state=state, action_type="plan_accept", requires_confirmation=False),
+                    )
+
+                # Dry-run preview.
+                obs: dict[str, Any] = {"tool": tool_name, "ok": False, "error": "tool_not_executable"}
+                try:
+                    tool = self._tools.get(tool_name)
+                    if tool is not None and tool.function is not None:
+                        params_preview = {
+                            "draft": raw_draft,
+                            "time_min": time_min,
+                            "time_max": time_max,
+                            "dry_run": True,
+                            "calendar_id": "primary",
+                        }
+                        ok, why = self._tools.validate_call(tool_name, params_preview)
+                        if ok:
+                            _emit_progress(tool_name=tool_name)
+                            result = tool.function(**params_preview)
+                            _emit_found(tool_name=tool_name)
+                            obs = {"tool": tool_name, "ok": True, "result": result}
+                        else:
+                            obs = {"tool": tool_name, "ok": False, "error": why}
+                except Exception as e:
+                    obs = {"tool": tool_name, "ok": False, "error": str(e)}
+
+                tz_name = str(ctx.get("tz_name") or "") or None
+                preview_text = _render_calendar_apply_plan_draft_result(obs=obs, tz_name=tz_name)
+                preview_text = _role_sanitize_text(preview_text)
+                try:
+                    self._events.publish(EventType.RESULT.value, {"text": preview_text}, source="brain")
                 except Exception:
                     pass
+
+                # Queue the real apply as a pending confirmation (writes).
+                apply_params = {
+                    "draft": raw_draft,
+                    "time_min": time_min,
+                    "time_max": time_max,
+                    "dry_run": False,
+                    "calendar_id": "primary",
+                }
+                try:
+                    if isinstance(state, dict):
+                        state[_PENDING_ACTION_KEY] = {
+                            "action": {"type": "CALL_TOOL", "name": tool_name, "params": apply_params},
+                            "decision": {"risk_level": "MED"},
+                            "original_user_input": "plan_apply",
+                        }
+                        state[_DIALOG_STATE_KEY] = "PENDING_CONFIRMATION"
+                except Exception:
+                    pass
+
+                # Trace evidence: queued confirmation payload.
+                try:
+                    trace = _ensure_trace()
+                    trace["intent"] = "calendar.apply_plan_draft"
+                    trace["next_action"] = "ask_confirm_apply"
+                    trace["pending_confirmation"] = {
+                        "queued": True,
+                        "tool": tool_name,
+                        "time_min": time_min,
+                        "time_max": time_max,
+                        "dry_run": False,
+                        "item_count": len(getattr(draft, "items", []) or []) if draft is not None else None,
+                    }
+                except Exception:
+                    pass
+
+                count = 0
+                try:
+                    if isinstance(obs, dict) and obs.get("ok") is True and isinstance(obs.get("result"), dict):
+                        res = obs.get("result")
+                        events = res.get("events")
+                        if isinstance(events, list):
+                            count = len(events)
+                except Exception:
+                    count = 0
+                q = _render_plan_apply_confirm(count=count)
+                try:
+                    self._events.publish(EventType.QUESTION.value, {"question": q}, source="brain")
+                except Exception:
+                    pass
+
+                # UI fallback: return both preview and prompt together.
+                combined = (str(preview_text).rstrip() + "\n\n" + str(q).strip()).strip()
                 return BrainResult(
-                    kind="say",
-                    text=text,
+                    kind="ask_user",
+                    text=combined,
                     steps_used=0,
-                    metadata=_std_metadata(ctx=ctx, state=state, action_type="plan_accept", requires_confirmation=False),
+                    metadata=_std_metadata(ctx=ctx, state=state, menu_id="plan_apply", requires_confirmation=True),
                 )
 
             instruction = _plan_edit_instruction(user_text)
@@ -3378,6 +3553,23 @@ class BrainLoop:
                 plan = build_plan_draft_from_text(user_text, ctx=ctx)
                 preview = plan.render_preview_tr()
 
+                # Resolve a concrete window now (so follow-up turns don't need session_context).
+                w_day_hint: Optional[str] = None
+                try:
+                    day = str(plan.day_hint or "").strip() or None
+                    tod = str(plan.time_of_day or "").strip() or None
+                    if (day == "tomorrow" and tod == "morning") or (day is None and tod == "morning"):
+                        w_day_hint = "morning"
+                    elif (day == "today" and tod == "evening") or (day is None and tod == "evening"):
+                        w_day_hint = "evening"
+                    else:
+                        w_day_hint = day
+                except Exception:
+                    w_day_hint = None
+                window = _window_from_ctx(ctx, day_hint=w_day_hint)
+                time_min = str((window or {}).get("time_min") or "").strip()
+                time_max = str((window or {}).get("time_max") or "").strip()
+
                 # Store pending plan draft for #116 confirmation/edit loop.
                 try:
                     if isinstance(state, dict):
@@ -3385,6 +3577,8 @@ class BrainLoop:
                             "id": str(uuid.uuid4()),
                             "created_at": float(time.time()),
                             "draft": plan_draft_to_dict(plan),
+                            "time_min": time_min or None,
+                            "time_max": time_max or None,
                         }
                         state[_DIALOG_STATE_KEY] = "PENDING_PLAN_DRAFT"
                 except Exception:
@@ -3503,6 +3697,17 @@ class BrainLoop:
             pending_decision = pending.get("decision")
 
             decision, note = _parse_user_confirmation(user_text)
+
+            # Trace evidence: pending confirmation was seen and parsed.
+            try:
+                trace = _ensure_trace()
+                trace["pending_confirmation"] = {
+                    "seen": True,
+                    "tool": str((pending_action or {}).get("name") or "").strip() or None,
+                    "decision": decision,
+                }
+            except Exception:
+                pass
 
             # Jarvis safety rule: destructive calendar writes require strict yes/no.
             if isinstance(ctx, dict) and bool(ctx.get("deterministic_render")):
@@ -3634,11 +3839,19 @@ class BrainLoop:
                     obs_last = observations[-1] if observations else None
                     if (
                         isinstance(state, dict)
-                        and tool_name in {"calendar.create_event", "calendar.update_event", "calendar.delete_event"}
+                        and tool_name in {"calendar.create_event", "calendar.update_event", "calendar.delete_event", "calendar.apply_plan_draft"}
                         and isinstance(obs_last, dict)
                         and obs_last.get("ok") is True
                     ):
                         _cleanup_after_calendar_write(state)
+                        # Planning apply: also clear confirmed draft.
+                        if tool_name == "calendar.apply_plan_draft":
+                            try:
+                                res = obs_last.get("result")
+                                if isinstance(res, dict) and res.get("ok") is True and not bool(res.get("dry_run")):
+                                    state.pop(_PLANNING_CONFIRMED_DRAFT_KEY, None)
+                            except Exception:
+                                pass
                 except Exception:
                     pass
 
@@ -3654,6 +3867,8 @@ class BrainLoop:
                             dry_run=dry_run,
                             fallback_params=params if isinstance(params, dict) else None,
                         )
+                    elif tool_name == "calendar.apply_plan_draft":
+                        text = _render_calendar_apply_plan_draft_result(obs=obs, tz_name=tz_name)
                     else:
                         # Fallback deterministic summary.
                         text = "Efendim, tamamdır." if isinstance(obs, dict) and obs.get("ok") is True else "Efendim, işlem başarısız oldu."
@@ -4026,6 +4241,14 @@ class BrainLoop:
                             risk = "HIGH" if bool(tool_obj.requires_confirmation) else "LOW"
                         requires_conf = bool(tool_obj.requires_confirmation)
 
+                    # Special-case: plan dry-run is read-only.
+                    try:
+                        if name == "calendar.apply_plan_draft" and isinstance(params, dict) and bool(params.get("dry_run")):
+                            risk = "LOW"
+                            requires_conf = False
+                    except Exception:
+                        pass
+
                     if policy is not None and hasattr(policy, "check"):
                         prompt = "Bu işlemi onaylıyor musun? (1/0)"
                         if name == "calendar.create_event":
@@ -4045,6 +4268,11 @@ class BrainLoop:
                                 prompt = JarvisVoice.format_confirmation(title, sh, eh)
                             else:
                                 prompt = f'"{title}" ekleyeyim mi? (1/0)'
+                        elif name == "calendar.apply_plan_draft":
+                            if isinstance(params, dict) and bool(params.get("dry_run")):
+                                prompt = "Dry-run yapıyorum. (Onay gerekmez)"
+                            else:
+                                prompt = "Planı takvime uygulayayım mı? (1/0)"
 
                         decision = policy.check(
                             session_id=session_id,

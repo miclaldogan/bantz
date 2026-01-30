@@ -650,4 +650,97 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    # ─────────────────────────────────────────────────────────────────
+    # Planning Tools (Jarvis-Calendar)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.planning.executor import apply_plan_draft as _apply_plan_draft
+        from bantz.planning.executor import plan_events_from_draft as _plan_events_from_draft
+    except Exception:  # pragma: no cover
+        _apply_plan_draft = None
+        _plan_events_from_draft = None
+
+    reg.register(
+        Tool(
+            name="calendar.plan_events_from_draft",
+            description="Create a deterministic event plan from a PlanDraft (dry-run, no writes).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "draft": {"type": "object", "description": "PlanDraft dict"},
+                    "time_min": {"type": "string", "description": "RFC3339 window start"},
+                    "time_max": {"type": "string", "description": "RFC3339 window end"},
+                },
+                "required": ["draft", "time_min", "time_max"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "count": {"type": "integer"},
+                    "events": {"type": "array"},
+                    "warnings": {"type": "array"},
+                    "time_min": {"type": "string"},
+                    "time_max": {"type": "string"},
+                },
+                "required": ["ok"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=_plan_events_from_draft,
+        )
+    )
+
+    def _apply_plan_draft_with_google_backend(**params):
+        if _apply_plan_draft is None:
+            return {"ok": False, "error": "planner_not_available"}
+        dry_run = bool(params.get("dry_run"))
+        draft = params.get("draft")
+        time_min = params.get("time_min")
+        time_max = params.get("time_max")
+        calendar_id = str(params.get("calendar_id") or "primary")
+        return _apply_plan_draft(
+            draft=draft,
+            time_min=time_min,
+            time_max=time_max,
+            dry_run=dry_run,
+            calendar_id=calendar_id,
+            create_event_fn=google_calendar_create_event,
+        )
+
+    reg.register(
+        Tool(
+            name="calendar.apply_plan_draft",
+            description="Apply a PlanDraft by creating calendar events (supports dry-run). Requires confirmation if writing.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "draft": {"type": "object", "description": "PlanDraft dict"},
+                    "time_min": {"type": "string", "description": "RFC3339 window start"},
+                    "time_max": {"type": "string", "description": "RFC3339 window end"},
+                    "dry_run": {"type": "boolean", "description": "If true, do not write; return planned events"},
+                    "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
+                },
+                "required": ["draft", "time_min", "time_max"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "dry_run": {"type": "boolean"},
+                    "created_count": {"type": "integer"},
+                    "failed_index": {"type": "integer"},
+                    "events": {"type": "array"},
+                    "created": {"type": "array"},
+                    "error": {"type": "string"},
+                    "warnings": {"type": "array"},
+                },
+                "required": ["ok"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=_apply_plan_draft_with_google_backend,
+        )
+    )
+
     return reg
