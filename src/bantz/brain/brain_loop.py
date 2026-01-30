@@ -3778,7 +3778,7 @@ class BrainLoop:
                     pass
                 return BrainResult(
                     kind="say",
-                    text="Vazgeçtim.",
+                    text="İptal ediyorum efendim.",
                     steps_used=0,
                     metadata=_std_metadata(
                         ctx=ctx,
