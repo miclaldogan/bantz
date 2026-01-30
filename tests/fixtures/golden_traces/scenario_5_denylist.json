@@ -1,0 +1,14 @@
+{
+  "scenario": "denylist_blocks_tool",
+  "user_input": "delete my calendar event",
+  "expected_trace": {
+    "route": "calendar",
+    "calendar_intent": "delete_event",
+    "tool_plan_len_min": 1,
+    "tools_attempted": 1,
+    "tools_executed": 0,
+    "policy_violation": true,
+    "violation_type": "denylist"
+  },
+  "description": "Denylist blocks tool execution - tool_plan exists but execution blocked by policy"
+}
