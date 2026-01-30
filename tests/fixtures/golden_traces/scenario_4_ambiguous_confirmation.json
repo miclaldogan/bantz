@@ -1,0 +1,11 @@
+{
+  "scenario": "ambiguous_confirmation",
+  "user_input": "okay, sure",
+  "confirmation_token": "okay",
+  "expected_behavior": {
+    "normalized_token": "ambiguous",
+    "strict_tools_rejected": true,
+    "non_strict_tools_allowed": true
+  },
+  "description": "Ambiguous confirmation (okay/sure) - rejected for strict tools, allowed for non-strict"
+}
