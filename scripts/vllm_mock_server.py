@@ -19,6 +19,8 @@ Usage:
 from flask import Flask, request, jsonify
 import time
 import json
+import sys
+import json
 
 app = Flask(__name__)
 
@@ -91,90 +93,100 @@ def generate_mock_response(prompt: str, temperature: float) -> str:
     
     prompt_lower = prompt.lower()
     
-    # Router prompt detection
-    if "route" in prompt_lower and ("calendar" in prompt_lower or "smalltalk" in prompt_lower):
-        # Extract user input from prompt (look for quotes or after "user:")
-        user_input = prompt_lower
-        
-        # Calendar queries
-        if any(word in user_input for word in ["bugün", "bu akşam", "yarın", "hafta", "cumartesi"]) and \
-           any(word in user_input for word in ["neler", "yapacağız", "yapıyoruz", "planımda", "randevum"]):
-            return json.dumps({
-                "route": "calendar",
-                "calendar_intent": "query",
-                "slots": {"window_hint": "today" if "bugün" in user_input else "week"},
-                "confidence": 0.9,
-                "tool_plan": ["calendar.list_events"],
-                "assistant_reply": ""
-            }, ensure_ascii=False, indent=2)
-        
-        # Calendar create
-        elif any(word in user_input for word in ["toplantı", "randevu", "etkinlik"]) and \
-             any(word in user_input for word in ["oluştur", "ekle", "koy", "yap"]):
-            return json.dumps({
-                "route": "calendar",
-                "calendar_intent": "create",
-                "slots": {"time": "16:00", "title": "toplantı"},
-                "confidence": 0.9,
-                "tool_plan": ["calendar.create_event"],
-                "assistant_reply": ""
-            }, ensure_ascii=False, indent=2)
-        
-        # Calendar list/show
-        elif any(word in user_input for word in ["takvim", "program", "ajanda"]) and \
-             any(word in user_input for word in ["göster", "bak", "listele"]):
-            return json.dumps({
-                "route": "calendar",
-                "calendar_intent": "query",
-                "slots": {"window_hint": "today"},
-                "confidence": 0.9,
-                "tool_plan": ["calendar.list_events"],
-                "assistant_reply": ""
-            }, ensure_ascii=False, indent=2)
-        
-        # Weather query
-        elif "hava" in user_input and ("nasıl" in user_input or "durumu" in user_input):
-            return json.dumps({
-                "route": "smalltalk",
-                "calendar_intent": "none",
-                "slots": {},
-                "confidence": 0.8,
-                "tool_plan": [],
-                "assistant_reply": "Hava durumu servisi henüz aktif değil, ama sana yardımcı olmak isterim!"
-            }, ensure_ascii=False, indent=2)
-        
-        # Self introduction
-        elif any(word in user_input for word in ["kendini tanıt", "kimsin", "nesin"]):
-            return json.dumps({
-                "route": "smalltalk",
-                "calendar_intent": "none",
-                "slots": {},
-                "confidence": 1.0,
-                "tool_plan": [],
-                "assistant_reply": "Ben Bantz, senin kişisel asistanınım! Takvim yönetimi, hatırlatıcılar ve daha fazlası için buradayım."
-            }, ensure_ascii=False, indent=2)
-        
-        # Greeting
-        elif any(word in user_input for word in ["merhaba", "selam", "hey", "nasılsın", "iyi misin"]):
-            return json.dumps({
-                "route": "smalltalk",
-                "calendar_intent": "none",
-                "slots": {},
-                "confidence": 1.0,
-                "tool_plan": [],
-                "assistant_reply": "Merhaba efendim! Nasıl yardımcı olabilirim?"
-            }, ensure_ascii=False, indent=2)
-        
-        # Default smalltalk for unrecognized router prompts
-        else:
-            return json.dumps({
-                "route": "smalltalk",
-                "calendar_intent": "none",
-                "slots": {},
-                "confidence": 0.7,
-                "tool_plan": [],
-                "assistant_reply": "Anlayamadım, daha açık bir şekilde söyler misin?"
-            }, ensure_ascii=False, indent=2)
+    # Extract user input from router prompt (after "USER:")
+    user_input = prompt_lower
+    if "user:" in prompt_lower:
+        # Get the last line after "USER:" marker
+        user_lines = prompt_lower.split("user:")
+        if len(user_lines) > 1:
+            # Take the last "USER:" occurrence and extract just that line
+            last_user_section = user_lines[-1].strip()
+            # Get first line (before "ASSISTANT" if present)
+            user_input = last_user_section.split("\n")[0].strip()
+            user_input = user_input.split("assistant")[0].strip()
+    
+    # Pattern matching on extracted user input
+    # Greeting - check FIRST (more specific)
+    if any(word in user_input for word in ["merhaba", "selam", "hey"]) and \
+       any(word in user_input for word in ["nasılsın", "iyi misin", "bantz"]):
+        return json.dumps({
+            "route": "smalltalk",
+            "calendar_intent": "none",
+            "slots": {},
+            "confidence": 1.0,
+            "tool_plan": [],
+            "assistant_reply": "Merhaba efendim! Nasıl yardımcı olabilirim?"
+        }, ensure_ascii=False, indent=2)
+    
+    # Self introduction
+    elif any(word in user_input for word in ["kendini tanıt", "kimsin", "nesin"]):
+        return json.dumps({
+            "route": "smalltalk",
+            "calendar_intent": "none",
+            "slots": {},
+            "confidence": 1.0,
+            "tool_plan": [],
+            "assistant_reply": "Ben Bantz, senin kişisel asistanınım! Takvim yönetimi, hatırlatıcılar ve daha fazlası için buradayım."
+        }, ensure_ascii=False, indent=2)
+    
+    # Weather query
+    elif "hava" in user_input and ("nasıl" in user_input or "durumu" in user_input):
+        return json.dumps({
+            "route": "smalltalk",
+            "calendar_intent": "none",
+            "slots": {},
+            "confidence": 0.8,
+            "tool_plan": [],
+            "assistant_reply": "Hava durumu servisi henüz aktif değil, ama sana yardımcı olmak isterim!"
+        }, ensure_ascii=False, indent=2)
+    
+    # Calendar queries - check for time words + action words
+    elif any(word in user_input for word in ["bugün", "bu akşam", "yarın", "hafta", "cumartesi"]) and \
+         any(word in user_input for word in ["neler", "yapacağız", "yapıyoruz", "planımda", "randevum"]):
+        return json.dumps({
+            "route": "calendar",
+            "calendar_intent": "query",
+            "slots": {"window_hint": "today" if "bugün" in user_input else "week"},
+            "confidence": 0.9,
+            "tool_plan": ["calendar.list_events"],
+            "assistant_reply": ""
+        }, ensure_ascii=False, indent=2)
+    
+    # Calendar create
+    elif any(word in user_input for word in ["toplantı", "randevu", "etkinlik"]) and \
+         any(word in user_input for word in ["oluştur", "ekle", "koy", "yap"]):
+        return json.dumps({
+            "route": "calendar",
+            "calendar_intent": "create",
+            "slots": {"time": "16:00", "title": "toplantı"},
+            "confidence": 0.9,
+            "tool_plan": ["calendar.create_event"],
+            "assistant_reply": ""
+        }, ensure_ascii=False, indent=2)
+    
+    # Calendar list/show
+    elif any(word in user_input for word in ["takvim", "program", "ajanda"]) and \
+         any(word in user_input for word in ["göster", "bak", "listele"]):
+        return json.dumps({
+            "route": "calendar",
+            "calendar_intent": "query",
+            "slots": {"window_hint": "today"},
+            "confidence": 0.9,
+            "tool_plan": ["calendar.list_events"],
+            "assistant_reply": ""
+        }, ensure_ascii=False, indent=2)
+    
+    # Default smalltalk for unrecognized input
+    else:
+        return json.dumps({
+            "route": "smalltalk",
+            "calendar_intent": "none",
+            "slots": {},
+            "confidence": 0.7,
+            "tool_plan": [],
+            "assistant_reply": "Anlayamadım, daha açık bir şekilde söyler misin?"
+        }, ensure_ascii=False, indent=2)
+
     
     # Simple math prompt
     if "2+2" in prompt or "2 + 2" in prompt:
