@@ -1,4 +1,4 @@
-"""LLM Router: Single entry point for all user inputs.
+"""LLM Orchestrator: Single entry point for all user inputs (LLM-first architecture).
 
 Provides:
 - Route classification (calendar | smalltalk | unknown)
@@ -7,62 +7,90 @@ Provides:
 - Confidence scoring
 - Tool planning
 - Assistant reply (chat part)
+- Confirmation management
+- Memory/reasoning tracking
 
-This is the "Jarvis consistency layer" - every turn goes through LLM first.
+This is the "Jarvis orchestrator" - every turn goes through LLM first.
+LLM controls routing, tool selection, confirmation prompts, and reasoning summary.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class RouterOutput:
-    """LLM Router decision output."""
+class OrchestratorOutput:
+    """LLM Orchestrator decision output (expanded from RouterOutput).
+    
+    This is the unified decision structure that drives the entire turn.
+    LLM controls everything: route, intent, tools, confirmation, memory, reasoning.
+    """
 
+    # Core routing (from original RouterOutput)
     route: str  # calendar | smalltalk | unknown
     calendar_intent: str  # create | modify | cancel | query | none
     slots: dict[str, Any]  # {date?, time?, duration?, title?, window_hint?}
     confidence: float  # 0.0-1.0
     tool_plan: list[str]  # ["calendar.list_events", ...]
     assistant_reply: str  # Chat/response text
-    raw_output: dict[str, Any]  # Full LLM response for debugging
+    
+    # Orchestrator extensions (Issue #134)
+    ask_user: bool = False  # Need clarification?
+    question: str = ""  # Clarification question (if ask_user=True)
+    requires_confirmation: bool = False  # Destructive operation?
+    confirmation_prompt: str = ""  # LLM-generated confirmation text
+    memory_update: str = ""  # 1-2 line summary for rolling memory
+    reasoning_summary: list[str] = field(default_factory=list)  # 1-3 bullet points (not raw CoT)
+    
+    # Debug/trace
+    raw_output: dict[str, Any] = field(default_factory=dict)  # Full LLM response for debugging
 
 
-class LLMRouterProtocol(Protocol):
-    """Protocol for LLM text completion."""
+# Legacy alias for backward compatibility
+RouterOutput = OrchestratorOutput
+
+
+class LLMOrchestratorProtocol(Protocol):
+    """Protocol for LLM text completion (orchestrator interface)."""
 
     def complete_text(self, *, prompt: str) -> str:
         """Complete text from prompt."""
         ...
 
 
-class JarvisLLMRouter:
-    """Jarvis-style LLM Router with strict rules and confidence thresholds.
+# Legacy alias
+LLMRouterProtocol = LLMOrchestratorProtocol
+
+
+class JarvisLLMOrchestrator:
+    """Jarvis-style LLM Orchestrator (Issue #134: LLM-first architecture).
     
-    This router is the "single entry point" - every user input goes through it
-    to determine route, intent, slots, and tool plan.
+    This orchestrator is the "single decision maker" - every user input goes through LLM
+    to determine route, intent, slots, tool plan, confirmation needs, and reasoning.
     
-    Design principles:
+    Design principles (LLM-first):
+    - LLM controls everything: routing, tool selection, confirmation prompts
     - Strict JSON output only
     - Tool calls only if confidence >= threshold
-    - Destructive operations require confirmation (handled by PolicyEngine)
-    - Time ambiguity handled with confidence reduction
+    - Destructive operations require confirmation (LLM generates prompt, executor enforces)
+    - Memory tracking with rolling summary
+    - Reasoning summary (not raw CoT) for transparency
     """
 
-    # Router system prompt (strict rules)
+    # Orchestrator system prompt (LLM-first architecture)
     SYSTEM_PROMPT = """Kimlik / Roller:
 - Sen BANTZ'sın. Kullanıcı USER'dır.
 - Rol: Jarvis-vari asistan. Türkçe konuş; 'Efendim' hitabını kullan.
 
-Görev: Her kullanıcı mesajını şu şemaya göre sınıflandır:
+Görev: Her kullanıcı mesajını şu şemaya göre sınıflandır ve **orkestra et**:
 
-OUTPUT SCHEMA (zorunlu):
+OUTPUT SCHEMA (zorunlu - genişletilmiş orchestrator):
 {
   "route": "calendar | smalltalk | unknown",
   "calendar_intent": "create | modify | cancel | query | none",
@@ -75,17 +103,27 @@ OUTPUT SCHEMA (zorunlu):
   },
   "confidence": 0.0-1.0,
   "tool_plan": ["tool_name", ...],
-  "assistant_reply": "Kullanıcıya söyleyeceğin metin"
+  "assistant_reply": "Kullanıcıya söyleyeceğin metin",
+  
+  // Orchestrator extensions (Issue #134)
+  "ask_user": false,  // Eksik bilgi var mı?
+  "question": "",  // Netleştirme sorusu (ask_user=true ise)
+  "requires_confirmation": false,  // Tehlikeli işlem? (delete/update)
+  "confirmation_prompt": "",  // Onay isteme metni (requires_confirmation=true ise)
+  "memory_update": "",  // 1-2 satır: bu turda ne oldu?
+  "reasoning_summary": ["madde1", "madde2"]  // 1-3 madde: düşünce özeti (ham CoT değil)
 }
 
 KURALLAR (kritik):
 1. Sadece tek bir JSON object döndür; Markdown yok; açıklama yok.
-2. confidence < 0.7 → tool_plan boş bırak, netleştirici soru sor.
+2. confidence < 0.7 → tool_plan boş bırak, ask_user=true + question doldur.
 3. Saat belirsiz ("4" gibi) → 16:00 varsay ama confidence düşür (0.5).
-4. Destructive işler (sil/değiştir) → confidence yüksek olsa bile confirmation gerekecek (kod kontrol eder).
-5. Tool çağırma ancak netse; belirsizlikte sohbet et veya sor.
+4. Destructive işler (delete/modify) → requires_confirmation=true + confirmation_prompt doldur.
+5. Tool çağırma ancak netse; belirsizlikte ask_user=true ile sor.
 6. **ÖNEMLI: route="smalltalk" ise MUTLAKA assistant_reply doldur! (Jarvis tarzı, samimi, Türkçe)**
 7. route="calendar" + tool çağırırsan assistant_reply boş bırakabilirsin.
+8. **memory_update**: Her turda doldur! (örn: "Kullanıcı nasılsın diye sordu, karşılık verdim")
+9. **reasoning_summary**: 1-3 madde, kısa ve net (örn: ["Saat belirsiz", "16:00 varsaydım", "Onay gerekir"])
 
 ROUTE KURALLARI:
 - "calendar": takvim sorgusu veya değişikliği
@@ -326,8 +364,8 @@ USER: bu akşam sekize parti ekle
         json_text = text[start : end + 1]
         return json.loads(json_text)
 
-    def _extract_output(self, parsed: dict[str, Any], raw_text: str) -> RouterOutput:
-        """Extract RouterOutput from parsed JSON."""
+    def _extract_output(self, parsed: dict[str, Any], raw_text: str) -> OrchestratorOutput:
+        """Extract OrchestratorOutput from parsed JSON (expanded with orchestrator fields)."""
         route = str(parsed.get("route") or "unknown").strip().lower()
         if route not in {"calendar", "smalltalk", "unknown"}:
             route = "unknown"
@@ -353,21 +391,39 @@ USER: bu akşam sekize parti ekle
             tool_plan = []
 
         assistant_reply = str(parsed.get("assistant_reply") or "").strip()
+        
+        # Orchestrator extensions (Issue #134)
+        ask_user = bool(parsed.get("ask_user", False))
+        question = str(parsed.get("question") or "").strip()
+        requires_confirmation = bool(parsed.get("requires_confirmation", False))
+        confirmation_prompt = str(parsed.get("confirmation_prompt") or "").strip()
+        memory_update = str(parsed.get("memory_update") or "").strip()
+        
+        reasoning_summary = parsed.get("reasoning_summary") or []
+        if not isinstance(reasoning_summary, list):
+            reasoning_summary = []
+        reasoning_summary = [str(r).strip() for r in reasoning_summary if r]
 
-        return RouterOutput(
+        return OrchestratorOutput(
             route=route,
             calendar_intent=calendar_intent,
             slots=slots,
             confidence=confidence,
             tool_plan=tool_plan,
             assistant_reply=assistant_reply,
+            ask_user=ask_user,
+            question=question,
+            requires_confirmation=requires_confirmation,
+            confirmation_prompt=confirmation_prompt,
+            memory_update=memory_update,
+            reasoning_summary=reasoning_summary,
             raw_output=parsed,
         )
 
-    def _fallback_output(self, user_input: str, error: str) -> RouterOutput:
+    def _fallback_output(self, user_input: str, error: str) -> OrchestratorOutput:
         """Fallback output when parsing fails."""
-        logger.warning(f"Router fallback triggered: {error}")
-        return RouterOutput(
+        logger.warning(f"Orchestrator fallback triggered: {error}")
+        return OrchestratorOutput(
             route="unknown",
             calendar_intent="none",
             slots={},
@@ -376,3 +432,7 @@ USER: bu akşam sekize parti ekle
             assistant_reply="Efendim, tam anlayamadım. Tekrar eder misiniz?",
             raw_output={"error": error, "user_input": user_input},
         )
+
+
+# Legacy alias for backward compatibility
+JarvisLLMRouter = JarvisLLMOrchestrator
