@@ -297,10 +297,10 @@ Jarvis Personality: Subjective A/B test
 | **Jarvis Feeling** | 8/10 | 6/10 | **9/10** |
 | **Overall** | 7.4/10 | 8.0/10 | **8.8/10** |
 
-**3. Memory-lite Success**
-- All models answered "az önce ne yaptık?" correctly
-- 500 token summary sufficient for conversation continuity
-- PII filtering working without false positives
+**3. Memory-lite (Scope-Limited Validation)**
+- Qualitative conversations included "az önce ne yaptık?" checks; treat as indicative, not exhaustive
+- 500 token summary appears sufficient in the tested scenarios (validate under adversarial prompts)
+- PII filtering needs explicit test coverage before claiming "no false positives"
 
 **4. Production Readiness**
 - Split strategy: ✅ Production-ready

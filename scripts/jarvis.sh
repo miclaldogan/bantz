@@ -92,12 +92,14 @@ cmd_start() {
 
     # Check dependencies
     log_info "Bağımlılıklar kontrol ediliyor..."
-    
-    # Check Ollama
-    if ! curl -s http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
-        log_warning "Ollama çalışmıyor! Başlatın: ollama serve"
+
+    # Check vLLM (OpenAI-compatible)
+    VLLM_URL="${BANTZ_VLLM_BASE_URL:-http://127.0.0.1:8001}"
+    if ! curl -s "${VLLM_URL}/v1/models" > /dev/null 2>&1; then
+        log_warning "vLLM çalışmıyor veya erişilemiyor: ${VLLM_URL}"
+        log_warning "Başlat (örnek): python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-3B-Instruct-AWQ --port 8001"
     else
-        log_success "Ollama bağlı"
+        log_success "vLLM bağlı (${VLLM_URL})"
     fi
 
     # Check audio
@@ -186,11 +188,12 @@ cmd_status() {
 
     echo ""
 
-    # Ollama
-    if curl -s http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
-        log_success "Ollama bağlı"
+    # vLLM
+    VLLM_URL="${BANTZ_VLLM_BASE_URL:-http://127.0.0.1:8001}"
+    if curl -s "${VLLM_URL}/v1/models" > /dev/null 2>&1; then
+        log_success "vLLM bağlı (${VLLM_URL})"
     else
-        log_error "Ollama bağlı değil"
+        log_error "vLLM bağlı değil (${VLLM_URL})"
     fi
 
     # Daemon socket

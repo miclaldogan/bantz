@@ -33,6 +33,9 @@ class OrchestratorState:
     # Conversation history (last N turns)
     conversation_history: list[dict[str, str]] = field(default_factory=list)
     max_history_turns: int = 3  # Keep only last 3 turns
+
+    # Turn counter (used by memory-lite summaries)
+    turn_count: int = 0
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue)."""
@@ -93,3 +96,4 @@ class OrchestratorState:
         self.pending_confirmation = None
         self.trace = {}
         self.conversation_history = []
+        self.turn_count = 0

@@ -59,7 +59,7 @@ RouterOutput = OrchestratorOutput
 class LLMOrchestratorProtocol(Protocol):
     """Protocol for LLM text completion (orchestrator interface)."""
 
-    def complete_text(self, *, prompt: str) -> str:
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
         """Complete text from prompt."""
         ...
 
@@ -264,6 +264,7 @@ USER: bu akşam sekize parti ekle
         self,
         *,
         llm: LLMRouterProtocol,
+        system_prompt: Optional[str] = None,
         confidence_threshold: float = 0.7,
         max_attempts: int = 2,
     ):
@@ -271,10 +272,12 @@ USER: bu akşam sekize parti ekle
         
         Args:
             llm: LLM client implementing LLMRouterProtocol
+            system_prompt: Override the default SYSTEM_PROMPT (useful for benchmarking)
             confidence_threshold: Minimum confidence to execute tools (default 0.7)
             max_attempts: Max repair attempts for malformed JSON (default 2)
         """
         self._llm = llm
+        self._system_prompt = (system_prompt if system_prompt is not None else self.SYSTEM_PROMPT)
         self._confidence_threshold = float(confidence_threshold)
         self._max_attempts = int(max_attempts)
 
@@ -303,7 +306,13 @@ USER: bu akşam sekize parti ekle
         )
 
         # Call LLM
-        raw_text = self._llm.complete_text(prompt=prompt)
+        # JSON outputs can exceed small defaults (e.g. 200 tokens) and get truncated,
+        # causing parse failures. Use a safer default.
+        try:
+            raw_text = self._llm.complete_text(prompt=prompt, temperature=0.0, max_tokens=512)
+        except TypeError:
+            # Backward compatibility for mocks/adapters that only accept `prompt`.
+            raw_text = self._llm.complete_text(prompt=prompt)
 
         # Parse JSON
         try:
@@ -324,7 +333,7 @@ USER: bu akşam sekize parti ekle
         session_context: Optional[dict[str, Any]] = None,
     ) -> str:
         """Build router prompt with context."""
-        lines = [self.SYSTEM_PROMPT, ""]
+        lines = [self._system_prompt, ""]
 
         # Add dialog memory if available
         if dialog_summary:
@@ -355,13 +364,25 @@ USER: bu akşam sekize parti ekle
 
         text = text.strip()
 
-        # Find first { and last }
+        # Find the first JSON object start
         start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1:
+        if start == -1:
             raise ValueError("No JSON object found")
 
-        json_text = text[start : end + 1]
+        candidate = text[start:]
+
+        # Some models occasionally omit the final closing brace of the outer object.
+        # If braces are unbalanced, append the missing number of '}' characters.
+        brace_balance = candidate.count("{") - candidate.count("}")
+        if brace_balance > 0:
+            candidate = candidate + ("}" * brace_balance)
+
+        # Trim to the last closing brace (in case extra text follows)
+        end = candidate.rfind("}")
+        if end == -1:
+            raise ValueError("No JSON object found")
+
+        json_text = candidate[: end + 1]
         return json.loads(json_text)
 
     def _extract_output(self, parsed: dict[str, Any], raw_text: str) -> OrchestratorOutput:
@@ -432,6 +453,107 @@ USER: bu akşam sekize parti ekle
             assistant_reply="Efendim, tam anlayamadım. Tekrar eder misiniz?",
             raw_output={"error": error, "user_input": user_input},
         )
+
+
+class HybridJarvisLLMOrchestrator:
+    """Hybrid orchestrator: plan with one model, reply with another.
+
+    Intended usage:
+    - planner (3B): strict JSON decision (route/intent/slots/tool_plan)
+    - finalizer (8B): natural-language assistant reply
+
+    This wrapper keeps the decision JSON from the planner and overwrites
+    `assistant_reply` using the finalizer model.
+    """
+
+    def __init__(
+        self,
+        *,
+        planner: JarvisLLMOrchestrator,
+        finalizer_llm: LLMOrchestratorProtocol,
+        override_mode: str = "smalltalk_only",  # smalltalk_only | always
+    ):
+        self._planner = planner
+        self._finalizer = finalizer_llm
+        self._override_mode = (override_mode or "smalltalk_only").strip().lower()
+
+    def route(
+        self,
+        *,
+        user_input: str,
+        dialog_summary: Optional[str] = None,
+        session_context: Optional[dict[str, Any]] = None,
+    ) -> RouterOutput:
+        planned = self._planner.route(
+            user_input=user_input,
+            dialog_summary=dialog_summary,
+            session_context=session_context,
+        )
+
+        should_override = False
+        if self._override_mode == "always":
+            should_override = True
+        else:
+            should_override = planned.route == "smalltalk"
+
+        if planned.ask_user and planned.question:
+            # Prefer explicit clarifying question.
+            if not planned.assistant_reply:
+                from dataclasses import replace
+
+                return replace(planned, assistant_reply=planned.question)
+            return planned
+
+        if not should_override:
+            return planned
+
+        try:
+            prompt_lines = [
+                "Kimlik / Roller:",
+                "- Sen BANTZ'sın. Kullanıcı USER'dır.",
+                "- Türkçe konuş; 'Efendim' hitabını kullan.",
+                "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
+                "",
+            ]
+
+            if dialog_summary:
+                prompt_lines.append(f"DIALOG_SUMMARY:\n{dialog_summary}\n")
+
+            if session_context:
+                ctx_str = json.dumps(session_context, ensure_ascii=False)
+                prompt_lines.append(f"SESSION_CONTEXT (JSON):\n{ctx_str}\n")
+
+            prompt_lines.append("PLANNER_DECISION (JSON):")
+            prompt_lines.append(
+                json.dumps(
+                    {
+                        "route": planned.route,
+                        "calendar_intent": planned.calendar_intent,
+                        "slots": planned.slots,
+                        "confidence": planned.confidence,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            prompt_lines.append(f"\nUSER: {user_input}\nASSISTANT:")
+
+            try:
+                reply = self._finalizer.complete_text(
+                    prompt="\n".join(prompt_lines),
+                    temperature=0.2,
+                    max_tokens=256,
+                )
+            except TypeError:
+                reply = self._finalizer.complete_text(prompt="\n".join(prompt_lines))
+            reply = str(reply or "").strip()
+            if reply:
+                from dataclasses import replace
+
+                return replace(planned, assistant_reply=reply)
+        except Exception:
+            pass
+
+        return planned
 
 
 # Legacy alias for backward compatibility

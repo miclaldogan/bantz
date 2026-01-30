@@ -121,7 +121,7 @@ This benchmark compares **Qwen2.5-3B-Instruct** and **Qwen2.5-8B-Instruct** on R
 
 **Key Findings**:
 
-1. **Memory-lite works!** All models successfully answered "az önce ne yaptık?" queries
+1. **Memory-lite looks promising (limited validation)**: qualitative conversations included "az önce ne yaptık?" checks, but this is not exhaustive.
 2. **3B**: Fast but sometimes awkward ("Jarvis hızlı ama bazen garip konuşuyor")
 3. **8B**: Natural but slower ("Daha akıllı ama cevap gelene kadar bekliyor")
 4. **Split**: "En iyi denge - hemen cevap veriyor ve doğal konuşuyor"
@@ -142,7 +142,7 @@ This benchmark compares **Qwen2.5-3B-Instruct** and **Qwen2.5-8B-Instruct** on R
 
 👤 User: az önce ne yaptık?
 🤖 Bantz: Az önce bu haftaki takvim planınızı sormuştunuz. Size 3 etkinlik gösterdim.
-   TTFT: 195ms | Route: smalltalk (memory-lite working!)
+  TTFT: (ESTIMATED in earlier draft; requires real vLLM streaming measurement) | Route: smalltalk (memory-lite indicated)
 
 Evaluator feedback: "Çok doğal ve hızlı. Gerçekten Jarvis hissi var."
 ```
