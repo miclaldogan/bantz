@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+import uuid
 from dataclasses import dataclass
 import unicodedata
 from datetime import datetime
@@ -22,7 +24,13 @@ from bantz.brain.calendar_intent import (
     parse_hash_ref_index,
     parse_hhmm,
 )
-from bantz.planning.plan_draft import build_plan_draft_from_text, looks_like_planning_prompt
+from bantz.planning.plan_draft import (
+    apply_plan_edit_instruction,
+    build_plan_draft_from_text,
+    looks_like_planning_prompt,
+    plan_draft_from_dict,
+    plan_draft_to_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +45,56 @@ _CALENDAR_PENDING_INTENT_KEY = "_calendar_pending_intent"
 _CALENDAR_LAST_EVENTS_KEY = "_calendar_last_events"
 
 _TRACE_KEY = "_dialog_trace"
+
+_PLANNING_PENDING_DRAFT_KEY = "_planning_pending_plan_draft"
+_PLANNING_CONFIRMED_DRAFT_KEY = "_planning_confirmed_plan_draft"
+
+
+def _render_plan_confirm_menu() -> str:
+    return (
+        "Planı onaylayayım mı?\n"
+        "1) Onayla\n"
+        "2) Değiştir (örn: 'şunu 30 dk yap')\n"
+        "0) İptal"
+    ).strip()
+
+
+def _is_plan_accept(user_text: str) -> bool:
+    t = _normalize_text_for_match(user_text)
+    if not t:
+        return False
+    if t.strip() == "1":
+        return True
+    return any(w in t for w in ["onayla", "onaylıyorum", "tamam", "evet", "devam", "uygula"])
+
+
+def _is_plan_cancel(user_text: str) -> bool:
+    t = _normalize_text_for_match(user_text)
+    if not t:
+        return False
+    if t.strip() == "0":
+        return True
+    return any(w in t for w in ["iptal", "vazgec", "vazgeç", "bosver", "boşver"])
+
+
+def _plan_edit_instruction(user_text: str) -> Optional[str]:
+    t = str(user_text or "").strip()
+    if not t:
+        return None
+    nt = _normalize_text_for_match(t)
+    if nt.strip() == "2":
+        return ""
+    # Explicit edit commands.
+    for k in ["degistir", "değiştir", "duzenle", "düzenle", "revize", "guncelle", "güncelle"]:
+        if k in nt:
+            parts = re.split(r"[:\-]", t, maxsplit=1)
+            if len(parts) == 2:
+                return parts[1].strip()
+            return ""
+    # Implicit edit: includes a duration expression.
+    if re.search(r"\b\d{1,3}\s*(dk|dakika|saat|sa)\b", nt):
+        return t
+    return None
 
 
 def _action_type_from_tool_name(tool_name: str) -> str:
@@ -1456,6 +1514,118 @@ class BrainLoop:
                 },
             }
             return plan, "ok"
+
+        # Issue #116: PlanDraft confirmation/edit loop.
+        # If a plan is pending, handle accept/edit/cancel deterministically
+        # to avoid falling into unknown menus.
+        pending_plan = state.get(_PLANNING_PENDING_DRAFT_KEY) if isinstance(state, dict) else None
+        if isinstance(pending_plan, dict) and not looks_like_planning_prompt(user_text):
+            raw_draft = pending_plan.get("draft")
+            draft = plan_draft_from_dict(raw_draft) if isinstance(raw_draft, dict) else None
+
+            if _is_plan_cancel(user_text):
+                try:
+                    if isinstance(state, dict):
+                        state.pop(_PLANNING_PENDING_DRAFT_KEY, None)
+                        state.pop(_PLANNING_CONFIRMED_DRAFT_KEY, None)
+                        state[_DIALOG_STATE_KEY] = "IDLE"
+                except Exception:
+                    pass
+                _emit_ack()
+                text = "Peki efendim, planı iptal ediyorum."
+                try:
+                    self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
+                except Exception:
+                    pass
+                return BrainResult(
+                    kind="say",
+                    text=text,
+                    steps_used=0,
+                    metadata=_std_metadata(ctx=ctx, state=state, action_type="plan_cancel", requires_confirmation=False),
+                )
+
+            if _is_plan_accept(user_text):
+                try:
+                    if isinstance(state, dict) and isinstance(raw_draft, dict):
+                        state[_PLANNING_CONFIRMED_DRAFT_KEY] = dict(pending_plan)
+                        state.pop(_PLANNING_PENDING_DRAFT_KEY, None)
+                        state[_DIALOG_STATE_KEY] = "IDLE"
+                except Exception:
+                    pass
+                _emit_ack()
+                text = "Tamam efendim, planı onayladım. (Bir sonraki adım: uygulama/dry-run)"
+                try:
+                    self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
+                except Exception:
+                    pass
+                return BrainResult(
+                    kind="say",
+                    text=text,
+                    steps_used=0,
+                    metadata=_std_metadata(ctx=ctx, state=state, action_type="plan_accept", requires_confirmation=False),
+                )
+
+            instruction = _plan_edit_instruction(user_text)
+            if instruction is not None and draft is not None:
+                if instruction.strip():
+                    draft = apply_plan_edit_instruction(draft, instruction)
+                    try:
+                        if isinstance(state, dict):
+                            pending_plan["draft"] = plan_draft_to_dict(draft)
+                            state[_PLANNING_PENDING_DRAFT_KEY] = pending_plan
+                    except Exception:
+                        pass
+                else:
+                    # Ask for the edit instruction.
+                    _emit_ack()
+                    q = "Ne değiştireyim efendim? Örn: 'şunu 30 dk yap'"
+                    try:
+                        self._events.publish(EventType.QUESTION.value, {"question": q}, source="brain")
+                    except Exception:
+                        pass
+                    return BrainResult(
+                        kind="ask_user",
+                        text=q,
+                        steps_used=0,
+                        metadata=_std_metadata(ctx=ctx, state=state, menu_id="plan_edit", requires_confirmation=False),
+                    )
+
+            # Default: re-render the confirm menu + current preview.
+            if draft is not None:
+                preview = draft.render_preview_tr()
+                # Keep trace slots updated for tests.
+                try:
+                    trace["intent"] = "calendar.plan_draft"
+                    trace["slots"] = {
+                        "plan_window": draft.plan_window(),
+                        "item_count": len(draft.items) if isinstance(draft.items, list) else 0,
+                    }
+                    trace["missing"] = []
+                    trace["next_action"] = "ask_confirm"
+                    trace["safety"] = []
+                except Exception:
+                    pass
+                _emit_ack()
+                rendered = _render_plan_confirm_menu()
+                try:
+                    self._events.publish(EventType.QUESTION.value, {"question": rendered}, source="brain")
+                except Exception:
+                    pass
+                preview = _role_sanitize_text(preview)
+                try:
+                    self._events.publish(EventType.RESULT.value, {"text": preview}, source="brain")
+                except Exception:
+                    pass
+                return BrainResult(
+                    kind="say",
+                    text=preview,
+                    steps_used=0,
+                    metadata={
+                        **_std_metadata(ctx=ctx, state=state, action_type="plan_draft", requires_confirmation=False),
+                        "plan_window": draft.plan_window(),
+                        "item_count": len(draft.items) if isinstance(draft.items, list) else 0,
+                    },
+                )
 
         # Deterministic state machine: confirmation > choice > router.
         # If we have a pending confirmation, do NOT consume pending choice menus.
@@ -3208,6 +3378,18 @@ class BrainLoop:
                 plan = build_plan_draft_from_text(user_text, ctx=ctx)
                 preview = plan.render_preview_tr()
 
+                # Store pending plan draft for #116 confirmation/edit loop.
+                try:
+                    if isinstance(state, dict):
+                        state[_PLANNING_PENDING_DRAFT_KEY] = {
+                            "id": str(uuid.uuid4()),
+                            "created_at": float(time.time()),
+                            "draft": plan_draft_to_dict(plan),
+                        }
+                        state[_DIALOG_STATE_KEY] = "PENDING_PLAN_DRAFT"
+                except Exception:
+                    pass
+
                 # Trace for auditability/tests (never chain-of-thought).
                 try:
                     trace["intent"] = "calendar.plan_draft"
@@ -3223,6 +3405,12 @@ class BrainLoop:
 
                 _emit_ack()
                 _emit_progress(tool_name="planner.plan_draft")
+                try:
+                    self._events.publish(
+                        EventType.QUESTION.value, {"question": _render_plan_confirm_menu()}, source="brain"
+                    )
+                except Exception:
+                    pass
                 preview = _role_sanitize_text(preview)
                 try:
                     self._events.publish(EventType.RESULT.value, {"text": preview}, source="brain")
