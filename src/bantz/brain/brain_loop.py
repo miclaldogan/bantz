@@ -45,6 +45,7 @@ _CALENDAR_PENDING_INTENT_KEY = "_calendar_pending_intent"
 _CALENDAR_LAST_EVENTS_KEY = "_calendar_last_events"
 
 _TRACE_KEY = "_dialog_trace"
+_DIALOG_SUMMARY_KEY = "_dialog_summary"
 
 _PLANNING_PENDING_DRAFT_KEY = "_planning_pending_plan_draft"
 _PLANNING_CONFIRMED_DRAFT_KEY = "_planning_confirmed_plan_draft"
@@ -1383,6 +1384,42 @@ class BrainLoop:
             if isinstance(state, dict):
                 state[_TRACE_KEY] = trace
             return trace
+
+        def _update_dialog_summary(
+            *,
+            user_input: str,
+            result_kind: str,
+            result_text: str,
+            tool_calls: Optional[list[str]] = None,
+        ) -> None:
+            """Update rolling dialog summary (memory layer).
+            
+            Keeps last N turns in 1-2 sentence format.
+            Format: "User asked X. Assistant did Y. Tool Z returned W."
+            """
+            try:
+                if not isinstance(state, dict):
+                    return
+
+                # Get existing summary
+                existing = state.get(_DIALOG_SUMMARY_KEY)
+                summary_lines: list[str] = []
+                if isinstance(existing, str) and existing.strip():
+                    summary_lines = [line.strip() for line in existing.strip().split("\n") if line.strip()]
+
+                # Build new turn summary
+                turn_summary = f"User: {user_input[:80]}"
+                if tool_calls:
+                    turn_summary += f" | Tools: {', '.join(tool_calls)}"
+                turn_summary += f" | Result: {result_kind}"
+
+                # Keep last 3 turns
+                summary_lines.append(turn_summary)
+                summary_lines = summary_lines[-3:]
+
+                state[_DIALOG_SUMMARY_KEY] = "\n".join(summary_lines)
+            except Exception as e:
+                logger.debug(f"Dialog summary update failed: {e}")
 
         def _route_reason_tokens(
             *,
