@@ -1,52 +1,66 @@
-# Model Configuration for Bantz LLM Orchestrator
-# Issue #136: Single-model baseline strategy with Qwen2.5-3B-Instruct
-# Issue #153: RTX 4060 optimization with split strategy (3B router/orch + 8B chat)
-
-# =============================================================================
-# Model Strategy (Updated based on RTX 4060 benchmarks)
-# =============================================================================
-# Strategy: SPLIT
-# - Router/Orchestrator: Qwen2.5-3B-Instruct (TTFT < 200ms, deterministic)
-# - Chat: Qwen2.5-8B-Instruct (TTFT < 300ms, natural Turkish)
-# 
-# Rationale:
-# - Best "Jarvis feeling" (8.8/10 user satisfaction)
-# - TTFT targets met across all roles
-# - VRAM safe: 5.5GB peak on RTX 4060 (8GB total)
-# - Quality: 8.5/10 naturalness vs 6.5/10 for 3B-only
+# vLLM Model Configuration for Bantz
+# Epic LLM-1 (Issue #155): vLLM Dual-Server Infrastructure
 #
-# See: docs/rtx4060-3b-vs-8b-benchmark.md
-# =============================================================================
+# Strategy: SEQUENTIAL (due to RTX 4060 8GB VRAM constraints)
+# - 3B model (port 8001): Fast router/orchestrator, always-on baseline
+# - 7B model (port 8002): High-quality chat (manual switch, requires stopping 3B)
+#
+# RTX 4060 8GB VRAM Constraints:
+#   - 3B AWQ: ~3.0GB VRAM (concurrent safe)
+#   - 7B AWQ: ~5.6GB VRAM (exclusive mode, requires 3B stopped)
+#
+# Startup Scripts:
+#   ./scripts/start_vllm_3b.sh   # Start 3B router (baseline)
+#   ./scripts/start_vllm_7b.sh   # Start 7B chat (stops 3B first)
+#   ./scripts/stop_vllm_servers.sh
 
-model_strategy: split  # split | single
+model_strategy: sequential  # Sequential mode: 3B or 7B, not both simultaneously
 
-# =============================================================================
-# Model Selection
-# =============================================================================
 models:
   router:
-    name: "Qwen/Qwen2.5-3B-Instruct"
+    name: "Qwen/Qwen2.5-3B-Instruct-AWQ"
     provider: "vllm"
-    context_window: 32768
+    context_window: 2048
     quantization: null  # FP16 (fits in VRAM)
+    endpoint: "http://localhost:8001/v1"
+    port: 8001
+    quantization: "awq_marlin"
+    max_model_len: 2048
+    gpu_memory_utilization: 0.70
+    vram_usage_gb: 3.0
+    ttft_ms: 41  # Validated (vllm_validation_report.md)
+    role: "routing, planning, tool selection"
+    enabled: true
     
   orchestrator:
-    name: "Qwen/Qwen2.5-3B-Instruct"
+    name: "Qwen/Qwen2.5-3B-Instruct-AWQ"
     provider: "vllm"
-    context_window: 32768
-    quantization: null  # FP16
+    endpoint: "http://localhost:8001/v1"  # Same as router (single 3B server)
+    port: 8001
+    context_window: 2048
+    quantization: "awq_marlin"
     
   chat:
-    name: "Qwen/Qwen2.5-8B-Instruct"
+    name: "Qwen/Qwen2.5-7B-Instruct-AWQ"
     provider: "vllm"
-    context_window: 32768
-    quantization: null  # FP16 (use AWQ if VRAM tight)
+    endpoint: "http://localhost:8002/v1"
+    port: 8002
+    context_window: 2048
+    quantization: "awq_marlin"
+    max_model_len: 2048
+    gpu_memory_utilization: 0.65
+    vram_usage_gb: 5.6
+    ttft_ms: 65  # Estimated (not yet benchmarked)
+    role: "chat, reasoning, complex responses"
+    enabled: false  # Sequential mode - manual switch required
 
 # Single-model fallback (for comparison or resource-constrained setups)
 single_model:
-  name: "Qwen/Qwen2.5-3B-Instruct"
+  name: "Qwen/Qwen2.5-3B-Instruct-AWQ"
   provider: "vllm"
-  context_window: 32768
+  endpoint: "http://localhost:8001/v1"
+  context_window: 2048
+  quantization: "awq_marlin"
 
 # =============================================================================
 # Router Configuration
