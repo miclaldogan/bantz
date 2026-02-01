@@ -97,3 +97,33 @@ export BANTZ_VLLM_QUALITY_MODEL="Qwen/Qwen2.5-7B-Instruct-AWQ"
 export BANTZ_VLLM_MODEL=auto
 export BANTZ_VLLM_QUALITY_MODEL=auto
 ```
+
+## Tiered routing (3B → 7B eskalasyon)
+
+Varsayılan davranış: Bantz çoğu yerde **3B (fast)** ile gider.
+7B (quality) otomatik devreye girsin istiyorsan:
+
+```bash
+export BANTZ_TIERED_MODE=1
+```
+
+İsteğe göre zorlamak için:
+
+```bash
+export BANTZ_LLM_TIER=fast     # her zaman 3B
+export BANTZ_LLM_TIER=quality  # her zaman 7B
+export BANTZ_LLM_TIER=auto     # (varsayılan) heuristic
+```
+
+Heuristic eşikleri:
+
+```bash
+export BANTZ_TIERED_MIN_COMPLEXITY=4
+export BANTZ_TIERED_MIN_WRITING=4
+```
+
+Kaliteye zorlayan keyword listesi (opsiyonel):
+
+```bash
+export BANTZ_TIERED_FORCE_QUALITY_KEYWORDS="mail,taslak,roadmap,detaylı"
+```

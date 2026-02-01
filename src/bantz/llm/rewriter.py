@@ -187,8 +187,9 @@ class CommandRewriter:
         
         try:
             import requests
+
             r = requests.get(
-                f"{self._base_url}/api/tags",
+                f"{self._base_url.rstrip('/')}/v1/models",
                 timeout=2.0,
             )
             return r.status_code == 200
@@ -202,12 +203,13 @@ _rewriter: Optional[CommandRewriter] = None
 
 def get_rewriter(
     enabled: bool = True,
-    model: str = "qwen2.5:3b-instruct",
+    model: str = "Qwen/Qwen2.5-3B-Instruct",
+    base_url: str = "http://127.0.0.1:8001",
 ) -> CommandRewriter:
     """Get or create the global command rewriter."""
     global _rewriter
     if _rewriter is None:
-        _rewriter = CommandRewriter(model=model, enabled=enabled)
+        _rewriter = CommandRewriter(model=model, base_url=base_url, enabled=enabled)
     return _rewriter
 
 

@@ -559,10 +559,28 @@ class OrchestratorLoop:
 
             return replace(orchestrator_output, assistant_reply=orchestrator_output.question)
 
-        # Hybrid mode: if a finalizer LLM is provided, generate the user-facing reply
-        # using that model (e.g., 8B), while keeping planning/tool decisions from the
-        # planner model (e.g., 3B).
+        # Hybrid mode: if a finalizer LLM is provided, optionally generate the
+        # user-facing reply using that model (e.g., 7B), while keeping planning/tool
+        # decisions from the planner model (e.g., 3B).
         if self.finalizer_llm is not None:
+            use_finalizer = True
+            try:
+                # Default behavior is unchanged unless tiering is enabled.
+                from bantz.llm.tiered import decide_tier
+
+                decision = decide_tier(
+                    user_input,
+                    tool_names=orchestrator_output.tool_plan,
+                    requires_confirmation=bool(orchestrator_output.requires_confirmation),
+                )
+                if decision.reason == "tiering_disabled":
+                    use_finalizer = True
+                else:
+                    use_finalizer = bool(decision.use_quality)
+            except Exception:
+                use_finalizer = True
+
+        if self.finalizer_llm is not None and use_finalizer:
             try:
                 context = state.get_context_for_llm()
                 dialog_summary = self.memory.to_prompt_block()

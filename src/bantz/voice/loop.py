@@ -168,7 +168,8 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
 
         return asr
 
-    llm = None
+    llm_fast = None
+    llm_quality = None
     history: List[LLMMessage] = []
     if cfg.enable_llm_fallback:
         history = [
@@ -427,13 +428,32 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
         # 2) Eğer daemon cevap veremediyse LLM fallback
         if cfg.enable_llm_fallback and (not reply or not ok):
             try:
-                nonlocal llm
-                if llm is None:
-                    llm = create_client(
-                        "vllm",
-                        base_url=cfg.vllm_url,
-                        model=cfg.vllm_model,
-                    )
+                nonlocal llm_fast, llm_quality
+
+                use_quality = False
+                try:
+                    from bantz.llm.tiered import decide_tier
+
+                    decision = decide_tier(text)
+                    use_quality = bool(decision.use_quality) and decision.reason != "tiering_disabled"
+                except Exception:
+                    use_quality = False
+
+                if use_quality:
+                    if llm_quality is None:
+                        from bantz.llm import create_quality_client
+
+                        llm_quality = create_quality_client()
+                    llm = llm_quality
+                else:
+                    if llm_fast is None:
+                        llm_fast = create_client(
+                            "vllm",
+                            base_url=cfg.vllm_url,
+                            model=cfg.vllm_model,
+                        )
+                    llm = llm_fast
+
                 history = history[-20:]  # keep it bounded
                 history.append(LLMMessage("user", text))
                 reply = llm.chat(history, temperature=0.4, max_tokens=512)
@@ -616,7 +636,8 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
         return asr
     
     # Setup LLM fallback
-    llm = None
+    llm_fast = None
+    llm_quality = None
     history: List[LLMMessage] = []
     if cfg.enable_llm_fallback:
         history = [
@@ -732,17 +753,41 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
             
             # LLM fallback for unknown commands
             if not ok and cfg.enable_llm_fallback and "anlayamadım" in reply.lower():
-                if llm is None:
-                    try:
-                        llm = create_client(
-                            "vllm",
-                            base_url=cfg.vllm_url,
-                            model=cfg.vllm_model,
-                        )
-                    except Exception as e:
-                        print(f"(LLM init hata: {e})")
-                        is_listening = False
-                        return
+                nonlocal llm_fast, llm_quality
+
+                use_quality = False
+                try:
+                    from bantz.llm.tiered import decide_tier
+
+                    decision = decide_tier(text)
+                    use_quality = bool(decision.use_quality) and decision.reason != "tiering_disabled"
+                except Exception:
+                    use_quality = False
+
+                if use_quality:
+                    if llm_quality is None:
+                        try:
+                            from bantz.llm import create_quality_client
+
+                            llm_quality = create_quality_client()
+                        except Exception as e:
+                            print(f"(LLM init hata: {e})")
+                            is_listening = False
+                            return
+                    llm = llm_quality
+                else:
+                    if llm_fast is None:
+                        try:
+                            llm_fast = create_client(
+                                "vllm",
+                                base_url=cfg.vllm_url,
+                                model=cfg.vllm_model,
+                            )
+                        except Exception as e:
+                            print(f"(LLM init hata: {e})")
+                            is_listening = False
+                            return
+                    llm = llm_fast
                 
                 print("🤖 LLM'e soruluyor...")
                 history.append(LLMMessage("user", text))
