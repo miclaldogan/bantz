@@ -15,8 +15,14 @@ fi
 
 # Get model info
 echo "✅ Server is running!"
-MODEL_INFO=$(curl -s http://localhost:$PORT/v1/models | python3 -c "import sys, json; d=json.load(sys.stdin)['data'][0]; print(f\"Model: {d['id']}\nMax tokens: {d['max_model_len']}\")")
+MODEL_INFO=$(curl -s http://localhost:$PORT/v1/models | python3 -c "import sys, json; d=json.load(sys.stdin)['data'][0]; print(f\"Model: {d.get('id')}\nMax tokens: {d.get('max_model_len')}\")")
 echo "$MODEL_INFO"
+
+MODEL_ID=$(curl -s http://localhost:$PORT/v1/models | python3 -c "import sys, json; print((json.load(sys.stdin)['data'][0].get('id') or '').strip())")
+if [ -z "$MODEL_ID" ]; then
+  echo "❌ Could not detect model id from /v1/models" >&2
+  exit 1
+fi
 echo ""
 
 # Speed test
@@ -27,7 +33,7 @@ for i in {1..3}; do
     curl -s http://localhost:$PORT/v1/completions \
       -H "Content-Type: application/json" \
       -d '{
-        "model": "Qwen/Qwen2.5-3B-Instruct-AWQ",
+        "model": "'"$MODEL_ID"'",
         "prompt": "Hello",
         "max_tokens": 10,
         "temperature": 0
@@ -47,7 +53,7 @@ echo "📝 Detailed test with output:"
 RESPONSE=$(curl -s http://localhost:$PORT/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen2.5-3B-Instruct-AWQ",
+    "model": "'"$MODEL_ID"'",
     "prompt": "Write a haiku about speed:",
     "max_tokens": 50,
     "temperature": 0.7

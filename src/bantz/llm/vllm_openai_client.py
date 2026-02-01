@@ -116,6 +116,17 @@ class VLLMOpenAIClient(LLMClient):
     ) -> LLMResponse:
         """Chat completion with detailed metadata."""
         client = self._get_client()
+
+        # Allow "auto" model selection (use the first model reported by /v1/models).
+        # This is helpful when scripts pass --served-model-name or when the exact
+        # model id differs between machines.
+        if (self.model or "").strip().lower() == "auto":
+            models = self.list_available_models(timeout_seconds=2.0)
+            if not models:
+                raise LLMModelNotFoundError(
+                    f"vLLM ({self.base_url}) did not report any models via /v1/models"
+                )
+            self.model = str(models[0]).strip()
         
         # Convert to OpenAI message format
         openai_messages = [

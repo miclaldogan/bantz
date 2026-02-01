@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start vLLM server with Qwen2.5-7B-Instruct-AWQ on port 8002
-# ⚠️  REQUIRES 3B server (port 8001) to be stopped first due to VRAM constraints!
+# Can run alongside 3B on a single GPU if memory/KV-cache limits are tuned.
 # Usage: ./scripts/vllm/start_7b.sh
 
 set -e
@@ -10,9 +10,14 @@ PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 cd "$PROJECT_ROOT"
 
-echo "⚠️  7B model requires ~5.6GB VRAM. Stopping 3B server on port 8001..."
-pkill -f "vllm.entrypoints.openai.api_server.*8001" || true
-sleep 3
+LOG_DIR="${BANTZ_VLLM_LOG_DIR:-artifacts/logs/vllm}"
+mkdir -p "$LOG_DIR"
+
+if [ "${BANTZ_VLLM_DUAL_MODE:-1}" != "1" ]; then
+    echo "⚠️  Dual mode kapalı: 3B server (8001) durduruluyor..."
+    pkill -f "vllm.entrypoints.openai.api_server.*8001" || true
+    sleep 3
+fi
 
 # Check if port 8002 is already in use
 if ss -ltnp | grep -q ":8002 "; then
@@ -25,29 +30,45 @@ fi
 # source .venv/bin/activate
 
 echo "🚀 Starting vLLM server (7B AWQ) on port 8002..."
-echo "   Model: Qwen/Qwen2.5-7B-Instruct-AWQ"
-echo "   Quantization: awq_marlin (optimized)"
-echo "   Max tokens: 2048"
-echo "   GPU utilization: 90% (SPEED OPTIMIZED)"
-echo "   Speed optimizations: prefix-caching, chunked-prefill"
+echo "   Model: ${BANTZ_VLLM_7B_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+echo "   Quantization: ${BANTZ_VLLM_7B_QUANT:-awq_marlin}"
+echo "   Profile: quality / dual-friendly defaults (override via env vars)"
+echo "   Max tokens: ${BANTZ_VLLM_7B_MAX_MODEL_LEN:-2048}"
+echo "   GPU utilization: ${BANTZ_VLLM_7B_GPU_UTIL:-0.60}"
+echo "   Offload: cpu_offload_gb=${BANTZ_VLLM_7B_CPU_OFFLOAD_GB:-6}, swap_space=${BANTZ_VLLM_7B_SWAP_SPACE:-8}"
 echo ""
 
-nohup python3 -m vllm.entrypoints.openai.api_server \
-  --model Qwen/Qwen2.5-7B-Instruct-AWQ \
-  --quantization awq_marlin \
-  --dtype half \
-  --port 8002 \
-  --max-model-len 2048 \
-  --gpu-memory-utilization 0.90 \
-  --enable-prefix-caching \
-  --enable-chunked-prefill \
-  --max-num-batched-tokens 4096 \
-  --max-num-seqs 256 \
-  > vllm_8002.log 2>&1 &
+PYTHON_BIN="${BANTZ_VLLM_PYTHON:-python3}"
+if ! "$PYTHON_BIN" -c "import vllm" >/dev/null 2>&1; then
+    echo "❌ vLLM import edilemedi ($PYTHON_BIN). Önce vLLM'i kurun: pip install vllm" >&2
+    exit 1
+fi
+
+EXTRA_ARGS=()
+if [ "${BANTZ_VLLM_7B_CPU_OFFLOAD_GB:-6}" != "0" ]; then
+        EXTRA_ARGS+=("--cpu-offload-gb" "${BANTZ_VLLM_7B_CPU_OFFLOAD_GB:-6}")
+fi
+if [ "${BANTZ_VLLM_7B_SWAP_SPACE:-8}" != "0" ]; then
+        EXTRA_ARGS+=("--swap-space" "${BANTZ_VLLM_7B_SWAP_SPACE:-8}")
+fi
+
+nohup "$PYTHON_BIN" -m vllm.entrypoints.openai.api_server \
+    --model "${BANTZ_VLLM_7B_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}" \
+    --quantization "${BANTZ_VLLM_7B_QUANT:-awq_marlin}" \
+    --dtype "${BANTZ_VLLM_7B_DTYPE:-half}" \
+    --port "${BANTZ_VLLM_7B_PORT:-8002}" \
+    --max-model-len "${BANTZ_VLLM_7B_MAX_MODEL_LEN:-2048}" \
+    --gpu-memory-utilization "${BANTZ_VLLM_7B_GPU_UTIL:-0.60}" \
+    --max-num-seqs "${BANTZ_VLLM_7B_MAX_NUM_SEQS:-16}" \
+    --max-num-batched-tokens "${BANTZ_VLLM_7B_MAX_BATCH_TOKENS:-4096}" \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    "${EXTRA_ARGS[@]}" \
+    > "$LOG_DIR/vllm_8002.log" 2>&1 &
 
 SERVER_PID=$!
 echo "✅ Server process started (PID: $SERVER_PID)"
-echo "📝 Logs: $PROJECT_ROOT/vllm_8002.log"
+echo "📝 Logs: $PROJECT_ROOT/$LOG_DIR/vllm_8002.log"
 echo ""
 echo "Waiting 60 seconds for model loading (7B is larger)..."
 sleep 60
