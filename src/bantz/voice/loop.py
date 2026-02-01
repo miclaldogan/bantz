@@ -431,17 +431,23 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
                 nonlocal llm_fast, llm_quality
 
                 use_quality = False
+                qos_timeout_s = 20.0
+                qos_max_tokens = 256
                 try:
-                    from bantz.llm.tiered import decide_tier
+                    from bantz.llm.tiered import decide_tier, get_qos
                     import os
 
                     decision = decide_tier(text)
                     use_quality = bool(decision.use_quality) and decision.reason != "tiering_disabled"
 
+                    qos = get_qos(use_quality=use_quality, profile="voice")
+                    qos_timeout_s = float(qos.timeout_s)
+                    qos_max_tokens = int(qos.max_tokens)
+
                     if str(os.getenv("BANTZ_TIERED_DEBUG", "")).strip().lower() in {"1", "true", "yes", "on"}:
                         tier = "quality" if use_quality else "fast"
                         print(
-                            f"[tiered] voice_fallback tier={tier} reason={decision.reason} c={decision.complexity} w={decision.writing} r={decision.risk}"
+                            f"[tiered] voice_fallback tier={tier} reason={decision.reason} c={decision.complexity} w={decision.writing} r={decision.risk} qos_timeout_s={qos_timeout_s} qos_max_tokens={qos_max_tokens}"
                         )
                 except Exception:
                     use_quality = False
@@ -450,7 +456,7 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
                     if llm_quality is None:
                         from bantz.llm import create_quality_client
 
-                        llm_quality = create_quality_client()
+                        llm_quality = create_quality_client(timeout=qos_timeout_s)
                     llm = llm_quality
                 else:
                     if llm_fast is None:
@@ -458,12 +464,13 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
                             "vllm",
                             base_url=cfg.vllm_url,
                             model=cfg.vllm_model,
+                            timeout=qos_timeout_s,
                         )
                     llm = llm_fast
 
                 history = history[-20:]  # keep it bounded
                 history.append(LLMMessage("user", text))
-                reply = llm.chat(history, temperature=0.4, max_tokens=512)
+                reply = llm.chat(history, temperature=0.4, max_tokens=qos_max_tokens)
                 history.append(LLMMessage("assistant", reply))
             except Exception as e:
                 reply = reply or f"(LLM hata: {e})"

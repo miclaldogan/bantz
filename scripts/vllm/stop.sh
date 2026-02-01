@@ -27,5 +27,11 @@ fi
 sleep 2
 echo "✅ All vLLM servers stopped"
 echo ""
-nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits | \
-    awk '{printf "   GPU Memory: %d / %d MiB (%.1f%% free)\n", $1, $2, 100*(1-$1/$2)}'
+
+# Best-effort GPU memory report (optional).
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits | \
+        awk '{printf "   GPU Memory: %d / %d MiB (%.1f%% free)\n", $1, $2, 100*(1-$1/$2)}' || true
+else
+    echo "   (nvidia-smi not found; skipping GPU memory report)"
+fi

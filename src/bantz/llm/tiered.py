@@ -23,6 +23,17 @@ class TierDecision:
     risk: int
 
 
+@dataclass(frozen=True)
+class TierQoS:
+    """QoS defaults to keep fast paths snappy and avoid long blocks.
+
+    These are *call-level* defaults. Underlying client timeouts still apply.
+    """
+
+    timeout_s: float
+    max_tokens: int
+
+
 def _env_flag(name: str, default: bool = False) -> bool:
     raw = str(os.getenv(name, "")).strip().lower()
     if not raw:
@@ -38,6 +49,51 @@ def _env_int(name: str, default: int) -> int:
         return int(raw)
     except Exception:
         return int(default)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = str(os.getenv(name, "")).strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
+def get_qos(
+    *,
+    use_quality: bool,
+    profile: str = "default",
+) -> TierQoS:
+    """Return tier-specific QoS settings.
+
+    Env override precedence:
+      1) Profile-specific: BANTZ_QOS_<PROFILE>_<FAST|QUALITY>_{TIMEOUT_S|MAX_TOKENS}
+      2) Generic:          BANTZ_QOS_<FAST|QUALITY>_{TIMEOUT_S|MAX_TOKENS}
+      3) Built-in defaults
+    """
+
+    tier = "QUALITY" if use_quality else "FAST"
+    profile_key = (profile or "default").strip().upper().replace("-", "_")
+
+    default_timeout = 90.0 if use_quality else 20.0
+    default_max_tokens = 512 if use_quality else 256
+
+    timeout_s = _env_float(
+        f"BANTZ_QOS_{profile_key}_{tier}_TIMEOUT_S",
+        _env_float(f"BANTZ_QOS_{tier}_TIMEOUT_S", default_timeout),
+    )
+    max_tokens = _env_int(
+        f"BANTZ_QOS_{profile_key}_{tier}_MAX_TOKENS",
+        _env_int(f"BANTZ_QOS_{tier}_MAX_TOKENS", default_max_tokens),
+    )
+
+    # Guardrails
+    timeout_s = max(0.5, float(timeout_s))
+    max_tokens = max(1, int(max_tokens))
+
+    return TierQoS(timeout_s=timeout_s, max_tokens=max_tokens)
 
 
 def _contains_any(text: str, phrases: Iterable[str]) -> bool:
@@ -330,3 +386,24 @@ def get_client_for_text(
     if decision.use_quality:
         return create_quality_client(timeout=quality_timeout), decision
     return create_fast_client(timeout=fast_timeout), decision
+
+
+def get_client_and_qos_for_text(
+    text: str,
+    *,
+    profile: str = "default",
+    fast_client_timeout: float = 120.0,
+    quality_client_timeout: float = 240.0,
+) -> tuple[LLMClientProtocol, TierDecision, TierQoS]:
+    """Return (client, decision, qos) for a given user text.
+
+    - `qos` is intended for per-call defaults (e.g. chat max_tokens).
+    - Client timeouts are still controlled via `*_client_timeout`.
+    """
+
+    decision = decide_tier(text)
+    qos = get_qos(use_quality=bool(decision.use_quality), profile=profile)
+
+    if decision.use_quality:
+        return create_quality_client(timeout=quality_client_timeout), decision, qos
+    return create_fast_client(timeout=fast_client_timeout), decision, qos
