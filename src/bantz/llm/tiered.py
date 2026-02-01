@@ -90,6 +90,21 @@ def score_complexity(text: str) -> int:
     ):
         score += 2
 
+    # Strong signal: explicit roadmap / step-by-step plan requests.
+    if _contains_any(
+        t,
+        [
+            "roadmap",
+            "3 adım",
+            "4 adım",
+            "5 adım",
+            "adım adım",
+            "gün gün",
+            "haftalık plan",
+        ],
+    ):
+        score += 2
+
     # Explicit "long" request
     if _contains_any(t, ["uzun", "kapsamlı", "çok detay", "tam rapor", "tümünü"]):
         score += 1
