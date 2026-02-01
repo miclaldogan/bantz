@@ -24,11 +24,8 @@ Bu durumda `.venv` zorunlu değil; önemli olan `python3 -c 'import vllm'` çal�
 ./scripts/vllm/start_3b.sh
 ```
 
-- 7B (kalite / daha uzun cevaplar):
-
-```bash
-./scripts/vllm/start_7b.sh
-```
+Not: 6GB VRAM cihazlarda **3B tek başına** en stabil moddur.
+"Quality" (uzun yazı / doküman / plan) için aşağıdaki **Gemini** entegrasyonunu öneriyoruz.
 
 ### 3B + 7B aynı anda (tek GPU)
 
@@ -68,6 +65,31 @@ curl -s http://127.0.0.1:8001/v1/models
 - 8002: 7B (kalite)
 
 Not: 6GB VRAM cihazlarda 3B ve 7B aynı anda çalışmayabilir.
+
+## Hybrid Quality (Önerilen): 3B local + Gemini Flash
+
+Amaç:
+- Router / tool seçimi / hızlı cevaplar **3B (local)**
+- Mail / uzun yazı / PDF yönerge / 3+ adım plan gibi işler **Gemini (cloud)**
+
+Cloud çağrıları **varsayılan olarak kapalıdır**. Açmak için:
+
+```bash
+export BANTZ_CLOUD_MODE=cloud
+export QUALITY_PROVIDER=gemini
+export GEMINI_API_KEY="..."
+export QUALITY_MODEL="gemini-1.5-flash"   # örnek
+```
+
+Gizlilik/minimize:
+
+```bash
+export BANTZ_CLOUD_REDACT=1        # (varsayılan) email/token vb maskele
+export BANTZ_CLOUD_MAX_CHARS=12000 # outbound text limit
+export BANTZ_LOCAL_ONLY=1          # cloud'u tamamen kapat (override)
+```
+
+Kalite endpoint'i yoksa / cloud kapalıysa Bantz otomatik **fast** tier'a düşer.
 
 ## Yönetim Komutları
 
@@ -109,7 +131,7 @@ export BANTZ_VLLM_QUALITY_MODEL=auto
 ## Tiered routing (3B → 7B eskalasyon)
 
 Varsayılan davranış: Bantz çoğu yerde **3B (fast)** ile gider.
-7B (quality) otomatik devreye girsin istiyorsan:
+Quality otomatik devreye girsin istiyorsan:
 
 ```bash
 export BANTZ_TIERED_MODE=1
