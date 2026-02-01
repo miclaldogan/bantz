@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -147,10 +148,31 @@ def _override_time_params(
     if tool_name not in {"calendar.list_events", "calendar.find_free_slots"}:
         return params
 
-    if intent is None:
-        return params
-
     windows = session_context or {}
+
+    if intent is None:
+        # Extra demo-only override: "önümüzdeki X saat" style queries.
+        t = _normalize_tr(user_text)
+        m = re.search(r"\b(onumuzdeki|sonraki)\s+(\d{1,2})\s+saat\b", t)
+        if m:
+            try:
+                hours = int(m.group(2))
+                if 1 <= hours <= 48:
+                    now_iso = str(windows.get("now_iso") or "")
+                    now_dt = datetime.fromisoformat(now_iso.replace("Z", "+00:00")) if now_iso else None
+                    if now_dt is not None:
+                        tmin = now_dt.replace(microsecond=0).isoformat()
+                        tmax = (now_dt + timedelta(hours=hours)).replace(microsecond=0).isoformat()
+                        params = dict(params)
+                        params["time_min"] = tmin
+                        params["time_max"] = tmax
+                        if debug:
+                            print(f"[debug] next-hours override: {tmin} .. {tmax}", file=sys.stderr)
+                        return params
+            except Exception:
+                pass
+
+        return params
 
     chosen: Optional[dict[str, str]] = None
     if intent == "evening":
@@ -245,6 +267,51 @@ def _print_event_stream(ev: Event) -> None:
     print("EVENT", json.dumps(ev.to_dict(), ensure_ascii=False))
 
 
+def _extract_first_json_object(text: str) -> Optional[str]:
+    """Best-effort extraction of the first JSON object from free-form text."""
+
+    if not isinstance(text, str):
+        return None
+    s = text.strip()
+    if not s:
+        return None
+
+    # Fast path: already a JSON object.
+    if s.startswith("{") and s.endswith("}"):
+        return s
+
+    start = s.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start : i + 1]
+
+    return None
+
+
 class VLLMTextLLM(RepairLLM):
     """Text-only vLLM client used by the JSON repair adapter."""
 
@@ -309,52 +376,125 @@ class JarvisRepairingLLMAdapter:
         self._max_attempts = max_attempts
 
     def complete_json(self, *, messages: list[dict[str, str]], schema_hint: str) -> dict[str, Any]:
+        # BrainLoop uses the same complete_json() for:
+        # 1) route classification (small schema)
+        # 2) action planning/execution (rich schema)
+        # This adapter supports both.
+        try:
+            schema_obj_any = json.loads(schema_hint)
+        except Exception:
+            schema_obj_any = None
+
+        # Route classifier schema: {route, calendar_intent, confidence}
+        if isinstance(schema_obj_any, dict) and {"route", "calendar_intent", "confidence"}.issubset(schema_obj_any.keys()):
+            user_text = ""
+            for m in reversed(messages or []):
+                if isinstance(m, dict) and str(m.get("role") or "") == "user":
+                    user_text = str(m.get("content") or "").strip()
+                    break
+
+            # Heuristic short-circuit: in the demo we prefer a deterministic router
+            # to avoid small-context model parse failures.
+            nt = _normalize_tr(user_text)
+            calendar_markers = [
+                "takvim",
+                "ajanda",
+                "calendar",
+                "plan",
+                "program",
+                "toplanti",
+                "toplantı",
+                "bugun",
+                "bugün",
+                "yarin",
+                "yarın",
+                "aksam",
+                "akşam",
+                "sabah",
+                "saat",
+            ]
+            if not any(k in nt for k in calendar_markers):
+                return {"route": "smalltalk", "calendar_intent": "none", "confidence": 0.8}
+
+            if any(k in nt for k in ["ekle", "olustur", "oluştur", "planla", "ayarla", "koy", "koyar misin", "hatirlat", "hatırlat"]):
+                return {"route": "calendar", "calendar_intent": "create", "confidence": 0.7}
+            if any(k in nt for k in ["iptal", "sil", "kaldir", "kaldır"]):
+                return {"route": "calendar", "calendar_intent": "cancel", "confidence": 0.7}
+            if any(k in nt for k in ["tasi", "taşı", "degistir", "değiştir", "ertele", "kaydir", "kaydır", "guncelle", "güncelle"]):
+                return {"route": "calendar", "calendar_intent": "modify", "confidence": 0.7}
+            if any(k in nt for k in ["bak", "listele", "goster", "göster", "var mi", "var mı"]):
+                return {"route": "calendar", "calendar_intent": "query", "confidence": 0.7}
+
+            prompt = (
+                "ONLY JSON: {\"route\":\"calendar|smalltalk|unknown\",\"calendar_intent\":\"create|modify|cancel|query|none\",\"confidence\":0.0}"
+                "\nKurallar: Ek alan ekleme; Markdown yok; tek satır JSON.\n"
+                f"USER: {user_text}\n"
+            )
+
+            # Force strict routing parameters on small local models.
+            llm_obj = self._llm
+            old_temp = getattr(llm_obj, "_temperature", None)
+            old_max = getattr(llm_obj, "_max_tokens", None)
+            try:
+                if old_temp is not None:
+                    setattr(llm_obj, "_temperature", 0.0)
+                if old_max is not None:
+                    setattr(llm_obj, "_max_tokens", 64)
+                raw_text = llm_obj.complete_text(prompt=prompt)
+            finally:
+                try:
+                    if old_temp is not None:
+                        setattr(llm_obj, "_temperature", old_temp)
+                    if old_max is not None:
+                        setattr(llm_obj, "_max_tokens", old_max)
+                except Exception:
+                    pass
+            raw_json = _extract_first_json_object(raw_text)
+            if raw_json:
+                try:
+                    out = json.loads(raw_json)
+                    if isinstance(out, dict):
+                        return out
+                except Exception:
+                    pass
+            logger.info("[demo_router] parse_fail -> default smalltalk")
+            return {"route": "smalltalk", "calendar_intent": "none", "confidence": 0.0}
+
+        # Action planning schema: keep compact for small-context local demos.
+        if isinstance(schema_obj_any, dict):
+            schema_hint = json.dumps(
+                {
+                    "protocol": schema_obj_any.get("protocol"),
+                    "tools": schema_obj_any.get("tools"),
+                    "session_context": schema_obj_any.get("session_context"),
+                },
+                ensure_ascii=False,
+            )
+
+        # Keep prompts small: 3B demos often run with 1024 context.
         conversation_tail = "\n".join(
             [
                 f"{m.get('role','')}: {m.get('content','')}"
-                for m in messages[-8:]
+                for m in messages[-4:]
                 if isinstance(m, dict)
             ]
         )
 
         jarvis_system = (
-            "Kimlik / roller:\n"
-            "- Sen BANTZ'sın. Kullanıcı USER'dır. Kullanıcının yerine konuşma veya karar verme.\n"
-            "- Tool çıktıları USER mesajı değildir; 'TOOL_OBSERVATION:' satırları sadece araç gözlemidir.\n\n"
-            "Rol: Jarvis-vari bir asistan gibi konuşan Bantz. Türkçe konuş; 'Efendim' hitabını kullan.\n"
-            "Amaç: Kullanıcının takvim sorularını gerçek tool'larla cevapla ve gerektiğinde plan yap.\n\n"
-            "Zaman farkındalığı:\n"
-            "- Kullanıcının yerel saatine göre düşün. `session_context.now_iso` ve `session_context.tz_name` varsa baz al.\n"
-            "- '8'den önce' gibi isteklerde saat geçtiyse bunu açıkça söyle ve alternatifler sun.\n\n"
-            "Anti-hallucination (kritik):\n"
-            "- Tool sonucu olmadan etkinlik/saat/plan uydurma.\n"
-            "- TOOL_OBSERVATION içindeki verilerin dışına çıkma; yoksa 'plan görünmüyor' de.\n\n"
-            "Takvim davranışı (önerilen):\n"
-            "- 'Bu akşam planım var mı?' => calendar.list_events (time_min=şimdi, time_max=gece yarısı).\n"
-            "  Not: SCHEMA_HINT içindeki session_context.evening_window bu değerleri hazır verir.\n"
-            "- Koşu planlama => önce calendar.find_free_slots ile slot ara; human-hours: 07:30–22:30.\n"
-            "- Yarın araması yapıyorsan time_min'i 07:30'dan başlat (00:00 değil).\n"
-            "  Not: SCHEMA_HINT içindeki session_context.tomorrow_window bu değerleri hazır verir.\n"
-            "- Slot bulamazsan seçenek menüsü gibi 2-3 alternatif öner.\n\n"
-            "Tease / sohbet:\n"
-            "- Kullanıcı 'uykuluyum' derse kısa, nazik bir şaka yap; sonra gerçekçi seçenek sun.\n\n"
-            "ASK_USER standardı (kritik):\n"
-            "- Sadece 1 soru sor.\n"
-            "- En fazla 3 seçenek sun; seçenekler 1/2/0 ile numaralı olsun.\n"
-            "- Kullanıcının son mesajını aynen tekrar soru olarak sorma.\n\n"
-            "ÇIKTI FORMATI (kritik):\n"
-            "- Sadece tek bir JSON object döndür; Markdown yok; açıklama yok.\n"
+            "Sen BANTZ'sın. Türkçe konuş; 'Efendim' hitabını kullan.\n"
+            "Amaç: Takvim sorularını gerçek tool'larla cevapla; belirsizse tek bir soru sor.\n\n"
+            "Kurallar (kritik):\n"
+            "- Sadece tek bir JSON object döndür; Markdown/açıklama/backtick yok.\n"
             "- type ∈ {SAY, CALL_TOOL, ASK_USER, FAIL}.\n"
-            "- SAY => {\"type\":\"SAY\",\"text\":\"...\"}\n"
-            "- ASK_USER => {\"type\":\"ASK_USER\",\"question\":\"...\"}\n"
-            "- CALL_TOOL => {\"type\":\"CALL_TOOL\",\"name\":\"tool\",\"params\":{...}}\n\n"
-            "Kontrol kuralı:\n"
-            "- CONVERSATION_TAIL içinde 'TOOL_OBSERVATION:' varsa, yeni tool çağırma; SAY ile özetle.\n\n"
-            "Mini örnek (few-shot):\n"
+            "- Tool sonucu olmadan etkinlik/saat uydurma.\n"
+            "- ASK_USER: 1 soru; en fazla 3 seçenek (1/2/0).\n\n"
+            "Takvim ipuçları:\n"
+            "- 'bugün'/'bu akşam'/'yarın' gibi ifadelerde SCHEMA_HINT içindeki window'ları kullan.\n"
+            "- 'önümüzdeki 4 saat' gibi ifadelerde time_min=now ve time_max=now+4h kullan.\n"
+            "- Koşu/uygun saat => calendar.find_free_slots.\n\n"
+            "Örnek:\n"
             "USER: Bu akşam planım var mı?\n"
             "ASSISTANT: {\"type\":\"CALL_TOOL\",\"name\":\"calendar.list_events\",\"params\":{\"time_min\":\"<now>\",\"time_max\":\"<midnight>\"}}\n"
-            "TOOL_OBSERVATION: {\"tool\":\"calendar.list_events\",\"ok\":true,\"result\":{\"count\":0,\"events\":[]}}\n"
-            "ASSISTANT: {\"type\":\"SAY\",\"text\":\"Efendim bu akşam için şu andan sonra bir plan görünmüyor.\"}\n"
         )
 
         prompt = (
@@ -499,6 +639,15 @@ def main() -> int:
     parser.add_argument("--max-steps", type=int, default=8)
     parser.add_argument("--debug", action="store_true")
 
+    # Router controls route/intent classification before the BrainLoop planner.
+    # On small-context local models (e.g., 1024), the router prompt can overflow.
+    # This flag lets us run a clean end-to-end calendar scenario without router.
+    parser.add_argument(
+        "--no-router",
+        action="store_true",
+        help="Disable LLM Router (avoids context-length errors on small-context models)",
+    )
+
     parser.add_argument("--session", default="demo")
     parser.add_argument("--calendar-id", default=None)
     parser.add_argument("--tz", default="Europe/Istanbul")
@@ -593,28 +742,30 @@ def main() -> int:
     bus = EventBus()
     bus.subscribe_all(_print_event_stream)
 
-    # LLM Router: Always active (Issue #126)
-    # Router uses same client for consistent backend
-    class RouterLLMWrapper:
-        def __init__(self, client, temperature: float = 0.0):
-            self._client = client
-            self._temperature = temperature
+    router = None
+    if not args.no_router:
+        # LLM Router: Always active (Issue #126)
+        # Router uses same client for consistent backend
+        class RouterLLMWrapper:
+            def __init__(self, client, temperature: float = 0.0):
+                self._client = client
+                self._temperature = temperature
+            
+            def complete_text(self, prompt: str) -> str:
+                """Simple text completion for router (no JSON mode)."""
+                messages = [LLMMessage(role="user", content=prompt)]
+                return self._client.chat(
+                    messages=messages,
+                    temperature=self._temperature,
+                    max_tokens=200,  # Router JSON is small, 200 is plenty
+                )
         
-        def complete_text(self, prompt: str) -> str:
-            """Simple text completion for router (no JSON mode)."""
-            messages = [LLMMessage(role="user", content=prompt)]
-            return self._client.chat(
-                messages=messages,
-                temperature=self._temperature,
-                max_tokens=200,  # Router JSON is small, 200 is plenty
-            )
-    
-    router_llm = RouterLLMWrapper(client=llm._client, temperature=0.0)
-    router = JarvisLLMRouter(llm=router_llm)
+        router_llm = RouterLLMWrapper(client=llm._client, temperature=0.0)
+        router = JarvisLLMRouter(llm=router_llm)
     
     # Warm-up LLM to speed up first real request
     if args.debug:
-        print(f"[DEMO] Warming up {backend} backend...")
+        print("[DEMO] Warming up vllm backend...")
     try:
         llm._client.chat(
             messages=[LLMMessage(role="user", content="test")],
@@ -627,7 +778,7 @@ def main() -> int:
         if args.debug:
             print(f"[DEMO] Warm-up warning: {e}")
     
-    if args.debug:
+    if args.debug and router is not None:
         print("[DEMO] LLM Router: ALWAYS ACTIVE - every conversation goes through LLM")
 
     loop = BrainLoop(
