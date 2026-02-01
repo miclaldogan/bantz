@@ -23,6 +23,7 @@ from bantz.llm.base import (
     create_client,
 )
 from bantz.llm.vllm_openai_client import VLLMOpenAIClient
+from bantz.llm import create_quality_client
 
 
 # ========================================================================
@@ -53,6 +54,53 @@ def test_factory_invalid_backend():
     """Test that factory raises ValueError for unknown backend."""
     with pytest.raises(ValueError, match="Unknown backend"):
         create_client("unknown_backend")
+
+
+# ========================================================================
+# Quality Client Selection (Hybrid mode)
+# ========================================================================
+
+
+def test_create_quality_client_falls_back_to_fast_when_vllm_quality_unavailable(monkeypatch):
+    monkeypatch.delenv("QUALITY_PROVIDER", raising=False)
+    monkeypatch.delenv("BANTZ_QUALITY_PROVIDER", raising=False)
+    monkeypatch.setenv("BANTZ_QUALITY_FALLBACK_TO_FAST", "1")
+
+    # Ensure the vLLM quality endpoint is configured but "down".
+    monkeypatch.setenv("BANTZ_VLLM_QUALITY_URL", "http://127.0.0.1:8002")
+    monkeypatch.setenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001")
+
+    # Force availability probe to fail.
+    monkeypatch.setattr(VLLMOpenAIClient, "is_available", lambda self, timeout_seconds=1.5: False)
+
+    llm = create_quality_client()
+    assert llm.backend_name == "vllm"
+    # Fallback should return the fast URL.
+    assert getattr(llm, "base_url", "").endswith(":8001")
+
+
+def test_create_quality_client_gemini_is_blocked_when_cloud_mode_local(monkeypatch):
+    monkeypatch.setenv("QUALITY_PROVIDER", "gemini")
+    monkeypatch.setenv("BANTZ_CLOUD_MODE", "local")
+    monkeypatch.setenv("GEMINI_API_KEY", "dummy")
+    monkeypatch.setenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001")
+
+    llm = create_quality_client()
+    assert llm.backend_name == "vllm"
+    assert getattr(llm, "base_url", "").endswith(":8001")
+
+
+def test_create_quality_client_gemini_missing_key_falls_back(monkeypatch):
+    monkeypatch.setenv("QUALITY_PROVIDER", "gemini")
+    monkeypatch.setenv("BANTZ_CLOUD_MODE", "cloud")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("BANTZ_GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001")
+
+    llm = create_quality_client()
+    assert llm.backend_name == "vllm"
+    assert getattr(llm, "base_url", "").endswith(":8001")
 
 
 # ========================================================================

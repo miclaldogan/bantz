@@ -201,7 +201,7 @@ def create_client(
     """Factory function to create LLM client.
     
     Args:
-        backend: 'vllm' | 'openai'
+        backend: 'vllm' | 'gemini' | 'openai'
         base_url: Backend URL (optional, uses defaults)
         model: Model name (optional, uses defaults)
         timeout: Request timeout
@@ -222,6 +222,18 @@ def create_client(
         return VLLMOpenAIClient(
             base_url=base_url or "http://127.0.0.1:8001",
             model=model or "Qwen/Qwen2.5-3B-Instruct",
+            timeout_seconds=timeout,
+        )
+
+    if backend == "gemini":
+        # Gemini uses an API key (not base_url). Pass the key via base_url for factory parity.
+        # Prefer using bantz.llm.create_quality_client() which applies privacy gating.
+        from bantz.llm.gemini_client import GeminiClient
+
+        api_key = (base_url or "").strip()
+        return GeminiClient(
+            api_key=api_key,
+            model=model or "gemini-1.5-flash",
             timeout_seconds=timeout,
         )
     

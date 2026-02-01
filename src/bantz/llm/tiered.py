@@ -11,6 +11,7 @@ from . import create_fast_client, create_quality_client
 
 
 logger = logging.getLogger(__name__)
+metrics_logger = logging.getLogger("bantz.llm.metrics")
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,8 @@ def score_writing_need(text: str) -> int:
             "email",
             "hocaya",
             "hoca",
+            "okula",
+            "öğretmen",
             "resmi",
             "yarı resmi",
             "taslak",
@@ -128,10 +131,20 @@ def score_writing_need(text: str) -> int:
             "özetle",
             "özet çıkar",
             "uzun özet",
+            "haber",
+            "araştır",
+            "kaynak",
             "blog",
             "linkedin",
             "cv",
             "cover letter",
+            "pdf",
+            "doküman",
+            "döküman",
+            "yönerge",
+            "rubrik",
+            "ödev",
+            "classroom",
         ],
     ):
         score += 4
@@ -188,17 +201,35 @@ def decide_tier(
     - BANTZ_LLM_TIER=fast|quality|auto forces tier
     """
     debug = _env_flag("BANTZ_TIERED_DEBUG", default=False)
+    metrics = _env_flag("BANTZ_TIERED_METRICS", default=False) or _env_flag(
+        "BANTZ_LLM_METRICS", default=False
+    )
+
+    def emit(d: TierDecision) -> None:
+        if not metrics:
+            return
+        tier = "quality" if d.use_quality else "fast"
+        metrics_logger.info(
+            "tier_decision tier=%s reason=%s complexity=%s writing=%s risk=%s",
+            tier,
+            d.reason,
+            d.complexity,
+            d.writing,
+            d.risk,
+        )
 
     forced = str(os.getenv("BANTZ_LLM_TIER", "")).strip().lower()
     if forced in {"fast", "3b", "small"}:
         d = TierDecision(False, "forced_fast", 0, 0, 0)
         if debug:
             logger.info("[tiered] forced=fast")
+        emit(d)
         return d
     if forced in {"quality", "7b", "large"}:
         d = TierDecision(True, "forced_quality", 5, 5, 0)
         if debug:
             logger.info("[tiered] forced=quality")
+        emit(d)
         return d
 
     if not _env_flag("BANTZ_TIERED_MODE", default=False):
@@ -206,6 +237,7 @@ def decide_tier(
         d = TierDecision(False, "tiering_disabled", 0, 0, 0)
         if debug:
             logger.info("[tiered] disabled -> fast")
+        emit(d)
         return d
 
     complexity = score_complexity(text)
@@ -229,6 +261,7 @@ def decide_tier(
                     d.writing,
                     d.risk,
                 )
+            emit(d)
             return d
 
     if complexity >= min_complexity or writing >= min_writing:
@@ -241,6 +274,7 @@ def decide_tier(
                 d.writing,
                 d.risk,
             )
+        emit(d)
         return d
 
     # Risky actions: keep execution control on fast, but allow quality drafts elsewhere.
@@ -254,6 +288,7 @@ def decide_tier(
                 d.writing,
                 d.risk,
             )
+        emit(d)
         return d
 
     d = TierDecision(False, "fast_ok", complexity, writing, risk)
@@ -265,6 +300,7 @@ def decide_tier(
             d.writing,
             d.risk,
         )
+    emit(d)
     return d
 
 

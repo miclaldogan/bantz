@@ -19,6 +19,9 @@ vLLM server must be running:
 from __future__ import annotations
 
 import json
+import logging
+import os
+import time
 from typing import List, Optional
 
 from bantz.llm.base import (
@@ -134,6 +137,7 @@ class VLLMOpenAIClient(LLMClient):
             for m in messages
         ]
         
+        t0 = time.perf_counter()
         try:
             # Call OpenAI-compatible API
             completion = client.chat.completions.create(
@@ -143,17 +147,30 @@ class VLLMOpenAIClient(LLMClient):
                 max_tokens=int(max_tokens),
                 seed=seed,
             )
+
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
             
             # Extract response
             choice = completion.choices[0]
             content = choice.message.content or ""
             
-            return LLMResponse(
+            resp = LLMResponse(
                 content=content.strip(),
                 model=completion.model,
                 tokens_used=completion.usage.total_tokens if completion.usage else -1,
                 finish_reason=choice.finish_reason or "stop",
             )
+
+            if _metrics_enabled():
+                logging.getLogger("bantz.llm.metrics").info(
+                    "llm_call backend=%s model=%s latency_ms=%s total_tokens=%s",
+                    self.backend_name,
+                    self.model_name,
+                    elapsed_ms,
+                    resp.tokens_used,
+                )
+
+            return resp
         
         except Exception as e:
             error_msg = str(e).lower()
@@ -221,3 +238,10 @@ class VLLMOpenAIClient(LLMClient):
             raise RuntimeError(
                 f"vLLM sunucusundan model listesi alınamadı ({self.base_url})"
             ) from e
+
+
+def _metrics_enabled() -> bool:
+    raw = str(os.environ.get("BANTZ_LLM_METRICS", "")).strip().lower()
+    if not raw:
+        return False
+    return raw in {"1", "true", "yes", "y", "on"}
