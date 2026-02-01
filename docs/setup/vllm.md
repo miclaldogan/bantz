@@ -116,6 +116,40 @@ Kalite endpoint'i yoksa / cloud kapalıysa Bantz otomatik **fast** tier'a düşe
 ./scripts/vllm/stop.sh
 ```
 
+## Watchdog'u servisleştir (systemd --user) ✅
+
+Amaç: terminal kapansa bile watchdog ayakta kalsın; vLLM düşerse otomatik ayağa kalksın.
+
+Kurulum (önerilen):
+
+```bash
+chmod +x ./scripts/systemd/install_watchdog_user_service.sh
+./scripts/systemd/install_watchdog_user_service.sh
+```
+
+Bu işlem şunu yapar:
+- `~/.config/systemd/user/bantz-vllm-watchdog.service` dosyasını üretir
+- `systemctl --user enable --now ...` ile autostart + immediate start yapar
+
+Durum / log:
+
+```bash
+systemctl --user status bantz-vllm-watchdog.service
+journalctl --user -u bantz-vllm-watchdog.service -f
+```
+
+Done testi (Issue #181):
+
+```bash
+pkill -f "vllm.entrypoints.openai.api_server.*8001" || true
+sleep 60
+curl -s http://127.0.0.1:8001/v1/models
+```
+
+Notlar:
+- Varsayılan unit `--port 8001` ile 3B server'ı hedefler.
+- Repo path'in `~/Desktop/Bantz` değilse installer otomatik doğru `WorkingDirectory` yazar.
+
 ## Sorun Giderme
 
 - Port doluysa: `ss -ltnp | grep 8001` ve `pkill -f "vllm.entrypoints.openai.api_server"`
