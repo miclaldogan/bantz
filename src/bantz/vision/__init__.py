@@ -4,7 +4,7 @@ Bantz Vision Module.
 Multi-modal input capabilities:
 - Screen capture and analysis
 - Document understanding (PDF, images)
-- Vision LLM integration (LLaVA via Ollama)
+- Vision LLM integration (OpenAI-compatible API via vLLM)
 - OCR text extraction
 """
 

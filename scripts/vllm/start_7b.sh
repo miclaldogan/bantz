@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Start vLLM server with Qwen2.5-7B-Instruct-AWQ on port 8002
 # ⚠️  REQUIRES 3B server (port 8001) to be stopped first due to VRAM constraints!
-# Usage: ./scripts/start_vllm_7b.sh
+# Usage: ./scripts/vllm/start_7b.sh
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 cd "$PROJECT_ROOT"
 
@@ -21,24 +21,28 @@ if ss -ltnp | grep -q ":8002 "; then
     sleep 3
 fi
 
-# Activate virtual environment
-source .venv/bin/activate
+# DISABLED: Using global vLLM installation due to CUDA compatibility
+# source .venv/bin/activate
 
 echo "🚀 Starting vLLM server (7B AWQ) on port 8002..."
 echo "   Model: Qwen/Qwen2.5-7B-Instruct-AWQ"
 echo "   Quantization: awq_marlin (optimized)"
 echo "   Max tokens: 2048"
-echo "   GPU utilization: 65%"
+echo "   GPU utilization: 90% (SPEED OPTIMIZED)"
+echo "   Speed optimizations: prefix-caching, chunked-prefill"
 echo ""
 
-nohup python -m vllm.entrypoints.openai.api_server \
+nohup python3 -m vllm.entrypoints.openai.api_server \
   --model Qwen/Qwen2.5-7B-Instruct-AWQ \
   --quantization awq_marlin \
   --dtype half \
   --port 8002 \
   --max-model-len 2048 \
-  --gpu-memory-utilization 0.65 \
+  --gpu-memory-utilization 0.90 \
   --enable-prefix-caching \
+  --enable-chunked-prefill \
+  --max-num-batched-tokens 4096 \
+  --max-num-seqs 256 \
   > vllm_8002.log 2>&1 &
 
 SERVER_PID=$!

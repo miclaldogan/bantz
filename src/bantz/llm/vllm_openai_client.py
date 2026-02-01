@@ -6,14 +6,14 @@ This client uses vLLM's OpenAI-compatible API endpoint to run local models with 
 vLLM provides 10-20x throughput compared to standard inference.
 
 Usage:
-    >>> client = VLLMOpenAIClient(base_url='http://localhost:8000')
+    >>> client = VLLMOpenAIClient(base_url='http://localhost:8001')
     >>> response = client.chat([LLMMessage(role='user', content='Hello')])
     
 Requirements:
     pip install openai
     
 vLLM server must be running:
-    python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-3B-Instruct --port 8000
+    python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-3B-Instruct --port 8001
 """
 
 from __future__ import annotations
@@ -39,14 +39,14 @@ class VLLMOpenAIClient(LLMClient):
     an OpenAI-compatible /v1/chat/completions endpoint.
     
     Attributes:
-        base_url: vLLM server URL (e.g., http://localhost:8000)
+        base_url: vLLM server URL (e.g., http://localhost:8001)
         model: Model name (e.g., Qwen/Qwen2.5-3B-Instruct)
         timeout_seconds: Request timeout
     """
     
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:8000",
+        base_url: str = "http://127.0.0.1:8001",
         model: str = "Qwen/Qwen2.5-3B-Instruct",
         timeout_seconds: float = 120.0,
     ):

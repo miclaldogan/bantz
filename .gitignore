@@ -47,6 +47,9 @@ results_vllm_*.json
 results_vllm_*.md
 _tmp_chat_stream.*
 
+# Local artifacts (logs/results/tmp) - kept out of repo root
+artifacts/
+
 # Local installer artifacts
 cuda-keyring_*.deb
 

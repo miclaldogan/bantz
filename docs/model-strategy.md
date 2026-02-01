@@ -205,7 +205,7 @@ Jarvis Personality: Subjective A/B test
 - Token tracking in benchmark script
 - vLLM benchmark harness: TTFT via streaming + VRAM peak sampling
 - Hibrit altyapı: planner/router + finalizer ayrımı (opsiyonel)
-- scripts/jarvis.sh preflight: Ollama yerine vLLM /v1/models kontrolü
+- scripts/jarvis.sh preflight: vLLM /v1/models kontrolü
 
 ### In Progress (🚧)
 - iterations=30 real vLLM benchmark (measured TTFT/VRAM/tok/s)

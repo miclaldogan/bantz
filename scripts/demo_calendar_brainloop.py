@@ -245,8 +245,8 @@ def _print_event_stream(ev: Event) -> None:
     print("EVENT", json.dumps(ev.to_dict(), ensure_ascii=False))
 
 
-class OllamaTextLLM(RepairLLM):
-    """Text-only Ollama client used by the JSON repair adapter."""
+class VLLMTextLLM(RepairLLM):
+    """Text-only vLLM client used by the JSON repair adapter."""
 
     def __init__(
         self,
@@ -256,15 +256,8 @@ class OllamaTextLLM(RepairLLM):
         timeout_seconds: float,
         temperature: float = 0.2,
         max_tokens: int = 768,
-        backend: str = "ollama",
     ):
-        # Use factory to create appropriate client
-        self._client = create_client(
-            backend=backend,
-            base_url=base_url,
-            model=model,
-            timeout=timeout_seconds,
-        )
+        self._client = create_client("vllm", base_url=base_url, model=model, timeout=timeout_seconds)
         self._temperature = float(temperature)
         self._max_tokens = int(max_tokens)
         self.calls = 0
@@ -495,13 +488,9 @@ def _iter_input_lines() -> Iterable[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Jarvis-like BrainLoop Calendar demo (Issue #100)")
-    
-    # LLM Backend Configuration
-    parser.add_argument("--llm-backend", default="ollama", choices=["ollama", "vllm"],
-                        help="LLM backend: ollama (default) or vllm")
-    parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+
+    # LLM Configuration (vLLM-only)
     parser.add_argument("--vllm-url", default="http://127.0.0.1:8000")
-    parser.add_argument("--ollama-model", default="qwen2.5:3b-instruct")
     parser.add_argument("--vllm-model", default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--temperature", type=float, default=0.2)
@@ -580,36 +569,23 @@ def main() -> int:
         })
     )
 
-    # Determine backend-specific URL and model
-    backend = args.llm_backend.lower()
-    if backend == "vllm":
-        llm_url = args.vllm_url
-        llm_model = args.vllm_model
-        print(f"[DEMO] Using vLLM backend: {llm_url} model={llm_model}")
-    else:
-        llm_url = args.ollama_url
-        llm_model = args.ollama_model
-        print(f"[DEMO] Using Ollama backend: {llm_url} model={llm_model}")
+    llm_url = args.vllm_url
+    llm_model = args.vllm_model
+    print(f"[DEMO] Using vLLM backend: {llm_url} model={llm_model}")
 
-    # LLM client (backend-agnostic).
-    llm = OllamaTextLLM(
+    # LLM client.
+    llm = VLLMTextLLM(
         base_url=llm_url,
         model=llm_model,
         timeout_seconds=float(args.timeout),
         temperature=float(args.temperature),
         max_tokens=int(args.max_tokens),
-        backend=backend,
     )
 
     if not llm.is_available():
         print(f"LLM backend erişilemedi: {llm_url}")
-        if backend == "ollama":
-            print("- Başlat: ollama serve")
-            print(f"- Model indir: ollama pull {llm_model}")
-        else:
-            print(f"- Başlat: python -m vllm.entrypoints.openai.api_server --model {llm_model} --port 8000")
-            print(f"- Veya mock server: python scripts/vllm_mock_server.py")
-        return 2
+        print(f"- Başlat: python -m vllm.entrypoints.openai.api_server --model {llm_model} --port 8000")
+        print(f"- Veya mock server: python scripts/vllm_mock_server.py")
         return 2
 
     adapter = JarvisRepairingLLMAdapter(llm=llm, tools=tools)

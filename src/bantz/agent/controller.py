@@ -142,9 +142,8 @@ class AgentController:
             auto_confirm: Auto-confirm plans without waiting
         """
         if agent is None:
-            from bantz.llm.ollama_client import OllamaClient
             tools = build_default_registry()
-            planner = Planner(OllamaClient())
+            planner = Planner()
             agent = Agent(planner, tools)
         
         self.agent = agent

@@ -73,8 +73,8 @@ class OrchestratorConfig:
         piper_model: Path to Piper TTS model
         whisper_model: Whisper model size
         
-        ollama_url: Ollama server URL
-        ollama_model: Ollama model name
+        vllm_url: vLLM server URL (OpenAI-compatible)
+        vllm_model: Model name served by vLLM
         
         startup_sound: Play startup sound
         wake_confirmation: What Jarvis says on wake
@@ -82,7 +82,7 @@ class OrchestratorConfig:
     # Server
     session_name: str = "default"
     policy_path: str = "config/policy.json"
-    log_path: str = "bantz.log.jsonl"
+    log_path: str = "artifacts/logs/bantz.log.jsonl"
     
     # Components
     enable_wake_word: bool = True
@@ -102,9 +102,9 @@ class OrchestratorConfig:
     language: str = "tr"
     sample_rate: int = 16000
     
-    # LLM
-    ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen2.5:3b-instruct"
+    # LLM (vLLM)
+    vllm_url: str = "http://127.0.0.1:8001"
+    vllm_model: str = "Qwen/Qwen2.5-3B-Instruct"
     
     # UX
     startup_sound: bool = True
@@ -118,7 +118,7 @@ class OrchestratorConfig:
         return cls(
             session_name=os.getenv("BANTZ_SESSION", "default"),
             policy_path=os.getenv("BANTZ_POLICY", "config/policy.json"),
-            log_path=os.getenv("BANTZ_LOG", "bantz.log.jsonl"),
+            log_path=os.getenv("BANTZ_LOG", "artifacts/logs/bantz.log.jsonl"),
             
             enable_wake_word=os.getenv("BANTZ_WAKE_WORD", "1") == "1",
             enable_tts=os.getenv("BANTZ_TTS", "1") == "1",
@@ -130,8 +130,8 @@ class OrchestratorConfig:
             whisper_model=os.getenv("BANTZ_WHISPER_MODEL", "base"),
             language=os.getenv("BANTZ_LANGUAGE", "tr"),
             
-            ollama_url=os.getenv("BANTZ_OLLAMA_URL", "http://127.0.0.1:11434"),
-            ollama_model=os.getenv("BANTZ_OLLAMA_MODEL", "qwen2.5:3b-instruct"),
+            vllm_url=os.getenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001"),
+            vllm_model=os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct"),
         )
 
 
@@ -398,12 +398,12 @@ class BantzOrchestrator:
         print("""
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
-║      ██╗ █████╗ ██████╗ ██╗   ██╗██╗███████╗                ║
-║      ██║██╔══██╗██╔══██╗██║   ██║██║██╔════╝                ║
-║      ██║███████║██████╔╝██║   ██║██║███████╗                ║
-║ ██   ██║██╔══██║██╔══██╗╚██╗ ██╔╝██║╚════██║                ║
-║ ╚█████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║███████║                ║
-║  ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝                ║
+║      ██████╗   █████╗  ███╗   ██╗████████╗███████╗          ║
+║      ██╔══██╗ ██╔══██╗ ████╗  ██║╚══██╔══╝╚══███╔╝          ║
+║      ██████╔╝ ███████║ ██╔██╗ ██║   ██║     ███╔╝           ║
+║      ██╔══██╗ ██╔══██║ ██║╚██╗██║   ██║    ███╔╝            ║
+║      ██████╔╝ ██║  ██║ ██║ ╚████║   ██║   ███████╗          ║
+║      ╚═════╝  ╚═╝  ╚═╝ ╚═╝  ╚═══╝   ╚═╝   ╚══════╝          ║
 ║                                                              ║
 ║            Just A Rather Very Intelligent System             ║
 ║                         v0.7.0                               ║

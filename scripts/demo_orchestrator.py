@@ -9,7 +9,6 @@ Shows 5 scenarios with LLM-first architecture:
 5. "bu hafta planımda önemli işler var mı?" - Calendar query (week)
 
 Usage:
-    python3 scripts/demo_orchestrator.py --backend ollama --debug
     python3 scripts/demo_orchestrator.py --backend vllm --debug
     python3 scripts/demo_orchestrator.py --backend mock  # Uses mock LLM (no server needed)
 """
@@ -291,12 +290,16 @@ def main():
     parser = argparse.ArgumentParser(description="Demo LLM Orchestrator (Issue #137)")
     parser.add_argument(
         "--backend",
-        choices=["ollama", "vllm", "mock"],
+        choices=["vllm", "mock"],
         default="mock",
         help="LLM backend (default: mock for quick demo)",
     )
     parser.add_argument("--debug", action="store_true", help="Debug mode (verbose output)")
-    parser.add_argument("--model", default="llama3.2:3b", help="Model name (for ollama/vllm)")
+    parser.add_argument(
+        "--model",
+        default="Qwen/Qwen2.5-3B-Instruct",
+        help="Model name (for vLLM)",
+    )
     
     args = parser.parse_args()
     

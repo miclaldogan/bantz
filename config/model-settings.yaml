@@ -10,9 +10,9 @@
 #   - 7B AWQ: ~5.6GB VRAM (exclusive mode, requires 3B stopped)
 #
 # Startup Scripts:
-#   ./scripts/start_vllm_3b.sh   # Start 3B router (baseline)
-#   ./scripts/start_vllm_7b.sh   # Start 7B chat (stops 3B first)
-#   ./scripts/stop_vllm_servers.sh
+#   ./scripts/vllm/start_3b.sh   # Start 3B router (baseline)
+#   ./scripts/vllm/start_7b.sh   # Start 7B chat (stops 3B first)
+#   ./scripts/vllm/stop.sh
 
 model_strategy: sequential  # Sequential mode: 3B or 7B, not both simultaneously
 

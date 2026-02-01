@@ -50,7 +50,13 @@ class Tool:
     risk_level: Optional[RiskLevel] = None
     examples: Optional[list[dict[str, Any]]] = None
     function: Optional[Callable[..., Any]] = None
+    # Back-compat alias used by older tests/callers.
+    handler: Optional[Callable[..., Any]] = None
     requires_confirmation: bool = False
+
+    def __post_init__(self) -> None:
+        if self.function is None and self.handler is not None:
+            object.__setattr__(self, "function", self.handler)
 
 
 class ToolRegistry:

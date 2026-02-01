@@ -114,88 +114,6 @@ def run_brainloop_demo_once(command: str) -> int:
     return 0
 
 
-def run_brainloop_demo_once(command: str) -> int:
-    """Minimal BrainLoop CLI demo with Jarvis-like event stream.
-
-    Issue #103 scope: render ACK/PROGRESS/FOUND/SUMMARIZING/RESULT in-order.
-    This is intentionally a deterministic, dependency-light demo.
-    """
-
-    from datetime import timedelta
-
-    from bantz.agent.tools import Tool, ToolRegistry
-    from bantz.brain.brain_loop import BrainLoop, BrainLoopConfig
-    from bantz.core.events import Event, EventBus, EventType
-
-    class _FailingLLM:
-        def complete_json(self, *, messages, schema_hint):  # type: ignore[no-untyped-def]
-            raise AssertionError("LLM should not be called in brainloop demo")
-
-    # Deterministic windows (stable enough for CLI demo).
-    now = datetime.now().astimezone().replace(microsecond=0)
-    day_end = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0)
-    session_context = {
-        "deterministic_render": True,
-        "tz_name": "Europe/Istanbul",
-        "today_window": {"time_min": now.isoformat(), "time_max": day_end.isoformat()},
-    }
-
-    tools = ToolRegistry()
-
-    def list_events(**params):
-        # Demo-friendly stub: empty calendar.
-        _ = params
-        return {"ok": True, "count": 0, "events": []}
-
-    tools.register(
-        Tool(
-            name="calendar.list_events",
-            description="list",
-            parameters={"type": "object", "properties": {}},
-            function=list_events,
-        )
-    )
-
-    bus = EventBus()
-
-    def on_event(ev: Event) -> None:
-        et = str(ev.event_type)
-        data = ev.data or {}
-
-        if et == EventType.ACK.value or et == EventType.PROGRESS.value:
-            msg = str(data.get("text") or data.get("message") or "").strip()
-            prefix = "Kontrol ediyorum efendim…"
-            if msg:
-                print(f"{Colors.DIM}{prefix}{Colors.RESET} {Colors.DIM}({msg}){Colors.RESET}")
-            else:
-                print(f"{Colors.DIM}{prefix}{Colors.RESET}")
-            return
-
-        if et == EventType.FOUND.value:
-            tool = str(data.get("tool") or data.get("name") or "").strip()
-            suffix = f" ({tool})" if tool else ""
-            print(f"{Colors.DIM}Buldum efendim…{suffix}{Colors.RESET}")
-            return
-
-        if et == EventType.SUMMARIZING.value:
-            status = str(data.get("status") or "").strip() or "started"
-            if status == "complete":
-                return
-            print(f"{Colors.DIM}Özetliyorum efendim…{Colors.RESET}")
-            return
-
-        if et == EventType.RESULT.value:
-            text = str(data.get("text") or data.get("summary") or "").strip()
-            print(text)
-            return
-
-    bus.subscribe_all(on_event)
-
-    loop = BrainLoop(llm=_FailingLLM(), tools=tools, event_bus=bus, config=BrainLoopConfig(max_steps=2, debug=False))
-    _ = loop.run(turn_input=command, session_context=session_context, policy=None, context={"session_id": "cli-demo"})
-    return 0
-
-
 # ANSI colors
 class Colors:
     RESET = "\033[0m"
@@ -530,6 +448,14 @@ def stop_session(session_name: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if argv and argv[0] == "google":
+        from bantz.google.cli import main as google_main
+
+        return google_main(argv[1:])
+
     parser = argparse.ArgumentParser(
         prog="bantz",
         description="Bantz v0.3 - Local voice assistant with live browser",
@@ -545,7 +471,7 @@ Kullanım örnekleri:
 """,
     )
     parser.add_argument("--policy", default="config/policy.json", help="Policy dosyası yolu")
-    parser.add_argument("--log", default="bantz.log.jsonl", help="JSONL log dosyası")
+    parser.add_argument("--log", default="artifacts/logs/bantz.log.jsonl", help="JSONL log dosyası")
     parser.add_argument("--session", default="default", help="Session adı (default: 'default')")
     parser.add_argument("--serve", action="store_true", help="Interactive server modu başlat")
     parser.add_argument("--once", default=None, metavar="CMD", help="Tek seferlik komut")
@@ -571,8 +497,8 @@ Kullanım örnekleri:
     parser.add_argument("--wake", action="store_true", help="Wake word modu ('Hey Jarvis' ile aktive)")
     parser.add_argument("--voice-warmup", action="store_true", help="ASR modelini önceden hazırla/indir (voice başlamaz)")
     parser.add_argument("--piper-model", default="", help="Piper .onnx model yolu (zorunlu: --voice)")
-    parser.add_argument("--ollama-url", default="http://127.0.0.1:11434", help="Ollama base URL")
-    parser.add_argument("--ollama-model", default="qwen2.5:3b-instruct", help="Ollama model adı")
+    parser.add_argument("--vllm-url", default="http://127.0.0.1:8001", help="vLLM (OpenAI-compatible) base URL")
+    parser.add_argument("--vllm-model", default="Qwen/Qwen2.5-3B-Instruct", help="vLLM model adı")
     parser.add_argument("--whisper-model", default="base", help="faster-whisper model adı (tiny/base/small/...)")
     parser.add_argument("--asr-cache-dir", default=os.path.expanduser("~/.cache/bantz/whisper"), help="Whisper model cache klasörü")
     parser.add_argument("--asr-allow-download", action="store_true", help="Whisper model indirmeye izin ver (ilk kurulumda)")
@@ -600,12 +526,12 @@ Kullanım örnekleri:
             file=sys.stderr,
         )
 
-    # Make Ollama settings available to all components (server thread, router, agent).
+    # Make vLLM settings available to all components (server thread, router, agent).
     # CLI flags should take precedence for this run.
-    if getattr(args, "ollama_url", None):
-        os.environ["BANTZ_OLLAMA_URL"] = str(args.ollama_url)
-    if getattr(args, "ollama_model", None):
-        os.environ["BANTZ_OLLAMA_MODEL"] = str(args.ollama_model)
+    if getattr(args, "vllm_url", None):
+        os.environ["BANTZ_VLLM_URL"] = str(args.vllm_url)
+    if getattr(args, "vllm_model", None):
+        os.environ["BANTZ_VLLM_MODEL"] = str(args.vllm_model)
 
     def _can_connect(host: str, port: int, timeout_s: float = 3.0) -> bool:
         try:
@@ -666,8 +592,8 @@ Kullanım örnekleri:
             cfg = VoiceLoopConfig(
                 session=args.session,
                 piper_model_path=args.piper_model,
-                ollama_url=args.ollama_url,
-                ollama_model=args.ollama_model,
+                vllm_url=args.vllm_url,
+                vllm_model=args.vllm_model,
                 whisper_model=args.whisper_model,
                 enable_tts=not args.no_tts,
                 enable_llm_fallback=not args.no_llm,
@@ -689,8 +615,8 @@ Kullanım örnekleri:
         cfg = VoiceLoopConfig(
             session=args.session,
             piper_model_path=args.piper_model,
-            ollama_url=args.ollama_url,
-            ollama_model=args.ollama_model,
+            vllm_url=args.vllm_url,
+            vllm_model=args.vllm_model,
             whisper_model=args.whisper_model,
             enable_tts=not args.no_tts,
             enable_llm_fallback=not args.no_llm,

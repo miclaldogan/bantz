@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop all vLLM servers (ports 8001, 8002)
-# Usage: ./scripts/stop_vllm_servers.sh
+# Usage: ./scripts/vllm/stop.sh
 
 set -e
 

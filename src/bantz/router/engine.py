@@ -2348,8 +2348,9 @@ class Router:
         if intent == "page_summarize":
             from bantz.skills.summarizer import PageSummarizer
             from bantz.llm.persona import JarvisPersona
-            from bantz.llm.ollama_client import OllamaClient
             from bantz.browser.extension_bridge import get_bridge
+            from bantz.llm import create_client
+            import os
             
             persona = JarvisPersona()
             
@@ -2364,7 +2365,11 @@ class Router:
             
             # Create LLM client and summarizer
             try:
-                llm = OllamaClient()
+                llm = create_client(
+                    "vllm",
+                    base_url=os.getenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001"),
+                    model=os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct"),
+                )
                 summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
                 
                 # Store in context for follow-up commands
@@ -2392,8 +2397,9 @@ class Router:
         if intent == "page_summarize_detailed":
             from bantz.skills.summarizer import PageSummarizer
             from bantz.llm.persona import JarvisPersona
-            from bantz.llm.ollama_client import OllamaClient
             from bantz.browser.extension_bridge import get_bridge
+            from bantz.llm import create_client
+            import os
             
             persona = JarvisPersona()
             
@@ -2423,7 +2429,11 @@ class Router:
                 )
             
             try:
-                llm = OllamaClient()
+                llm = create_client(
+                    "vllm",
+                    base_url=os.getenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001"),
+                    model=os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct"),
+                )
                 summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
                 ctx.set_page_summarizer(summarizer)
                 
@@ -2448,8 +2458,9 @@ class Router:
         if intent == "page_question":
             from bantz.skills.summarizer import PageSummarizer
             from bantz.llm.persona import JarvisPersona
-            from bantz.llm.ollama_client import OllamaClient
             from bantz.browser.extension_bridge import get_bridge
+            from bantz.llm import create_client
+            import os
             
             persona = JarvisPersona()
             question = str(slots.get("question", "")).strip()
@@ -2475,7 +2486,11 @@ class Router:
                     )
                 
                 try:
-                    llm = OllamaClient()
+                    llm = create_client(
+                        "vllm",
+                        base_url=os.getenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001"),
+                        model=os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct"),
+                    )
                     summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
                     ctx.set_page_summarizer(summarizer)
                 except Exception as e:

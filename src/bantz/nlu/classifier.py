@@ -15,6 +15,7 @@ This is the "slow but accurate" path in the hybrid NLU system.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -26,6 +27,8 @@ from bantz.nlu.types import (
     ClarificationOption,
     IntentCategory,
 )
+
+from bantz.llm.base import LLMClientProtocol, LLMMessage, create_client
 
 
 # ============================================================================
@@ -47,7 +50,7 @@ class ClassifierConfig:
         cache_ttl_seconds: Cache entry lifetime
     """
     
-    model: str = "qwen2.5:3b-instruct"
+    model: str = "Qwen/Qwen2.5-3B-Instruct"
     temperature: float = 0.1  # Low for consistent classification
     max_tokens: int = 256
     timeout_seconds: float = 30.0
@@ -297,26 +300,27 @@ class LLMIntentClassifier:
     def __init__(
         self,
         config: Optional[ClassifierConfig] = None,
-        ollama_client: Optional[Any] = None,
+        llm_client: Optional[LLMClientProtocol] = None,
     ):
         """Initialize the classifier.
         
         Args:
             config: Classifier configuration
-            ollama_client: Pre-configured OllamaClient (optional)
+            llm_client: Pre-configured LLM client (optional)
         """
         self.config = config or ClassifierConfig()
-        self._client = ollama_client
+        self._client = llm_client
         self._cache: Dict[str, Tuple[IntentResult, float]] = {}  # text -> (result, timestamp)
     
     @property
     def client(self):
-        """Lazy-load Ollama client."""
+        """Lazy-load LLM client."""
         if self._client is None:
-            from bantz.llm.ollama_client import OllamaClient
-            self._client = OllamaClient(
+            self._client = create_client(
+                "vllm",
+                base_url=os.getenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001"),
                 model=self.config.model,
-                timeout_seconds=self.config.timeout_seconds,
+                timeout=self.config.timeout_seconds,
             )
         return self._client
     
@@ -386,8 +390,6 @@ class LLMIntentClassifier:
         context: Optional[Dict[str, Any]] = None,
     ) -> List:
         """Build messages for LLM chat."""
-        from bantz.llm.ollama_client import LLMMessage
-        
         messages = [LLMMessage(role="system", content=SYSTEM_PROMPT)]
         
         # Add context if provided

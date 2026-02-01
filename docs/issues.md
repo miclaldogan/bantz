@@ -4,6 +4,17 @@
 
 ---
 
+## ⚡ vLLM Runtime Notice
+
+**Effective Date:** 2026-01-31
+
+Bantz uses **vLLM** for local LLM inference:
+- ✅ OpenAI API compatible (`/v1/chat/completions`)
+- ✅ Prefix caching + batching
+- ✅ Supports small + larger model setups (e.g., 3B + 7B/8B)
+
+---
+
 ## Epic V2 — “Jarvis Seviye” Roadmap (Phases 0–8 + UI/Voice)
 
 Bu bölüm, v2 mimarisi için **faz bazlı** epic issue’ları takip etmek içindir. Detaylar roadmap dokümanında.

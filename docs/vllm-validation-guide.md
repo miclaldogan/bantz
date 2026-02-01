@@ -57,6 +57,11 @@ huggingface-cli download Qwen/Qwen2.5-8B-Instruct
 ```bash
 cd ~/Desktop/Bantz
 
+# (Önerilen) Helper script:
+./scripts/vllm/start_3b.sh
+
+# (Alternatif) Manuel:
+
 # Start vLLM server
 python -m vllm.entrypoints.openai.api_server \
   --model Qwen/Qwen2.5-3B-Instruct \
@@ -104,7 +109,6 @@ cd ~/Desktop/Bantz
 
 # Full benchmark (router + orchestrator + chat)
 python scripts/bench_llm_orchestrator.py \
-  --backend vllm \
   --iterations 30 \
   --scenarios all \
   --output-json results_3b_real.json \
@@ -158,7 +162,6 @@ nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits
 **Step 4: Run benchmark (30 iterations)**
 ```bash
 python scripts/bench_llm_orchestrator.py \
-  --backend vllm \
   --iterations 30 \
   --scenarios all \
   --output-json results_8b_real.json \
@@ -177,7 +180,6 @@ python scripts/bench_llm_orchestrator.py \
 **Step 1: Test with 3B (restart server if needed)**
 ```bash
 python scripts/bench_llm_orchestrator.py \
-  --backend vllm \
   --qualitative
 ```
 
@@ -197,7 +199,6 @@ python scripts/bench_llm_orchestrator.py \
 ```bash
 # Switch to 8B server (same as Phase 2 Step 1-2)
 python scripts/bench_llm_orchestrator.py \
-  --backend vllm \
   --qualitative
 ```
 
@@ -305,7 +306,7 @@ cd ~/Desktop/Bantz
 python -c "from bantz.llm.base import create_client; print('OK')"
 
 # Run with verbose
-python scripts/bench_llm_orchestrator.py --backend vllm --verbose --quick
+python scripts/bench_llm_orchestrator.py --verbose --quick
 ```
 
 ### TTFT not measured

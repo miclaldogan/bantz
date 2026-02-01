@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
@@ -263,7 +264,8 @@ USER: bu akşam sekize parti ekle
     def __init__(
         self,
         *,
-        llm: LLMRouterProtocol,
+        llm: Optional[LLMRouterProtocol] = None,
+        llm_client: Optional[LLMRouterProtocol] = None,
         system_prompt: Optional[str] = None,
         confidence_threshold: float = 0.7,
         max_attempts: int = 2,
@@ -276,7 +278,11 @@ USER: bu akşam sekize parti ekle
             confidence_threshold: Minimum confidence to execute tools (default 0.7)
             max_attempts: Max repair attempts for malformed JSON (default 2)
         """
-        self._llm = llm
+        effective_llm = llm if llm is not None else llm_client
+        if effective_llm is None:
+            raise TypeError("JarvisLLMOrchestrator requires `llm=` (or legacy `llm_client=`)")
+
+        self._llm = effective_llm
         self._system_prompt = (system_prompt if system_prompt is not None else self.SYSTEM_PROMPT)
         self._confidence_threshold = float(confidence_threshold)
         self._max_attempts = int(max_attempts)
@@ -392,7 +398,11 @@ USER: bu akşam sekize parti ekle
             route = "unknown"
 
         calendar_intent = str(parsed.get("calendar_intent") or "none").strip().lower()
-        if calendar_intent not in {"create", "modify", "cancel", "query", "none"}:
+        # Allow both high-level intents (create/modify/cancel/query) and tool-like intents
+        # used by regression tests (list_events/create_event/update_event/delete_event).
+        if not calendar_intent:
+            calendar_intent = "none"
+        elif not re.match(r"^[a-z0-9_]+$", calendar_intent):
             calendar_intent = "none"
 
         slots = parsed.get("slots") or {}
@@ -402,10 +412,20 @@ USER: bu akşam sekize parti ekle
         confidence = float(parsed.get("confidence") or 0.0)
         confidence = max(0.0, min(1.0, confidence))
 
-        tool_plan = parsed.get("tool_plan") or []
-        if not isinstance(tool_plan, list):
-            tool_plan = []
-        tool_plan = [str(t).strip() for t in tool_plan if t]
+        raw_tool_plan = parsed.get("tool_plan") or []
+        tool_plan: list[str] = []
+        if isinstance(raw_tool_plan, list):
+            for item in raw_tool_plan:
+                if isinstance(item, str):
+                    name = item
+                elif isinstance(item, dict):
+                    name = item.get("name") or item.get("tool") or item.get("tool_name")
+                else:
+                    name = str(item)
+
+                name = str(name or "").strip()
+                if name:
+                    tool_plan.append(name)
 
         # Apply confidence threshold: if below threshold, clear tool_plan
         if confidence < self._confidence_threshold:

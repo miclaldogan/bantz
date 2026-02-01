@@ -1,7 +1,7 @@
 """LLM Command Rewriter for Bantz.
 
-Uses a local LLM (Ollama) to normalize and correct ASR output into clean commands.
-This is used in the voice pipeline to improve recognition accuracy.
+Uses vLLM (OpenAI-compatible API) to normalize and correct ASR output into clean
+commands. This is used in the voice pipeline to improve recognition accuracy.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import time
 from typing import Optional, Tuple
 from dataclasses import dataclass
 
-from bantz.llm.ollama_client import OllamaClient, LLMMessage
+from bantz.llm.base import LLMClientProtocol, LLMMessage, create_client
 
 logger = logging.getLogger(__name__)
 
@@ -57,25 +57,26 @@ class CommandRewriter:
     
     def __init__(
         self,
-        model: str = "qwen2.5:3b-instruct",
-        base_url: str = "http://127.0.0.1:11434",
+        model: str = "Qwen/Qwen2.5-3B-Instruct",
+        base_url: str = "http://127.0.0.1:8001",
         timeout: float = 10.0,
         enabled: bool = True,
     ):
         self.enabled = enabled
-        self._client: Optional[OllamaClient] = None
+        self._client: Optional[LLMClientProtocol] = None
         self._model = model
         self._base_url = base_url
         self._timeout = timeout
         self._warmed_up = False
     
-    def _get_client(self) -> OllamaClient:
+    def _get_client(self) -> LLMClientProtocol:
         """Lazy initialize client."""
         if self._client is None:
-            self._client = OllamaClient(
+            self._client = create_client(
+                "vllm",
                 base_url=self._base_url,
                 model=self._model,
-                timeout_seconds=self._timeout,
+                timeout=self._timeout,
             )
         return self._client
     

@@ -1,7 +1,7 @@
 """
 Vision LLM Client.
 
-Integration with vision-capable LLMs like LLaVA via Ollama.
+Integration with vision-capable LLMs via an OpenAI-compatible API (vLLM).
 Provides image analysis, description, and visual question answering.
 """
 
@@ -19,17 +19,16 @@ logger = logging.getLogger(__name__)
 
 class VisionModel(Enum):
     """Supported vision models."""
-    
-    LLAVA = "llava"
-    LLAVA_13B = "llava:13b"
-    LLAVA_34B = "llava:34b"
-    BAKLLAVA = "bakllava"
-    LLAVA_LLAMA3 = "llava-llama3"
-    MOONDREAM = "moondream"
+
+    # Defaults here are "sane starting points" for vLLM-hosted multimodal models.
+    # You can always pass a string `model=` to override.
+    QWEN2_5_VL_7B = "Qwen/Qwen2.5-VL-7B-Instruct"
+    LLAVA_1_5_7B = "llava-hf/llava-1.5-7b-hf"
+    LLAVA_1_5_13B = "llava-hf/llava-1.5-13b-hf"
     
     @classmethod
     def default(cls) -> "VisionModel":
-        return cls.LLAVA
+        return cls.QWEN2_5_VL_7B
 
 
 @dataclass
@@ -127,15 +126,30 @@ class VisionMessage:
             raise ValueError(f"Unsupported image type: {type(image)}")
         return self
     
-    def to_ollama_format(self) -> Dict[str, Any]:
-        """Convert to Ollama API format."""
-        result = {
-            "role": self.role,
-            "content": self.text,
-        }
-        if self.images:
-            result["images"] = [img.to_base64() for img in self.images]
-        return result
+    def to_openai_message(self) -> Dict[str, Any]:
+        """Convert to OpenAI-compatible chat message format.
+
+        For multimodal messages, `content` is a list of parts:
+        - {"type": "text", "text": "..."}
+        - {"type": "image_url", "image_url": {"url": "data:image/..."}}
+        """
+        if not self.images:
+            return {"role": self.role, "content": self.text}
+
+        parts: List[Dict[str, Any]] = []
+        if self.text:
+            parts.append({"type": "text", "text": self.text})
+        for img in self.images:
+            fmt = (img.format or "png").lower().strip() or "png"
+            if fmt == "auto":
+                fmt = "png"
+            parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/{fmt};base64,{img.to_base64()}"},
+                }
+            )
+        return {"role": self.role, "content": parts}
 
 
 @dataclass
@@ -152,8 +166,8 @@ class VisionResponse:
 class VisionLLM:
     """
     Vision-capable LLM client.
-    
-    Uses Ollama to run vision models like LLaVA locally.
+
+    Uses an OpenAI-compatible endpoint (e.g. vLLM) for multimodal chat.
     
     Example:
         vision = VisionLLM(model="llava:13b")
@@ -170,8 +184,8 @@ class VisionLLM:
     
     def __init__(
         self,
-        model: Union[str, VisionModel] = VisionModel.LLAVA,
-        base_url: str = "http://localhost:11434",
+        model: Union[str, VisionModel] = VisionModel.default(),
+        base_url: str = "http://127.0.0.1:8001",
         timeout: float = 120.0,
         default_language: str = "tr",
     ):
@@ -180,7 +194,7 @@ class VisionLLM:
         
         Args:
             model: Vision model to use
-            base_url: Ollama API base URL
+            base_url: OpenAI-compatible API base URL (vLLM)
             timeout: Request timeout in seconds
             default_language: Default response language
         """
@@ -473,46 +487,30 @@ If no: Write "No error message visible"."""
             Model response
         """
         try:
-            import urllib.request
-            import urllib.error
-            
-            # Build request
-            ollama_messages = []
-            
-            if system_prompt:
-                ollama_messages.append({
-                    "role": "system",
-                    "content": system_prompt,
-                })
-            
-            for msg in messages:
-                ollama_messages.append(msg.to_ollama_format())
-            
-            payload = {
-                "model": self.model,
-                "messages": ollama_messages,
-                "stream": False,
-            }
-            
-            url = f"{self.base_url}/api/chat"
-            
-            request = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            from openai import OpenAI
+        except ModuleNotFoundError as e:
+            raise RuntimeError("openai kütüphanesi yüklü değil. Kurulum: pip install openai") from e
+
+        client = OpenAI(
+            base_url=f"{self.base_url}/v1",
+            api_key="EMPTY",
+            timeout=self.timeout,
+        )
+
+        openai_messages: List[Dict[str, Any]] = []
+        if system_prompt:
+            openai_messages.append({"role": "system", "content": system_prompt})
+        openai_messages.extend([m.to_openai_message() for m in messages])
+
+        try:
+            completion = client.chat.completions.create(
+                model=self.model,
+                messages=openai_messages,
+                temperature=0.2,
+                max_tokens=512,
             )
-            
-            logger.debug(f"Querying vision LLM: {self.model}")
-            
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            
-            return result.get("message", {}).get("content", "")
-            
-        except urllib.error.URLError as e:
-            logger.error(f"Failed to connect to Ollama: {e}")
-            raise ConnectionError(f"Could not connect to Ollama at {self.base_url}") from e
+            choice = completion.choices[0]
+            return (choice.message.content or "").strip()
         except Exception as e:
             logger.error(f"Vision LLM query failed: {e}")
             raise
@@ -520,36 +518,35 @@ If no: Write "No error message visible"."""
     def is_available(self) -> bool:
         """Check if the vision model is available."""
         try:
-            import urllib.request
-            
-            url = f"{self.base_url}/api/tags"
-            with urllib.request.urlopen(url, timeout=5) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            
-            models = [m.get("name", "") for m in result.get("models", [])]
-            return any(self.model in m for m in models)
-            
+            import requests
+        except ModuleNotFoundError:
+            return False
+
+        try:
+            r = requests.get(f"{self.base_url}/v1/models", timeout=5)
+            if r.status_code != 200:
+                return False
+            data = r.json() or {}
+            ids = [m.get("id") for m in (data.get("data") or []) if isinstance(m, dict)]
+            return any((mid or "").strip() == self.model for mid in ids)
         except Exception:
             return False
     
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about the current model."""
         try:
-            import urllib.request
-            
-            url = f"{self.base_url}/api/show"
-            payload = {"name": self.model}
-            
-            request = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            
-            with urllib.request.urlopen(request, timeout=10) as response:
-                return json.loads(response.read().decode("utf-8"))
-                
+            import requests
+        except ModuleNotFoundError as e:
+            return {"error": f"requests yüklü değil: {e}"}
+
+        try:
+            r = requests.get(f"{self.base_url}/v1/models", timeout=10)
+            r.raise_for_status()
+            data = r.json() or {}
+            for item in (data.get("data") or []):
+                if isinstance(item, dict) and item.get("id") == self.model:
+                    return item
+            return {"id": self.model, "warning": "model_not_listed"}
         except Exception as e:
             logger.error(f"Failed to get model info: {e}")
             return {"error": str(e)}

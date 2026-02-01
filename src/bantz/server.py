@@ -40,7 +40,7 @@ _bg_server_errors: dict[str, str] = {}
 def start_server_in_background(
     session_name: str = DEFAULT_SESSION,
     policy_path: str = "config/policy.json",
-    log_path: str = "bantz.log.jsonl",
+    log_path: str = "artifacts/logs/bantz.log.jsonl",
 ) -> bool:
     """Start a server for the given session in a daemon thread.
 
@@ -79,7 +79,7 @@ def start_server_in_background(
 def ensure_server_running(
     session_name: str = DEFAULT_SESSION,
     policy_path: str = "config/policy.json",
-    log_path: str = "bantz.log.jsonl",
+    log_path: str = "artifacts/logs/bantz.log.jsonl",
     timeout_s: float = 8.0,
 ) -> tuple[bool, bool, str]:
     """Ensure a session server is running.

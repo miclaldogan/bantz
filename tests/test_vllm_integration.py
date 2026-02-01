@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 import requests
 from typing import Optional
+import os
 
 from bantz.llm.vllm_openai_client import VLLMOpenAIClient
 from bantz.llm.base import LLMMessage, LLMConnectionError
@@ -23,7 +24,7 @@ from bantz.llm.base import LLMMessage, LLMConnectionError
 # Fixtures
 # =============================================================================
 
-def is_vllm_server_available(url: str = "http://127.0.0.1:8000") -> bool:
+def is_vllm_server_available(url: str = "http://127.0.0.1:8001") -> bool:
     """Check if vLLM server is available."""
     try:
         response = requests.get(f"{url}/v1/models", timeout=2)
@@ -35,14 +36,22 @@ def is_vllm_server_available(url: str = "http://127.0.0.1:8000") -> bool:
 @pytest.fixture
 def vllm_url() -> str:
     """vLLM server URL (or mock server URL)."""
-    # Check if real vLLM is running
-    if is_vllm_server_available("http://127.0.0.1:8000"):
-        return "http://127.0.0.1:8000"
-    # Check if mock server is running
-    elif is_vllm_server_available("http://127.0.0.1:8001"):
-        return "http://127.0.0.1:8001"
-    else:
-        pytest.skip("No vLLM server available (start vLLM or scripts/vllm_mock_server.py)")
+    # Prefer explicit env if provided.
+    env_url = (os.getenv("BANTZ_VLLM_URL") or "").strip()
+    if env_url and is_vllm_server_available(env_url):
+        return env_url.rstrip("/")
+
+    # Default scripts: 3B on 8001, 7B on 8002.
+    for candidate in ("http://127.0.0.1:8001", "http://127.0.0.1:8002"):
+        if is_vllm_server_available(candidate):
+            return candidate
+
+    # Back-compat / mock servers.
+    for candidate in ("http://127.0.0.1:8000",):
+        if is_vllm_server_available(candidate):
+            return candidate
+
+    pytest.skip("No vLLM server available (start vLLM or scripts/vllm_mock_server.py)")
 
 
 @pytest.fixture

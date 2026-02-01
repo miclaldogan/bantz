@@ -1,11 +1,11 @@
-"""LLM Client Interface - Backend abstraction for Ollama, vLLM, etc.
+"""LLM Client Interface - Backend abstraction for vLLM (OpenAI-compatible).
 
 Issue #133: Backend Abstraction
 
-This module provides a unified interface for different LLM backends:
-- OllamaClient
-- vLLM OpenAI-compatible client
-- Future: Anthropic, OpenAI, etc.
+This module provides a unified interface for the project's LLM backend.
+
+Project policy (2026-02): vLLM (OpenAI-compatible API) is the supported local
+inference backend.
 
 Design goals:
 - Single interface for BrainLoop/Router
@@ -64,8 +64,8 @@ class LLMInvalidResponseError(LLMClientError):
 
 class LLMClient(ABC):
     """Abstract base class for LLM clients.
-    
-    All concrete clients (Ollama, vLLM, etc.) must implement this interface.
+
+    Concrete clients must implement this interface.
     """
     
     @abstractmethod
@@ -157,7 +157,7 @@ class LLMClient(ABC):
     @property
     @abstractmethod
     def backend_name(self) -> str:
-        """Backend type: 'ollama', 'vllm', etc."""
+        """Backend type: 'vllm', etc."""
         pass
 
 
@@ -201,7 +201,7 @@ def create_client(
     """Factory function to create LLM client.
     
     Args:
-        backend: 'ollama' | 'vllm' | 'openai'
+        backend: 'vllm' | 'openai'
         base_url: Backend URL (optional, uses defaults)
         model: Model name (optional, uses defaults)
         timeout: Request timeout
@@ -213,23 +213,14 @@ def create_client(
         ValueError: Unknown backend
         
     Example:
-        >>> client = create_client('ollama', model='qwen2.5:3b-instruct')
-        >>> client = create_client('vllm', base_url='http://localhost:8000')
+        >>> client = create_client('vllm', base_url='http://localhost:8001')
     """
     backend = backend.lower().strip()
-    
-    if backend == "ollama":
-        from bantz.llm.ollama_client import OllamaClientAdapter
-        return OllamaClientAdapter(
-            base_url=base_url or "http://127.0.0.1:11434",
-            model=model or "qwen2.5:3b-instruct",
-            timeout_seconds=timeout,
-        )
-    
-    elif backend == "vllm":
+
+    if backend == "vllm":
         from bantz.llm.vllm_openai_client import VLLMOpenAIClient
         return VLLMOpenAIClient(
-            base_url=base_url or "http://127.0.0.1:8000",
+            base_url=base_url or "http://127.0.0.1:8001",
             model=model or "Qwen/Qwen2.5-3B-Instruct",
             timeout_seconds=timeout,
         )
@@ -237,9 +228,5 @@ def create_client(
     elif backend == "openai":
         # Future: OpenAI API client
         raise NotImplementedError("OpenAI backend not yet implemented")
-    
-    else:
-        raise ValueError(
-            f"Unknown LLM backend: '{backend}'. "
-            f"Supported: ollama, vllm"
-        )
+
+    raise ValueError(f"Unknown backend: {backend}")

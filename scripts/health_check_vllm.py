@@ -85,8 +85,8 @@ def print_health_report(result: dict, verbose: bool = False) -> bool:
         
         if status == "offline":
             print(f"\n💡 Tip: Start the server with:")
-            print(f"   ./scripts/start_vllm_3b.sh   # For 3B model on port 8001")
-            print(f"   ./scripts/start_vllm_7b.sh   # For 7B model on port 8002")
+            print(f"   ./scripts/vllm/start_3b.sh   # For 3B model on port 8001")
+            print(f"   ./scripts/vllm/start_7b.sh   # For 7B model on port 8002")
         
         return False
 

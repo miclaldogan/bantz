@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Benchmark script for LLM Orchestrator (Issue #138).
 
-Measures latency, throughput, and token usage for both vLLM and Ollama backends.
+Measures latency, throughput, and token usage for the vLLM backend.
 
 Scenarios:
 - Router: 10 different prompts, 50 repetitions each
@@ -15,9 +15,7 @@ Metrics:
 - Error rate: Failed requests
 
 Usage:
-    python3 scripts/bench_llm_orchestrator.py --backend ollama --iterations 50
     python3 scripts/bench_llm_orchestrator.py --backend vllm --iterations 50
-    python3 scripts/bench_llm_orchestrator.py --compare  # Run both backends
     python3 scripts/bench_llm_orchestrator.py --quick  # 10 iterations (faster)
 """
 
@@ -932,28 +930,31 @@ def run_benchmark(
         except Exception:
             return preferred_model
 
+    if backend != "vllm":
+        raise ValueError(f"Unsupported backend: {backend} (expected 'vllm')")
+
     # Create LLM client(s)
     finalizer_client: Optional[LLMClient] = None
-    if backend == "ollama":
-        client = create_client("ollama", base_url="http://127.0.0.1:11434", model="qwen2.5:3b-instruct")
-    elif backend == "vllm":
-        resolved_model = resolve_vllm_model_id(vllm_base_url, vllm_model)
-        if resolved_model != vllm_model:
-            print(f"ℹ️ vLLM model override: '{vllm_model}' → '{resolved_model}'")
-        client = create_client("vllm", base_url=vllm_base_url, model=resolved_model)
+    resolved_model = resolve_vllm_model_id(vllm_base_url, vllm_model)
+    if resolved_model != vllm_model:
+        print(f"ℹ️ vLLM model override: '{vllm_model}' → '{resolved_model}'")
+    client = create_client(
+        "vllm",
+        base_url=vllm_base_url,
+        model=resolved_model,
+        timeout=vllm_timeout_seconds,
+    )
 
-        if str(vllm_final_base_url or "").strip():
-            resolved_final_model = resolve_vllm_model_id(vllm_final_base_url, vllm_final_model or resolved_model)
-            if vllm_final_model and resolved_final_model != vllm_final_model:
-                print(f"ℹ️ vLLM finalizer model override: '{vllm_final_model}' → '{resolved_final_model}'")
-            finalizer_client = create_client(
-                "vllm",
-                base_url=vllm_final_base_url,
-                model=resolved_final_model,
-                timeout=vllm_timeout_seconds,
-            )
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
+    if str(vllm_final_base_url or "").strip():
+        resolved_final_model = resolve_vllm_model_id(vllm_final_base_url, vllm_final_model or resolved_model)
+        if vllm_final_model and resolved_final_model != vllm_final_model:
+            print(f"ℹ️ vLLM finalizer model override: '{vllm_final_model}' → '{resolved_final_model}'")
+        finalizer_client = create_client(
+            "vllm",
+            base_url=vllm_final_base_url,
+            model=resolved_final_model,
+            timeout=vllm_timeout_seconds,
+        )
 
     token_estimator: Optional[_TokenEstimator] = None
     if backend == "vllm":
@@ -1082,18 +1083,16 @@ def run_qualitative_tests(backend: str) -> None:
         except Exception:
             return preferred_model
 
+    if backend != "vllm":
+        raise ValueError(f"Unsupported backend: {backend} (expected 'vllm')")
+
     # Create LLM client
-    if backend == "ollama":
-        client = create_client("ollama", base_url="http://127.0.0.1:11434", model="qwen2.5:3b-instruct")
-    elif backend == "vllm":
-        base_url = "http://127.0.0.1:8001"
-        preferred_model = "Qwen/Qwen2.5-3B-Instruct"
-        resolved_model = resolve_vllm_model_id(base_url, preferred_model)
-        if resolved_model != preferred_model:
-            print(f"ℹ️ vLLM model override: '{preferred_model}' → '{resolved_model}'")
-        client = create_client("vllm", base_url=base_url, model=resolved_model)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
+    base_url = "http://127.0.0.1:8001"
+    preferred_model = "Qwen/Qwen2.5-3B-Instruct"
+    resolved_model = resolve_vllm_model_id(base_url, preferred_model)
+    if resolved_model != preferred_model:
+        print(f"ℹ️ vLLM model override: '{preferred_model}' → '{resolved_model}'")
+    client = create_client("vllm", base_url=base_url, model=resolved_model)
     
     if not client.is_available():
         print(f"❌ {backend} server is not available.")
@@ -1146,8 +1145,7 @@ def run_qualitative_tests(backend: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark LLM Orchestrator (Issue #138, #153)")
-    parser.add_argument("--backend", choices=["ollama", "vllm"], help="LLM backend to benchmark")
-    parser.add_argument("--compare", action="store_true", help="Compare both backends")
+    parser.add_argument("--backend", choices=["vllm"], default="vllm", help="LLM backend to benchmark")
     parser.add_argument("--iterations", type=int, default=50, help="Number of iterations per scenario")
     parser.add_argument("--quick", action="store_true", help="Quick benchmark (10 iterations)")
     parser.add_argument("--scenarios", choices=["all", "router", "orchestrator", "chat"], default="all", help="Which scenarios to run")
@@ -1192,8 +1190,7 @@ def main():
     
     # Qualitative test mode
     if args.qualitative:
-        backend = args.backend or "vllm"
-        run_qualitative_tests(backend)
+        run_qualitative_tests("vllm")
         return 0
     
     # Set iterations
@@ -1208,44 +1205,21 @@ def main():
     elif args.vllm_stream_ttft:
         vllm_stream_ttft = True
     
-    if args.compare:
-        # Run both backends
-        for backend in ["ollama", "vllm"]:
-            stats = run_benchmark(
-                backend,
-                iterations,
-                args.scenarios,
-                verbose=args.verbose,
-                vllm_base_url=args.vllm_base_url,
-                vllm_model=args.vllm_model,
-                vllm_final_base_url=args.vllm_final_base_url,
-                vllm_final_model=args.vllm_final_model,
-                prompt_profile=args.prompt_profile,
-                vllm_stream_ttft=vllm_stream_ttft,
-                vllm_timeout_seconds=args.vllm_timeout_seconds,
-                vllm_chat_max_tokens=args.vllm_chat_max_tokens,
-            )
-            all_stats.extend(stats)
-    elif args.backend:
-        # Run single backend
-        stats = run_benchmark(
-            args.backend,
-            iterations,
-            args.scenarios,
-            verbose=args.verbose,
-            vllm_base_url=args.vllm_base_url,
-            vllm_model=args.vllm_model,
-            vllm_final_base_url=args.vllm_final_base_url,
-            vllm_final_model=args.vllm_final_model,
-            prompt_profile=args.prompt_profile,
-            vllm_stream_ttft=vllm_stream_ttft,
-            vllm_timeout_seconds=args.vllm_timeout_seconds,
-            vllm_chat_max_tokens=args.vllm_chat_max_tokens,
-        )
-        all_stats.extend(stats)
-    else:
-        print("Error: Either --backend or --compare must be specified")
-        return 1
+    stats = run_benchmark(
+        "vllm",
+        iterations,
+        args.scenarios,
+        verbose=args.verbose,
+        vllm_base_url=args.vllm_base_url,
+        vllm_model=args.vllm_model,
+        vllm_final_base_url=args.vllm_final_base_url,
+        vllm_final_model=args.vllm_final_model,
+        prompt_profile=args.prompt_profile,
+        vllm_stream_ttft=vllm_stream_ttft,
+        vllm_timeout_seconds=args.vllm_timeout_seconds,
+        vllm_chat_max_tokens=args.vllm_chat_max_tokens,
+    )
+    all_stats.extend(stats)
     
     # Print all stats
     print(f"\n{'='*80}")

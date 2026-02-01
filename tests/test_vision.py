@@ -213,18 +213,19 @@ class TestVisionMessage:
         
         assert len(msg.images) == 1
     
-    def test_to_ollama_format(self):
-        """Test Ollama format conversion."""
+    def test_to_openai_message(self):
+        """Test OpenAI-compatible message conversion."""
         from bantz.vision.llm import VisionMessage
         
         msg = VisionMessage(text="Test", role="user")
         msg.add_image(b"data")
         
-        formatted = msg.to_ollama_format()
+        formatted = msg.to_openai_message()
         assert formatted["role"] == "user"
-        assert formatted["content"] == "Test"
-        assert "images" in formatted
-        assert len(formatted["images"]) == 1
+        assert isinstance(formatted["content"], list)
+        assert formatted["content"][0]["type"] == "text"
+        assert formatted["content"][0]["text"] == "Test"
+        assert any(part.get("type") == "image_url" for part in formatted["content"])
 
 
 class TestVisionModel:
@@ -233,10 +234,10 @@ class TestVisionModel:
     def test_vision_models(self):
         """Test vision model values."""
         from bantz.vision.llm import VisionModel
-        
-        assert VisionModel.LLAVA.value == "llava"
-        assert VisionModel.LLAVA_13B.value == "llava:13b"
-        assert VisionModel.default() == VisionModel.LLAVA
+
+        assert VisionModel.QWEN2_5_VL_7B.value == "Qwen/Qwen2.5-VL-7B-Instruct"
+        assert VisionModel.LLAVA_1_5_7B.value == "llava-hf/llava-1.5-7b-hf"
+        assert VisionModel.default() == VisionModel.QWEN2_5_VL_7B
 
 
 class TestMockVisionLLM:
@@ -320,15 +321,15 @@ class TestVisionLLM:
         from bantz.vision.llm import VisionLLM
         
         llm = VisionLLM()
-        assert llm.model == "llava"
-        assert "11434" in llm.base_url
+        assert llm.model == "Qwen/Qwen2.5-VL-7B-Instruct"
+        assert "8001" in llm.base_url
     
     def test_init_custom_model(self):
         """Test custom model initialization."""
         from bantz.vision.llm import VisionLLM, VisionModel
         
-        llm = VisionLLM(model=VisionModel.LLAVA_13B)
-        assert llm.model == "llava:13b"
+        llm = VisionLLM(model=VisionModel.LLAVA_1_5_13B)
+        assert llm.model == "llava-hf/llava-1.5-13b-hf"
     
     def test_init_string_model(self):
         """Test string model initialization."""

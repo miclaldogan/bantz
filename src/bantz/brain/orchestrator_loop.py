@@ -163,6 +163,125 @@ class OrchestratorLoop:
                 raw_output={"error": str(e)},
             )
             return fallback, state
+
+    # ---------------------------------------------------------------------
+    # Backward-compat / test helper
+    # ---------------------------------------------------------------------
+    def run_full_cycle(
+        self,
+        user_input: str,
+        confirmation_token: Optional[str] = None,
+        state: Optional[OrchestratorState] = None,
+    ) -> dict[str, Any]:
+        """Run a full orchestration cycle and return a trace dict.
+
+        This is a backward-compat shim used by golden regression tests.
+
+        Notes:
+        - If a destructive tool requires confirmation, the first cycle will set
+          `state.pending_confirmation` and not execute the tool.
+        - If `confirmation_token` is provided and a pending confirmation exists,
+          we attempt a second execution pass in the same call.
+        """
+        if state is None:
+            state = OrchestratorState()
+
+        # Phase 1: plan
+        orchestrator_output = self._llm_planning_phase(user_input, state)
+
+        # Phase 2: execute tools
+        tool_results = self._execute_tools_phase(orchestrator_output, state)
+
+        # Phase 3: finalize
+        final_output = self._llm_finalization_phase(
+            user_input,
+            orchestrator_output,
+            tool_results,
+            state,
+        )
+
+        # Phase 4: update state
+        self._update_state_phase(user_input, final_output, tool_results, state)
+
+        # Optional: if confirmation was requested and user provided a token,
+        # attempt to execute the pending tool immediately.
+        if confirmation_token is not None and state.has_pending_confirmation():
+            pending = state.pending_confirmation or {}
+            pending_tool = str(pending.get("tool") or "").strip()
+
+            if self.safety_guard and pending_tool:
+                accepted, _reason = self.safety_guard.check_confirmation_token(
+                    pending_tool,
+                    confirmation_token,
+                )
+            else:
+                # Best-effort: accept only obvious "yes" tokens.
+                accepted = str(confirmation_token).strip().lower() in {"yes", "y", "evet", "e", "1", "ok", "tamam"}
+
+            if accepted:
+                # Second execution pass: state already has pending confirmation.
+                tool_results_2 = self._execute_tools_phase(orchestrator_output, state)
+                final_output = self._llm_finalization_phase(
+                    user_input,
+                    orchestrator_output,
+                    tool_results_2,
+                    state,
+                )
+                self._update_state_phase(user_input, final_output, tool_results_2, state)
+                tool_results = tool_results_2
+            else:
+                # User rejected/unclear: clear pending confirmation and return.
+                state.clear_pending_confirmation()
+
+        # Build a trace dict in the format expected by regression tests.
+        tools_attempted = len(tool_results)
+        tools_executed = sum(1 for r in tool_results if r.get("success") is True)
+        tools_success_names = [
+            str(r.get("tool") or "")
+            for r in tool_results
+            if r.get("success") is True and r.get("tool")
+        ]
+
+        policy_violation = False
+        violation_type: Optional[str] = None
+        for r in tool_results:
+            if r.get("success") is True:
+                continue
+            err = str(r.get("error") or "")
+            tool_name = str(r.get("tool") or "")
+            if self.safety_guard and tool_name in getattr(self.safety_guard.policy, "denylist", set()):
+                policy_violation = True
+                violation_type = "denylist"
+                break
+            if "not in allowlist" in err:
+                policy_violation = True
+                violation_type = "allowlist"
+                break
+            if "denied by policy" in err:
+                policy_violation = True
+                violation_type = "policy"
+                break
+
+        trace: dict[str, Any] = {
+            "route": final_output.route,
+            "calendar_intent": final_output.calendar_intent,
+            "confidence": final_output.confidence,
+            "tool_plan_len": len(final_output.tool_plan),
+            "tools_attempted": tools_attempted,
+            "tools_executed": tools_executed,
+            # Regression tests expect this to be iterable of strings.
+            "tools_success": tools_success_names,
+            "requires_confirmation": bool(final_output.requires_confirmation),
+        }
+
+        if final_output.confirmation_prompt:
+            trace["confirmation_prompt"] = final_output.confirmation_prompt
+
+        if policy_violation:
+            trace["policy_violation"] = True
+            trace["violation_type"] = violation_type or "policy"
+
+        return trace
     
     def _llm_planning_phase(
         self,
@@ -240,6 +359,21 @@ class OrchestratorLoop:
         """
         if not output.tool_plan:
             return []
+
+        # Support both legacy `tool_plan: ["tool.name", ...]` and richer
+        # forms emitted by some tests/models: `tool_plan: [{"name": ..., "args": {...}}, ...]`.
+        tool_args_by_name: dict[str, dict[str, Any]] = {}
+        raw_plan = getattr(output, "raw_output", None)
+        if isinstance(raw_plan, dict):
+            raw_entries = raw_plan.get("tool_plan")
+            if isinstance(raw_entries, list):
+                for entry in raw_entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    name = str(entry.get("name") or entry.get("tool") or entry.get("tool_name") or "").strip()
+                    args = entry.get("args")
+                    if name and isinstance(args, dict):
+                        tool_args_by_name[name] = args
         
         # Safety Guard: Filter tool plan based on route
         filtered_tool_plan = output.tool_plan
@@ -326,8 +460,13 @@ class OrchestratorLoop:
                 if tool.function is None:
                     raise ValueError(f"Tool {tool_name} has no function implementation")
                 
-                # Build parameters from slots
-                params = self._build_tool_params(tool_name, output.slots)
+                # Build parameters: prefer explicit tool_plan args, else fall back to slots.
+                args = tool_args_by_name.get(tool_name)
+                if args is not None:
+                    params = dict(output.slots)
+                    params.update(args)
+                else:
+                    params = self._build_tool_params(tool_name, output.slots)
                 
                 # Safety Guard: Validate tool arguments
                 if self.safety_guard:
@@ -574,6 +713,7 @@ class OrchestratorLoop:
             route_source="llm",  # Everything comes from LLM now
             route=output.route,
             intent=output.calendar_intent,
+            calendar_intent=output.calendar_intent,
             confidence=output.confidence,
             tool_plan_len=len(output.tool_plan),
             tools_attempted=len(tool_results),

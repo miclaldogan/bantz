@@ -1,4 +1,5 @@
-from .ollama_client import LLMMessage, OllamaClient
+from .base import LLMMessage, LLMClient, LLMClientProtocol, create_client
+from .vllm_openai_client import VLLMOpenAIClient
 from .persona import (
     JarvisPersona,
     ResponseBuilder,
@@ -12,7 +13,10 @@ from .persona import (
 
 __all__ = [
     "LLMMessage",
-    "OllamaClient",
+    "LLMClient",
+    "LLMClientProtocol",
+    "create_client",
+    "VLLMOpenAIClient",
     "JarvisPersona",
     "ResponseBuilder",
     "JARVIS_RESPONSES",
@@ -22,3 +26,4 @@ __all__ = [
     "jarvis_greeting",
     "jarvis_farewell",
 ]
+
