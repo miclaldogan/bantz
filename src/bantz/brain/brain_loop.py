@@ -1398,6 +1398,84 @@ class BrainLoop:
                 # Memory must never crash the brain loop.
                 self._memory_manager = None
 
+        # Optional quality finalizer (lazy): used to rewrite user-facing calendar replies.
+        # Enabled only when create_quality_client() resolves to a Gemini backend.
+        self._calendar_finalizer_llm = None
+
+    def _maybe_finalize_calendar_reply(
+        self,
+        *,
+        user_text: str,
+        draft_text: str,
+        observations: list[Any],
+    ) -> str:
+        """Rewrite calendar replies with the quality provider (Gemini) when enabled.
+
+        This keeps routing/tooling local (fast model) but uses Gemini for the final
+        user-facing response to improve "Jarvis" feel.
+
+        Guardrails:
+        - Only runs when the last tool is a calendar.* tool.
+        - Only runs when create_quality_client() returns a Gemini backend.
+        - Best-effort: failures fall back to the original draft.
+        """
+
+        try:
+            last_tool = ""
+            if observations and isinstance(observations[-1], dict):
+                last_tool = str(
+                    observations[-1].get("tool")
+                    or observations[-1].get("name")
+                    or ""
+                ).strip()
+            if not last_tool.startswith("calendar."):
+                return draft_text
+
+            # Lazy init + cache. A False sentinel means "disabled/unavailable".
+            if self._calendar_finalizer_llm is False:
+                return draft_text
+            if self._calendar_finalizer_llm is None:
+                from bantz.llm import create_quality_client
+
+                q = create_quality_client(timeout=240.0)
+                if str(getattr(q, "backend_name", "") or "").strip().lower() != "gemini":
+                    self._calendar_finalizer_llm = False
+                    return draft_text
+                self._calendar_finalizer_llm = q
+
+            finalizer = self._calendar_finalizer_llm
+
+            # Keep payload minimal: only include what the user would already see.
+            from bantz.llm import LLMMessage
+
+            sys_msg = (
+                "Sen BANTZ'sın. Türkçe konuş; 'Efendim' hitabını kullan.\n"
+                "Görev: DRAFT cevabı daha doğal, kısa ve yardımcı bir dille yeniden yaz.\n"
+                "Kural: DRAFT içindeki gerçekleri KESİN değiştirme (sayı/saat/tarih/başlık).\n"
+                "Yeni etkinlik uydurma, ekstra detay ekleme. JSON/Markdown/backtick yazma.\n"
+            )
+            user_msg = (
+                f"USER: {str(user_text or '').strip()}\n\n"
+                f"LAST_TOOL: {last_tool}\n\n"
+                f"DRAFT:\n{str(draft_text or '').strip()}\n\n"
+                "ASSISTANT:"
+            )
+
+            out = finalizer.chat(
+                [
+                    LLMMessage(role="system", content=sys_msg),
+                    LLMMessage(role="user", content=user_msg),
+                ],
+                temperature=0.6,
+                max_tokens=220,
+            )
+            out = str(out or "").strip()
+            if not out:
+                return draft_text
+            return _role_sanitize_text(out)
+        except Exception:
+            return draft_text
+
     def run(
         self,
         *,
@@ -4619,6 +4697,11 @@ class BrainLoop:
 
             if isinstance(action, Say):
                 text = _role_sanitize_text(action.text)
+                text = self._maybe_finalize_calendar_reply(
+                    user_text=user_text,
+                    draft_text=text,
+                    observations=observations,
+                )
                 try:
                     self._events.publish(
                         EventType.RESULT.value, {"text": text}, source="brain"
