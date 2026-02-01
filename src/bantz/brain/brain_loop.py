@@ -1121,15 +1121,19 @@ def _detect_route(
     has_calendar_object_strong = any(w in nt for w in strong_nouns)
     has_calendar_object_soft = any(w in nt for w in soft_nouns)
 
-    create_verbs = {"ekle", "olustur", "oluştur", "koy", "ayarla", "planla", "hatirlat", "hatırlat"}
-    cancel_verbs = {"iptal", "iptal et", "sil", "kaldir", "kaldır"}
-    modify_verbs = {"tasi", "taşı", "kaydir", "ertele", "guncelle", "güncelle", "degistir", "değiştir"}
-    query_verbs = {"bak", "listele", "goster", "göster"}
+    # IMPORTANT: Use token-based matching to avoid false positives like
+    # "nasılsın" -> contains substring "sil".
+    tokens = set(re.findall(r"[a-z0-9]+", nt))
 
-    has_create = any(v in nt for v in create_verbs)
-    has_cancel = any(v in nt for v in cancel_verbs)
-    has_modify = any(v in nt for v in modify_verbs)
-    has_query = any(v in nt for v in query_verbs)
+    create_tokens = {"ekle", "olustur", "oluştur", "koy", "ayarla", "planla", "hatirlat", "hatırlat"}
+    cancel_tokens = {"iptal", "sil", "kaldir", "kaldır"}
+    modify_tokens = {"tasi", "taşı", "kaydir", "kaydır", "ertele", "guncelle", "güncelle", "degistir", "değiştir"}
+    query_tokens = {"bak", "listele", "goster", "göster"}
+
+    has_create = bool(tokens & create_tokens)
+    has_cancel = bool(tokens & cancel_tokens)
+    has_modify = bool(tokens & modify_tokens)
+    has_query = bool(tokens & query_tokens)
     has_any_cal_verb = bool(has_create or has_cancel or has_modify or has_query)
 
     has_calendar_context = bool(
@@ -1698,7 +1702,8 @@ class BrainLoop:
 
             # Heuristic short-circuit: prevent greetings from ever hitting the menu.
             nt = _normalize_text_for_match(user_text_in)
-            calendar_keywords = {
+            tokens = set(re.findall(r"[a-z0-9]+", nt))
+            calendar_markers = {
                 "takvim",
                 "calendar",
                 "ajanda",
@@ -1711,35 +1716,27 @@ class BrainLoop:
                 "meeting",
                 "plan",
                 "program",
-                "ekle",
-                "olustur",
-                "oluştur",
-                "sil",
-                "iptal",
                 "hatirlat",
                 "hatırlat",
             }
-            if not any(k in nt for k in calendar_keywords):
+            # "önümüzdeki 4 saat" / "4 saatte" style windows should be treated as calendar queries.
+            has_hour_window = bool(re.search(r"\b\d{1,2}\s*saat", nt))
+            has_saat_variant = any(tok.startswith("saat") for tok in tokens)
+            if not ((tokens & calendar_markers) or has_hour_window or has_saat_variant):
                 return _ROUTE_SMALLTALK, "none", 0.8
 
             # If it mentions calendar-ish words, bias toward calendar query.
             create_words = {"ekle", "olustur", "oluştur", "planla", "ayarla", "koy"}
             cancel_words = {"iptal", "sil", "kaldir", "kaldır"}
-            modify_words = {"tasi", "taşı", "degistir", "değiştir", "ertele", "kaydir"}
-            if any(w in nt for w in create_words):
+            modify_words = {"tasi", "taşı", "degistir", "değiştir", "ertele", "kaydir", "kaydır"}
+            if tokens & create_words:
                 return _ROUTE_CALENDAR_CREATE, "create", 0.7
-            if any(w in nt for w in cancel_words):
+            if tokens & cancel_words:
                 return _ROUTE_CALENDAR_CANCEL, "cancel", 0.7
-            if any(w in nt for w in modify_words):
+            if tokens & modify_words:
                 return _ROUTE_CALENDAR_MODIFY, "modify", 0.7
             # Default: query
             return _ROUTE_CALENDAR_QUERY, "query", 0.7
-
-            schema = {
-                "route": "calendar|smalltalk|unknown",
-                "calendar_intent": "create|modify|cancel|query|none",
-                "confidence": 0.0,
-            }
             try:
                 # Keep prompt minimal to reduce small-model failures.
                 prompt = "SADECE JSON döndür: " + json.dumps(schema, ensure_ascii=False)
