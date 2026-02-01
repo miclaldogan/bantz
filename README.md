@@ -54,6 +54,7 @@ More details: docs/setup/vllm.md
 - docs/jarvis-roadmap-v2.md
 - docs/setup/vllm.md
 - docs/setup/google-oauth.md
+- docs/setup/memory.md
 
 ## Google OAuth (Calendar/Gmail)
 
