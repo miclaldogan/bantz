@@ -153,7 +153,7 @@ def _override_time_params(
     if intent is None:
         # Extra demo-only override: "önümüzdeki X saat" style queries.
         t = _normalize_tr(user_text)
-        m = re.search(r"\b(onumuzdeki|sonraki)\s+(\d{1,2})\s+saat\b", t)
+        m = re.search(r"\b(onumuzdeki|sonraki)\s+(\d{1,2})\s+saat(?:te|ta)?\b", t)
         if m:
             try:
                 hours = int(m.group(2))
@@ -462,14 +462,58 @@ class JarvisRepairingLLMAdapter:
 
         # Action planning schema: keep compact for small-context local demos.
         if isinstance(schema_obj_any, dict):
+            def _compact_session_context(ctx_any: Any) -> dict[str, Any]:
+                if not isinstance(ctx_any, dict):
+                    return {}
+                keep = [
+                    "now_iso",
+                    "tz_name",
+                    "date",
+                    "mode",
+                    "dry_run",
+                    "human_hours",
+                    "_dialog_state",
+                ]
+                return {k: ctx_any.get(k) for k in keep if k in ctx_any}
+
+            def _compact_tools(tools_any: Any) -> list[dict[str, Any]]:
+                if not isinstance(tools_any, list):
+                    return []
+                compact: list[dict[str, Any]] = []
+                for t in tools_any:
+                    if not isinstance(t, dict):
+                        continue
+                    name = t.get("name")
+                    if not name:
+                        continue
+                    args_schema = t.get("args_schema") if isinstance(t.get("args_schema"), dict) else {}
+                    required = []
+                    if isinstance(args_schema, dict):
+                        req_any = args_schema.get("required")
+                        if isinstance(req_any, list):
+                            required = [str(x) for x in req_any if x is not None]
+                    compact.append(
+                        {
+                            "name": str(name),
+                            "requires_confirmation": bool(t.get("requires_confirmation")),
+                            "risk_level": t.get("risk_level"),
+                            "required": required,
+                        }
+                    )
+                return compact
+
             schema_hint = json.dumps(
                 {
                     "protocol": schema_obj_any.get("protocol"),
-                    "tools": schema_obj_any.get("tools"),
-                    "session_context": schema_obj_any.get("session_context"),
+                    "tools": _compact_tools(schema_obj_any.get("tools")),
+                    "session_context": _compact_session_context(schema_obj_any.get("session_context")),
                 },
                 ensure_ascii=False,
             )
+
+        # Hard cap to avoid 1024-context blowups on small local models.
+        if isinstance(schema_hint, str) and len(schema_hint) > 1600:
+            schema_hint = schema_hint[:1600] + "…"
 
         # Keep prompts small: 3B demos often run with 1024 context.
         conversation_tail = "\n".join(
@@ -482,19 +526,10 @@ class JarvisRepairingLLMAdapter:
 
         jarvis_system = (
             "Sen BANTZ'sın. Türkçe konuş; 'Efendim' hitabını kullan.\n"
-            "Amaç: Takvim sorularını gerçek tool'larla cevapla; belirsizse tek bir soru sor.\n\n"
-            "Kurallar (kritik):\n"
-            "- Sadece tek bir JSON object döndür; Markdown/açıklama/backtick yok.\n"
-            "- type ∈ {SAY, CALL_TOOL, ASK_USER, FAIL}.\n"
-            "- Tool sonucu olmadan etkinlik/saat uydurma.\n"
-            "- ASK_USER: 1 soru; en fazla 3 seçenek (1/2/0).\n\n"
-            "Takvim ipuçları:\n"
-            "- 'bugün'/'bu akşam'/'yarın' gibi ifadelerde SCHEMA_HINT içindeki window'ları kullan.\n"
-            "- 'önümüzdeki 4 saat' gibi ifadelerde time_min=now ve time_max=now+4h kullan.\n"
-            "- Koşu/uygun saat => calendar.find_free_slots.\n\n"
-            "Örnek:\n"
-            "USER: Bu akşam planım var mı?\n"
-            "ASSISTANT: {\"type\":\"CALL_TOOL\",\"name\":\"calendar.list_events\",\"params\":{\"time_min\":\"<now>\",\"time_max\":\"<midnight>\"}}\n"
+            "Sadece tek bir JSON object döndür (Markdown/backtick/açıklama yok).\n"
+            "type ∈ {SAY, CALL_TOOL, ASK_USER, FAIL}.\n"
+            "Takvim sorularında calendar.list_events / calendar.find_free_slots kullan; yazma işlemleri (calendar.create_event) onay ister.\n"
+            "'önümüzdeki X saat' => time_min=now, time_max=now+Xh.\n"
         )
 
         prompt = (
@@ -506,13 +541,54 @@ class JarvisRepairingLLMAdapter:
             f"CONVERSATION_TAIL:\n{conversation_tail}\n"
         )
 
+        if len(prompt) > 3400:
+            # Keep the header + tail; drop the middle if needed.
+            head = prompt[:900]
+            tail = prompt[-900:]
+            prompt = head + "\n...\n" + tail
+
         raw_text = self._llm.complete_text(prompt=prompt)
-        return validate_or_repair_action(
+        action = validate_or_repair_action(
             llm=self._llm,
             raw_text=raw_text,
             tool_registry=self._tools,
             max_attempts=self._max_attempts,
         )
+
+        # Demo hardening: avoid redundant questions on obvious calendar queries.
+        # If the model asks the user the same thing they just asked (common on 3B),
+        # force a safe read-only tool call.
+        try:
+            last_user_text = ""
+            for m in reversed(messages or []):
+                if isinstance(m, dict) and str(m.get("role") or "") == "user":
+                    last_user_text = str(m.get("content") or "").strip()
+                    break
+            nt = _normalize_tr(last_user_text)
+            is_calendarish = any(
+                k in nt
+                for k in [
+                    "takvim",
+                    "ajanda",
+                    "calendar",
+                    "plan",
+                    "program",
+                    "toplanti",
+                    "toplantı",
+                ]
+            ) or bool(re.search(r"\b(onumuzdeki|sonraki)\s+\d{1,2}\s+saat(?:te|ta)?\b", nt))
+            if (
+                isinstance(action, dict)
+                and str(action.get("type") or "") == "ASK_USER"
+                and is_calendarish
+            ):
+                q = _normalize_tr(str(action.get("question") or "").strip())
+                if not q or q == nt:
+                    return {"type": "CALL_TOOL", "name": "calendar.list_events", "params": {}}
+        except Exception:
+            pass
+
+        return action
 
 
 def _build_calendar_tools(
@@ -773,7 +849,7 @@ def main() -> int:
             max_tokens=5,
         )
         if args.debug:
-            print(f"[DEMO] {backend} backend ready!")
+            print("[DEMO] vllm backend ready!")
     except Exception as e:
         if args.debug:
             print(f"[DEMO] Warm-up warning: {e}")
