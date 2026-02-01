@@ -56,6 +56,7 @@ More details: docs/setup/vllm.md
 - docs/setup/google-oauth.md
 - docs/setup/memory.md
 - docs/setup/docker-vllm.md
+- docs/setup/google-vision.md
 
 ## Google OAuth (Calendar/Gmail)
 
