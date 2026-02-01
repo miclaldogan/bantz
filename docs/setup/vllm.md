@@ -77,8 +77,18 @@ Cloud çağrıları **varsayılan olarak kapalıdır**. Açmak için:
 ```bash
 export BANTZ_CLOUD_MODE=cloud
 export QUALITY_PROVIDER=gemini
-export GEMINI_API_KEY="..."
+export GEMINI_API_KEY="PASTE_YOUR_KEY_HERE"   # buraya yapıştır
 export QUALITY_MODEL="gemini-1.5-flash"   # örnek
+```
+
+Tek seferlik test için yukarıdaki `export` yeterli.
+Daemon/systemd ile çalıştırıyorsan kalıcı yapmak için `systemctl --user edit bantz.service` içine şu satırları ekle (commit'leme):
+
+```ini
+Environment=BANTZ_CLOUD_MODE=cloud
+Environment=QUALITY_PROVIDER=gemini
+Environment=GEMINI_API_KEY=PASTE_YOUR_KEY_HERE
+Environment=QUALITY_MODEL=gemini-1.5-flash
 ```
 
 Gizlilik/minimize:
