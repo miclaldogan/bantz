@@ -78,7 +78,7 @@ Cloud çağrıları **varsayılan olarak kapalıdır**. Açmak için:
 export BANTZ_CLOUD_MODE=cloud
 export QUALITY_PROVIDER=gemini
 export GEMINI_API_KEY="PASTE_YOUR_KEY_HERE"   # buraya yapıştır
-export QUALITY_MODEL="gemini-1.5-flash"   # örnek
+export QUALITY_MODEL="gemini-flash-latest"   # öneri (veya: gemini-2.0-flash)
 ```
 
 Hızlı doğrulama (4 senaryo + metrics):
@@ -93,8 +93,8 @@ Daemon/systemd ile çalıştırıyorsan kalıcı yapmak için `systemctl --user 
 ```ini
 Environment=BANTZ_CLOUD_MODE=cloud
 Environment=QUALITY_PROVIDER=gemini
-Environment=GEMINI_API_KEY=AIzaSyCH65yYsRBYA6cotB8mURtn2h2k9BhYcF0
-Environment=QUALITY_MODEL=gemini-1.5-flash
+Environment=GEMINI_API_KEY=PASTE_YOUR_KEY_HERE
+Environment=QUALITY_MODEL=gemini-flash-latest
 ```
 
 Gizlilik/minimize:
