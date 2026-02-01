@@ -1402,25 +1402,51 @@ class BrainLoop:
         # Enabled only when create_quality_client() resolves to a Gemini backend.
         self._calendar_finalizer_llm = None
 
-    def _maybe_finalize_calendar_reply(
+    def _finalizer_mode(self) -> str:
+        try:
+            raw = str(os.getenv("BANTZ_FINALIZER_MODE", "") or "").strip().lower()
+        except Exception:
+            raw = ""
+
+        # Backward-compatible default: only calendar tool replies are finalized.
+        if not raw:
+            return "calendar_only"
+
+        if raw in {"off", "0", "false", "disable", "disabled", "none"}:
+            return "off"
+        if raw in {"calendar", "calendar_only", "calendar-only"}:
+            return "calendar_only"
+        if raw in {"smalltalk", "smalltalk_only", "smalltalk-only"}:
+            return "smalltalk"
+        if raw in {"always", "all", "everything"}:
+            return "always"
+        return "calendar_only"
+
+    def _maybe_finalize_user_reply(
         self,
         *,
         user_text: str,
         draft_text: str,
         observations: list[Any],
+        route: str | None = None,
     ) -> str:
-        """Rewrite calendar replies with the quality provider (Gemini) when enabled.
+        """Rewrite user-visible replies with the quality provider (Gemini) when enabled.
 
         This keeps routing/tooling local (fast model) but uses Gemini for the final
         user-facing response to improve "Jarvis" feel.
 
         Guardrails:
-        - Only runs when the last tool is a calendar.* tool.
+        - Default runs only when the last tool is a calendar.* tool.
+        - Can be enabled for smalltalk / all SAY via BANTZ_FINALIZER_MODE.
         - Only runs when create_quality_client() returns a Gemini backend.
         - Best-effort: failures fall back to the original draft.
         """
 
         try:
+            mode = self._finalizer_mode()
+            if mode == "off":
+                return draft_text
+
             last_tool = ""
             if observations and isinstance(observations[-1], dict):
                 last_tool = str(
@@ -1428,7 +1454,21 @@ class BrainLoop:
                     or observations[-1].get("name")
                     or ""
                 ).strip()
-            if not last_tool.startswith("calendar."):
+
+            route_norm = str(route or "").strip().lower()
+            is_calendar_tool = bool(last_tool.startswith("calendar."))
+            is_smalltalk_route = route_norm in {"smalltalk", "smalltalk_stage1"}
+
+            should_finalize = False
+            if mode == "always":
+                should_finalize = True
+            elif mode == "smalltalk":
+                should_finalize = bool(is_smalltalk_route)
+            else:
+                # default: calendar_only
+                should_finalize = bool(is_calendar_tool)
+
+            if not should_finalize:
                 return draft_text
 
             # Lazy init + cache. A False sentinel means "disabled/unavailable".
@@ -1456,7 +1496,8 @@ class BrainLoop:
             )
             user_msg = (
                 f"USER: {str(user_text or '').strip()}\n\n"
-                f"LAST_TOOL: {last_tool}\n\n"
+                f"ROUTE: {route_norm or 'unknown'}\n"
+                f"LAST_TOOL: {last_tool or 'none'}\n\n"
                 f"DRAFT:\n{str(draft_text or '').strip()}\n\n"
                 "ASSISTANT:"
             )
@@ -4697,10 +4738,11 @@ class BrainLoop:
 
             if isinstance(action, Say):
                 text = _role_sanitize_text(action.text)
-                text = self._maybe_finalize_calendar_reply(
+                text = self._maybe_finalize_user_reply(
                     user_text=user_text,
                     draft_text=text,
                     observations=observations,
+                    route=str(ctx.get("route") or "") if isinstance(ctx, dict) else None,
                 )
                 try:
                     self._events.publish(
