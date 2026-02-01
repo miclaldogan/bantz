@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__
+**/__pycache__
+**/*.pyc
+artifacts/tmp
+artifacts/results
+artifacts/logs
+node_modules
+bantz-browser/node_modules
+bantz-browser/dist
+bantz-browser/build
+bantz-extension/node_modules
