@@ -18,6 +18,28 @@ Replace **ESTIMATED** values in `rtx4060-3b-vs-8b-benchmark.md` with **MEASURED*
 
 ---
 
+## ⚡ Issue #180: vLLM Performance Benchmark (tok/s)
+
+Issue #153 dokümanı daha çok **Bantz orchestrator/router** seviyesinde benchmark içindir.
+vLLM runtime optimizasyonu için (KV cache / batching / quantization / vs.) doğrudan vLLM endpoint’ini ölçmek üzere:
+
+```bash
+# vLLM 3B server'ı başlat (8001)
+./scripts/vllm/start_3b.sh
+
+# Micro benchmark (default: 256 requests, concurrency=32, max_tokens=256)
+python3 scripts/bench_vllm.py --target awq=http://127.0.0.1:8001
+
+# Baseline karşılaştırma + regression gate örneği
+python3 scripts/bench_vllm.py \
+  --baseline artifacts/results/bench_vllm_YYYYMMDD_HHMMSS.json \
+  --fail-regression-pct 10
+```
+
+Çıktılar otomatik olarak `artifacts/results/bench_vllm_<timestamp>.{json,md}` olarak yazılır.
+
+---
+
 ## 📋 Prerequisites
 
 ### 1. Hardware
