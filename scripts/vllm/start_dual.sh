@@ -36,94 +36,37 @@ echo "🛑 Mevcut vLLM sunucuları kapatılıyor..."
 pkill -f "vllm" || true
 sleep 3
 
-# Check if virtual environment exists
-if [ ! -d ".venv" ]; then
-    echo "❌ Virtual environment bulunamadı. Önce kurun:"
-    echo "   python -m venv .venv"
-    echo "   source .venv/bin/activate"
-    echo "   pip install -e ."
+LOG_DIR="${BANTZ_VLLM_LOG_DIR:-artifacts/logs/vllm}"
+mkdir -p "$LOG_DIR"
+
+PYTHON_BIN="${BANTZ_VLLM_PYTHON:-python3}"
+if ! "$PYTHON_BIN" -c "import vllm" >/dev/null 2>&1; then
+    echo "❌ vLLM import edilemedi ($PYTHON_BIN). Önce kurun: pip install vllm" >&2
     exit 1
-fi
-
-# Activate virtual environment
-source .venv/bin/activate
-
-# Verify vLLM installation
-if ! python -c "import vllm" 2>/dev/null; then
-    echo "❌ vLLM import edilemedi. Yeniden kuruluyor..."
-    pip install --upgrade pip
-    pip uninstall -y vllm vllm-flash-attn || true
-    pip install vllm==0.6.6 --no-cache-dir
 fi
 
 echo ""
 echo "🚀 3B Model Başlatılıyor (Port 8001)..."
-echo "   Model: Qwen/Qwen2.5-3B-Instruct-AWQ"
-echo "   VRAM: ~2.5GB"
+echo "   Model: ${BANTZ_VLLM_3B_MODEL:-Qwen/Qwen2.5-3B-Instruct-AWQ}"
+echo "   (Dual defaults: gpu_util=${BANTZ_VLLM_3B_GPU_UTIL:-0.30}, max_len=${BANTZ_VLLM_3B_MAX_MODEL_LEN:-1536})"
 
-# Set LD_LIBRARY_PATH for CUDA libraries
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/iclaldogan/Desktop/Bantz/.venv/lib/python3.10/site-packages/nvidia/nvjitlink/lib
-
-nohup python -m vllm.entrypoints.openai.api_server \
-  --model Qwen/Qwen2.5-3B-Instruct-AWQ \
-  --quantization awq_marlin \
-  --dtype half \
-  --port 8001 \
-  --max-model-len 2048 \
-  --gpu-memory-utilization 0.40 \
-  --enable-prefix-caching \
-  > vllm_8001.log 2>&1 &
-
-PID_3B=$!
-echo "✅ 3B server başlatıldı (PID: $PID_3B)"
-
-echo ""
-echo "⏳ 3B model yükleniyor... (30 saniye)"
-sleep 30
-
-# Check 3B health
-if curl -s http://localhost:8001/v1/models > /dev/null 2>&1; then
-    echo "✅ 3B server hazır: http://localhost:8001"
-else
-    echo "⚠️  3B server henüz hazır değil, log kontrol edin: tail -f vllm_8001.log"
-fi
+export BANTZ_VLLM_DUAL_MODE=1
+./scripts/vllm/start_3b.sh
 
 echo ""
 echo "🚀 7B Model Başlatılıyor (Port 8002)..."
-echo "   Model: Qwen/Qwen2.5-7B-Instruct-AWQ"
-echo "   VRAM: ~4.5GB"
+echo "   Model: ${BANTZ_VLLM_7B_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+echo "   (Dual defaults: gpu_util=${BANTZ_VLLM_7B_GPU_UTIL:-0.60}, max_len=${BANTZ_VLLM_7B_MAX_MODEL_LEN:-2048})"
 
-nohup python -m vllm.entrypoints.openai.api_server \
-  --model Qwen/Qwen2.5-7B-Instruct-AWQ \
-  --quantization awq_marlin \
-  --dtype half \
-  --port 8002 \
-  --max-model-len 2048 \
-  --gpu-memory-utilization 0.50 \
-  --enable-prefix-caching \
-  > vllm_8002.log 2>&1 &
-
-PID_7B=$!
-echo "✅ 7B server başlatıldı (PID: $PID_7B)"
-
-echo ""
-echo "⏳ 7B model yükleniyor... (45 saniye)"
-sleep 45
-
-# Check 7B health
-if curl -s http://localhost:8002/v1/models > /dev/null 2>&1; then
-    echo "✅ 7B server hazır: http://localhost:8002"
-else
-    echo "⚠️  7B server henüz hazır değil, log kontrol edin: tail -f vllm_8002.log"
-fi
+./scripts/vllm/start_7b.sh
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ Kurulum Tamamlandı!"
 echo ""
 echo "📝 Loglar:"
-echo "   3B: tail -f $PROJECT_ROOT/vllm_8001.log"
-echo "   7B: tail -f $PROJECT_ROOT/vllm_8002.log"
+echo "   3B: tail -f $PROJECT_ROOT/$LOG_DIR/vllm_8001.log"
+echo "   7B: tail -f $PROJECT_ROOT/$LOG_DIR/vllm_8002.log"
 echo ""
 echo "🔍 Health Check:"
 echo "   ./scripts/health_check_vllm.py --all"

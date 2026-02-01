@@ -499,6 +499,16 @@ Kullanım örnekleri:
     parser.add_argument("--piper-model", default="", help="Piper .onnx model yolu (zorunlu: --voice)")
     parser.add_argument("--vllm-url", default="http://127.0.0.1:8001", help="vLLM (OpenAI-compatible) base URL")
     parser.add_argument("--vllm-model", default="Qwen/Qwen2.5-3B-Instruct", help="vLLM model adı")
+    parser.add_argument(
+        "--vllm-quality-url",
+        default="http://127.0.0.1:8002",
+        help="Quality vLLM base URL (bigger model; e.g. summaries/reasoning)",
+    )
+    parser.add_argument(
+        "--vllm-quality-model",
+        default="Qwen/Qwen2.5-7B-Instruct-AWQ",
+        help="Quality vLLM model adı (default: 7B AWQ)",
+    )
     parser.add_argument("--whisper-model", default="base", help="faster-whisper model adı (tiny/base/small/...)")
     parser.add_argument("--asr-cache-dir", default=os.path.expanduser("~/.cache/bantz/whisper"), help="Whisper model cache klasörü")
     parser.add_argument("--asr-allow-download", action="store_true", help="Whisper model indirmeye izin ver (ilk kurulumda)")
@@ -532,6 +542,11 @@ Kullanım örnekleri:
         os.environ["BANTZ_VLLM_URL"] = str(args.vllm_url)
     if getattr(args, "vllm_model", None):
         os.environ["BANTZ_VLLM_MODEL"] = str(args.vllm_model)
+
+    if getattr(args, "vllm_quality_url", None):
+        os.environ["BANTZ_VLLM_QUALITY_URL"] = str(args.vllm_quality_url)
+    if getattr(args, "vllm_quality_model", None):
+        os.environ["BANTZ_VLLM_QUALITY_MODEL"] = str(args.vllm_quality_model)
 
     def _can_connect(host: str, port: int, timeout_s: float = 3.0) -> bool:
         try:

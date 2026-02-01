@@ -13,6 +13,9 @@ pip install -U pip
 pip install -e ".[llm]"
 ```
 
+Not: Şu an bazı sistemlerde CUDA uyumluluğu nedeniyle **global Python** ile çalıştırmak daha stabil olabilir.
+Bu durumda `.venv` zorunlu değil; önemli olan `python3 -c 'import vllm'` çalışması.
+
 2) vLLM sunucusunu başlat:
 
 - 3B (hız / router / tool seçim):
@@ -25,6 +28,24 @@ pip install -e ".[llm]"
 
 ```bash
 ./scripts/vllm/start_7b.sh
+```
+
+### 3B + 7B aynı anda (tek GPU)
+
+Tek GPU’da iki instance çalıştırmak istiyorsan:
+
+```bash
+./scripts/vllm/start_dual.sh
+```
+
+Bu scriptler “dual-friendly” KV/cache limitleriyle gelir (VRAM/KV-cache patlamasını azaltır).
+Gerekirse env ile daha da kısabilirsin:
+
+```bash
+export BANTZ_VLLM_3B_GPU_UTIL=0.28
+export BANTZ_VLLM_3B_MAX_MODEL_LEN=1024
+export BANTZ_VLLM_7B_GPU_UTIL=0.58
+export BANTZ_VLLM_7B_CPU_OFFLOAD_GB=6
 ```
 
 3) Sunucu kontrol:
@@ -61,4 +82,18 @@ Bantz, vLLM endpoint’ine şu env’lerle bağlanır:
 ```bash
 export BANTZ_VLLM_URL="http://127.0.0.1:8001"
 export BANTZ_VLLM_MODEL="Qwen/Qwen2.5-3B-Instruct-AWQ"
+```
+
+Kalite gereken işler (örn: sayfa özetleme) için 7B endpoint’i ayrı tanımlanabilir:
+
+```bash
+export BANTZ_VLLM_QUALITY_URL="http://127.0.0.1:8002"
+export BANTZ_VLLM_QUALITY_MODEL="Qwen/Qwen2.5-7B-Instruct-AWQ"
+```
+
+İpucu: model id’yi makineden makineye farklı tutuyorsan `auto` kullanabilirsin:
+
+```bash
+export BANTZ_VLLM_MODEL=auto
+export BANTZ_VLLM_QUALITY_MODEL=auto
 ```
