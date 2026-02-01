@@ -81,13 +81,19 @@ export GEMINI_API_KEY="PASTE_YOUR_KEY_HERE"   # buraya yapıştır
 export QUALITY_MODEL="gemini-1.5-flash"   # örnek
 ```
 
+Hızlı doğrulama (4 senaryo + metrics):
+
+```bash
+./scripts/validate_hybrid_quality.sh
+```
+
 Tek seferlik test için yukarıdaki `export` yeterli.
 Daemon/systemd ile çalıştırıyorsan kalıcı yapmak için `systemctl --user edit bantz.service` içine şu satırları ekle (commit'leme):
 
 ```ini
 Environment=BANTZ_CLOUD_MODE=cloud
 Environment=QUALITY_PROVIDER=gemini
-Environment=GEMINI_API_KEY=PASTE_YOUR_KEY_HERE
+Environment=GEMINI_API_KEY=AIzaSyCH65yYsRBYA6cotB8mURtn2h2k9BhYcF0
 Environment=QUALITY_MODEL=gemini-1.5-flash
 ```
 
