@@ -1180,6 +1180,25 @@ def _render_unknown_menu(seed: str = "default") -> str:
     return JarvisVoice.format_unknown_menu(seed)
 
 
+def _menus_enabled(ctx: Any) -> bool:
+    """Choice menus are debug UX; avoid showing them in normal product flows."""
+
+    if not isinstance(ctx, dict):
+        return False
+    return bool(ctx.get("debug")) or bool(ctx.get("debug_menus"))
+
+
+def _smalltalk_fallback_reply(user_text: str) -> str:
+    t = _normalize_text_for_match(user_text)
+    if any(w in t for w in ["selam", "merhaba", "hello", "hi", "hey"]):
+        return "Merhaba efendim. Nasıl yardımcı olabilirim?"
+    if any(w in t for w in ["nasilsin", "nasil", "naber"]):
+        return "İyiyim efendim, teşekkür ederim. Siz nasılsınız?"
+    if any(w in t for w in ["tesekkur", "teşekkür", "sagol", "sağol"]):
+        return "Her zaman efendim."
+    return "Anlaşıldı efendim. Dilerseniz takviminize de bakabilirim."
+
+
 class LLMClient(Protocol):
     """Minimal adapter interface for BrainLoop.
 
@@ -1677,21 +1696,53 @@ class BrainLoop:
         def _llm_route_classifier(user_text_in: str) -> tuple[str, str, float]:
             """Return (route, calendar_intent, confidence) using the LLM."""
 
+            # Heuristic short-circuit: prevent greetings from ever hitting the menu.
+            nt = _normalize_text_for_match(user_text_in)
+            calendar_keywords = {
+                "takvim",
+                "calendar",
+                "ajanda",
+                "saat",
+                "bugun",
+                "yarin",
+                "aksam",
+                "sabah",
+                "toplanti",
+                "meeting",
+                "plan",
+                "program",
+                "ekle",
+                "olustur",
+                "oluştur",
+                "sil",
+                "iptal",
+                "hatirlat",
+                "hatırlat",
+            }
+            if not any(k in nt for k in calendar_keywords):
+                return _ROUTE_SMALLTALK, "none", 0.8
+
+            # If it mentions calendar-ish words, bias toward calendar query.
+            create_words = {"ekle", "olustur", "oluştur", "planla", "ayarla", "koy"}
+            cancel_words = {"iptal", "sil", "kaldir", "kaldır"}
+            modify_words = {"tasi", "taşı", "degistir", "değiştir", "ertele", "kaydir"}
+            if any(w in nt for w in create_words):
+                return _ROUTE_CALENDAR_CREATE, "create", 0.7
+            if any(w in nt for w in cancel_words):
+                return _ROUTE_CALENDAR_CANCEL, "cancel", 0.7
+            if any(w in nt for w in modify_words):
+                return _ROUTE_CALENDAR_MODIFY, "modify", 0.7
+            # Default: query
+            return _ROUTE_CALENDAR_QUERY, "query", 0.7
+
             schema = {
                 "route": "calendar|smalltalk|unknown",
                 "calendar_intent": "create|modify|cancel|query|none",
                 "confidence": 0.0,
             }
             try:
-                prompt = (
-                    "Sen bir router sınıflandırıcısısın. SADECE şu JSON'u döndür:\n"
-                    + json.dumps(schema, ensure_ascii=False)
-                    + "\n\nKurallar:\n"
-                    + "- route sadece calendar|smalltalk|unknown\n"
-                    + "- calendar_intent sadece create|modify|cancel|query|none\n"
-                    + "- confidence 0.0-1.0 arası\n"
-                    + "- Ek alan ekleme, açıklama yazma.\n"
-                )
+                # Keep prompt minimal to reduce small-model failures.
+                prompt = "SADECE JSON döndür: " + json.dumps(schema, ensure_ascii=False)
                 raw = self._llm.complete_json(
                     messages=[
                         {"role": "system", "content": prompt},
@@ -1700,10 +1751,20 @@ class BrainLoop:
                     schema_hint=json.dumps(schema, ensure_ascii=False),
                 )
             except Exception:
-                return _ROUTE_UNKNOWN, "none", 0.0
+                try:
+                    trace["llm_router_parse_fail"] = True
+                    trace["route_reason"] = (trace.get("route_reason") or []) + ["router_parse_fail_default_smalltalk"]
+                except Exception:
+                    pass
+                return _ROUTE_SMALLTALK, "none", 0.0
 
             if not isinstance(raw, dict):
-                return _ROUTE_UNKNOWN, "none", 0.0
+                try:
+                    trace["llm_router_parse_fail"] = True
+                    trace["route_reason"] = (trace.get("route_reason") or []) + ["router_non_dict_default_smalltalk"]
+                except Exception:
+                    pass
+                return _ROUTE_SMALLTALK, "none", 0.0
 
             route_out = str(raw.get("route") or "").strip().lower()
             intent_out = str(raw.get("calendar_intent") or "").strip().lower()
@@ -1723,7 +1784,13 @@ class BrainLoop:
             if route_out == "smalltalk":
                 return _ROUTE_SMALLTALK, "none", conf
             if route_out == "unknown":
-                return _ROUTE_UNKNOWN, "none", conf
+                # Never surface the unknown menu in product flows; default to smalltalk.
+                try:
+                    trace["llm_router_unknown_default_smalltalk"] = True
+                    trace["route_reason"] = (trace.get("route_reason") or []) + ["router_unknown_default_smalltalk"]
+                except Exception:
+                    pass
+                return _ROUTE_SMALLTALK, "none", conf
 
             # calendar
             if intent_out == "create":
@@ -4157,52 +4224,69 @@ class BrainLoop:
                 )
 
             if route == _ROUTE_SMALLTALK and not isinstance(pending_action, dict):
-                rendered = _render_smalltalk_stage1()
-                try:
-                    if isinstance(state, dict):
-                        state[_PENDING_CHOICE_KEY] = {"menu_id": "smalltalk_stage1", "default": "0"}
-                        state[_DIALOG_STATE_KEY] = "PENDING_CHOICE"
-                except Exception:
-                    pass
-                try:
-                    self._events.publish(
-                        EventType.QUESTION.value, {"question": rendered}, source="brain"
+                if _menus_enabled(ctx):
+                    rendered = _render_smalltalk_stage1()
+                    try:
+                        if isinstance(state, dict):
+                            state[_PENDING_CHOICE_KEY] = {"menu_id": "smalltalk_stage1", "default": "0"}
+                            state[_DIALOG_STATE_KEY] = "PENDING_CHOICE"
+                    except Exception:
+                        pass
+                    try:
+                        self._events.publish(
+                            EventType.QUESTION.value, {"question": rendered}, source="brain"
+                        )
+                    except Exception:
+                        pass
+                    return BrainResult(
+                        kind="ask_user",
+                        text=rendered,
+                        steps_used=0,
+                        metadata=_std_metadata(
+                            ctx=ctx,
+                            state=state,
+                            menu_id="smalltalk_stage1",
+                            options=JarvisVoice.MENU_STAGE1,
+                        ),
                     )
+
+                text = _smalltalk_fallback_reply(user_text)
+                try:
+                    self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
                 except Exception:
                     pass
-                return BrainResult(
-                    kind="ask_user",
-                    text=rendered,
-                    steps_used=0,
-                    metadata=_std_metadata(
-                        ctx=ctx,
-                        state=state,
-                        menu_id="smalltalk_stage1",
-                        options=JarvisVoice.MENU_STAGE1,
-                    ),
-                )
+                return BrainResult(kind="say", text=text, steps_used=0, metadata={"trace": _ensure_trace()})
 
             if route == _ROUTE_UNKNOWN and not isinstance(pending_action, dict):
-                state[_PENDING_CHOICE_KEY] = {"menu_id": "unknown", "default": "0"}
-                state[_DIALOG_STATE_KEY] = "PENDING_CHOICE"
-                rendered = _render_unknown_menu()
-                try:
-                    self._events.publish(
-                        EventType.QUESTION.value, {"question": rendered}, source="brain"
+                if _menus_enabled(ctx):
+                    state[_PENDING_CHOICE_KEY] = {"menu_id": "unknown", "default": "0"}
+                    state[_DIALOG_STATE_KEY] = "PENDING_CHOICE"
+                    rendered = _render_unknown_menu()
+                    try:
+                        self._events.publish(
+                            EventType.QUESTION.value, {"question": rendered}, source="brain"
+                        )
+                    except Exception:
+                        pass
+                    return BrainResult(
+                        kind="ask_user",
+                        text=rendered,
+                        steps_used=0,
+                        metadata=_std_metadata(
+                            ctx=ctx,
+                            state=state,
+                            menu_id="unknown",
+                            options=JarvisVoice.MENU_UNKNOWN,
+                        ),
                     )
+
+                # No menu fallback: ask a single clarifying question.
+                q = "Efendim, bunu takvimle ilgili mi soruyorsunuz, yoksa genel bir şey mi?"
+                try:
+                    self._events.publish(EventType.QUESTION.value, {"question": q}, source="brain")
                 except Exception:
                     pass
-                return BrainResult(
-                    kind="ask_user",
-                    text=rendered,
-                    steps_used=0,
-                    metadata=_std_metadata(
-                        ctx=ctx,
-                        state=state,
-                        menu_id="unknown",
-                        options=JarvisVoice.MENU_UNKNOWN,
-                    ),
-                )
+                return BrainResult(kind="ask_user", text=q, steps_used=0, metadata={"trace": _ensure_trace()})
 
         # Conversation messages for the adapter.
         messages: list[dict[str, str]] = [
@@ -4692,37 +4776,52 @@ class BrainLoop:
                 if isinstance(ctx, dict) and bool(ctx.get("deterministic_render")):
                     route = str(ctx.get("route") or "").strip() or _detect_route(user_text)
                     if not _is_calendar_route(route):
-                        rendered = (
-                            _render_smalltalk_menu(user_text)
-                            if route == _ROUTE_SMALLTALK
-                            else _render_unknown_menu()
-                        )
-                        try:
-                            self._events.publish(
-                                EventType.QUESTION.value,
-                                {"question": rendered},
-                                source="brain",
+                        if _menus_enabled(ctx):
+                            rendered = (
+                                _render_smalltalk_menu(user_text)
+                                if route == _ROUTE_SMALLTALK
+                                else _render_unknown_menu()
                             )
+                            try:
+                                self._events.publish(
+                                    EventType.QUESTION.value,
+                                    {"question": rendered},
+                                    source="brain",
+                                )
+                            except Exception:
+                                pass
+                            return BrainResult(
+                                kind="ask_user",
+                                text=rendered,
+                                steps_used=step_idx,
+                                metadata={
+                                    **_meta(transcript, raw=out_raw),
+                                    **_std_metadata(
+                                        ctx=ctx,
+                                        state=state,
+                                        menu_id=(
+                                            "smalltalk_stage1" if route == _ROUTE_SMALLTALK else "unknown"
+                                        ),
+                                        options=(
+                                            JarvisVoice.MENU_STAGE1 if route == _ROUTE_SMALLTALK else JarvisVoice.MENU_UNKNOWN
+                                        ),
+                                    ),
+                                },
+                            )
+
+                        # Product fallback: never ask the user to choose; reply safely.
+                        text = _smalltalk_fallback_reply(user_text)
+                        try:
+                            trace = _ensure_trace()
+                            trace["deterministic_non_calendar_tool_call"] = True
+                            trace["route_reason"] = (trace.get("route_reason") or []) + ["no_menu_smalltalk_fallback"]
                         except Exception:
                             pass
-                        return BrainResult(
-                            kind="ask_user",
-                            text=rendered,
-                            steps_used=step_idx,
-                            metadata={
-                                **_meta(transcript, raw=out_raw),
-                                **_std_metadata(
-                                    ctx=ctx,
-                                    state=state,
-                                    menu_id=(
-                                        "smalltalk_stage1" if route == _ROUTE_SMALLTALK else "unknown"
-                                    ),
-                                    options=(
-                                        JarvisVoice.MENU_STAGE1 if route == _ROUTE_SMALLTALK else JarvisVoice.MENU_UNKNOWN
-                                    ),
-                                ),
-                            },
-                        )
+                        try:
+                            self._events.publish(EventType.RESULT.value, {"text": text}, source="brain")
+                        except Exception:
+                            pass
+                        return BrainResult(kind="say", text=text, steps_used=step_idx, metadata=_meta(transcript, raw=out_raw))
 
                     # Even on calendar routes, enforce allowlist.
                     if not str(name).startswith("calendar."):
