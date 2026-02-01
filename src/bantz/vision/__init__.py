@@ -34,6 +34,12 @@ from bantz.vision.document import (
     OCRResult,
     MockDocumentAnalyzer,
 )
+from bantz.vision.google_vision import (
+    GoogleVisionClient,
+    GoogleVisionError,
+    vision_ocr,
+    vision_describe,
+)
 from bantz.vision.screen import (
     ScreenUnderstanding,
     ScreenAnalysis,
@@ -74,6 +80,11 @@ __all__ = [
     "DocumentPage",
     "OCRResult",
     "MockDocumentAnalyzer",
+    # Google Vision
+    "GoogleVisionClient",
+    "GoogleVisionError",
+    "vision_ocr",
+    "vision_describe",
     # Screen
     "ScreenUnderstanding",
     "ScreenAnalysis",
