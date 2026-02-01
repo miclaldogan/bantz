@@ -1,0 +1,24 @@
+[Unit]
+Description=Bantz vLLM Watchdog (auto-recovery)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Assumes repo is cloned to ~/Desktop/Bantz (recommended). If yours differs,
+# either edit this file or use scripts/systemd/install_watchdog_user_service.sh.
+WorkingDirectory=%h/Desktop/Bantz
+
+# Prefer venv python if present; otherwise fall back to system python.
+Environment=PATH=%h/Desktop/Bantz/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=python3 scripts/vllm/watchdog.py --port 8001 --interval 10 --timeout 3 --fail-threshold 3 --cooldown 120
+Restart=always
+RestartSec=5
+
+# journald already captures stdout/stderr; watchdog also writes restart context to:
+#   artifacts/logs/vllm/watchdog/
+
+[Install]
+WantedBy=default.target
