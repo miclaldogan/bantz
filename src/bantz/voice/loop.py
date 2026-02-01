@@ -433,9 +433,16 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
                 use_quality = False
                 try:
                     from bantz.llm.tiered import decide_tier
+                    import os
 
                     decision = decide_tier(text)
                     use_quality = bool(decision.use_quality) and decision.reason != "tiering_disabled"
+
+                    if str(os.getenv("BANTZ_TIERED_DEBUG", "")).strip().lower() in {"1", "true", "yes", "on"}:
+                        tier = "quality" if use_quality else "fast"
+                        print(
+                            f"[tiered] voice_fallback tier={tier} reason={decision.reason} c={decision.complexity} w={decision.writing} r={decision.risk}"
+                        )
                 except Exception:
                     use_quality = False
 

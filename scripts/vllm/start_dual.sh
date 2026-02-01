@@ -33,7 +33,7 @@ fi
 # Kill existing servers
 echo ""
 echo "🛑 Mevcut vLLM sunucuları kapatılıyor..."
-pkill -f "vllm" || true
+pkill -f "vllm.entrypoints.openai.api_server" || true
 sleep 3
 
 LOG_DIR="${BANTZ_VLLM_LOG_DIR:-artifacts/logs/vllm}"
@@ -48,7 +48,7 @@ fi
 echo ""
 echo "🚀 3B Model Başlatılıyor (Port 8001)..."
 echo "   Model: ${BANTZ_VLLM_3B_MODEL:-Qwen/Qwen2.5-3B-Instruct-AWQ}"
-echo "   (Dual defaults: gpu_util=${BANTZ_VLLM_3B_GPU_UTIL:-0.30}, max_len=${BANTZ_VLLM_3B_MAX_MODEL_LEN:-1536})"
+echo "   (Dual defaults: gpu_util=${BANTZ_VLLM_3B_GPU_UTIL:-0.45}, max_len=${BANTZ_VLLM_3B_MAX_MODEL_LEN:-1024})"
 
 export BANTZ_VLLM_DUAL_MODE=1
 ./scripts/vllm/start_3b.sh
@@ -56,7 +56,7 @@ export BANTZ_VLLM_DUAL_MODE=1
 echo ""
 echo "🚀 7B Model Başlatılıyor (Port 8002)..."
 echo "   Model: ${BANTZ_VLLM_7B_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
-echo "   (Dual defaults: gpu_util=${BANTZ_VLLM_7B_GPU_UTIL:-0.60}, max_len=${BANTZ_VLLM_7B_MAX_MODEL_LEN:-2048})"
+echo "   (Dual defaults: gpu_util=${BANTZ_VLLM_7B_GPU_UTIL:-0.55}, max_len=${BANTZ_VLLM_7B_MAX_MODEL_LEN:-1536})"
 
 ./scripts/vllm/start_7b.sh
 

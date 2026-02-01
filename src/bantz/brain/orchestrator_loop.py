@@ -567,6 +567,7 @@ class OrchestratorLoop:
             try:
                 # Default behavior is unchanged unless tiering is enabled.
                 from bantz.llm.tiered import decide_tier
+                import os
 
                 decision = decide_tier(
                     user_input,
@@ -577,6 +578,17 @@ class OrchestratorLoop:
                     use_finalizer = True
                 else:
                     use_finalizer = bool(decision.use_quality)
+
+                if str(os.getenv("BANTZ_TIERED_DEBUG", "")).strip().lower() in {"1", "true", "yes", "on"}:
+                    tier = "quality" if use_finalizer else "fast"
+                    logger.info(
+                        "[tiered] orchestrator_finalizer tier=%s reason=%s c=%s w=%s r=%s",
+                        tier,
+                        decision.reason,
+                        decision.complexity,
+                        decision.writing,
+                        decision.risk,
+                    )
             except Exception:
                 use_finalizer = True
 

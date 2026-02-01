@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 import os
-import re
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from bantz.llm.base import LLMClientProtocol
 
 from . import create_fast_client, create_quality_client
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -184,15 +187,26 @@ def decide_tier(
     - BANTZ_TIERED_MODE=1 enables auto decisions (otherwise always fast unless forced)
     - BANTZ_LLM_TIER=fast|quality|auto forces tier
     """
+    debug = _env_flag("BANTZ_TIERED_DEBUG", default=False)
+
     forced = str(os.getenv("BANTZ_LLM_TIER", "")).strip().lower()
     if forced in {"fast", "3b", "small"}:
-        return TierDecision(False, "forced_fast", 0, 0, 0)
+        d = TierDecision(False, "forced_fast", 0, 0, 0)
+        if debug:
+            logger.info("[tiered] forced=fast")
+        return d
     if forced in {"quality", "7b", "large"}:
-        return TierDecision(True, "forced_quality", 5, 5, 0)
+        d = TierDecision(True, "forced_quality", 5, 5, 0)
+        if debug:
+            logger.info("[tiered] forced=quality")
+        return d
 
     if not _env_flag("BANTZ_TIERED_MODE", default=False):
         # Tiering disabled: default to fast.
-        return TierDecision(False, "tiering_disabled", 0, 0, 0)
+        d = TierDecision(False, "tiering_disabled", 0, 0, 0)
+        if debug:
+            logger.info("[tiered] disabled -> fast")
+        return d
 
     complexity = score_complexity(text)
     writing = score_writing_need(text)
@@ -206,16 +220,52 @@ def decide_tier(
     if force_kw_raw:
         kws = [x.strip() for x in force_kw_raw.split(",") if x.strip()]
         if kws and _contains_any(text, kws):
-            return TierDecision(True, "forced_by_keyword", complexity, writing, risk)
+            d = TierDecision(True, "forced_by_keyword", complexity, writing, risk)
+            if debug:
+                logger.info(
+                    "[tiered] quality (%s) c=%s w=%s r=%s",
+                    d.reason,
+                    d.complexity,
+                    d.writing,
+                    d.risk,
+                )
+            return d
 
     if complexity >= min_complexity or writing >= min_writing:
-        return TierDecision(True, "auto_escalate", complexity, writing, risk)
+        d = TierDecision(True, "auto_escalate", complexity, writing, risk)
+        if debug:
+            logger.info(
+                "[tiered] quality (%s) c=%s w=%s r=%s",
+                d.reason,
+                d.complexity,
+                d.writing,
+                d.risk,
+            )
+        return d
 
     # Risky actions: keep execution control on fast, but allow quality drafts elsewhere.
     if risk >= 4 and writing >= 2:
-        return TierDecision(True, "risky_draft", complexity, writing, risk)
+        d = TierDecision(True, "risky_draft", complexity, writing, risk)
+        if debug:
+            logger.info(
+                "[tiered] quality (%s) c=%s w=%s r=%s",
+                d.reason,
+                d.complexity,
+                d.writing,
+                d.risk,
+            )
+        return d
 
-    return TierDecision(False, "fast_ok", complexity, writing, risk)
+    d = TierDecision(False, "fast_ok", complexity, writing, risk)
+    if debug:
+        logger.info(
+            "[tiered] fast (%s) c=%s w=%s r=%s",
+            d.reason,
+            d.complexity,
+            d.writing,
+            d.risk,
+        )
+    return d
 
 
 def get_client_for_text(

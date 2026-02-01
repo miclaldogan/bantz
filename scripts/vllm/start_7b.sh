@@ -33,9 +33,9 @@ echo "🚀 Starting vLLM server (7B AWQ) on port 8002..."
 echo "   Model: ${BANTZ_VLLM_7B_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
 echo "   Quantization: ${BANTZ_VLLM_7B_QUANT:-awq_marlin}"
 echo "   Profile: quality / dual-friendly defaults (override via env vars)"
-echo "   Max tokens: ${BANTZ_VLLM_7B_MAX_MODEL_LEN:-2048}"
-echo "   GPU utilization: ${BANTZ_VLLM_7B_GPU_UTIL:-0.60}"
-echo "   Offload: cpu_offload_gb=${BANTZ_VLLM_7B_CPU_OFFLOAD_GB:-6}, swap_space=${BANTZ_VLLM_7B_SWAP_SPACE:-8}"
+echo "   Max tokens: ${BANTZ_VLLM_7B_MAX_MODEL_LEN:-1536}"
+echo "   GPU utilization: ${BANTZ_VLLM_7B_GPU_UTIL:-0.55}"
+echo "   Offload: cpu_offload_gb=${BANTZ_VLLM_7B_CPU_OFFLOAD_GB:-6}, swap_space=${BANTZ_VLLM_7B_SWAP_SPACE:-6}"
 echo ""
 
 PYTHON_BIN="${BANTZ_VLLM_PYTHON:-python3}"
@@ -46,10 +46,10 @@ fi
 
 EXTRA_ARGS=()
 if [ "${BANTZ_VLLM_7B_CPU_OFFLOAD_GB:-6}" != "0" ]; then
-        EXTRA_ARGS+=("--cpu-offload-gb" "${BANTZ_VLLM_7B_CPU_OFFLOAD_GB:-6}")
+    EXTRA_ARGS+=("--cpu-offload-gb" "${BANTZ_VLLM_7B_CPU_OFFLOAD_GB:-6}")
 fi
-if [ "${BANTZ_VLLM_7B_SWAP_SPACE:-8}" != "0" ]; then
-        EXTRA_ARGS+=("--swap-space" "${BANTZ_VLLM_7B_SWAP_SPACE:-8}")
+if [ "${BANTZ_VLLM_7B_SWAP_SPACE:-6}" != "0" ]; then
+    EXTRA_ARGS+=("--swap-space" "${BANTZ_VLLM_7B_SWAP_SPACE:-6}")
 fi
 
 nohup "$PYTHON_BIN" -m vllm.entrypoints.openai.api_server \
@@ -57,8 +57,8 @@ nohup "$PYTHON_BIN" -m vllm.entrypoints.openai.api_server \
     --quantization "${BANTZ_VLLM_7B_QUANT:-awq_marlin}" \
     --dtype "${BANTZ_VLLM_7B_DTYPE:-half}" \
     --port "${BANTZ_VLLM_7B_PORT:-8002}" \
-    --max-model-len "${BANTZ_VLLM_7B_MAX_MODEL_LEN:-2048}" \
-    --gpu-memory-utilization "${BANTZ_VLLM_7B_GPU_UTIL:-0.60}" \
+    --max-model-len "${BANTZ_VLLM_7B_MAX_MODEL_LEN:-1536}" \
+    --gpu-memory-utilization "${BANTZ_VLLM_7B_GPU_UTIL:-0.55}" \
     --max-num-seqs "${BANTZ_VLLM_7B_MAX_NUM_SEQS:-16}" \
     --max-num-batched-tokens "${BANTZ_VLLM_7B_MAX_BATCH_TOKENS:-4096}" \
     --enable-prefix-caching \

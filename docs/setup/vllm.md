@@ -35,6 +35,12 @@ Bu durumda `.venv` zorunlu değil; önemli olan `python3 -c 'import vllm'` çal�
 Tek GPU’da iki instance çalıştırmak istiyorsan:
 
 ```bash
+./scripts/start_dual.sh
+```
+
+Alternatif (doğrudan):
+
+```bash
 ./scripts/vllm/start_dual.sh
 ```
 
@@ -42,10 +48,12 @@ Bu scriptler “dual-friendly” KV/cache limitleriyle gelir (VRAM/KV-cache patl
 Gerekirse env ile daha da kısabilirsin:
 
 ```bash
-export BANTZ_VLLM_3B_GPU_UTIL=0.28
+export BANTZ_VLLM_3B_GPU_UTIL=0.45
 export BANTZ_VLLM_3B_MAX_MODEL_LEN=1024
-export BANTZ_VLLM_7B_GPU_UTIL=0.58
+export BANTZ_VLLM_7B_GPU_UTIL=0.55
+export BANTZ_VLLM_7B_MAX_MODEL_LEN=1536
 export BANTZ_VLLM_7B_CPU_OFFLOAD_GB=6
+export BANTZ_VLLM_7B_SWAP_SPACE=6
 ```
 
 3) Sunucu kontrol:
@@ -64,7 +72,7 @@ Not: 6GB VRAM cihazlarda 3B ve 7B aynı anda çalışmayabilir.
 ## Yönetim Komutları
 
 ```bash
-./scripts/vllm/status.sh
+./scripts/vllm_status.sh
 ./scripts/vllm/test.sh 8001
 ./scripts/vllm/test.sh 8002
 ./scripts/vllm/stop.sh

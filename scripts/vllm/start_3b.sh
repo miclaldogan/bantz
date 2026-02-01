@@ -29,8 +29,8 @@ echo "🚀 Starting vLLM server (3B AWQ) on port 8001..."
 echo "   Model: Qwen/Qwen2.5-3B-Instruct-AWQ"
 echo "   Quantization: awq_marlin (optimized)"
 echo "   Profile: dual-friendly defaults (override via env vars)"
-echo "   Max tokens: ${BANTZ_VLLM_3B_MAX_MODEL_LEN:-1536}"
-echo "   GPU utilization: ${BANTZ_VLLM_3B_GPU_UTIL:-0.30}"
+echo "   Max tokens: ${BANTZ_VLLM_3B_MAX_MODEL_LEN:-1024}"
+echo "   GPU utilization: ${BANTZ_VLLM_3B_GPU_UTIL:-0.45}"
 echo ""
 
 # Use global Python for now (no venv requirement).
@@ -45,8 +45,8 @@ nohup "$PYTHON_BIN" -m vllm.entrypoints.openai.api_server \
     --quantization "${BANTZ_VLLM_3B_QUANT:-awq_marlin}" \
     --dtype "${BANTZ_VLLM_3B_DTYPE:-half}" \
     --port "${BANTZ_VLLM_3B_PORT:-8001}" \
-    --max-model-len "${BANTZ_VLLM_3B_MAX_MODEL_LEN:-1536}" \
-    --gpu-memory-utilization "${BANTZ_VLLM_3B_GPU_UTIL:-0.30}" \
+    --max-model-len "${BANTZ_VLLM_3B_MAX_MODEL_LEN:-1024}" \
+    --gpu-memory-utilization "${BANTZ_VLLM_3B_GPU_UTIL:-0.45}" \
     --max-num-seqs "${BANTZ_VLLM_3B_MAX_NUM_SEQS:-32}" \
     --max-num-batched-tokens "${BANTZ_VLLM_3B_MAX_BATCH_TOKENS:-2048}" \
     --enable-prefix-caching \
