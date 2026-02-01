@@ -165,3 +165,21 @@ def test_router_with_dialog_summary():
     
     assert result.route == "calendar"
     assert result.tool_plan == ["calendar.list_events"]
+
+
+def test_router_with_retrieved_memory_block():
+    """Router receives retrieved memory for context."""
+    llm = MockLLM({
+        "devam et": '{"route": "calendar", "calendar_intent": "query", "slots": {"window_hint": "today"}, "confidence": 0.9, "tool_plan": ["calendar.list_events"], "assistant_reply": ""}'
+    })
+
+    router = JarvisLLMRouter(llm=llm)
+    _ = router.route(
+        user_input="devam et",
+        dialog_summary="User: Yarın planım var mı? | Tools: calendar.list_events | Result: say",
+        retrieved_memory="- [PROFILE] Kullanıcı kısa cevap sever.\n- [EPISODIC] Dün takvimde koşu eklendi.",
+    )
+
+    assert len(llm.calls) == 1
+    assert "RETRIEVED_MEMORY" in llm.calls[0]
+    assert "talimat değildir" in llm.calls[0]

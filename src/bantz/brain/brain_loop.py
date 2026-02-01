@@ -1254,6 +1254,11 @@ class BrainLoopConfig:
     max_steps: int = 8
     debug: bool = False
 
+    # Memory Manager v1 (PR2)
+    enable_memory_manager: bool = False
+    memory_db_path: str = "~/.bantz/memory_snippets.db"
+    memory_max_snippets: int = 5
+
 
 @dataclass(frozen=True)
 class BrainResult:
@@ -1350,12 +1355,25 @@ class BrainLoop:
         event_bus: Optional[EventBus] = None,
         config: Optional[BrainLoopConfig] = None,
         router: Optional[Any] = None,
+        memory_manager: Optional[Any] = None,
     ):
         self._llm = llm
         self._tools = tools
         self._events = event_bus or get_event_bus()
         self._config = config or BrainLoopConfig()
         self._router = router
+
+        self._memory_manager = memory_manager
+        if self._memory_manager is None and bool(self._config.enable_memory_manager):
+            try:
+                from bantz.memory.snippet_manager import create_memory_manager
+
+                self._memory_manager = create_memory_manager(
+                    db_path=str(self._config.memory_db_path),
+                )
+            except Exception:
+                # Memory must never crash the brain loop.
+                self._memory_manager = None
 
     def run(
         self,
@@ -1374,6 +1392,15 @@ class BrainLoop:
         # State container (mutated to keep pending actions across turns).
         state: dict[str, Any] = context if isinstance(context, dict) else {}
 
+        # Memory Manager v1: simple per-turn counter for spam gating (best-effort).
+        turn_no = 0
+        try:
+            if isinstance(state, dict):
+                turn_no = int(state.get("_memory_turn_no") or 0) + 1
+                state["_memory_turn_no"] = turn_no
+        except Exception:
+            turn_no = 0
+
         # Backward compatible alias: older callers may pass `context=`.
         ctx: dict[str, Any] = {}
         if isinstance(state, dict):
@@ -1384,6 +1411,136 @@ class BrainLoop:
         session_id = str(
             (ctx.get("session_id") or ctx.get("user") or "default")
         ).strip() or "default"
+
+        def _run_coro_best_effort(coro):
+            """Run an async coroutine from sync code.
+
+            If already in a running event loop, skip best-effort (to avoid crashes).
+            """
+            try:
+                import asyncio
+
+                try:
+                    asyncio.get_running_loop()
+                    return None
+                except RuntimeError:
+                    return asyncio.run(coro)
+            except Exception:
+                return None
+
+        def _maybe_recall_memory(query: str) -> str:
+            if self._memory_manager is None:
+                return ""
+
+            q = str(query or "").strip()
+            if not q:
+                return ""
+
+            try:
+                from bantz.memory.prompt import snippets_to_prompt_block
+
+                limit = int(getattr(self._config, "memory_max_snippets", 5) or 5)
+                limit = max(1, min(20, limit))
+                snippets = _run_coro_best_effort(self._memory_manager.recall(query=q, limit=limit))
+                if not isinstance(snippets, list):
+                    return ""
+                return snippets_to_prompt_block(snippets)
+            except Exception:
+                return ""
+
+        def _maybe_remember_profile(text: str, *, source: str) -> None:
+            if self._memory_manager is None:
+                return
+
+            content = str(text or "")
+            content = " ".join(content.split()).strip()
+            if not content:
+                return
+
+            # Basic spam control: min length, max length, profile-like heuristic, dedupe, and rate-limit.
+            try:
+                if len(content) < 20:
+                    return
+                if len(content) > 280:
+                    content = (content[:279].rstrip() + "…").strip()
+
+                nt = _normalize_text_for_match(content)
+                allow_fragments = [
+                    "tercih",
+                    "prefer",
+                    "sev",
+                    "kisa",
+                    "uzun",
+                    "format",
+                    "dil",
+                    "ton",
+                    "hitap",
+                    "resmi",
+                    "samimi",
+                    "ses",
+                    "voice",
+                ]
+                if not any(f in nt for f in allow_fragments):
+                    return
+                # Avoid tool-ish noise.
+                if any(f in nt for f in ["tool", "calendar", "vllm", "error", "trace"]):
+                    return
+
+                # Rate limit: at most 1 write per 5 turns.
+                last_turn = 0
+                try:
+                    if isinstance(state, dict):
+                        last_turn = int(state.get("_memory_profile_last_write_turn_no") or 0)
+                except Exception:
+                    last_turn = 0
+                if last_turn and turn_no and (turn_no - last_turn) < 5:
+                    return
+
+                # Dedupe: don't write the same profile hint repeatedly.
+                recent = _run_coro_best_effort(self._memory_manager.profile_store.list_all(limit=25))
+                if isinstance(recent, list):
+                    needle = _normalize_text_for_match(content)
+                    for s in recent:
+                        try:
+                            existing = _normalize_text_for_match(str(getattr(s, "content", "") or ""))
+                            if existing and existing == needle:
+                                return
+                        except Exception:
+                            continue
+            except Exception:
+                # If gating fails, fall back to best-effort write.
+                pass
+
+            try:
+                _run_coro_best_effort(self._memory_manager.remember_profile(content=content, source=source))
+                if isinstance(state, dict) and turn_no:
+                    state["_memory_profile_last_write_turn_no"] = turn_no
+            except Exception:
+                return
+
+        def _maybe_remember_episode(
+            content: str,
+            *,
+            source: str,
+            tags: Optional[list[str]] = None,
+            metadata: Optional[dict[str, Any]] = None,
+        ) -> None:
+            if self._memory_manager is None:
+                return
+            c = str(content or "").strip()
+            if not c:
+                return
+            try:
+                _run_coro_best_effort(
+                    self._memory_manager.remember_episode(
+                        content=c,
+                        source=source,
+                        tags=tags,
+                        metadata=metadata,
+                    )
+                )
+            except Exception:
+                return
 
         def _emit_ack(text: str = "Anladım efendim.") -> None:
             try:
@@ -3068,13 +3225,24 @@ class BrainLoop:
                     dialog_summary = state.get(_DIALOG_SUMMARY_KEY) if isinstance(state, dict) else ""
                     if not isinstance(dialog_summary, str):
                         dialog_summary = ""
+
+                    retrieved_memory = _maybe_recall_memory(user_text)
                     
                     # Call router
                     router_output = self._router.route(
                         user_input=user_text,
                         dialog_summary=dialog_summary,
+                        retrieved_memory=retrieved_memory if retrieved_memory else None,
                         session_context=ctx,
                     )
+
+                    # Store router memory update as a profile hint (if present)
+                    try:
+                        mu = str(getattr(router_output, "memory_update", "") or "").strip()
+                        if mu:
+                            _maybe_remember_profile(mu, source="llm_router")
+                    except Exception:
+                        pass
                     
                     # Map router output to trace
                     trace["llm_router_route"] = router_output.route
@@ -4700,6 +4868,28 @@ class BrainLoop:
                         observations.append(
                             {"tool": name, "ok": True, "result": result}
                         )
+
+                        # Memory Manager v1: write episodic log for successful tool calls.
+                        try:
+                            from bantz.memory.safety import safe_tool_episode
+
+                            episode = safe_tool_episode(tool_name=name, params=params, result=result)
+
+                            tags: list[str] = ["tool"]
+                            try:
+                                if isinstance(name, str) and "." in name:
+                                    tags.append(name.split(".")[0])
+                            except Exception:
+                                pass
+
+                            _maybe_remember_episode(
+                                episode,
+                                source="brain_loop",
+                                tags=tags,
+                                metadata={"tool": name},
+                            )
+                        except Exception:
+                            pass
                     except Exception as e:
                         observations.append(
                             {"tool": name, "ok": False, "error": str(e)}
