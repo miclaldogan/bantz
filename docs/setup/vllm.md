@@ -173,3 +173,63 @@ Kaliteye zorlayan keyword listesi (opsiyonel):
 ```bash
 export BANTZ_TIERED_FORCE_QUALITY_KEYWORDS="mail,taslak,roadmap,detaylı"
 ```
+
+## Auto-recovery (Issue #181): vLLM watchdog
+
+vLLM bazen OOM/driver sorunlarıyla düşebilir veya `/v1/models` cevap vermez hale gelebilir.
+Bu durumda otomatik restart için watchdog kullan:
+
+```bash
+python3 scripts/vllm/watchdog.py --port 8001
+```
+
+Önerilen ayarlar (3 ardışık hata → restart, 2dk cooldown):
+
+```bash
+python3 scripts/vllm/watchdog.py --port 8001 --interval 10 --timeout 3 --fail-threshold 3 --cooldown 120
+```
+
+Watchdog restart öncesi/sonrası debug çıktıları şu klasöre yazılır:
+`artifacts/logs/vllm/watchdog/`
+
+## QoS (router/voice vs quality)
+
+Amaç: fast path’in "takılmaması" (kısa timeout + kısa cevap), kalite işlerinde daha geniş limit.
+
+Env ile ayarlayabilirsin:
+
+```bash
+# Genel varsayılanlar
+export BANTZ_QOS_FAST_TIMEOUT_S=20
+export BANTZ_QOS_FAST_MAX_TOKENS=256
+export BANTZ_QOS_QUALITY_TIMEOUT_S=90
+export BANTZ_QOS_QUALITY_MAX_TOKENS=512
+
+# Profil bazlı override (örn: voice)
+export BANTZ_QOS_VOICE_FAST_TIMEOUT_S=15
+export BANTZ_QOS_VOICE_FAST_MAX_TOKENS=192
+export BANTZ_QOS_VOICE_QUALITY_TIMEOUT_S=60
+export BANTZ_QOS_VOICE_QUALITY_MAX_TOKENS=384
+```
+
+Şu an QoS profili voice fallback ve validation script’te aktif.
+
+## Tuning loop: benchmark profilleri
+
+Issue #180 benchmark’ını iki profille (router-like + generation-like) koşturmak için:
+
+```bash
+python3 scripts/tune_vllm.py
+```
+
+Baseline kaydet/yenile:
+
+```bash
+python3 scripts/tune_vllm.py --baseline-dir artifacts/results/baselines --write-baseline
+```
+
+Regression gate (örn: %10’dan fazla düşerse exit 2):
+
+```bash
+python3 scripts/tune_vllm.py --baseline-dir artifacts/results/baselines --fail-regression-pct 10
+```

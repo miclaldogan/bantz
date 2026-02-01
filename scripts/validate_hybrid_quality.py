@@ -6,7 +6,7 @@ import logging
 
 from bantz.llm import create_fast_client, create_quality_client
 from bantz.llm.base import LLMMessage
-from bantz.llm.tiered import decide_tier
+from bantz.llm.tiered import decide_tier, get_qos
 
 
 def _env(name: str, default: str = "") -> str:
@@ -48,11 +48,14 @@ def _run_case(name: str, text: str) -> None:
     d = decide_tier(text)
     print(f"tier_decision use_quality={d.use_quality} reason={d.reason} c={d.complexity} w={d.writing} r={d.risk}")
 
+    qos = get_qos(use_quality=bool(d.use_quality), profile="validate")
+    print(f"qos timeout_s={qos.timeout_s} max_tokens={qos.max_tokens}")
+
     # For routing validation we explicitly show which client would be used.
     if d.use_quality:
-        llm = create_quality_client()
+        llm = create_quality_client(timeout=float(qos.timeout_s))
     else:
-        llm = create_fast_client()
+        llm = create_fast_client(timeout=float(qos.timeout_s))
 
     extra = ""
     if getattr(llm, "backend_name", "") == "vllm" and hasattr(llm, "base_url"):
@@ -60,7 +63,11 @@ def _run_case(name: str, text: str) -> None:
     print(f"client backend={llm.backend_name} model={llm.model_name}{extra}")
 
     t0 = time.perf_counter()
-    out = llm.chat([LLMMessage(role="user", content=text)], temperature=0.2, max_tokens=220)
+    out = llm.chat(
+        [LLMMessage(role="user", content=text)],
+        temperature=0.2,
+        max_tokens=int(qos.max_tokens),
+    )
     dt_ms = int((time.perf_counter() - t0) * 1000)
 
     print(f"latency_ms={dt_ms}")
