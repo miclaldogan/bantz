@@ -68,12 +68,14 @@ class OrchestratorLoop:
         event_bus: Optional[EventBus] = None,
         config: Optional[OrchestratorConfig] = None,
         finalizer_llm: Optional[Any] = None,
+        audit_logger: Optional[Any] = None,
     ):
         self.orchestrator = orchestrator
         self.tools = tools
         self.event_bus = event_bus or EventBus()
         self.config = config or OrchestratorConfig()
         self.finalizer_llm = finalizer_llm
+        self.audit_logger = audit_logger  # For tool execution auditing (Issue #160)
         
         # Initialize memory-lite (Issue #141)
         self.memory = DialogSummaryManager(
@@ -418,33 +420,60 @@ class OrchestratorLoop:
                     })
                     continue
             
-            # Confirmation firewall (destructive operations)
-            if tool_name in self.config.require_confirmation_for:
-                if not output.requires_confirmation:
+            # Confirmation firewall (Issue #160 - enhanced)
+            # Import metadata module for risk classification
+            from bantz.tools.metadata import (
+                get_tool_risk,
+                is_destructive,
+                requires_confirmation as check_confirmation,
+                get_confirmation_prompt,
+            )
+            
+            risk = get_tool_risk(tool_name)
+            needs_confirmation = check_confirmation(
+                tool_name,
+                llm_requested=bool(output.requires_confirmation)
+            )
+            
+            if needs_confirmation:
+                # FIREWALL: Destructive tools always need confirmation
+                # Even if LLM didn't request it
+                if is_destructive(tool_name) and not output.requires_confirmation:
                     logger.warning(
-                        f"Tool {tool_name} requires confirmation but LLM didn't set requires_confirmation=True. "
-                        f"Skipping tool for safety."
+                        f"[FIREWALL] Tool {tool_name} is DESTRUCTIVE but LLM didn't request confirmation. "
+                        f"Enforcing confirmation requirement (Issue #160)."
                     )
-                    tool_results.append({
-                        "tool": tool_name,
-                        "success": False,
-                        "error": "Confirmation required but not requested by LLM",
-                    })
-                    continue
                 
                 if not state.has_pending_confirmation():
                     # First time asking - don't execute yet
-                    logger.info(f"Tool {tool_name} requires confirmation. Asking user first.")
+                    prompt = get_confirmation_prompt(tool_name, output.slots)
+                    logger.info(f"[FIREWALL] Tool {tool_name} ({risk.value}) requires confirmation.")
+                    
                     state.set_pending_confirmation({
                         "tool": tool_name,
-                        "prompt": output.confirmation_prompt,
+                        "prompt": prompt,
                         "slots": output.slots,
+                        "risk_level": risk.value,
                     })
+                    
                     tool_results.append({
                         "tool": tool_name,
                         "success": False,
                         "pending_confirmation": True,
+                        "risk_level": risk.value,
+                        "confirmation_prompt": prompt,
                     })
+                    
+                    # Audit confirmation request
+                    if self.safety_guard:
+                        self.safety_guard.audit_decision(
+                            decision_type="confirmation_required",
+                            tool_name=tool_name,
+                            allowed=False,
+                            reason=f"Destructive tool ({risk.value}) requires user confirmation",
+                            metadata={"prompt": prompt, "params": output.slots},
+                        )
+                    
                     continue
                 else:
                     # Confirmation already pending - this is the confirmed execution
@@ -494,19 +523,36 @@ class OrchestratorLoop:
                     "tool": tool_name,
                     "success": True,
                     "result": str(result)[:500],  # Truncate
+                    "risk_level": risk.value,
                 })
                 
                 # Add to state
                 state.add_tool_result(tool_name, result, success=True)
                 
-                # Audit successful execution
+                # Audit successful execution (Issue #160)
+                if self.audit_logger:
+                    try:
+                        from bantz.tools.metadata import get_tool_risk
+                        risk_level = get_tool_risk(tool_name)
+                        self.audit_logger.log_tool_execution(
+                            tool_name=tool_name,
+                            risk_level=risk_level.value,
+                            success=True,
+                            confirmed=state.has_pending_confirmation(),  # Was it confirmed?
+                            params=params,
+                            result=result,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to log tool execution: {e}")
+                
+                # Audit successful execution (Safety Guard)
                 if self.safety_guard:
                     self.safety_guard.audit_decision(
                         decision_type="tool_execute",
                         tool_name=tool_name,
                         allowed=True,
                         reason="Tool executed successfully",
-                        metadata={"params": params},
+                        metadata={"params": params, "risk_level": risk.value},
                     )
                 
                 # Emit tool event
@@ -522,8 +568,25 @@ class OrchestratorLoop:
                     "tool": tool_name,
                     "success": False,
                     "error": str(e),
+                    "risk_level": risk.value,
                 })
                 state.add_tool_result(tool_name, str(e), success=False)
+                
+                # Audit failed execution (Issue #160)
+                if self.audit_logger:
+                    try:
+                        from bantz.tools.metadata import get_tool_risk
+                        risk_level = get_tool_risk(tool_name)
+                        self.audit_logger.log_tool_execution(
+                            tool_name=tool_name,
+                            risk_level=risk_level.value,
+                            success=False,
+                            confirmed=False,
+                            error=str(e),
+                            params=params if 'params' in locals() else None,
+                        )
+                    except Exception as audit_err:
+                        logger.warning(f"Failed to log tool execution error: {audit_err}")
         
         return tool_results
     
