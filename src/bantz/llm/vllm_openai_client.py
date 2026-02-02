@@ -1,13 +1,23 @@
 """vLLM OpenAI-compatible client for fast GPU inference.
 
 Issue #133: Backend Abstraction
+Issue #158: TTFT Monitoring & Optimization
 
 This client uses vLLM's OpenAI-compatible API endpoint to run local models with GPU acceleration.
 vLLM provides 10-20x throughput compared to standard inference.
 
+Features:
+- Streaming support with TTFT measurement
+- Automatic TTFT monitoring integration
+- Performance regression detection
+
 Usage:
     >>> client = VLLMOpenAIClient(base_url='http://localhost:8001')
     >>> response = client.chat([LLMMessage(role='user', content='Hello')])
+    
+    >>> # Streaming with TTFT
+    >>> for chunk in client.chat_stream([LLMMessage(role='user', content='Hello')]):
+    ...     print(chunk, end='', flush=True)
     
 Requirements:
     pip install openai
@@ -22,7 +32,8 @@ import json
 import logging
 import os
 import time
-from typing import List, Optional
+from typing import List, Optional, Iterator, Any
+from dataclasses import dataclass
 
 from bantz.llm.base import (
     LLMClient,
@@ -34,6 +45,17 @@ from bantz.llm.base import (
     LLMInvalidResponseError,
 )
 
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StreamChunk:
+    """Streaming response chunk."""
+    content: str
+    is_first_token: bool = False
+    ttft_ms: Optional[int] = None
+    finish_reason: Optional[str] = None
+
 
 class VLLMOpenAIClient(LLMClient):
     """vLLM client using OpenAI-compatible API.
@@ -41,10 +63,17 @@ class VLLMOpenAIClient(LLMClient):
     This client connects to a local vLLM server (or remote endpoint) that exposes
     an OpenAI-compatible /v1/chat/completions endpoint.
     
+    Features (Issue #158):
+    - Streaming support with TTFT measurement
+    - Automatic TTFT monitoring integration
+    - Performance tracking
+    
     Attributes:
         base_url: vLLM server URL (e.g., http://localhost:8001)
         model: Model name (e.g., Qwen/Qwen2.5-3B-Instruct)
         timeout_seconds: Request timeout
+        track_ttft: Enable TTFT tracking (default: True)
+        ttft_phase: Phase name for TTFT tracking ("router" | "finalizer")
     """
     
     def __init__(
@@ -52,10 +81,14 @@ class VLLMOpenAIClient(LLMClient):
         base_url: str = "http://127.0.0.1:8001",
         model: str = "Qwen/Qwen2.5-3B-Instruct",
         timeout_seconds: float = 120.0,
+        track_ttft: bool = True,
+        ttft_phase: str = "router",
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model.strip()
         self.timeout_seconds = float(timeout_seconds)
+        self.track_ttft = track_ttft
+        self.ttft_phase = ttft_phase
         
         # Lazy-import OpenAI client
         self._client: Optional[object] = None
@@ -161,6 +194,20 @@ class VLLMOpenAIClient(LLMClient):
                 finish_reason=choice.finish_reason or "stop",
             )
 
+            # Track TTFT (approximate for non-streaming)
+            if self.track_ttft:
+                try:
+                    from bantz.llm.ttft_monitor import record_ttft
+                    record_ttft(
+                        ttft_ms=elapsed_ms,  # Approximate: total time for non-streaming
+                        phase=self.ttft_phase,
+                        model=self.model_name,
+                        backend=self.backend_name,
+                        total_tokens=resp.tokens_used,
+                    )
+                except Exception as e:
+                    logger.debug(f"TTFT tracking failed: {e}")
+
             if _metrics_enabled():
                 logging.getLogger("bantz.llm.metrics").info(
                     "llm_call backend=%s model=%s latency_ms=%s total_tokens=%s",
@@ -196,6 +243,140 @@ class VLLMOpenAIClient(LLMClient):
             else:
                 raise LLMInvalidResponseError(
                     f"vLLM response parsing failed: {e}"
+                ) from e
+    
+    def chat_stream(
+        self,
+        messages: List[LLMMessage],
+        *,
+        temperature: float = 0.4,
+        max_tokens: int = 512,
+        seed: Optional[int] = None,
+    ) -> Iterator[StreamChunk]:
+        """Chat completion with streaming (Issue #158).
+        
+        This enables TTFT measurement and real-time response display.
+        
+        Args:
+            messages: Chat messages
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            seed: Random seed
+            
+        Yields:
+            StreamChunk with content and TTFT metadata
+            
+        Example:
+            >>> for chunk in client.chat_stream(messages):
+            ...     if chunk.is_first_token:
+            ...         print(f"[TTFT: {chunk.ttft_ms}ms]")
+            ...     print(chunk.content, end='', flush=True)
+        """
+        client = self._get_client()
+        
+        # Model auto-selection
+        if (self.model or "").strip().lower() == "auto":
+            models = self.list_available_models(timeout_seconds=2.0)
+            if not models:
+                raise LLMModelNotFoundError(
+                    f"vLLM ({self.base_url}) did not report any models via /v1/models"
+                )
+            self.model = str(models[0]).strip()
+        
+        # Convert to OpenAI message format
+        openai_messages = [
+            {"role": m.role, "content": m.content}
+            for m in messages
+        ]
+        
+        t0 = time.perf_counter()
+        ttft_measured = False
+        ttft_ms = None
+        total_tokens = 0
+        
+        try:
+            # Call OpenAI-compatible streaming API
+            stream = client.chat.completions.create(
+                model=self.model,
+                messages=openai_messages,
+                temperature=float(temperature),
+                max_tokens=int(max_tokens),
+                seed=seed,
+                stream=True,
+            )
+            
+            for chunk_data in stream:
+                # First token timing
+                if not ttft_measured:
+                    ttft_ms = int((time.perf_counter() - t0) * 1000)
+                    ttft_measured = True
+                    
+                    # Track TTFT
+                    if self.track_ttft:
+                        try:
+                            from bantz.llm.ttft_monitor import record_ttft
+                            record_ttft(
+                                ttft_ms=ttft_ms,
+                                phase=self.ttft_phase,
+                                model=self.model_name,
+                                backend=self.backend_name,
+                            )
+                        except Exception as e:
+                            logger.debug(f"TTFT tracking failed: {e}")
+                
+                # Extract content
+                if not chunk_data.choices:
+                    continue
+                
+                choice = chunk_data.choices[0]
+                delta = choice.delta
+                
+                content = delta.content or ""
+                finish_reason = choice.finish_reason
+                
+                if content:
+                    total_tokens += 1
+                    
+                    yield StreamChunk(
+                        content=content,
+                        is_first_token=(total_tokens == 1),
+                        ttft_ms=ttft_ms if total_tokens == 1 else None,
+                        finish_reason=finish_reason,
+                    )
+                
+                if finish_reason:
+                    break
+            
+            # Log final metrics
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            
+            if _metrics_enabled():
+                logging.getLogger("bantz.llm.metrics").info(
+                    "llm_stream backend=%s model=%s ttft_ms=%s total_ms=%s total_tokens=%s",
+                    self.backend_name,
+                    self.model_name,
+                    ttft_ms or -1,
+                    elapsed_ms,
+                    total_tokens,
+                )
+        
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            # Classify error type
+            if "connection" in error_msg or "refused" in error_msg:
+                raise LLMConnectionError(
+                    f"vLLM sunucusuna bağlanamadım ({self.base_url})"
+                ) from e
+            
+            elif "timeout" in error_msg:
+                raise LLMTimeoutError(
+                    f"vLLM stream timeout ({self.timeout_seconds}s)"
+                ) from e
+            
+            else:
+                raise LLMInvalidResponseError(
+                    f"vLLM stream failed: {e}"
                 ) from e
     
     def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:

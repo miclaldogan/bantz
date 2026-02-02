@@ -123,6 +123,61 @@ python scripts/bench_hybrid_quality.py --num-tests 30
 - **Flexible**: Choose Gemini (cloud) or 7B (local)
 - **Target TTFT**: <500ms total (planning 40ms + execution + finalize 100ms)
 
+## TTFT Monitoring & Optimization (Issue #158)
+
+### Real-Time TTFT Tracking
+
+Bantz provides comprehensive Time-To-First-Token (TTFT) monitoring for exceptional UX:
+
+```bash
+# Interactive demo with real-time TTFT display
+python scripts/demo_ttft_realtime.py --mode interactive
+
+# Demo mode with predefined prompts
+python scripts/demo_ttft_realtime.py --mode demo
+
+# Benchmark TTFT performance
+python scripts/bench_ttft_monitoring.py --num-tests 30
+```
+
+### Features
+- **Streaming support**: Token-by-token output with real-time TTFT measurement
+- **Statistical tracking**: p50, p95, p99 percentiles
+- **Threshold enforcement**: Router p95 < 300ms, Finalizer p95 < 500ms
+- **Alert system**: Automatic warnings on threshold violations
+- **Color-coded UI**: Green (<300ms), Yellow (300-500ms), Red (>500ms)
+- **Export reports**: JSON output with full statistics
+
+### Example
+
+```python
+from bantz.llm.vllm_openai_client import VLLMOpenAIClient
+from bantz.llm.ttft_monitor import TTFTMonitor
+
+# Create client with TTFT tracking
+client = VLLMOpenAIClient(
+    base_url="http://localhost:8001",
+    track_ttft=True,
+    ttft_phase="router",
+)
+
+# Stream with TTFT measurement
+for chunk in client.chat_stream(messages):
+    if chunk.is_first_token:
+        print(f"[THINKING] (TTFT: {chunk.ttft_ms}ms)")
+    print(chunk.content, end='', flush=True)
+
+# Get statistics
+monitor = TTFTMonitor.get_instance()
+stats = monitor.get_statistics("router")
+print(f"Router p95: {stats.p95_ms}ms")
+```
+
+### Performance Targets
+- **Router (3B)**: p95 < 300ms (typical: ~40-50ms ✅)
+- **Finalizer (7B)**: p95 < 500ms (typical: ~100-150ms ✅)
+- **Total latency**: <500ms for "Jarvis feel" UX
+
 ## JSON Schema Validation (Issue #156)
 
 Bantz uses strict Pydantic schemas for LLM output validation:
