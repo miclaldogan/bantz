@@ -1,0 +1,346 @@
+"""Gemini Hybrid Orchestrator - 3B Router + Gemini Finalizer.
+
+Strategy (Issues #131, #134, #135):
+- Phase 1: 3B Local Router (vLLM/Ollama) - Fast routing & slot extraction (~50ms)
+- Phase 2: Tool Execution (if confirmed)
+- Phase 3: Gemini Finalizer (Flash/Pro) - Natural language response generation
+
+Architecture:
+    User Input
+        ↓
+    3B Router (local)
+    - Route classification (calendar/smalltalk/unknown)
+    - Intent extraction (create/modify/cancel/query)
+    - Slot extraction (date/time/title/duration)
+    - Tool planning
+        ↓
+    [Tool Execution if approved]
+        ↓
+    Gemini Finalizer (cloud)
+    - Natural language response
+    - Context-aware replies
+    - Jarvis personality
+        ↓
+    User Output
+
+Benefits:
+- Low latency: 3B router is fast (41ms TTFT)
+- High quality: Gemini for natural responses
+- Cost effective: Cloud only for finalization
+- Privacy: Sensitive planning stays local
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Optional, Protocol
+
+from bantz.brain.llm_router import (
+    OrchestratorOutput,
+    JarvisLLMOrchestrator,
+)
+from bantz.llm.base import LLMClient, LLMMessage
+from bantz.llm.gemini_client import GeminiClient
+
+logger = logging.getLogger(__name__)
+
+
+class Local3BRouterProtocol(Protocol):
+    """Protocol for local 3B router (vLLM/Ollama)."""
+
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 512) -> str:
+        """Complete text from prompt."""
+        ...
+
+
+@dataclass(frozen=True)
+class HybridOrchestratorConfig:
+    """Configuration for Gemini Hybrid Orchestrator.
+    
+    Attributes:
+        router_backend: 3B router backend ("vllm" or "ollama")
+        router_model: 3B model name (e.g., "qwen2.5:3b-instruct-q8_0")
+        router_temperature: Temperature for router (0.0 for deterministic)
+        router_max_tokens: Max tokens for router output
+        
+        gemini_model: Gemini model (e.g., "gemini-1.5-flash", "gemini-1.5-pro")
+        gemini_temperature: Temperature for Gemini (0.4 for balanced)
+        gemini_max_tokens: Max tokens for Gemini response
+        
+        confidence_threshold: Minimum confidence to call tools (0.7 default)
+        enable_gemini_finalization: If False, only use router (debug mode)
+    """
+    
+    router_backend: str = "ollama"
+    router_model: str = "qwen2.5:3b-instruct-q8_0"
+    router_temperature: float = 0.0
+    router_max_tokens: int = 512
+    
+    gemini_model: str = "gemini-1.5-flash"
+    gemini_temperature: float = 0.4
+    gemini_max_tokens: int = 512
+    
+    confidence_threshold: float = 0.7
+    enable_gemini_finalization: bool = True
+
+
+class GeminiHybridOrchestrator:
+    """Hybrid orchestrator: 3B router (local) + Gemini finalizer (cloud).
+    
+    This implements the strategy from Issues #131, #134, #135:
+    - Fast routing with local 3B model
+    - Quality responses with Gemini
+    
+    Usage:
+        router = create_3b_router()  # Ollama or vLLM
+        gemini = GeminiClient(api_key="...", model="gemini-1.5-flash")
+        orchestrator = GeminiHybridOrchestrator(
+            router=router,
+            gemini_client=gemini,
+            config=config
+        )
+        
+        output = orchestrator.orchestrate(
+            user_input="bugün toplantılarım neler?",
+            dialog_summary="",
+            tool_results=None
+        )
+    """
+    
+    def __init__(
+        self,
+        *,
+        router: Local3BRouterProtocol,
+        gemini_client: GeminiClient,
+        config: Optional[HybridOrchestratorConfig] = None,
+    ):
+        self._router = router
+        self._gemini = gemini_client
+        self._config = config or HybridOrchestratorConfig()
+        
+        # Internal JarvisLLMOrchestrator for router prompts
+        self._router_orchestrator = JarvisLLMOrchestrator(llm_client=router)
+    
+    def orchestrate(
+        self,
+        *,
+        user_input: str,
+        dialog_summary: str = "",
+        tool_results: Optional[dict[str, Any]] = None,
+    ) -> OrchestratorOutput:
+        """Orchestrate user input through hybrid pipeline.
+        
+        Args:
+            user_input: User message
+            dialog_summary: Rolling dialog context
+            tool_results: Results from previous tool execution (if any)
+            
+        Returns:
+            OrchestratorOutput with route, intent, slots, and final response
+        """
+        
+        # Phase 1: 3B Router - Fast routing & slot extraction
+        logger.info("[HYBRID] Phase 1: 3B Router")
+        router_output = self._router_orchestrator.route(
+            user_text=user_input,
+            dialog_summary=dialog_summary,
+        )
+        
+        logger.debug(
+            f"[HYBRID] Router: route={router_output.route}, "
+            f"intent={router_output.calendar_intent}, "
+            f"confidence={router_output.confidence:.2f}"
+        )
+        
+        # If ask_user is set, return immediately (no finalization needed)
+        if router_output.ask_user:
+            logger.info("[HYBRID] Router wants clarification, skipping Gemini")
+            return router_output
+        
+        # If confidence too low, return router's ask_user response
+        if router_output.confidence < self._config.confidence_threshold:
+            logger.warning(
+                f"[HYBRID] Low confidence ({router_output.confidence:.2f}), "
+                f"skipping tools and Gemini"
+            )
+            return router_output
+        
+        # Phase 2: Tool execution happens externally (BrainLoop)
+        # (This orchestrator doesn't execute tools, just plans them)
+        
+        # Phase 3: Gemini Finalizer - Natural language response
+        if not self._config.enable_gemini_finalization:
+            logger.info("[HYBRID] Gemini finalization disabled, using router response")
+            return router_output
+        
+        logger.info("[HYBRID] Phase 3: Gemini Finalizer")
+        final_response = self._finalize_with_gemini(
+            router_output=router_output,
+            user_input=user_input,
+            dialog_summary=dialog_summary,
+            tool_results=tool_results,
+        )
+        
+        # Merge router output with Gemini response
+        return OrchestratorOutput(
+            route=router_output.route,
+            calendar_intent=router_output.calendar_intent,
+            slots=router_output.slots,
+            confidence=router_output.confidence,
+            tool_plan=router_output.tool_plan,
+            assistant_reply=final_response,
+            ask_user=router_output.ask_user,
+            question=router_output.question,
+            requires_confirmation=router_output.requires_confirmation,
+            confirmation_prompt=router_output.confirmation_prompt,
+            memory_update=router_output.memory_update,
+            reasoning_summary=router_output.reasoning_summary,
+            raw_output={
+                "router": router_output.raw_output,
+                "gemini_response": final_response,
+            },
+        )
+    
+    def _finalize_with_gemini(
+        self,
+        *,
+        router_output: OrchestratorOutput,
+        user_input: str,
+        dialog_summary: str,
+        tool_results: Optional[dict[str, Any]],
+    ) -> str:
+        """Generate natural language response using Gemini.
+        
+        Args:
+            router_output: Output from 3B router
+            user_input: Original user input
+            dialog_summary: Dialog context
+            tool_results: Tool execution results
+            
+        Returns:
+            Natural language response (Jarvis style)
+        """
+        
+        # Build context for Gemini
+        context_parts = []
+        
+        if dialog_summary:
+            context_parts.append(f"Dialog Context:\n{dialog_summary}")
+        
+        context_parts.append(f"User: {user_input}")
+        
+        if router_output.route == "calendar":
+            context_parts.append(f"Intent: {router_output.calendar_intent}")
+            if router_output.slots:
+                slots_str = json.dumps(router_output.slots, ensure_ascii=False)
+                context_parts.append(f"Extracted Slots: {slots_str}")
+        
+        if tool_results:
+            results_str = json.dumps(tool_results, ensure_ascii=False)
+            context_parts.append(f"Tool Results: {results_str}")
+        
+        context = "\n\n".join(context_parts)
+        
+        # Gemini system prompt (Jarvis personality)
+        system_prompt = """Sen BANTZ'sın - Jarvis tarzı Türkçe asistan.
+
+Özellikler:
+- "Efendim" hitabı kullan
+- Nazik, profesyonel ama samimi
+- Kısa ve öz cevaplar (1-2 cümle ideal)
+- Türkçe doğal konuş (İngilizce teknik terimler OK)
+
+Görev:
+Kullanıcıya verilen context'e göre doğal, yardımsever bir cevap ver.
+Takvim işlemlerinde sonucu özetle.
+Sohbette samimi ve kısa cevap ver.
+"""
+        
+        # Special handling for smalltalk
+        if router_output.route == "smalltalk":
+            system_prompt += "\n\nBu bir sohbet mesajı. Samimi ve kısa yanıt ver (1 cümle yeterli)."
+        
+        # Build Gemini prompt
+        if router_output.route == "calendar" and tool_results:
+            user_prompt = (
+                f"{context}\n\n"
+                "Yukarıdaki takvim işleminin sonucunu kullanıcıya kısa ve öz şekilde aktar. "
+                "Jarvis tarzında, profesyonel ama samimi ol."
+            )
+        elif router_output.route == "smalltalk":
+            user_prompt = (
+                f"Kullanıcı: {user_input}\n\n"
+                "Samimi ve kısa bir yanıt ver (1-2 cümle). Jarvis tarzında."
+            )
+        else:
+            user_prompt = (
+                f"{context}\n\n"
+                "Kullanıcıya yardımcı ol. Kısa ve öz yanıt ver."
+            )
+        
+        # Call Gemini
+        try:
+            messages = [
+                LLMMessage(role="system", content=system_prompt),
+                LLMMessage(role="user", content=user_prompt),
+            ]
+            
+            response = self._gemini.chat_detailed(
+                messages=messages,
+                temperature=self._config.gemini_temperature,
+                max_tokens=self._config.gemini_max_tokens,
+            )
+            
+            logger.info(
+                f"[HYBRID] Gemini finalization: {len(response.content)} chars, "
+                f"{response.tokens_used} tokens"
+            )
+            
+            return response.content.strip()
+            
+        except Exception as e:
+            logger.error(f"[HYBRID] Gemini finalization failed: {e}")
+            # Fallback to router response
+            return router_output.assistant_reply or "Üzgünüm efendim, bir sorun oluştu."
+
+
+def create_gemini_hybrid_orchestrator(
+    *,
+    router_client: Local3BRouterProtocol,
+    gemini_api_key: str,
+    config: Optional[HybridOrchestratorConfig] = None,
+) -> GeminiHybridOrchestrator:
+    """Create Gemini Hybrid Orchestrator with given configuration.
+    
+    Args:
+        router_client: 3B router client (Ollama or vLLM)
+        gemini_api_key: Gemini API key
+        config: Optional configuration (uses defaults if None)
+        
+    Returns:
+        Configured GeminiHybridOrchestrator
+        
+    Example:
+        >>> from bantz.llm.ollama_client import OllamaClient
+        >>> router = OllamaClient(model="qwen2.5:3b-instruct-q8_0")
+        >>> orchestrator = create_gemini_hybrid_orchestrator(
+        ...     router_client=router,
+        ...     gemini_api_key="YOUR_API_KEY"
+        ... )
+    """
+    
+    config = config or HybridOrchestratorConfig()
+    
+    gemini = GeminiClient(
+        api_key=gemini_api_key,
+        model=config.gemini_model,
+        timeout_seconds=30.0,
+    )
+    
+    return GeminiHybridOrchestrator(
+        router=router_client,
+        gemini_client=gemini,
+        config=config,
+    )
