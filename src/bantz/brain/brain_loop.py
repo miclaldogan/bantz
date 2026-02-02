@@ -1281,6 +1281,10 @@ class BrainLoopConfig:
     enable_memory_manager: bool = False
     memory_db_path: str = "~/.bantz/memory_snippets.db"
     memory_max_snippets: int = 5
+    
+    # Policy Engine (Issue #87)
+    enable_policy_engine: bool = True
+    policy_audit_path: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -1397,6 +1401,30 @@ class BrainLoop:
             except Exception:
                 # Memory must never crash the brain loop.
                 self._memory_manager = None
+        
+        # Initialize PolicyEngine (Issue #87)
+        self._policy_engine = None
+        if bool(self._config.enable_policy_engine):
+            try:
+                from bantz.policy.engine import PolicyEngine
+                from bantz.policy.risk_map import RiskMap
+                
+                # Default risk mapping for calendar tools
+                risk_map = RiskMap({
+                    "calendar.delete_event": "HIGH",
+                    "calendar.update_event": "MED",
+                    "calendar.create_event": "MED",
+                    "web.open": "LOW",
+                    "web.search": "LOW",
+                })
+                
+                self._policy_engine = PolicyEngine(
+                    risk_map=risk_map,
+                    audit_path=self._config.policy_audit_path,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize PolicyEngine: {e}")
+                self._policy_engine = None
 
         # Optional quality finalizer (lazy): used to rewrite user-facing calendar replies.
         # Enabled only when create_quality_client() resolves to a Gemini backend.
