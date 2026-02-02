@@ -59,6 +59,70 @@ More details: docs/setup/vllm.md
 - docs/setup/docker-vllm.md
 - docs/setup/google-vision.md
 
+## Hybrid Orchestrator Architecture (Issues #134, #135, #157)
+
+Bantz supports flexible hybrid LLM architectures for optimal quality/latency balance:
+
+### Option 1: Gemini Hybrid (Issue #134, #135)
+**3B Router + Gemini Finalizer**
+- Phase 1: Local 3B router (fast planning ~40ms)
+- Phase 2: Tool execution
+- Phase 3: Gemini finalizer (quality responses)
+- **Use case**: Best quality, cloud dependency acceptable
+
+```python
+from bantz.brain.gemini_hybrid_orchestrator import create_gemini_hybrid_orchestrator
+from bantz.llm.ollama_client import OllamaClient
+
+router = OllamaClient(model="qwen2.5:3b-instruct-q8_0")
+orchestrator = create_gemini_hybrid_orchestrator(
+    router_client=router,
+    gemini_api_key="YOUR_API_KEY"
+)
+```
+
+### Option 2: Flexible vLLM Hybrid (Issue #157)
+**3B Router + 7B vLLM Finalizer (with fallback)**
+- Phase 1: 3B router (vLLM port 8001) - fast planning
+- Phase 2: Tool execution
+- Phase 3: 7B finalizer (vLLM port 8002) - quality responses
+- **Fallback**: If 7B down, uses 3B router response
+- **Use case**: Fully local, privacy-preserving, graceful degradation
+
+```python
+from bantz.brain.flexible_hybrid_orchestrator import create_flexible_hybrid_orchestrator
+from bantz.llm.vllm_openai_client import VLLMOpenAIClient
+
+router = VLLMOpenAIClient(base_url="http://localhost:8001", model="Qwen/Qwen2.5-3B-Instruct")
+finalizer = VLLMOpenAIClient(base_url="http://localhost:8002", model="Qwen/Qwen2.5-7B-Instruct")
+
+orchestrator = create_flexible_hybrid_orchestrator(
+    router_client=router,
+    finalizer_client=finalizer,
+)
+```
+
+### Benchmark (Issue #157)
+
+Compare 3B-only vs 3B+7B hybrid quality:
+
+```bash
+# Start both servers
+./scripts/vllm/start_3b.sh   # port 8001
+./scripts/vllm/start_7b.sh   # port 8002
+
+# Run benchmark
+python scripts/bench_hybrid_quality.py --num-tests 30
+# Results: artifacts/results/bench_hybrid_quality.json
+```
+
+### Architecture Benefits
+- **Low latency**: 3B router for fast planning (~40ms)
+- **High quality**: 7B/Gemini for natural responses
+- **Resilience**: Fallback to 3B if finalizer unavailable
+- **Flexible**: Choose Gemini (cloud) or 7B (local)
+- **Target TTFT**: <500ms total (planning 40ms + execution + finalize 100ms)
+
 ## JSON Schema Validation (Issue #156)
 
 Bantz uses strict Pydantic schemas for LLM output validation:
