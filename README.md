@@ -219,6 +219,71 @@ assert schema.tool_plan == ["create_event"]  # Repaired: string → list
 - ✅ <5% repair rate (most outputs already correct)
 - ✅ Turkish confirmation prompts enforced
 
+## Confirmation Firewall (Issue #160)
+
+### Security Layer for Destructive Operations
+
+Bantz implements a **confirmation firewall** that prevents accidental execution of dangerous operations:
+
+#### Key Features
+- **Risk Classification**: All tools classified as SAFE/MODERATE/DESTRUCTIVE
+- **LLM Cannot Override**: Even if LLM forgets, DESTRUCTIVE tools require confirmation
+- **Audit Logging**: Complete trail of all tool executions with risk levels
+- **User Control**: Destructive operations need explicit user approval
+
+#### Risk Levels
+
+**🟢 SAFE** (Read-only, no side effects)
+```
+web.search, calendar.list_events, file.read, vision.screenshot
+```
+
+**🟡 MODERATE** (Reversible state changes)
+```
+calendar.create_event, notification.send, browser.open, email.send
+```
+
+**🔴 DESTRUCTIVE** (Requires confirmation)
+```
+calendar.delete_event, file.delete, payment.submit, system.shutdown
+```
+
+#### Example: Firewall in Action
+
+```python
+from bantz.tools.metadata import requires_confirmation, is_destructive
+
+# LLM output with missing confirmation
+llm_output = {
+    "tool_plan": ["calendar.delete_event"],
+    "requires_confirmation": False,  # ❌ LLM forgot!
+}
+
+# Firewall overrides
+if is_destructive("calendar.delete_event"):
+    needs_confirmation = True  # ✅ Enforced by firewall
+    prompt = "Delete calendar event 'evt123'? This cannot be undone."
+```
+
+#### Audit Trail
+
+All tool executions logged to `artifacts/logs/bantz.log.jsonl`:
+
+```jsonl
+{
+  "event_type": "tool_execution",
+  "tool_name": "calendar.delete_event",
+  "risk_level": "destructive",
+  "success": true,
+  "confirmed": true,
+  "params": {"event_id": "evt123"}
+}
+```
+
+**Full docs:** [docs/confirmation-firewall.md](docs/confirmation-firewall.md)
+
+**Tests:** 25 comprehensive tests in `tests/test_confirmation_firewall.py`
+
 ## Google OAuth (Calendar/Gmail)
 
 ### 1) Install Calendar deps
