@@ -284,6 +284,67 @@ All tool executions logged to `artifacts/logs/bantz.log.jsonl`:
 
 **Tests:** 25 comprehensive tests in `tests/test_confirmation_firewall.py`
 
+## Benchmark Suite (Issue #161)
+
+### Comprehensive Performance & Quality Testing
+
+Bantz includes a full benchmark suite for comparing LLM modes and tracking regression:
+
+#### Test Scenarios
+- **50+ real-world test cases** across 3 domains:
+  - Calendar (30 cases): create/query/modify/cancel events, Turkish prompts
+  - Chat (10 cases): smalltalk, memory, context tracking
+  - Browser (10 cases): search, navigation, multi-step flows
+
+#### Benchmark Modes
+- **3B-only**: Single Qwen 2.5 3B for all tasks (fast, lower quality)
+- **Hybrid**: 3B router + 7B finalizer (balanced quality/latency)
+- **Both**: Compare both modes side-by-side
+
+#### Metrics Tracked
+- **Accuracy**: Route, intent, tools correctness
+- **Performance**: TTFT (Time to First Token) p50/p95/p99, total latency
+- **Token usage**: Input/output counts, avg per test case
+
+#### Run Benchmarks
+
+```bash
+# Run both modes and compare
+python scripts/bench_hybrid_vs_3b_only.py --mode both
+
+# 3B-only mode
+python scripts/bench_hybrid_vs_3b_only.py --mode 3b_only
+
+# Hybrid mode (3B router + 7B finalizer)
+python scripts/bench_hybrid_vs_3b_only.py --mode hybrid
+
+# Generate markdown report
+python scripts/generate_benchmark_report.py
+cat artifacts/results/BENCHMARK_REPORT.md
+```
+
+#### CI Regression Tests
+
+```bash
+# Run regression tests (requires benchmark results)
+pytest tests/test_benchmark_regression.py -v
+
+# Only regression tests
+pytest -m regression
+```
+
+**Thresholds:**
+- TTFT p95 < 400ms (router)
+- JSON validity > 95%
+- Overall accuracy > 85%
+- Route accuracy > 90%
+
+**Files:**
+- `tests/scenarios/*.json`: Test case definitions
+- `scripts/bench_hybrid_vs_3b_only.py`: Benchmark runner
+- `scripts/generate_benchmark_report.py`: Report generator
+- `tests/test_benchmark_regression.py`: CI regression tests
+
 ## Google OAuth (Calendar/Gmail)
 
 ### 1) Install Calendar deps

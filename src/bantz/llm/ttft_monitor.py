@@ -329,6 +329,12 @@ class TTFTMonitor:
         """Disable TTFT monitoring."""
         self._enabled = False
         logger.info("[TTFT] Monitoring disabled")
+    
+    def clear_all(self):
+        """Clear all measurements and statistics."""
+        self._measurements.clear()
+        self._stats.clear()
+        logger.debug("[TTFT] All measurements and statistics cleared")
 
 
 # Convenience function
