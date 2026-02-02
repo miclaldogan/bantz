@@ -72,9 +72,12 @@ Bantz supports flexible hybrid LLM architectures for optimal quality/latency bal
 
 ```python
 from bantz.brain.gemini_hybrid_orchestrator import create_gemini_hybrid_orchestrator
-from bantz.llm.ollama_client import OllamaClient
+from bantz.llm.vllm_openai_client import VLLMOpenAIClient
 
-router = OllamaClient(model="qwen2.5:3b-instruct-q8_0")
+router = VLLMOpenAIClient(
+    base_url="http://localhost:8001",
+    model="Qwen/Qwen2.5-3B-Instruct"
+)
 orchestrator = create_gemini_hybrid_orchestrator(
     router_client=router,
     gemini_api_key="YOUR_API_KEY"

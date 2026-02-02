@@ -2,7 +2,7 @@
 """Demo: Gemini Hybrid Orchestrator (Issues #131, #134, #135).
 
 Strategy:
-- 3B Local Router (Ollama): Fast routing & slot extraction
+- 3B Local Router (vLLM): Fast routing & slot extraction
 - Gemini Flash: Natural language response generation
 
 Run:
@@ -10,8 +10,8 @@ Run:
 
 Environment:
     GEMINI_API_KEY or GOOGLE_API_KEY: Gemini API key
-    BANTZ_LLM_BACKEND: "ollama" or "vllm" (default: ollama)
-    BANTZ_ROUTER_MODEL: 3B model name (default: qwen2.5:3b-instruct-q8_0)
+    BANTZ_VLLM_URL: vLLM server URL (default: http://localhost:8001)
+    BANTZ_VLLM_MODEL: 3B model name (default: Qwen/Qwen2.5-3B-Instruct)
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from bantz.brain.gemini_hybrid_orchestrator import (
     HybridOrchestratorConfig,
     create_gemini_hybrid_orchestrator,
 )
-from bantz.llm.ollama_client import OllamaClient
+from bantz.llm.vllm_openai_client import VLLMOpenAIClient
 
 
 def main():
@@ -59,12 +59,12 @@ def main():
     print()
     
     # Setup configuration
-    backend = os.environ.get("BANTZ_LLM_BACKEND", "ollama").lower()
-    router_model = os.environ.get("BANTZ_ROUTER_MODEL", "qwen2.5:3b-instruct-q8_0")
+    vllm_url = os.environ.get("BANTZ_VLLM_URL", "http://localhost:8001")
+    router_model = os.environ.get("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct")
     gemini_model = os.environ.get("BANTZ_GEMINI_MODEL", "gemini-1.5-flash")
     
     config = HybridOrchestratorConfig(
-        router_backend=backend,
+        router_backend="vllm",
         router_model=router_model,
         gemini_model=gemini_model,
         router_temperature=0.0,
@@ -74,35 +74,34 @@ def main():
     )
     
     print("Configuration:")
-    print(f"  Router Backend: {config.router_backend}")
+    print(f"  Router Backend: vLLM")
+    print(f"  vLLM URL: {vllm_url}")
     print(f"  Router Model: {config.router_model}")
     print(f"  Gemini Model: {config.gemini_model}")
     print(f"  Confidence Threshold: {config.confidence_threshold}")
     print()
     
-    # Create router client
-    if backend == "ollama":
-        print("🔧 Initializing Ollama router...")
-        router_client = OllamaClient(
-            model=router_model,
-            timeout_seconds=30.0,
-        )
-        
-        if not router_client.is_available():
-            print(f"❌ ERROR: Ollama not available or model '{router_model}' not found")
-            print()
-            print("Please ensure:")
-            print("  1. Ollama is running (ollama serve)")
-            print(f"  2. Model is pulled (ollama pull {router_model})")
-            print()
-            return 1
-        
-        print(f"✅ Ollama ready with {router_model}")
-    else:
-        print(f"❌ ERROR: Backend '{backend}' not supported yet")
-        print("Currently only 'ollama' is supported")
+    # Create vLLM router client
+    print("🔧 Initializing vLLM router...")
+    router_client = VLLMOpenAIClient(
+        base_url=vllm_url,
+        model=router_model,
+        timeout_seconds=30.0,
+    )
+    
+    if not router_client.is_available():
+        print(f"❌ ERROR: vLLM not available at {vllm_url}")
+        print()
+        print("Please ensure:")
+        print("  1. vLLM server is running")
+        print(f"  2. Server URL is correct: {vllm_url}")
+        print()
+        print("Start vLLM server:")
+        print(f"  ./scripts/vllm/start_3b.sh")
+        print()
         return 1
     
+    print(f"✅ vLLM ready with {router_model}")
     print()
     
     # Create orchestrator
