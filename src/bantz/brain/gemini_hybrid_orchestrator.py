@@ -1,7 +1,7 @@
 """Gemini Hybrid Orchestrator - 3B Router + Gemini Finalizer.
 
 Strategy (Issues #131, #134, #135):
-- Phase 1: 3B Local Router (vLLM/Ollama) - Fast routing & slot extraction (~50ms)
+- Phase 1: 3B Local Router (vLLM) - Fast routing & slot extraction (~50ms)
 - Phase 2: Tool Execution (if confirmed)
 - Phase 3: Gemini Finalizer (Flash/Pro) - Natural language response generation
 
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 class Local3BRouterProtocol(Protocol):
-    """Protocol for local 3B router (vLLM/Ollama)."""
+    """Protocol for local 3B router (vLLM)."""
 
     def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 512) -> str:
         """Complete text from prompt."""
@@ -60,8 +60,8 @@ class HybridOrchestratorConfig:
     """Configuration for Gemini Hybrid Orchestrator.
     
     Attributes:
-        router_backend: 3B router backend ("vllm" or "ollama")
-        router_model: 3B model name (e.g., "qwen2.5:3b-instruct-q8_0")
+        router_backend: Router backend ("vllm")
+        router_model: Router model name (e.g., "Qwen/Qwen2.5-3B-Instruct")
         router_temperature: Temperature for router (0.0 for deterministic)
         router_max_tokens: Max tokens for router output
         
@@ -73,8 +73,8 @@ class HybridOrchestratorConfig:
         enable_gemini_finalization: If False, only use router (debug mode)
     """
     
-    router_backend: str = "ollama"
-    router_model: str = "qwen2.5:3b-instruct-q8_0"
+    router_backend: str = "vllm"
+    router_model: str = "Qwen/Qwen2.5-3B-Instruct"
     router_temperature: float = 0.0
     router_max_tokens: int = 512
     
@@ -94,7 +94,7 @@ class GeminiHybridOrchestrator:
     - Quality responses with Gemini
     
     Usage:
-        router = create_3b_router()  # Ollama or vLLM
+        router = create_3b_router()  # vLLM
         gemini = GeminiClient(api_key="...", model="gemini-1.5-flash")
         orchestrator = GeminiHybridOrchestrator(
             router=router,
@@ -315,7 +315,7 @@ def create_gemini_hybrid_orchestrator(
     """Create Gemini Hybrid Orchestrator with given configuration.
     
     Args:
-        router_client: 3B router client (Ollama or vLLM)
+        router_client: 3B router client (vLLM)
         gemini_api_key: Gemini API key
         config: Optional configuration (uses defaults if None)
         
@@ -323,8 +323,11 @@ def create_gemini_hybrid_orchestrator(
         Configured GeminiHybridOrchestrator
         
     Example:
-        >>> from bantz.llm.ollama_client import OllamaClient
-        >>> router = OllamaClient(model="qwen2.5:3b-instruct-q8_0")
+        >>> from bantz.llm.vllm_openai_client import VLLMOpenAIClient
+        >>> router = VLLMOpenAIClient(
+        ...     base_url="http://localhost:8001",
+        ...     model="Qwen/Qwen2.5-3B-Instruct"
+        ... )
         >>> orchestrator = create_gemini_hybrid_orchestrator(
         ...     router_client=router,
         ...     gemini_api_key="YOUR_API_KEY"

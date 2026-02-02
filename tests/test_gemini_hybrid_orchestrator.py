@@ -86,8 +86,8 @@ def test_hybrid_orchestrator_config_defaults():
     
     config = HybridOrchestratorConfig()
     
-    assert config.router_backend == "ollama"
-    assert config.router_model == "qwen2.5:3b-instruct-q8_0"
+    assert config.router_backend == "vllm"
+    assert config.router_model == "Qwen/Qwen2.5-3B-Instruct"
     assert config.router_temperature == 0.0
     assert config.router_max_tokens == 512
     

@@ -70,7 +70,7 @@ class FlexibleHybridConfig:
     """Configuration for Flexible Hybrid Orchestrator.
     
     Attributes:
-        router_backend: 3B router backend ("vllm" or "ollama")
+        router_backend: 3B router backend ("vllm")
         router_model: 3B model name
         router_temperature: Temperature for router (0.0 deterministic)
         router_max_tokens: Max tokens for router output

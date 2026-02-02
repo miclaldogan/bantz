@@ -10,7 +10,7 @@ User Input
     ↓
 ┌─────────────────────────┐
 │  3B Local Router        │  ← Fast (41ms TTFT)
-│  (Ollama/vLLM)          │
+│  (vLLM)                 │
 │  - Route classification │
 │  - Intent extraction    │
 │  - Slot parsing         │
@@ -39,14 +39,14 @@ User Output
 - **High Quality**: Gemini generates natural, context-aware responses
 - **Cost Effective**: Cloud usage only for finalization
 - **Privacy**: Sensitive routing/planning stays local
-- **Scalable**: Can switch router backend (Ollama ↔ vLLM)
+- **Scalable**: vLLM backend for optimal performance
 
 ## 📦 Components
 
 ### 1. 3B Local Router
 - **Purpose**: Fast routing and slot extraction
-- **Backend**: Ollama or vLLM
-- **Model**: Qwen 2.5 3B Instruct (Q8 quantization)
+- **Backend**: vLLM
+- **Model**: Qwen/Qwen2.5-3B-Instruct
 - **Latency**: ~41ms TTFT
 - **Output**: JSON schema with route, intent, slots, tool plan
 
@@ -64,8 +64,8 @@ from bantz.brain.gemini_hybrid_orchestrator import HybridOrchestratorConfig
 
 config = HybridOrchestratorConfig(
     # Router settings
-    router_backend="ollama",  # or "vllm"
-    router_model="qwen2.5:3b-instruct-q8_0",
+    router_backend="vllm",
+    router_model="Qwen/Qwen2.5-3B-Instruct",
     router_temperature=0.0,  # Deterministic
     router_max_tokens=512,
     
@@ -86,10 +86,13 @@ config = HybridOrchestratorConfig(
 
 ```python
 from bantz.brain.gemini_hybrid_orchestrator import create_gemini_hybrid_orchestrator
-from bantz.llm.ollama_client import OllamaClient
+from bantz.llm.vllm_openai_client import VLLMOpenAIClient
 
 # Create router
-router = OllamaClient(model="qwen2.5:3b-instruct-q8_0")
+router = VLLMOpenAIClient(
+    base_url="http://localhost:8001",
+    model="Qwen/Qwen2.5-3B-Instruct"
+)
 
 # Create orchestrator
 orchestrator = create_gemini_hybrid_orchestrator(
