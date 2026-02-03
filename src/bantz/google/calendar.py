@@ -444,16 +444,106 @@ def create_event(
     calendar_id: Optional[str] = None,
     description: Optional[str] = None,
     location: Optional[str] = None,
+    all_day: bool = False,
 ) -> dict[str, Any]:
     """Create a calendar event (write).
 
+    Time-based events:
     - `start` and `end` must be RFC3339 strings (timezone offset recommended).
     - If `end` is not provided, `duration_minutes` must be provided.
+
+    All-day events (Issue #164):
+    - Set `all_day=True`
+    - `start` must be a date string in YYYY-MM-DD format
+    - `end` is optional; if not provided, creates single-day all-day event
+    - `end` is exclusive (e.g., "2026-02-23" to "2026-02-26" = Feb 23-25)
+    - `duration_minutes` is ignored for all-day events
+
+    Examples:
+    ```python
+    # Time-based event
+    create_event(summary="Meeting", start="2026-02-03T14:00:00+03:00", duration_minutes=60)
+
+    # Single-day all-day event
+    create_event(summary="Conference", start="2026-02-03", all_day=True)
+
+    # Multi-day all-day event
+    create_event(summary="Vacation", start="2026-02-23", end="2026-02-26", all_day=True)
+    ```
     """
 
     if not isinstance(summary, str) or not summary.strip():
         raise ValueError("summary_required")
 
+    # All-day event handling
+    if all_day:
+        # Parse start as date
+        try:
+            start_date = _parse_date(start)
+        except ValueError:
+            raise ValueError("all_day_start_must_be_date_format")
+
+        # Parse end as date if provided, otherwise next day (single-day event)
+        if end is not None and str(end).strip():
+            try:
+                end_date = _parse_date(end)
+            except ValueError:
+                raise ValueError("all_day_end_must_be_date_format")
+        else:
+            # Single-day all-day event: end = start + 1 day (exclusive)
+            end_date = start_date + timedelta(days=1)
+
+        # Validate date range
+        if end_date <= start_date:
+            raise ValueError("end_date_must_be_after_start_date")
+
+        cal_id = (
+            calendar_id
+            or os.getenv("BANTZ_GOOGLE_CALENDAR_ID")
+            or DEFAULT_CALENDAR_ID
+        )
+
+        from bantz.google.auth import get_credentials
+        creds = get_credentials(scopes=WRITE_SCOPES)
+
+        try:
+            from googleapiclient.discovery import build  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError(
+                "Google calendar dependencies are not installed. Install with: "
+                "pip install -e '.[calendar]'"
+            ) from e
+
+        # All-day event body uses "date" instead of "dateTime"
+        body: dict[str, Any] = {
+            "summary": summary.strip(),
+            "start": {"date": start_date.isoformat()},
+            "end": {"date": end_date.isoformat()},
+        }
+        if description:
+            body["description"] = str(description)
+        if location:
+            body["location"] = str(location)
+
+        service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+        created = service.events().insert(calendarId=cal_id, body=body).execute()
+        if not isinstance(created, dict):
+            raise RuntimeError("calendar_insert_failed")
+
+        start_obj = created.get("start") if isinstance(created.get("start"), dict) else {}
+        end_obj = created.get("end") if isinstance(created.get("end"), dict) else {}
+
+        return {
+            "ok": True,
+            "id": created.get("id"),
+            "htmlLink": created.get("htmlLink"),
+            "summary": created.get("summary") or summary.strip(),
+            "start": start_obj.get("date") or start_obj.get("dateTime") or start_date.isoformat(),
+            "end": end_obj.get("date") or end_obj.get("dateTime") or end_date.isoformat(),
+            "all_day": True,
+        }
+
+    # Time-based event handling (original logic)
     start_dt = _parse_rfc3339(start)
 
     if end is not None and str(end).strip():
@@ -510,6 +600,7 @@ def create_event(
         "summary": created.get("summary") or summary.strip(),
         "start": start_obj.get("dateTime") or start_obj.get("date") or start_dt.isoformat(),
         "end": end_obj.get("dateTime") or end_obj.get("date") or end_dt.isoformat(),
+        "all_day": False,
     }
 
 

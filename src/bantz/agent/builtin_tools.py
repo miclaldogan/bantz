@@ -545,17 +545,41 @@ def build_default_registry() -> ToolRegistry:
     reg.register(
         Tool(
             name="calendar.create_event",
-            description="Create a calendar event (write). Requires confirmation.",
+            description=(
+                "Create a calendar event (write). Supports both time-based and all-day events. "
+                "For all-day events (Issue #164), set all_day=true and use YYYY-MM-DD format for start/end dates. "
+                "Requires confirmation."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "summary": {"type": "string", "description": "Event summary/title"},
-                    "start": {"type": "string", "description": "RFC3339 start datetime (with timezone)"},
-                    "end": {"type": "string", "description": "RFC3339 end datetime (optional if duration_minutes provided)"},
-                    "duration_minutes": {"type": "integer", "description": "Duration in minutes (optional if end provided)"},
+                    "start": {
+                        "type": "string",
+                        "description": (
+                            "Start datetime (RFC3339 with timezone) or date (YYYY-MM-DD for all-day events)"
+                        ),
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": (
+                            "End datetime (RFC3339) or date (YYYY-MM-DD). "
+                            "Optional if duration_minutes provided (time-based events) or "
+                            "for single-day all-day events."
+                        ),
+                    },
+                    "duration_minutes": {"type": "integer", "description": "Duration in minutes (ignored for all-day events)"},
                     "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
                     "description": {"type": "string", "description": "Optional description"},
                     "location": {"type": "string", "description": "Optional location"},
+                    "all_day": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, creates an all-day event. "
+                            "Start and end must be YYYY-MM-DD format. "
+                            "End is exclusive (e.g., 2026-02-23 to 2026-02-26 = Feb 23-25)."
+                        ),
+                    },
                 },
                 "required": ["summary", "start"],
             },
@@ -568,6 +592,7 @@ def build_default_registry() -> ToolRegistry:
                     "summary": {"type": "string"},
                     "start": {"type": "string"},
                     "end": {"type": "string"},
+                    "all_day": {"type": "boolean"},
                 },
                 "required": ["ok", "id", "start", "end", "summary"],
             },
