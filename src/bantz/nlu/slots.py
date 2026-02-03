@@ -833,3 +833,127 @@ class SlotExtractor:
                 flat[name] = slot
         
         return flat
+
+
+# ============================================================================
+# Free Slot Request Extraction (Issue #237)
+# ============================================================================
+
+
+@dataclass
+class FreeSlotRequest:
+    """Extracted free slot search parameters.
+    
+    Default behavior (Issue #237):
+    - duration: 30 minutes (if not specified)
+    - window: today 09:00-18:00 (if not specified)
+    - One clarifying question max
+    """
+    
+    duration_minutes: int = 30
+    day: Optional[str] = None  # "bugün", "yarın", "pazartesi", etc.
+    window_start: Optional[str] = None  # "09:00"
+    window_end: Optional[str] = None  # "18:00"
+    raw_text: str = ""
+    needs_clarification: bool = False
+    clarification_type: Optional[str] = None  # "duration", "day", "window"
+
+
+def extract_free_slot_request(text: str, reference_time: Optional[datetime] = None) -> Optional[FreeSlotRequest]:
+    """Extract free slot search parameters from natural language.
+    
+    Patterns supported:
+    - "uygun saat var mı" -> default (30m, today 09-18)
+    - "yarın 1 saatlik boşluk" -> tomorrow, 60m, 09-18
+    - "bugün öğleden sonra boş zaman" -> today, 30m, 13-18
+    - "pazartesi sabah toplantı için boşluk" -> monday, 30m (needs duration clarification)
+    
+    Args:
+        text: User input
+        reference_time: Current time for relative calculations
+    
+    Returns:
+        FreeSlotRequest or None if not a free slot query
+    """
+    if reference_time is None:
+        reference_time = datetime.now()
+    
+    text_lower = text.lower().strip()
+    
+    # Check if this is a free slot query
+    free_slot_patterns = [
+        r"uygun\s+(saat|zaman|boşluk)",
+        r"boş\s+(saat|zaman|slot)",
+        r"müsait\s+(saat|zaman)",
+        r"ne\s+zaman\s+(boş|müsait|uygun)",
+        r"boşluk\s+(var|bul|ara)",
+        r"\bboşluk\b",  # standalone "boşluk"
+        r"için\s+(boşluk|saat|zaman)",  # "toplantı için boşluk/saat"
+        r"toplantı.*için.*saat",  # "toplantı için saat"
+        r"(sabah|öğlen|akşam|öğleden sonra)\s+toplantı",  # "akşam toplantı"
+    ]
+    
+    is_free_slot_query = any(re.search(pattern, text_lower) for pattern in free_slot_patterns)
+    if not is_free_slot_query:
+        return None
+    
+    request = FreeSlotRequest(raw_text=text)
+    
+    # Extract duration
+    duration_patterns = [
+        (r"(\d+)\s*saatlik", lambda m: int(m.group(1)) * 60),
+        (r"(\d+)\s*dakika", lambda m: int(m.group(1))),
+        (r"(yarım|30)\s*saat", lambda m: 30),
+        (r"(bir|1)\s*saat", lambda m: 60),
+        (r"(iki|2)\s*saat", lambda m: 120),
+    ]
+    
+    for pattern, extractor in duration_patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            request.duration_minutes = extractor(match)
+            break
+    
+    # Extract day
+    day_patterns = [
+        (r"\bbugün\b", "bugün"),
+        (r"\byarın\b", "yarın"),
+        (r"\bpazartesi\b", "pazartesi"),
+        (r"\bsalı\b", "salı"),
+        (r"\bçarşamba\b", "çarşamba"),
+        (r"\bperşembe\b", "perşembe"),
+        (r"\bcuma\b", "cuma"),
+        (r"\bcumartesi\b", "cumartesi"),
+        (r"\bpazar\b", "pazar"),
+    ]
+    
+    for pattern, day in day_patterns:
+        if re.search(pattern, text_lower):
+            request.day = day
+            break
+    
+    # Default to today if no day specified
+    if request.day is None:
+        request.day = "bugün"
+    
+    # Extract time window hints
+    time_of_day_patterns = [
+        (r"\bsabah\b", ("09:00", "12:00")),
+        (r"\böğleden sonra\b", ("13:00", "18:00")),
+        (r"\bakşam\b", ("18:00", "21:00")),
+        (r"\böğlen\b", ("12:00", "14:00")),
+    ]
+    
+    for pattern, (start, end) in time_of_day_patterns:
+        if re.search(pattern, text_lower):
+            request.window_start = start
+            request.window_end = end
+            break
+    
+    # Default window: 09:00-18:00 (business hours)
+    if request.window_start is None:
+        request.window_start = "09:00"
+    if request.window_end is None:
+        request.window_end = "18:00"
+    
+    return request
