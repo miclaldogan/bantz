@@ -120,6 +120,133 @@ def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[d
     return merged
 
 
+# RRULE Helper Functions (Issue #165)
+
+
+def build_rrule_daily(*, count: Optional[int] = None, until: Optional[str] = None) -> str:
+    """Build RRULE for daily recurring events.
+
+    Args:
+        count: Number of occurrences (e.g., 10 for 10 days)
+        until: End date in RFC3339 format (e.g., "20260301T000000Z")
+
+    Returns:
+        RRULE string (e.g., "RRULE:FREQ=DAILY;COUNT=10")
+
+    Examples:
+        >>> build_rrule_daily(count=10)
+        'RRULE:FREQ=DAILY;COUNT=10'
+        >>> build_rrule_daily(until="20260301T000000Z")
+        'RRULE:FREQ=DAILY;UNTIL=20260301T000000Z'
+    """
+    if count is None and until is None:
+        raise ValueError("Either count or until must be provided")
+    if count is not None and until is not None:
+        raise ValueError("Cannot specify both count and until")
+    
+    parts = ["RRULE:FREQ=DAILY"]
+    if count is not None:
+        parts.append(f"COUNT={int(count)}")
+    elif until is not None:
+        parts.append(f"UNTIL={until}")
+    return ";".join(parts)
+
+
+def build_rrule_weekly(
+    *,
+    byday: Optional[list[str]] = None,
+    count: Optional[int] = None,
+    until: Optional[str] = None,
+    interval: int = 1,
+) -> str:
+    """Build RRULE for weekly recurring events.
+
+    Args:
+        byday: List of weekdays (MO, TU, WE, TH, FR, SA, SU)
+        count: Number of occurrences
+        until: End date in RFC3339 format
+        interval: Repeat every N weeks (default: 1)
+
+    Returns:
+        RRULE string (e.g., "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10")
+
+    Examples:
+        >>> build_rrule_weekly(byday=["MO"], count=10)
+        'RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10'
+        >>> build_rrule_weekly(byday=["MO", "WE", "FR"], until="20260301T000000Z")
+        'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20260301T000000Z'
+    """
+    if not byday:
+        raise ValueError("byday must be provided for weekly recurrence")
+    if count is None and until is None:
+        raise ValueError("Either count or until must be provided")
+    if count is not None and until is not None:
+        raise ValueError("Cannot specify both count and until")
+    
+    parts = ["RRULE:FREQ=WEEKLY"]
+    if interval > 1:
+        parts.append(f"INTERVAL={int(interval)}")
+    if byday:
+        valid_days = {"MO", "TU", "WE", "TH", "FR", "SA", "SU"}
+        days_upper = [d.upper() for d in byday]
+        for day in days_upper:
+            if day not in valid_days:
+                raise ValueError(f"Invalid BYDAY value: {day}")
+        parts.append(f"BYDAY={','.join(days_upper)}")
+    if count is not None:
+        parts.append(f"COUNT={int(count)}")
+    elif until is not None:
+        parts.append(f"UNTIL={until}")
+    return ";".join(parts)
+
+
+def build_rrule_monthly(
+    *,
+    byday: Optional[str] = None,
+    bymonthday: Optional[int] = None,
+    count: Optional[int] = None,
+    until: Optional[str] = None,
+) -> str:
+    """Build RRULE for monthly recurring events.
+
+    Args:
+        byday: Weekday with position (e.g., "1MO" for first Monday, "-1FR" for last Friday)
+        bymonthday: Day of month (1-31)
+        count: Number of occurrences
+        until: End date in RFC3339 format
+
+    Returns:
+        RRULE string (e.g., "RRULE:FREQ=MONTHLY;BYDAY=1FR;COUNT=12")
+
+    Examples:
+        >>> build_rrule_monthly(byday="1FR", count=12)  # First Friday of each month
+        'RRULE:FREQ=MONTHLY;BYDAY=1FR;COUNT=12'
+        >>> build_rrule_monthly(bymonthday=15, count=6)  # 15th of each month
+        'RRULE:FREQ=MONTHLY;BYMONTHDAY=15;COUNT=6'
+    """
+    if byday is None and bymonthday is None:
+        raise ValueError("Either byday or bymonthday must be provided for monthly recurrence")
+    if byday is not None and bymonthday is not None:
+        raise ValueError("Cannot specify both byday and bymonthday")
+    if count is None and until is None:
+        raise ValueError("Either count or until must be provided")
+    if count is not None and until is not None:
+        raise ValueError("Cannot specify both count and until")
+    
+    parts = ["RRULE:FREQ=MONTHLY"]
+    if byday is not None:
+        parts.append(f"BYDAY={byday}")
+    elif bymonthday is not None:
+        if not (1 <= int(bymonthday) <= 31):
+            raise ValueError("bymonthday must be between 1 and 31")
+        parts.append(f"BYMONTHDAY={int(bymonthday)}")
+    if count is not None:
+        parts.append(f"COUNT={int(count)}")
+    elif until is not None:
+        parts.append(f"UNTIL={until}")
+    return ";".join(parts)
+
+
 def _parse_hhmm(value: Optional[str], *, default: time) -> tuple[time, bool]:
     """Parse an HH:MM string into a time.
 
@@ -445,6 +572,7 @@ def create_event(
     description: Optional[str] = None,
     location: Optional[str] = None,
     all_day: bool = False,
+    recurrence: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Create a calendar event (write).
 
@@ -459,6 +587,14 @@ def create_event(
     - `end` is exclusive (e.g., "2026-02-23" to "2026-02-26" = Feb 23-25)
     - `duration_minutes` is ignored for all-day events
 
+    Recurring events (Issue #165):
+    - Set `recurrence` to a list of RRULE strings (RFC5545 format)
+    - Example: `["RRULE:FREQ=WEEKLY;BYDAY=MO"]` (every Monday)
+    - Supports FREQ: DAILY, WEEKLY, MONTHLY, YEARLY
+    - Supports BYDAY: MO, TU, WE, TH, FR, SA, SU
+    - Supports COUNT: number of occurrences
+    - Supports UNTIL: end date (RFC3339 format)
+
     Examples:
     ```python
     # Time-based event
@@ -469,11 +605,42 @@ def create_event(
 
     # Multi-day all-day event
     create_event(summary="Vacation", start="2026-02-23", end="2026-02-26", all_day=True)
+
+    # Recurring weekly event (every Monday at 10:00, 10 times)
+    create_event(
+        summary="Standup",
+        start="2026-02-03T10:00:00+03:00",
+        duration_minutes=30,
+        recurrence=["RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10"]
+    )
+
+    # Recurring daily event until specific date
+    create_event(
+        summary="Morning Email Check",
+        start="2026-02-03T09:00:00+03:00",
+        duration_minutes=15,
+        recurrence=["RRULE:FREQ=DAILY;UNTIL=20260301T000000Z"]
+    )
     ```
     """
 
     if not isinstance(summary, str) or not summary.strip():
         raise ValueError("summary_required")
+
+    # Validate recurrence format if provided
+    if recurrence is not None:
+        if not isinstance(recurrence, list):
+            raise ValueError("recurrence_must_be_list")
+        for rule in recurrence:
+            if not isinstance(rule, str) or not rule.strip():
+                raise ValueError("recurrence_rule_must_be_string")
+            # Basic RRULE format validation
+            rule_upper = rule.strip().upper()
+            if not rule_upper.startswith("RRULE:"):
+                raise ValueError("recurrence_rule_must_start_with_rrule")
+            # Check for required FREQ parameter
+            if "FREQ=" not in rule_upper:
+                raise ValueError("recurrence_rule_missing_freq")
 
     # All-day event handling
     if all_day:
@@ -524,6 +691,8 @@ def create_event(
             body["description"] = str(description)
         if location:
             body["location"] = str(location)
+        if recurrence:
+            body["recurrence"] = recurrence
 
         service = build("calendar", "v3", credentials=creds, cache_discovery=False)
         created = service.events().insert(calendarId=cal_id, body=body).execute()
@@ -541,6 +710,7 @@ def create_event(
             "start": start_obj.get("date") or start_obj.get("dateTime") or start_date.isoformat(),
             "end": end_obj.get("date") or end_obj.get("dateTime") or end_date.isoformat(),
             "all_day": True,
+            "recurrence": created.get("recurrence"),
         }
 
     # Time-based event handling (original logic)
@@ -584,6 +754,8 @@ def create_event(
         body["description"] = str(description)
     if location:
         body["location"] = str(location)
+    if recurrence:
+        body["recurrence"] = recurrence
 
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
     created = service.events().insert(calendarId=cal_id, body=body).execute()
@@ -601,6 +773,7 @@ def create_event(
         "start": start_obj.get("dateTime") or start_obj.get("date") or start_dt.isoformat(),
         "end": end_obj.get("dateTime") or end_obj.get("date") or end_dt.isoformat(),
         "all_day": False,
+        "recurrence": created.get("recurrence"),
     }
 
 
