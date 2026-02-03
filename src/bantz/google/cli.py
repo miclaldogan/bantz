@@ -28,6 +28,11 @@ def cmd_env(_args: argparse.Namespace) -> int:
     from bantz.google.auth import get_google_auth_config
 
     cfg = get_google_auth_config()
+    
+    # Redact sensitive client secret value for security
+    client_secret_env = os.getenv("BANTZ_GOOGLE_CLIENT_SECRET")
+    client_secret_display = "***REDACTED***" if client_secret_env else None
+    
     out = {
         "client_secret_path": str(cfg.client_secret_path),
         "client_secret_exists": cfg.client_secret_path.exists(),
@@ -36,7 +41,7 @@ def cmd_env(_args: argparse.Namespace) -> int:
         "calendar_id": os.getenv("BANTZ_GOOGLE_CALENDAR_ID") or None,
         "gmail_token_path": _default_gmail_token_path(),
         "env": {
-            "BANTZ_GOOGLE_CLIENT_SECRET": os.getenv("BANTZ_GOOGLE_CLIENT_SECRET") or None,
+            "BANTZ_GOOGLE_CLIENT_SECRET": client_secret_display,
             "BANTZ_GOOGLE_TOKEN_PATH": os.getenv("BANTZ_GOOGLE_TOKEN_PATH") or None,
             "BANTZ_GOOGLE_CALENDAR_ID": os.getenv("BANTZ_GOOGLE_CALENDAR_ID") or None,
             "BANTZ_GOOGLE_GMAIL_TOKEN_PATH": os.getenv("BANTZ_GOOGLE_GMAIL_TOKEN_PATH") or None,
