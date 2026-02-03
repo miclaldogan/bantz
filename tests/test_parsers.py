@@ -155,10 +155,7 @@ class TestPDFParser:
     async def test_parse_invalid_pdf_raises(self):
         """Test parsing invalid PDF raises error."""
         parser = PDFParser()
-        
-        if not parser.is_available:
-            pytest.skip("PDF library not available")
-        
+
         with pytest.raises(ValueError):
             await parser.parse(b"Not a PDF")
 
