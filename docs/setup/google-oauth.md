@@ -16,6 +16,11 @@ Bantz şu dosyaları bekler:
 - `~/.config/bantz/google/client_secret.json`
 - `~/.config/bantz/google/token.json` (Calendar için)
 
+Gmail için (Issue #169):
+
+- `~/.config/bantz/google/client_secret_gmail.json`
+- `~/.config/bantz/google/gmail_token.json`
+
 Env ile override edebilirsin:
 
 ```bash
@@ -59,6 +64,10 @@ python scripts/smoke_calendar_list_events.py
 Gmail için ayrı token dosyası kullanmak istersen:
 
 ```bash
+export BANTZ_GMAIL_CLIENT_SECRET="$HOME/.config/bantz/google/client_secret_gmail.json"
+export BANTZ_GMAIL_TOKEN_PATH="$HOME/.config/bantz/google/gmail_token.json"
+
+# (Legacy/back-compat)
 export BANTZ_GOOGLE_GMAIL_TOKEN_PATH="$HOME/.config/bantz/google/gmail_token.json"
 ```
 
