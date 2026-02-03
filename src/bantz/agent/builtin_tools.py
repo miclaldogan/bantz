@@ -491,6 +491,80 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    # ─────────────────────────────────────────────────────────────────
+    # Gmail Tools (Google) - Read-only (Issue #170)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.google.gmail import gmail_list_messages as google_gmail_list_messages
+    except Exception:  # pragma: no cover
+        google_gmail_list_messages = None
+
+    reg.register(
+        Tool(
+            name="gmail.list_messages",
+            description="List messages from Gmail inbox (read-only).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "max_results": {"type": "integer", "description": "Max results (default: 10)"},
+                    "unread_only": {"type": "boolean", "description": "Only unread messages (default: false)"},
+                    "page_token": {"type": "string", "description": "Pagination token (nextPageToken)"},
+                },
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "query": {"type": "string"},
+                    "estimated_count": {"type": ["integer", "null"]},
+                    "next_page_token": {"type": ["string", "null"]},
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "from": {"type": ["string", "null"]},
+                                "subject": {"type": ["string", "null"]},
+                                "snippet": {"type": "string"},
+                                "date": {"type": ["string", "null"]},
+                            },
+                            "required": ["id", "snippet"],
+                        },
+                    },
+                },
+                "required": ["ok", "query", "messages", "estimated_count", "next_page_token"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_list_messages,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_unread_count as google_gmail_unread_count
+    except Exception:  # pragma: no cover
+        google_gmail_unread_count = None
+
+    reg.register(
+        Tool(
+            name="gmail.unread_count",
+            description="Get estimated unread count from Gmail (read-only).",
+            parameters={"type": "object", "properties": {}},
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "unread_count_estimate": {"type": "integer"},
+                },
+                "required": ["ok", "unread_count_estimate"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_unread_count,
+        )
+    )
+
     try:
         from bantz.google.calendar import find_free_slots as google_calendar_find_free_slots
     except Exception:  # pragma: no cover
