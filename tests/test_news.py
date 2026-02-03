@@ -138,8 +138,8 @@ class TestGoogleNewsSource:
         source = GoogleNewsSource()
         url = source.get_search_url("teknoloji")
         
-        # Use startswith or parsed URL check instead of substring (Security Alert #14)
-        assert url.startswith("https://news.google.com") or "https://news.google.com" in url
+        # Use startswith to avoid false positives (Security Alerts #14, #33, #34)
+        assert url.startswith("https://news.google.com")
         assert "teknoloji" in url
         assert "hl=tr" in url
         assert "gl=TR" in url
