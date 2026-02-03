@@ -12,7 +12,13 @@ def _print_json(data: Any) -> None:
 
 
 def _default_gmail_token_path() -> str:
-    return os.path.expanduser(os.getenv("BANTZ_GOOGLE_GMAIL_TOKEN_PATH", "~/.config/bantz/google/gmail_token.json"))
+    # Prefer Issue #169 env var, fall back to legacy name.
+    return os.path.expanduser(
+        os.getenv(
+            "BANTZ_GMAIL_TOKEN_PATH",
+            os.getenv("BANTZ_GOOGLE_GMAIL_TOKEN_PATH", "~/.config/bantz/google/gmail_token.json"),
+        )
+    )
 
 
 def _require_yes(args: argparse.Namespace, *, action: str) -> None:
@@ -45,6 +51,8 @@ def cmd_env(_args: argparse.Namespace) -> int:
             "BANTZ_GOOGLE_TOKEN_PATH": os.getenv("BANTZ_GOOGLE_TOKEN_PATH") or None,
             "BANTZ_GOOGLE_CALENDAR_ID": os.getenv("BANTZ_GOOGLE_CALENDAR_ID") or None,
             "BANTZ_GOOGLE_GMAIL_TOKEN_PATH": os.getenv("BANTZ_GOOGLE_GMAIL_TOKEN_PATH") or None,
+            "BANTZ_GMAIL_CLIENT_SECRET": "***REDACTED***" if os.getenv("BANTZ_GMAIL_CLIENT_SECRET") else None,
+            "BANTZ_GMAIL_TOKEN_PATH": os.getenv("BANTZ_GMAIL_TOKEN_PATH") or None,
         },
     }
     _print_json(out)
@@ -75,17 +83,17 @@ def cmd_auth_calendar(args: argparse.Namespace) -> int:
 
 
 def cmd_auth_gmail(args: argparse.Namespace) -> int:
-    from bantz.google.auth import get_credentials
+    from bantz.google.gmail_auth import get_gmail_credentials
 
     scopes_by_mode = {
-        "readonly": ["https://www.googleapis.com/auth/gmail.readonly"],
-        "send": ["https://www.googleapis.com/auth/gmail.send"],
-        "modify": ["https://www.googleapis.com/auth/gmail.modify"],
+        "readonly": ["gmail.readonly", "gmail.metadata"],
+        "send": ["gmail.send", "gmail.compose"],
+        "modify": ["gmail.modify"],
     }
     scopes = scopes_by_mode[args.scope]
 
     token_path = args.token_path or _default_gmail_token_path()
-    creds = get_credentials(
+    creds = get_gmail_credentials(
         scopes=scopes,
         client_secret_path=args.client_secret,
         token_path=token_path,
@@ -173,7 +181,6 @@ def cmd_calendar_update(args: argparse.Namespace) -> int:
         kwargs["description"] = args.description
     
     resp = update_event(**kwargs)
-    )
     _print_json(resp)
     return 0 if resp.get("ok") else 1
 
@@ -230,12 +237,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_auth_gm.add_argument(
         "--client-secret",
         default=None,
-        help="Path to client_secret.json (overrides BANTZ_GOOGLE_CLIENT_SECRET)",
+        help="Path to client_secret_gmail.json (overrides BANTZ_GMAIL_CLIENT_SECRET)",
     )
     p_auth_gm.add_argument(
         "--token-path",
         default=None,
-        help="Path to Gmail token (default: ~/.config/bantz/google/gmail_token.json or BANTZ_GOOGLE_GMAIL_TOKEN_PATH)",
+        help=(
+            "Path to Gmail token (default: ~/.config/bantz/google/gmail_token.json; "
+            "env: BANTZ_GMAIL_TOKEN_PATH or legacy BANTZ_GOOGLE_GMAIL_TOKEN_PATH)"
+        ),
     )
     p_auth_gm.set_defaults(func=cmd_auth_gmail)
 
