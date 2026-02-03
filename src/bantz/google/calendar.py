@@ -549,25 +549,56 @@ def delete_event(
 def update_event(
     *,
     event_id: str,
-    start: str,
-    end: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
     summary: Optional[str] = None,
     calendar_id: Optional[str] = None,
     description: Optional[str] = None,
     location: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Update a calendar event (write).
+    """Update a calendar event (write) with partial updates.
 
-    MVP usage: moving an event by updating start/end.
+    Supports partial updates - only specified fields are modified.
+    If start is provided, end must also be provided (and vice versa).
+    
+    Args:
+        event_id: Google Calendar event ID
+        start: Optional RFC3339 start datetime
+        end: Optional RFC3339 end datetime
+        summary: Optional new event title
+        calendar_id: Optional calendar ID (default: primary)
+        description: Optional event description
+        location: Optional event location
+    
+    Returns:
+        dict with ok, id, htmlLink, summary, start, end, calendar_id
+    
+    Examples:
+        >>> # Update only summary
+        >>> update_event(event_id="evt123", summary="New Title")
+        
+        >>> # Update only location
+        >>> update_event(event_id="evt123", location="Zoom")
+        
+        >>> # Update time (both start and end required)
+        >>> update_event(event_id="evt123", start="2026-02-01T15:00:00+03:00", end="2026-02-01T16:00:00+03:00")
+        
+        >>> # Update multiple fields
+        >>> update_event(event_id="evt123", summary="New Title", location="Office 301", start="...", end="...")
     """
 
     if not isinstance(event_id, str) or not event_id.strip():
         raise ValueError("event_id_required")
-
-    start_dt = _parse_rfc3339(start)
-    end_dt = _parse_rfc3339(end)
-    if end_dt <= start_dt:
-        raise ValueError("end_must_be_after_start")
+    
+    # Validate time range if both provided
+    if start is not None and end is not None:
+        start_dt = _parse_rfc3339(start)
+        end_dt = _parse_rfc3339(end)
+        if end_dt <= start_dt:
+            raise ValueError("end_must_be_after_start")
+    elif start is not None or end is not None:
+        # If only one is provided, raise error
+        raise ValueError("start_and_end_must_be_provided_together")
 
     cal_id = (
         calendar_id
@@ -586,21 +617,47 @@ def update_event(
             "pip install -e '.[calendar]'"
         ) from e
 
-    body: dict[str, Any] = {
-        "start": {"dateTime": start_dt.replace(microsecond=0).isoformat()},
-        "end": {"dateTime": end_dt.replace(microsecond=0).isoformat()},
-    }
+    # Build update body - only include fields that are provided
+    body: dict[str, Any] = {}
+    
+    if start is not None and end is not None:
+        start_dt = _parse_rfc3339(start)
+        end_dt = _parse_rfc3339(end)
+        body["start"] = {"dateTime": start_dt.replace(microsecond=0).isoformat()}
+        body["end"] = {"dateTime": end_dt.replace(microsecond=0).isoformat()}
+    
     if summary is not None:
         s = str(summary).strip()
         if s:
             body["summary"] = s
+        else:
+            raise ValueError("summary_cannot_be_empty")
+    
     if description is not None:
         body["description"] = str(description)
+    
     if location is not None:
         body["location"] = str(location)
+    
+    # Check that at least one field is being updated
+    if not body:
+        raise ValueError("at_least_one_field_must_be_updated")
 
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
-    updated = service.events().patch(calendarId=cal_id, eventId=str(event_id).strip(), body=body).execute()
+    
+    try:
+        updated = service.events().patch(
+            calendarId=cal_id,
+            eventId=str(event_id).strip(),
+            body=body
+        ).execute()
+    except Exception as e:
+        # Handle common Google API errors
+        error_msg = str(e).lower()
+        if "not found" in error_msg or "404" in error_msg:
+            raise ValueError(f"event_not_found: {event_id}") from e
+        raise
+    
     if not isinstance(updated, dict):
         raise RuntimeError("calendar_update_failed")
 
@@ -611,8 +668,10 @@ def update_event(
         "ok": True,
         "id": updated.get("id") or str(event_id).strip(),
         "htmlLink": updated.get("htmlLink"),
-        "summary": updated.get("summary") or (str(summary).strip() if summary else None),
-        "start": start_obj.get("dateTime") or start_obj.get("date") or start_dt.replace(microsecond=0).isoformat(),
-        "end": end_obj.get("dateTime") or end_obj.get("date") or end_dt.replace(microsecond=0).isoformat(),
+        "summary": updated.get("summary"),
+        "start": start_obj.get("dateTime") or start_obj.get("date"),
+        "end": end_obj.get("dateTime") or end_obj.get("date"),
+        "location": updated.get("location"),
+        "description": updated.get("description"),
         "calendar_id": cal_id,
     }

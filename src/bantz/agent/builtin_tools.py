@@ -617,19 +617,24 @@ def build_default_registry() -> ToolRegistry:
     reg.register(
         Tool(
             name="calendar.update_event",
-            description="Update/move a calendar event (write). Requires confirmation.",
+            description=(
+                "Update a calendar event with partial updates (write). Requires confirmation. "
+                "Only specified fields are modified. "
+                "Examples: change title only, change location only, change time only, or combine multiple changes. "
+                "If start is provided, end must also be provided."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "event_id": {"type": "string", "description": "Event ID"},
-                    "start": {"type": "string", "description": "RFC3339 start datetime (with timezone)"},
-                    "end": {"type": "string", "description": "RFC3339 end datetime (with timezone)"},
-                    "summary": {"type": "string", "description": "Optional new summary/title"},
+                    "event_id": {"type": "string", "description": "Event ID (required)"},
+                    "summary": {"type": "string", "description": "New event title/summary (optional)"},
+                    "start": {"type": "string", "description": "RFC3339 start datetime with timezone (optional, requires end)"},
+                    "end": {"type": "string", "description": "RFC3339 end datetime with timezone (optional, requires start)"},
+                    "location": {"type": "string", "description": "Event location (optional)"},
+                    "description": {"type": "string", "description": "Event description (optional)"},
                     "calendar_id": {"type": "string", "description": "Calendar ID (default: primary)"},
-                    "description": {"type": "string", "description": "Optional description"},
-                    "location": {"type": "string", "description": "Optional location"},
                 },
-                "required": ["event_id", "start", "end"],
+                "required": ["event_id"],
             },
             returns_schema={
                 "type": "object",
@@ -640,9 +645,11 @@ def build_default_registry() -> ToolRegistry:
                     "summary": {"type": "string"},
                     "start": {"type": "string"},
                     "end": {"type": "string"},
+                    "location": {"type": "string"},
+                    "description": {"type": "string"},
                     "calendar_id": {"type": "string"},
                 },
-                "required": ["ok", "id", "start", "end", "calendar_id"],
+                "required": ["ok", "id", "calendar_id"],
             },
             risk_level="MED",
             requires_confirmation=True,
