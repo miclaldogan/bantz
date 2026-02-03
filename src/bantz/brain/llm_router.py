@@ -1,7 +1,7 @@
 """LLM Orchestrator: Single entry point for all user inputs (LLM-first architecture).
 
 Provides:
-- Route classification (calendar | smalltalk | unknown)
+- Route classification (calendar | gmail | smalltalk | unknown)
 - Intent extraction (create | modify | cancel | query)
 - Slot extraction (date, time, duration, title, window_hint)
 - Confidence scoring
@@ -34,7 +34,7 @@ class OrchestratorOutput:
     """
 
     # Core routing (from original RouterOutput)
-    route: str  # calendar | smalltalk | unknown
+    route: str  # calendar | gmail | smalltalk | unknown
     calendar_intent: str  # create | modify | cancel | query | none
     slots: dict[str, Any]  # {date?, time?, duration?, title?, window_hint?}
     confidence: float  # 0.0-1.0
@@ -93,7 +93,7 @@ Görev: Her kullanıcı mesajını şu şemaya göre sınıflandır ve **orkestr
 
 OUTPUT SCHEMA (zorunlu - genişletilmiş orchestrator):
 {
-  "route": "calendar | smalltalk | unknown",
+    "route": "calendar | gmail | smalltalk | unknown",
   "calendar_intent": "create | modify | cancel | query | none",
   "slots": {
     "date": "YYYY-MM-DD veya null",
@@ -128,6 +128,7 @@ KURALLAR (kritik):
 
 ROUTE KURALLARI:
 - "calendar": takvim sorgusu veya değişikliği
+- "gmail": Gmail mesaj okuma/sorgu (okuma-only)
 - "smalltalk": sohbet, selam, durum sorma
 - "unknown": belirsiz veya başka kategoriler
 
@@ -142,6 +143,8 @@ TOOL_PLAN:
 - "calendar.list_events": takvim sorgusu
 - "calendar.find_free_slots": boş slot ara
 - "calendar.create_event": etkinlik oluştur
+- "gmail.list_messages": Gmail gelen kutusu listele (read-only)
+- "gmail.unread_count": Gmail okunmamış sayısı (read-only)
 - Birden fazla tool sıralı çağrılabilir.
 
 TIME AWARENESS:
@@ -409,7 +412,7 @@ USER: bu akşam sekize parti ekle
     def _extract_output(self, parsed: dict[str, Any], raw_text: str) -> OrchestratorOutput:
         """Extract OrchestratorOutput from parsed JSON (expanded with orchestrator fields)."""
         route = str(parsed.get("route") or "unknown").strip().lower()
-        if route not in {"calendar", "smalltalk", "unknown"}:
+        if route not in {"calendar", "gmail", "smalltalk", "unknown"}:
             route = "unknown"
 
         calendar_intent = str(parsed.get("calendar_intent") or "none").strip().lower()

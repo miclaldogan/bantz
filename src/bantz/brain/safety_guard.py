@@ -257,8 +257,10 @@ class SafetyGuard:
         if not self.policy.enforce_route_tool_match:
             return tool_plan, []
         
-        # If route is not calendar, no tools should run
-        if route != "calendar" and tool_plan:
+        # If route is not a tool-allowed route, no tools should run
+        # (Issue #170 adds read-only Gmail tools under route="gmail").
+        allowed_routes = {"calendar", "gmail"}
+        if route not in allowed_routes and tool_plan:
             violations = [
                 PolicyViolation(
                     violation_type="route_tool_mismatch",

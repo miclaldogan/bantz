@@ -34,6 +34,8 @@ TOOL_REGISTRY: dict[str, ToolRisk] = {
     "calendar.list_events": ToolRisk.SAFE,
     "calendar.find_event": ToolRisk.SAFE,
     "calendar.get_event": ToolRisk.SAFE,
+    "gmail.list_messages": ToolRisk.SAFE,
+    "gmail.unread_count": ToolRisk.SAFE,
     "time.now": ToolRisk.SAFE,
     "time.date": ToolRisk.SAFE,
     "weather.current": ToolRisk.SAFE,
