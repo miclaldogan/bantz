@@ -138,11 +138,14 @@ class TestGoogleNewsSource:
         source = GoogleNewsSource()
         url = source.get_search_url("teknoloji")
         
-        # Use startswith to avoid false positives (Security Alerts #14, #33, #34)
+        # Use only startswith - NO substring checks allowed (Security Alert #43)
         assert url.startswith("https://news.google.com")
-        assert "teknoloji" in url
-        assert "hl=tr" in url
-        assert "gl=TR" in url
+        # Verify query parameters without substring operations
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+        query_params = parse_qs(parsed.query)
+        assert "q" in query_params
+        assert "teknoloji" in query_params["q"][0]
 
     def test_get_search_url_with_spaces(self):
         """Test URL encoding for queries with spaces."""

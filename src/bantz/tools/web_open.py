@@ -171,9 +171,10 @@ def _extract_text(html: str) -> str:
     - newspaper3k
     - trafilatura
     """
-    # Remove script and style tags (Security Alert #36: handle spaces in closing tags)
-    html = re.sub(r'<script[^>]*>.*?</script\s*>', '', html, flags=re.DOTALL | re.IGNORECASE)
-    html = re.sub(r'<style[^>]*>.*?</style\s*>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    # Remove script and style tags (Security Alert #44: match tag name with optional whitespace)
+    # Pattern matches: </script>, </script >, </  script>, etc.
+    html = re.sub(r'<script[^>]*>.*?<\s*/\s*script\s*>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<style[^>]*>.*?<\s*/\s*style\s*>', '', html, flags=re.DOTALL | re.IGNORECASE)
     
     # Remove HTML tags
     text = re.sub(r'<[^>]+>', ' ', html)
