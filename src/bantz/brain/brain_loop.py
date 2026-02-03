@@ -7,8 +7,7 @@ import time
 import uuid
 from dataclasses import dataclass
 import unicodedata
-from datetime import datetime
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol, Optional, Literal, Union
 
 from bantz.core.events import EventBus, EventType, get_event_bus
@@ -19,6 +18,7 @@ from bantz.brain.calendar_intent import (
     add_minutes,
     build_intent,
     iso_from_date_hhmm,
+    iso_from_date_hhmm_in_timezone,
     parse_day_hint,
     parse_duration_minutes,
     parse_hash_ref_index,
@@ -322,6 +322,7 @@ def _render_calendar_create_event_result(
     tz_name: Optional[str],
     dry_run: bool,
     fallback_params: Optional[dict[str, Any]] = None,
+    show_tz_abbr: bool = False,
 ) -> str:
     if not isinstance(obs, dict) or obs.get("ok") is not True:
         err = str(obs.get("error") or "unknown_error").strip()
@@ -337,8 +338,12 @@ def _render_calendar_create_event_result(
     start = str(result.get("start") or fb.get("start") or "").strip()
     end = str(result.get("end") or fb.get("end") or "").strip()
 
-    sh = _format_hhmm(start, tz_name=tz_name)
-    eh = _format_hhmm(end, tz_name=tz_name)
+    if tz_name and show_tz_abbr:
+        sh = _format_hhmm_with_tz(start, tz_name=tz_name, include_abbr=True)
+        eh = _format_hhmm_with_tz(end, tz_name=tz_name, include_abbr=True)
+    else:
+        sh = _format_hhmm(start, tz_name=tz_name)
+        eh = _format_hhmm(end, tz_name=tz_name)
 
     if dry_run or bool(result.get("dry_run")):
         return JarvisVoice.format_dry_run(summary, sh, eh)
@@ -680,6 +685,47 @@ def _format_hhmm(dt_str: str, *, tz_name: Optional[str] = None) -> str:
         return dt.strftime("%H:%M")
     except Exception:
         return s
+
+
+_FIXED_OFFSET_TZ_RE = re.compile(r"^(UTC|GMT)\s*([+-])\s*(\d{1,2})(?::(\d{2}))?$", re.IGNORECASE)
+
+
+def _tzinfo_from_name(tz_name: str):
+    name = str(tz_name or "").strip()
+    if not name:
+        raise ValueError("timezone_name_required")
+
+    m = _FIXED_OFFSET_TZ_RE.match(name)
+    if m:
+        sign = 1 if m.group(2) == "+" else -1
+        hours = int(m.group(3))
+        minutes = int(m.group(4) or 0)
+        if hours > 23 or minutes > 59:
+            raise ValueError("invalid_utc_offset")
+        delta = timedelta(hours=hours, minutes=minutes) * sign
+        label = f"{m.group(1).upper()}{m.group(2)}{hours:02d}:{minutes:02d}"
+        return timezone(delta, name=label)
+
+    from zoneinfo import ZoneInfo
+
+    return ZoneInfo(name)
+
+
+def _format_hhmm_with_tz(dt_str: str, *, tz_name: str, include_abbr: bool = False) -> str:
+    s = str(dt_str or "").strip()
+    if not s:
+        return "?"
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        return s
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        tzinfo = _tzinfo_from_name(tz_name)
+        dt = dt.astimezone(tzinfo)
+        return dt.strftime("%H:%M %Z") if include_abbr else dt.strftime("%H:%M")
+    except Exception:
+        return _format_hhmm(dt_str)
 
 
 def _render_calendar_list_events(
@@ -1189,6 +1235,10 @@ def _menus_enabled(ctx: Any) -> bool:
 
     if not isinstance(ctx, dict):
         return False
+    # In deterministic render (Jarvis/demo mode) tests and clients expect
+    # structured menus to always be available.
+    if bool(ctx.get("deterministic_render")):
+        return True
     return bool(ctx.get("debug")) or bool(ctx.get("debug_menus"))
 
 
@@ -1847,43 +1897,12 @@ class BrainLoop:
         def _llm_route_classifier(user_text_in: str) -> tuple[str, str, float]:
             """Return (route, calendar_intent, confidence) using the LLM."""
 
-            # Heuristic short-circuit: prevent greetings from ever hitting the menu.
-            nt = _normalize_text_for_match(user_text_in)
-            tokens = set(re.findall(r"[a-z0-9]+", nt))
-            calendar_markers = {
-                "takvim",
-                "calendar",
-                "ajanda",
-                "saat",
-                "bugun",
-                "yarin",
-                "aksam",
-                "sabah",
-                "toplanti",
-                "meeting",
-                "plan",
-                "program",
-                "hatirlat",
-                "hatırlat",
+            schema = {
+                "route": "calendar|smalltalk|unknown",
+                "calendar_intent": "create|modify|cancel|query|none",
+                "confidence": 0.0,
             }
-            # "önümüzdeki 4 saat" / "4 saatte" style windows should be treated as calendar queries.
-            has_hour_window = bool(re.search(r"\b\d{1,2}\s*saat", nt))
-            has_saat_variant = any(tok.startswith("saat") for tok in tokens)
-            if not ((tokens & calendar_markers) or has_hour_window or has_saat_variant):
-                return _ROUTE_SMALLTALK, "none", 0.8
 
-            # If it mentions calendar-ish words, bias toward calendar query.
-            create_words = {"ekle", "olustur", "oluştur", "planla", "ayarla", "koy"}
-            cancel_words = {"iptal", "sil", "kaldir", "kaldır"}
-            modify_words = {"tasi", "taşı", "degistir", "değiştir", "ertele", "kaydir", "kaydır"}
-            if tokens & create_words:
-                return _ROUTE_CALENDAR_CREATE, "create", 0.7
-            if tokens & cancel_words:
-                return _ROUTE_CALENDAR_CANCEL, "cancel", 0.7
-            if tokens & modify_words:
-                return _ROUTE_CALENDAR_MODIFY, "modify", 0.7
-            # Default: query
-            return _ROUTE_CALENDAR_QUERY, "query", 0.7
             try:
                 # Keep prompt minimal to reduce small-model failures.
                 prompt = "SADECE JSON döndür: " + json.dumps(schema, ensure_ascii=False)
@@ -1897,10 +1916,11 @@ class BrainLoop:
             except Exception:
                 try:
                     trace["llm_router_parse_fail"] = True
-                    trace["route_reason"] = (trace.get("route_reason") or []) + ["router_parse_fail_default_smalltalk"]
+                    trace["route_reason"] = (trace.get("route_reason") or []) + ["router_parse_fail_default_unknown"]
                 except Exception:
                     pass
-                return _ROUTE_SMALLTALK, "none", 0.0
+                # Conservative fallback: unknown route.
+                return _ROUTE_UNKNOWN, "none", 0.0
 
             if not isinstance(raw, dict):
                 try:
@@ -1928,13 +1948,7 @@ class BrainLoop:
             if route_out == "smalltalk":
                 return _ROUTE_SMALLTALK, "none", conf
             if route_out == "unknown":
-                # Never surface the unknown menu in product flows; default to smalltalk.
-                try:
-                    trace["llm_router_unknown_default_smalltalk"] = True
-                    trace["route_reason"] = (trace.get("route_reason") or []) + ["router_unknown_default_smalltalk"]
-                except Exception:
-                    pass
-                return _ROUTE_SMALLTALK, "none", conf
+                return _ROUTE_UNKNOWN, "none", conf
 
             # calendar
             if intent_out == "create":
@@ -3672,6 +3686,12 @@ class BrainLoop:
                                 if title:
                                     pending_snapshot["title"] = title
                                 try:
+                                    tzv = (intent.params or {}).get("timezone")
+                                    if isinstance(tzv, str) and tzv.strip():
+                                        pending_snapshot["timezone"] = tzv.strip()
+                                except Exception:
+                                    pass
+                                try:
                                     dh = (intent.params or {}).get("day_hint")
                                     if isinstance(dh, str) and dh:
                                         pending_snapshot["day_hint"] = dh
@@ -3752,6 +3772,7 @@ class BrainLoop:
                     frozen_day_hint = None
                     frozen_start_hhmm = None
                     frozen_duration = None
+                    frozen_timezone = None
                     if isinstance(pending_intent, dict):
                         try:
                             frozen_title = str(pending_intent.get("title") or "").strip() or None
@@ -3769,6 +3790,10 @@ class BrainLoop:
                             frozen_duration = pending_intent.get("duration_minutes")
                         except Exception:
                             frozen_duration = None
+                        try:
+                            frozen_timezone = str(pending_intent.get("timezone") or "").strip() or None
+                        except Exception:
+                            frozen_timezone = None
 
                     # Fill missing slots from follow-up text without polluting the title.
                     day_hint = intent.params.get("day_hint")
@@ -3865,6 +3890,7 @@ class BrainLoop:
                                     "day_hint": day_hint,
                                     "start_hhmm": hhmm,
                                     "duration_minutes": dur,
+                                    "timezone": (str(intent.params.get("timezone") or "").strip() or frozen_timezone),
                                 }
                         except Exception:
                             pass
@@ -3900,7 +3926,21 @@ class BrainLoop:
                     except Exception:
                         duration_minutes = 30
 
-                    start = iso_from_date_hhmm(date_iso=date_iso, hhmm=hhmm, offset=offset)
+                    tz_override = None
+                    try:
+                        tz_override = str(intent.params.get("timezone") or "").strip() or None
+                    except Exception:
+                        tz_override = None
+                    if not tz_override:
+                        tz_override = frozen_timezone
+
+                    if tz_override:
+                        try:
+                            start = iso_from_date_hhmm_in_timezone(date_iso=date_iso, hhmm=hhmm, tz_name=tz_override)
+                        except Exception:
+                            start = iso_from_date_hhmm(date_iso=date_iso, hhmm=hhmm, offset=offset)
+                    else:
+                        start = iso_from_date_hhmm(date_iso=date_iso, hhmm=hhmm, offset=offset)
                     end = add_minutes(start, int(duration_minutes))
 
                     trace["intent"] = "calendar.create"
@@ -3925,13 +3965,19 @@ class BrainLoop:
                             },
                             "decision": {"risk_level": "MED", "requires_confirmation": True, "allowed": False},
                             "original_user_input": base_text,
+                            "render_tz_name": tz_override,
                         }
                     except Exception:
                         pass
 
-                    tz_name = str(ctx.get("tz_name") or "") or None
-                    sh = _format_hhmm(start, tz_name=tz_name)
-                    eh = _format_hhmm(end, tz_name=tz_name)
+
+                    default_tz = str(ctx.get("tz_name") or "") or None
+                    if tz_override:
+                        sh = _format_hhmm_with_tz(start, tz_name=tz_override, include_abbr=True)
+                        eh = _format_hhmm_with_tz(end, tz_name=tz_override, include_abbr=True)
+                    else:
+                        sh = _format_hhmm(start, tz_name=default_tz)
+                        eh = _format_hhmm(end, tz_name=default_tz)
                     prompt = JarvisVoice.format_confirmation(summary, sh, eh)
 
                     trace["intent"] = "calendar.create"
@@ -4614,7 +4660,13 @@ class BrainLoop:
                 # Demo/Jarvis deterministic renderer: bypass LLM.
                 if isinstance(ctx, dict) and bool(ctx.get("deterministic_render")):
                     obs = observations[-1] if observations else {"ok": False, "error": "no_observation"}
-                    tz_name = str(ctx.get("tz_name") or "") or None
+                    tz_name = None
+                    try:
+                        tz_name = str(pending.get("render_tz_name") or "") or None
+                    except Exception:
+                        tz_name = None
+                    if not tz_name:
+                        tz_name = str(ctx.get("tz_name") or "") or None
                     dry_run = bool(ctx.get("dry_run"))
                     if tool_name == "calendar.create_event":
                         text = _render_calendar_create_event_result(
@@ -4622,6 +4674,7 @@ class BrainLoop:
                             tz_name=tz_name,
                             dry_run=dry_run,
                             fallback_params=params if isinstance(params, dict) else None,
+                            show_tz_abbr=bool(pending.get("render_tz_name")),
                         )
                     elif tool_name == "calendar.apply_plan_draft":
                         text = _render_calendar_apply_plan_draft_result(obs=obs, tz_name=tz_name)

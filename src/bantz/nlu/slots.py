@@ -957,3 +957,200 @@ def extract_free_slot_request(text: str, reference_time: Optional[datetime] = No
         request.window_end = "18:00"
     
     return request
+
+
+# ============================================================================
+# Timezone Extraction (Issue #167)
+# ============================================================================
+
+
+@dataclass
+class TimezoneSlot:
+    """Extracted timezone information.
+    
+    Supports city names, timezone abbreviations, and UTC offsets.
+    Example: "New York", "PST", "GMT+1", "Istanbul"
+    """
+    
+    iana_name: str  # IANA timezone name: "America/New_York"
+    raw_text: str  # Original matched text
+    display_name: str  # Human-readable: "New York (EST)"
+    confidence: float = 1.0
+
+
+# Common timezone mappings for natural language
+TIMEZONE_MAPPINGS = {
+    # Turkish cities
+    "istanbul": "Europe/Istanbul",
+    "ankara": "Europe/Istanbul",
+    "izmir": "Europe/Istanbul",
+    
+    # Major world cities
+    "new york": "America/New_York",
+    "newyork": "America/New_York",
+    "los angeles": "America/Los_Angeles",
+    "chicago": "America/Chicago",
+    "london": "Europe/London",
+    "paris": "Europe/Paris",
+    "berlin": "Europe/Berlin",
+    "tokyo": "Asia/Tokyo",
+    "hong kong": "Asia/Hong_Kong",
+    "singapore": "Asia/Singapore",
+    "dubai": "Asia/Dubai",
+    "sydney": "Australia/Sydney",
+    "moscow": "Europe/Moscow",
+    
+    # US timezone abbreviations
+    "est": "America/New_York",
+    "edt": "America/New_York",
+    "cst": "America/Chicago",
+    "cdt": "America/Chicago",
+    "mst": "America/Denver",
+    "mdt": "America/Denver",
+    "pst": "America/Los_Angeles",
+    "pdt": "America/Los_Angeles",
+    "pacific": "America/Los_Angeles",
+    "pacific time": "America/Los_Angeles",
+    
+    # European timezone abbreviations
+    "cet": "Europe/Paris",
+    "cest": "Europe/Paris",
+    "gmt": "Europe/London",
+    "bst": "Europe/London",
+    
+    # Asian timezones
+    "jst": "Asia/Tokyo",
+    "kst": "Asia/Seoul",
+    "ist": "Asia/Kolkata",
+    "sgt": "Asia/Singapore",
+}
+
+# UTC offset patterns (GMT+1, UTC-5, etc.)
+UTC_OFFSET_PATTERN = re.compile(
+    r"\b(utc|gmt)\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?\b",
+    re.IGNORECASE
+)
+
+
+def extract_timezone(text: str) -> Optional[TimezoneSlot]:
+    """Extract timezone from natural language.
+    
+    Patterns supported:
+    - City names: "New York", "Istanbul", "Tokyo"
+    - Abbreviations: "PST", "EST", "CET"
+    - UTC offsets: "GMT+1", "UTC-5", "GMT+5:30"
+    
+    Args:
+        text: User input
+    
+    Returns:
+        TimezoneSlot or None if no timezone found
+    """
+    text_lower = text.lower().strip()
+    
+    # Check for UTC offset FIRST (GMT+1, UTC-5, etc.) before abbreviations
+    # This prevents "GMT" abbreviation from matching "GMT+1"
+    match = UTC_OFFSET_PATTERN.search(text)
+    if match:
+        base = match.group(1).upper()  # UTC or GMT
+        sign = match.group(2)
+        hours = int(match.group(3))
+        minutes = int(match.group(4)) if match.group(4) else 0
+        
+        # Build display name
+        offset_str = f"{sign}{hours}"
+        if minutes:
+            offset_str += f":{minutes:02d}"
+        
+        display = f"{base}{offset_str}"
+
+        # For integer-hour offsets, prefer Etc/GMT zones (note: signs are inverted in Etc/GMT).
+        # For minute offsets (e.g., +05:30), represent as a fixed-offset identifier like "UTC+05:30".
+        if minutes == 0:
+            etc_sign = "-" if sign == "+" else "+"
+            return TimezoneSlot(
+                iana_name=f"Etc/GMT{etc_sign}{hours}",
+                raw_text=match.group(0),
+                display_name=display,
+                confidence=0.85,  # Lower confidence for offset-only
+            )
+
+        # Fixed offset token handled by downstream formatting/construction.
+        fixed = f"{base}{sign}{hours:02d}:{minutes:02d}"
+        return TimezoneSlot(
+            iana_name=fixed,
+            raw_text=match.group(0),
+            display_name=display,
+            confidence=0.85,
+        )
+    
+    # Check for direct city/abbreviation matches
+    for key, iana_name in TIMEZONE_MAPPINGS.items():
+        # Use word boundaries for abbreviations, flexible for multi-word cities
+        if len(key.split()) > 1:
+            # Multi-word city names
+            if key in text_lower:
+                return TimezoneSlot(
+                    iana_name=iana_name,
+                    raw_text=key,
+                    display_name=key.title(),
+                    confidence=0.95,
+                )
+        else:
+            # Single word or abbreviations - use word boundaries
+            pattern = rf"\b{re.escape(key)}\b"
+            if re.search(pattern, text_lower):
+                return TimezoneSlot(
+                    iana_name=iana_name,
+                    raw_text=key,
+                    display_name=key.upper() if len(key) <= 4 else key.title(),
+                    confidence=0.95,
+                )
+    
+    return None
+
+
+def format_timezone_aware_time(dt: datetime, timezone_name: str) -> str:
+    """Format datetime with timezone information.
+    
+    Args:
+        dt: Datetime object
+        timezone_name: IANA timezone name
+    
+    Returns:
+        Formatted string like "15:00 EST" or "15:00 PST"
+    """
+    tz_name = str(timezone_name or "").strip()
+    if not tz_name:
+        return dt.strftime("%H:%M")
+
+    # First try IANA via zoneinfo.
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(tz_name)
+        dt_tz = dt.astimezone(tz)
+        time_str = dt_tz.strftime("%H:%M")
+        tz_abbr = dt_tz.strftime("%Z")
+        return f"{time_str} {tz_abbr}".strip()
+    except Exception:
+        pass
+
+    # Fallback: fixed-offset tokens like "UTC+05:30" / "GMT-04:00".
+    try:
+        from datetime import timedelta, timezone
+
+        m = re.match(r"^(UTC|GMT)\s*([+-])\s*(\d{1,2})(?::(\d{2}))?$", tz_name, flags=re.IGNORECASE)
+        if m:
+            sign = 1 if m.group(2) == "+" else -1
+            hours = int(m.group(3))
+            minutes = int(m.group(4) or 0)
+            offset = timedelta(hours=hours, minutes=minutes) * sign
+            label = f"{m.group(1).upper()}{m.group(2)}{hours:02d}:{minutes:02d}"
+            tz = timezone(offset, name=label)
+            dt_tz = dt.astimezone(tz)
+            return f"{dt_tz.strftime('%H:%M')} {dt_tz.strftime('%Z')}".strip()
+    except Exception:
+        pass
+
+    return dt.strftime("%H:%M")
