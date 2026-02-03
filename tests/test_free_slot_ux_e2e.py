@@ -9,6 +9,22 @@ from bantz.agent.builtin_tools import build_default_registry
 from bantz.brain.brain_loop import BrainLoop
 
 
+class _StaticLLM:
+    """Minimal deterministic LLM stub for UX-style tests.
+
+    These tests are intended to validate high-level UX constraints without
+    depending on a real model backend.
+    """
+
+    def __init__(self, text: str):
+        self._text = text
+
+    def complete_json(self, *, messages, schema_hint):  # type: ignore[no-untyped-def]
+        _ = messages
+        _ = schema_hint
+        return {"type": "SAY", "text": self._text}
+
+
 class TestFreeSlotUX:
     """Test free slot UX meets acceptance criteria (Issue #237)."""
     
@@ -16,7 +32,10 @@ class TestFreeSlotUX:
     def brain_loop(self):
         """Create brain loop with calendar tools."""
         registry = build_default_registry()
-        return BrainLoop(tools=registry)
+        llm = _StaticLLM(
+            "Efendim, birkaç uygun boşluk var: 1) 13:00–13:30 2) 15:00–15:30 3) 17:00–17:30. Daha fazla isterseniz söyleyin."
+        )
+        return BrainLoop(llm=llm, tools=registry)
     
     def test_simple_query_no_clarification(self, brain_loop):
         """Test 'uygun saat var mı' completes with minimal clarification.
