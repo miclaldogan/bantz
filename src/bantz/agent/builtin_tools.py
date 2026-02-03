@@ -566,6 +566,39 @@ def build_default_registry() -> ToolRegistry:
     )
 
     try:
+        from bantz.google.gmail import gmail_get_message as google_gmail_get_message
+    except Exception:  # pragma: no cover
+        google_gmail_get_message = None
+
+    reg.register(
+        Tool(
+            name="gmail.get_message",
+            description="Read a Gmail message body and detect attachments (read-only).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "Gmail message id"},
+                    "expand_thread": {"type": "boolean", "description": "Also fetch full thread (default: false)"},
+                    "max_thread_messages": {"type": "integer", "description": "Max thread messages to return (default: 25)"},
+                },
+                "required": ["message_id"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "message": {"type": ["object", "null"]},
+                    "thread": {"type": ["object", "null"]},
+                },
+                "required": ["ok", "message", "thread"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_get_message,
+        )
+    )
+
+    try:
         from bantz.google.calendar import find_free_slots as google_calendar_find_free_slots
     except Exception:  # pragma: no cover
         google_calendar_find_free_slots = None
