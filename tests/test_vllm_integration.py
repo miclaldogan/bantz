@@ -1,12 +1,10 @@
 """vLLM integration tests (Issue #139).
 
-These tests require a running vLLM server (local GPU or mock).
-They are marked with @pytest.mark.vllm and will be skipped by default.
+These tests are integration-level and are deselected by default.
 
 Run:
-    pytest tests/test_vllm_integration.py -v -m vllm  # Run only vLLM tests
-    pytest tests/test_vllm_integration.py -v  # Skip vLLM tests (default)
-    pytest -m "not vllm"  # Exclude all vLLM tests
+    pytest --run-integration -m vllm -v
+    pytest --run-integration tests/test_vllm_integration.py -v
 """
 
 from __future__ import annotations
@@ -34,7 +32,7 @@ def is_vllm_server_available(url: str = "http://127.0.0.1:8001") -> bool:
 
 
 @pytest.fixture
-def vllm_url() -> str:
+def vllm_url(vllm_mock_server_url: str) -> str:
     """vLLM server URL (or mock server URL)."""
     # Prefer explicit env if provided.
     env_url = (os.getenv("BANTZ_VLLM_URL") or "").strip()
@@ -46,12 +44,8 @@ def vllm_url() -> str:
         if is_vllm_server_available(candidate):
             return candidate
 
-    # Back-compat / mock servers.
-    for candidate in ("http://127.0.0.1:8000",):
-        if is_vllm_server_available(candidate):
-            return candidate
-
-    pytest.skip("No vLLM server available (start vLLM or scripts/vllm_mock_server.py)")
+    # Otherwise, start and use a lightweight in-test mock server.
+    return vllm_mock_server_url.rstrip("/")
 
 
 @pytest.fixture

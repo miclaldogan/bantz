@@ -35,6 +35,7 @@ class LLMResponse:
     model: str  # Model used
     tokens_used: int  # Total tokens (prompt + completion)
     finish_reason: str  # "stop" | "length" | "error"
+    usage: Optional[object] = None  # Backend-specific usage payload (optional)
 
 
 class LLMClientError(Exception):

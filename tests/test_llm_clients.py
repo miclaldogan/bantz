@@ -145,8 +145,8 @@ def test_vllm_is_available_failure(mock_get):
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Requires real vLLM server or mock - run with --run-integration")
-def test_vllm_chat_integration():
+@pytest.mark.vllm
+def test_vllm_chat_integration(vllm_mock_server_url: str):
     """Integration test: chat with real vLLM server.
     
     Run with: pytest tests/test_llm_clients.py::test_vllm_chat_integration --run-integration
@@ -154,10 +154,7 @@ def test_vllm_chat_integration():
     Requires:
         python scripts/vllm_mock_server.py  # or real vLLM server
     """
-    client = VLLMOpenAIClient(base_url="http://127.0.0.1:8001")  # Mock server port
-    
-    if not client.is_available():
-        pytest.skip("vLLM server not available (start scripts/vllm_mock_server.py)")
+    client = VLLMOpenAIClient(base_url=vllm_mock_server_url)
     
     messages = [LLMMessage(role="user", content="Hello")]
     response = client.chat(messages, temperature=0.0, max_tokens=50)
@@ -167,13 +164,10 @@ def test_vllm_chat_integration():
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Requires real vLLM server or mock")
-def test_vllm_complete_text_integration():
+@pytest.mark.vllm
+def test_vllm_complete_text_integration(vllm_mock_server_url: str):
     """Integration test: complete_text with real server."""
-    client = VLLMOpenAIClient(base_url="http://127.0.0.1:8001")
-    
-    if not client.is_available():
-        pytest.skip("vLLM server not available")
+    client = VLLMOpenAIClient(base_url=vllm_mock_server_url)
     
     result = client.complete_text(prompt="Test prompt", temperature=0.0, max_tokens=50)
     
@@ -182,13 +176,10 @@ def test_vllm_complete_text_integration():
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Requires real vLLM server or mock")
-def test_vllm_list_models():
+@pytest.mark.vllm
+def test_vllm_list_models(vllm_mock_server_url: str):
     """Test list_available_models with real server."""
-    client = VLLMOpenAIClient(base_url="http://127.0.0.1:8001")
-    
-    if not client.is_available():
-        pytest.skip("vLLM server not available")
+    client = VLLMOpenAIClient(base_url=vllm_mock_server_url)
     
     models = client.list_available_models()
     
@@ -295,8 +286,8 @@ def test_vllm_chat_detailed_response(mock_get_client):
 # ========================================================================
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Requires real server")
-def test_determinism_vllm():
+@pytest.mark.vllm
+def test_determinism_vllm(vllm_mock_server_url: str):
     """Test deterministic output with seed (vLLM).
 
     This test verifies that vLLM respects temperature=0 and seed for deterministic output.
@@ -305,8 +296,7 @@ def test_determinism_vllm():
     messages = [LLMMessage(role="user", content=prompt)]
 
     # Test vLLM (if available)
-    vllm = create_client("vllm", base_url="http://127.0.0.1:8001")
-    if vllm.is_available():
-        resp1 = vllm.chat_detailed(messages, temperature=0.0, max_tokens=50, seed=42)
-        resp2 = vllm.chat_detailed(messages, temperature=0.0, max_tokens=50, seed=42)
-        assert resp1.content == resp2.content, "vLLM should be deterministic with temp=0 and seed"
+    vllm = create_client("vllm", base_url=vllm_mock_server_url)
+    resp1 = vllm.chat_detailed(messages, temperature=0.0, max_tokens=50, seed=42)
+    resp2 = vllm.chat_detailed(messages, temperature=0.0, max_tokens=50, seed=42)
+    assert resp1.content == resp2.content, "vLLM should be deterministic with temp=0 and seed"

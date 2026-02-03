@@ -133,12 +133,14 @@ class VLLMOpenAIClient(LLMClient):
         *,
         temperature: float = 0.4,
         max_tokens: int = 512,
+        response_format: Optional[dict[str, Any]] = None,
     ) -> str:
         """Chat completion (simple string response)."""
         response = self.chat_detailed(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            response_format=response_format,
         )
         return response.content
     
@@ -149,6 +151,7 @@ class VLLMOpenAIClient(LLMClient):
         temperature: float = 0.4,
         max_tokens: int = 512,
         seed: Optional[int] = None,
+        response_format: Optional[dict[str, Any]] = None,
     ) -> LLMResponse:
         """Chat completion with detailed metadata."""
         client = self._get_client()
@@ -173,12 +176,17 @@ class VLLMOpenAIClient(LLMClient):
         t0 = time.perf_counter()
         try:
             # Call OpenAI-compatible API
+            kwargs: dict[str, Any] = {}
+            if response_format is not None:
+                kwargs["response_format"] = response_format
+
             completion = client.chat.completions.create(
                 model=self.model,
                 messages=openai_messages,
                 temperature=float(temperature),
                 max_tokens=int(max_tokens),
                 seed=seed,
+                **kwargs,
             )
 
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
@@ -187,11 +195,31 @@ class VLLMOpenAIClient(LLMClient):
             choice = completion.choices[0]
             content = choice.message.content or ""
             
+            usage_dict: dict[str, Any] | None = None
+            try:
+                if completion.usage is not None:
+                    usage_obj = completion.usage
+                    usage_dict = {
+                        "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
+                        "completion_tokens": getattr(usage_obj, "completion_tokens", None),
+                        "total_tokens": getattr(usage_obj, "total_tokens", None),
+                    }
+            except Exception:
+                usage_dict = None
+
+            total_tokens = -1
+            if isinstance(usage_dict, dict) and usage_dict.get("total_tokens") is not None:
+                try:
+                    total_tokens = int(usage_dict["total_tokens"])
+                except Exception:
+                    total_tokens = -1
+
             resp = LLMResponse(
                 content=content.strip(),
                 model=completion.model,
-                tokens_used=completion.usage.total_tokens if completion.usage else -1,
+                tokens_used=total_tokens,
                 finish_reason=choice.finish_reason or "stop",
+                usage=usage_dict,
             )
 
             # Track TTFT (approximate for non-streaming)
