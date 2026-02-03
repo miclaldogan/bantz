@@ -261,8 +261,9 @@ class TestCircuitBreakerMethods:
         breaker.record_failure("b.com")
         
         domains = breaker.domains
-        assert "a.com" in domains
-        assert "b.com" in domains
+        # Use exact match instead of substring to avoid false positives (Security Alerts #10-11)
+        assert any(domain == "a.com" for domain in domains)
+        assert any(domain == "b.com" for domain in domains)
 
 
 class TestCircuitBreakerSingleton:
