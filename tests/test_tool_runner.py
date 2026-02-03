@@ -386,9 +386,7 @@ class TestToolRunnerDomainExtraction:
         
         await runner.run(tool, {"url": "https://example.com/path"}, context)
         
-        # Use exact match instead of substring to avoid false positives (Security Alert #16)
-        assert "example.com" == circuit_breaker.domains.get("example.com", {}).get("domain", None) or "example.com" in [d for d in circuit_breaker.domains.keys() if d == "example.com"]
-        # Simpler alternative: check the domain was registered
+        # Use exact match to avoid false positives (Security Alerts #16, #35)
         assert any(domain == "example.com" for domain in circuit_breaker.domains)
     
     @pytest.mark.asyncio

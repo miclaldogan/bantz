@@ -55,7 +55,8 @@ def main():
         print()
         return 1
     
-    print(f"✅ Gemini API key: {gemini_api_key[:10]}...{gemini_api_key[-4:]}")
+    # Redact API key for security (Alert #26)
+    print("✅ Gemini API key: ***REDACTED*** (configured)")
     print()
     
     # Setup configuration
