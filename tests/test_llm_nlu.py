@@ -589,7 +589,7 @@ class TestURLExtraction:
         
         result = extract_url("github.com/user/repo")
         assert result is not None
-        # Use startswith to avoid false positives (Security Alerts #12, #29, #30)
+        # Use only startswith - NO substring checks allowed (Security Alerts #38, #39)
         assert result.url.startswith("https://github.com") or result.url.startswith("http://github.com")
     
     def test_extract_known_site(self):
@@ -598,8 +598,9 @@ class TestURLExtraction:
         result = extract_url("youtube")
         assert result is not None
         assert result.site_name == "youtube"
-        # Use startswith to avoid false positives (Security Alerts #13, #31, #32)
-        assert result.url.startswith("https://youtube.com") or result.url.startswith("http://youtube.com") or result.url.startswith("https://www.youtube.com")
+        # Use only startswith - NO substring checks allowed (Security Alerts #40, #41, #42)
+        valid_prefixes = ["https://youtube.com", "http://youtube.com", "https://www.youtube.com", "http://www.youtube.com"]
+        assert any(result.url.startswith(prefix) for prefix in valid_prefixes)
     
     def test_extract_site_with_suffix(self):
         from bantz.nlu.slots import extract_url

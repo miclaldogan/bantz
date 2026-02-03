@@ -115,8 +115,9 @@ class TestCitationFormatting:
         assert "Kaynaklar:" in formatted
         assert "1. Python Docs" in formatted
         assert "2. Wikipedia" in formatted
-        # Use startswith to avoid false positives (Security Alert #28)
-        assert any("https://docs.python.org" in c["url"] for c in citations)
+        # Verify citations contain expected URLs without substring checks (Security Alert #37)
+        assert len(citations) == 2
+        assert citations[0]["url"].startswith("https://docs.python.org")
     
     def test_format_citations_empty(self):
         """Test formatting empty citations."""
