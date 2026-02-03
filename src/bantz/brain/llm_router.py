@@ -145,6 +145,7 @@ TOOL_PLAN:
 - "calendar.create_event": etkinlik oluştur
 - "gmail.list_messages": Gmail gelen kutusu listele (read-only)
 - "gmail.unread_count": Gmail okunmamış sayısı (read-only)
+- "gmail.get_message": Gmail mesajını oku + thread genişlet (read-only)
 - Birden fazla tool sıralı çağrılabilir.
 
 TIME AWARENESS:

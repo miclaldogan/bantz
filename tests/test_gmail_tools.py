@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
-from bantz.google.gmail import gmail_list_messages, gmail_unread_count
+import base64
+
+from bantz.google.gmail import gmail_get_message, gmail_list_messages, gmail_unread_count
 
 
 def _make_get_response(
@@ -123,3 +125,136 @@ def test_gmail_unread_count_uses_is_unread_query():
     messages.list.assert_called_once()
     _, kwargs = messages.list.call_args
     assert kwargs["q"] == "is:unread"
+
+
+def _b64url(s: str) -> str:
+    raw = base64.urlsafe_b64encode(s.encode("utf-8")).decode("ascii")
+    return raw.rstrip("=")
+
+
+def test_gmail_get_message_plain_text_decoding_and_attachments_and_truncation():
+    service = Mock(name="gmail_service")
+    users = service.users.return_value
+
+    # messages().get(...).execute()
+    msg_get_req = Mock(name="msg_get_req")
+    users.messages.return_value.get.return_value = msg_get_req
+
+    long_text = "x" * 6000
+    msg_get_req.execute.return_value = {
+        "id": "m1",
+        "threadId": "t1",
+        "snippet": "snip",
+        "payload": {
+            "headers": [
+                {"name": "From", "value": "Ali <ali@example.com>"},
+                {"name": "Subject", "value": "Konu"},
+                {"name": "Date", "value": "Mon, 1 Jan 2024 10:00:00 +0000"},
+            ],
+            "mimeType": "multipart/mixed",
+            "parts": [
+                {
+                    "mimeType": "text/plain",
+                    "filename": "",
+                    "body": {"data": _b64url(long_text), "size": len(long_text)},
+                },
+                {
+                    "mimeType": "application/pdf",
+                    "filename": "file.pdf",
+                    "body": {"attachmentId": "att1", "size": 12345},
+                },
+            ],
+        },
+    }
+
+    out = gmail_get_message(message_id="m1", service=service)
+    assert out["ok"] is True
+    assert out["message"]["id"] == "m1"
+    assert out["message"]["threadId"] == "t1"
+    assert out["message"]["from"] == "Ali <ali@example.com>"
+    assert out["message"]["subject"] == "Konu"
+    assert out["message"]["truncated"] is True
+    assert len(out["message"]["body_text"]) == 5000
+
+    atts = out["message"]["attachments"]
+    assert any(a.get("filename") == "file.pdf" for a in atts)
+
+    users.messages.return_value.get.assert_called_once()
+    _, kwargs = users.messages.return_value.get.call_args
+    assert kwargs["format"] == "full"
+
+
+def test_gmail_get_message_html_fallback_when_no_plain():
+    service = Mock(name="gmail_service")
+    users = service.users.return_value
+    msg_get_req = Mock(name="msg_get_req")
+    users.messages.return_value.get.return_value = msg_get_req
+
+    html = "<div>Merhaba <b>dunya</b></div>"
+    msg_get_req.execute.return_value = {
+        "id": "m2",
+        "threadId": "t2",
+        "snippet": "snip",
+        "payload": {
+            "headers": [{"name": "Subject", "value": "HTML"}],
+            "mimeType": "text/html",
+            "body": {"data": _b64url(html), "size": len(html)},
+        },
+    }
+
+    out = gmail_get_message(message_id="m2", service=service)
+    assert out["ok"] is True
+    assert out["message"]["body_html"] is not None
+    assert "Merhaba" in out["message"]["body_text"]
+    assert "dunya" in out["message"]["body_text"]
+
+
+def test_gmail_get_message_thread_expansion():
+    service = Mock(name="gmail_service")
+    users = service.users.return_value
+
+    msg_get_req = Mock(name="msg_get_req")
+    users.messages.return_value.get.return_value = msg_get_req
+    msg_get_req.execute.return_value = {
+        "id": "m3",
+        "threadId": "t3",
+        "snippet": "snip",
+        "payload": {
+            "headers": [{"name": "Subject", "value": "Thread"}],
+            "mimeType": "text/plain",
+            "body": {"data": _b64url("hi"), "size": 2},
+        },
+    }
+
+    thread_get_req = Mock(name="thread_get_req")
+    users.threads.return_value.get.return_value = thread_get_req
+    thread_get_req.execute.return_value = {
+        "id": "t3",
+        "messages": [
+            {
+                "id": "m3",
+                "threadId": "t3",
+                "snippet": "snip",
+                "payload": {
+                    "headers": [{"name": "Subject", "value": "Thread"}],
+                    "mimeType": "text/plain",
+                    "body": {"data": _b64url("hi"), "size": 2},
+                },
+            },
+            {
+                "id": "m4",
+                "threadId": "t3",
+                "snippet": "snip2",
+                "payload": {
+                    "headers": [{"name": "Subject", "value": "Thread"}],
+                    "mimeType": "text/plain",
+                    "body": {"data": _b64url("hello"), "size": 5},
+                },
+            },
+        ],
+    }
+
+    out = gmail_get_message(message_id="m3", expand_thread=True, service=service)
+    assert out["ok"] is True
+    assert out["thread"]["id"] == "t3"
+    assert [m["id"] for m in out["thread"]["messages"]] == ["m3", "m4"]
