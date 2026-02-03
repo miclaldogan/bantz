@@ -235,6 +235,8 @@ class JarvisVoice:
             return "Hangisi? (1/2/3/0)"
         if menu_id == "free_slots":
             return "Hangi boşluk? (1/2/3 veya 0)"
+        if menu_id == "conflict_slots":
+            return "Hangisi uygun? (1/2/3 veya 0)"
         if menu_id == "unknown":
             return "Takvim için 1, sohbet için 2."
         return "Hangisini tercih edersin?"

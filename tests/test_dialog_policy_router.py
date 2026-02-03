@@ -292,6 +292,85 @@ def test_calendar_create_event_is_deterministic_and_requires_confirmation() -> N
     assert isinstance(state.get("_policy_pending_action"), dict)
 
 
+def test_calendar_create_event_conflict_shows_alternative_slots_menu() -> None:
+    tools = ToolRegistry()
+
+    def list_events(**params):
+        return {
+            "ok": True,
+            "count": 1,
+            "events": [
+                {
+                    "id": "evt_1",
+                    "summary": "Toplantı",
+                    "start": "2026-01-28T15:30:00+03:00",
+                    "end": "2026-01-28T16:00:00+03:00",
+                }
+            ],
+        }
+
+    tools.register(
+        Tool(
+            name="calendar.list_events",
+            description="list",
+            parameters={"type": "object", "properties": {}},
+            function=list_events,
+        )
+    )
+
+    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+    state: dict[str, object] = {"session_id": "t"}
+
+    res = loop.run(
+        turn_input="15:45 koşu ekle 30 dk",
+        session_context={
+            "deterministic_render": True,
+            "tz_name": "Europe/Istanbul",
+            "today_window": {"time_min": "2026-01-28T10:00:00+03:00", "time_max": "2026-01-28T23:59:00+03:00"},
+        },
+        policy=None,
+        context=state,
+    )
+
+    assert res.kind == "ask_user"
+    assert res.metadata.get("menu_id") == "conflict_slots"
+    assert res.metadata.get("state") == "PENDING_CHOICE"
+    assert isinstance(state.get("_dialog_pending_choice"), dict)
+
+
+def test_conflict_slots_pick_transitions_to_pending_confirmation() -> None:
+    tools = ToolRegistry()
+    loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
+
+    state: dict = {
+        "session_id": "t",
+        "_dialog_pending_choice": {
+            "menu_id": "conflict_slots",
+            "default": "0",
+            "summary": "Koşu",
+            "duration": 30,
+            "timezone": "Europe/Istanbul",
+            "slots": [
+                {"start": "2026-01-28T16:00:00+03:00", "end": "2026-01-28T16:30:00+03:00"},
+                {"start": "2026-01-28T16:30:00+03:00", "end": "2026-01-28T17:00:00+03:00"},
+            ],
+        },
+        "_dialog_state": "PENDING_CHOICE",
+    }
+
+    res = loop.run(
+        turn_input="1",
+        session_context={"deterministic_render": True, "tz_name": "Europe/Istanbul"},
+        policy=None,
+        context=state,
+    )
+
+    assert res.kind == "ask_user"
+    assert res.metadata.get("menu_id") == "pending_confirmation"
+    assert res.metadata.get("action_type") == "create_event"
+    assert isinstance(state.get("_policy_pending_action"), dict)
+
+
 def test_calendar_cancel_event_without_ref_uses_event_pick_when_last_events_available() -> None:
     tools = ToolRegistry()
     loop = BrainLoop(llm=_FailingLLM(), tools=tools, config=BrainLoopConfig(max_steps=2, debug=False))
