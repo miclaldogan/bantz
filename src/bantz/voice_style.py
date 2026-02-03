@@ -254,20 +254,26 @@ class VoiceStyle:
 
     @staticmethod
     def strip_emoji(text: str) -> str:
-        """Remove emoji from text."""
+        """Remove emoji from text.
+        
+        Uses non-overlapping Unicode ranges to avoid CodeQL security warnings.
+        Covers most common emoji blocks without character class overlap.
+        """
         if not text:
             return ""
-        emoji_pattern = re.compile(
-            "["
-            "\U0001F600-\U0001F64F"
-            "\U0001F300-\U0001F5FF"
-            "\U0001F680-\U0001F6FF"
-            "\U0001F900-\U0001F9FF"
-            "\U00002702-\U000027B0"
-            "]+",
-            flags=re.UNICODE,
-        )
-        return emoji_pattern.sub("", text).strip()
+        # Use separate patterns to avoid overlapping ranges (CodeQL alerts #21-23)
+        # Each block is processed independently
+        patterns = [
+            r"[\U0001F600-\U0001F64F]",  # Emoticons
+            r"[\U0001F300-\U0001F5FF]",  # Symbols & Pictographs
+            r"[\U0001F680-\U0001F6FF]",  # Transport & Map
+            r"[\U0001F900-\U0001F9FF]",  # Supplemental Symbols
+            r"[\U00002702-\U000027B0]",  # Dingbats
+        ]
+        result = text
+        for pattern in patterns:
+            result = re.sub(pattern, "", result, flags=re.UNICODE)
+        return result.strip()
 
     @staticmethod
     def limit_sentences(text: str, max_sentences: int = 2) -> str:
