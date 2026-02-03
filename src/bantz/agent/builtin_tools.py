@@ -546,8 +546,9 @@ def build_default_registry() -> ToolRegistry:
         Tool(
             name="calendar.create_event",
             description=(
-                "Create a calendar event (write). Supports both time-based and all-day events. "
-                "For all-day events (Issue #164), set all_day=true and use YYYY-MM-DD format for start/end dates. "
+                "Create a calendar event (write). Supports time-based, all-day, and recurring events. "
+                "For all-day events (Issue #164), set all_day=true and use YYYY-MM-DD format. "
+                "For recurring events (Issue #165), provide recurrence list with RRULE strings. "
                 "Requires confirmation."
             ),
             parameters={
@@ -580,6 +581,16 @@ def build_default_registry() -> ToolRegistry:
                             "End is exclusive (e.g., 2026-02-23 to 2026-02-26 = Feb 23-25)."
                         ),
                     },
+                    "recurrence": {
+                        "type": "array",
+                        "description": (
+                            "List of RRULE strings for recurring events (RFC5545 format). "
+                            "Example: ['RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10'] for weekly Monday meetings, 10 times. "
+                            "Supports: FREQ=DAILY/WEEKLY/MONTHLY/YEARLY, BYDAY=MO/TU/WE/TH/FR/SA/SU, "
+                            "COUNT=number, UNTIL=dateTime, INTERVAL=number."
+                        ),
+                        "items": {"type": "string"},
+                    },
                 },
                 "required": ["summary", "start"],
             },
@@ -593,6 +604,7 @@ def build_default_registry() -> ToolRegistry:
                     "start": {"type": "string"},
                     "end": {"type": "string"},
                     "all_day": {"type": "boolean"},
+                    "recurrence": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["ok", "id", "start", "end", "summary"],
             },
