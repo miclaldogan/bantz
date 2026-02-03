@@ -140,6 +140,7 @@ def cmd_calendar_create(args: argparse.Namespace) -> int:
         duration_minutes=args.duration_minutes,
         description=args.description,
         location=args.location,
+        all_day=bool(args.all_day),
     )
     _print_json(resp)
     return 0 if resp.get("ok") else 1
@@ -264,11 +265,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_create = cal_sub.add_parser("create", help="Create an event (write)")
     add_calendar_common(p_create)
     p_create.add_argument("--summary", required=True, help="Event summary/title")
-    p_create.add_argument("--start", required=True, help="RFC3339 datetime")
-    p_create.add_argument("--end", default=None, help="RFC3339 datetime")
-    p_create.add_argument("--duration-minutes", type=int, default=None, help="Used if --end is missing")
+    p_create.add_argument(
+        "--start",
+        required=True,
+        help="RFC3339 datetime or YYYY-MM-DD (for all-day events)",
+    )
+    p_create.add_argument(
+        "--end",
+        default=None,
+        help="RFC3339 datetime or YYYY-MM-DD (for all-day events)",
+    )
+    p_create.add_argument("--duration-minutes", type=int, default=None, help="Used if --end is missing (time-based only)")
     p_create.add_argument("--description", default=None)
     p_create.add_argument("--location", default=None)
+    p_create.add_argument(
+        "--all-day",
+        action="store_true",
+        help="Create all-day event (use YYYY-MM-DD format for --start and --end)",
+    )
     p_create.add_argument("--yes", action="store_true", help="Confirm write operation")
     p_create.set_defaults(func=cmd_calendar_create)
 
