@@ -325,6 +325,243 @@ def _sleep_busy_intervals(
     return _merge_intervals(clipped)
 
 
+def _normalize_allowed_windows(
+    windows: list[tuple[time, time]],
+) -> list[tuple[time, time]]:
+    """Normalize/merge allowed windows within a single day.
+
+    Windows must be same-day (no overnight). Returns sorted, merged windows.
+    """
+
+    cleaned: list[tuple[time, time]] = []
+    for s, e in windows:
+        if not isinstance(s, time) or not isinstance(e, time):
+            continue
+        if e <= s:
+            raise ValueError("allowed_window_end_must_be_after_start")
+        cleaned.append((s, e))
+    cleaned.sort(key=lambda t: (t[0].hour, t[0].minute, t[1].hour, t[1].minute))
+
+    merged: list[tuple[time, time]] = []
+    for s, e in cleaned:
+        if not merged:
+            merged.append((s, e))
+            continue
+        ps, pe = merged[-1]
+        if s <= pe:
+            merged[-1] = (ps, max(pe, e))
+            continue
+        merged.append((s, e))
+    return merged
+
+
+def _busy_outside_allowed_windows(
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    allowed_windows: list[tuple[time, time]],
+) -> list[tuple[datetime, datetime]]:
+    """Synthetic busy intervals outside allowed windows.
+
+    This enables "union" preferred windows (e.g. 08:00–12:00 and 13:00–18:00)
+    by marking everything else as busy.
+    """
+
+    if window_end <= window_start:
+        return []
+    normalized = _normalize_allowed_windows(allowed_windows)
+    if not normalized:
+        return []
+
+    tzinfo = window_start.tzinfo or timezone.utc
+    if not isinstance(tzinfo, timezone):
+        tzinfo = timezone.utc
+
+    day_cursor = datetime.combine(window_start.date(), time(0, 0), tzinfo=tzinfo)
+    intervals: list[tuple[datetime, datetime]] = []
+
+    while day_cursor < window_end:
+        day_start = day_cursor
+        day_end = day_start + timedelta(days=1)
+
+        cursor = day_start
+        for ws, we in normalized:
+            ws_dt = datetime.combine(day_start.date(), ws, tzinfo=tzinfo)
+            we_dt = datetime.combine(day_start.date(), we, tzinfo=tzinfo)
+            if ws_dt > cursor:
+                intervals.append((cursor, ws_dt))
+            if we_dt > cursor:
+                cursor = we_dt
+
+        if cursor < day_end:
+            intervals.append((cursor, day_end))
+
+        day_cursor = day_end
+
+    # Clip to the requested window.
+    clipped: list[tuple[datetime, datetime]] = []
+    for s, e in intervals:
+        if e <= window_start or s >= window_end:
+            continue
+        clipped.append((max(s, window_start), min(e, window_end)))
+    return _merge_intervals(clipped)
+
+
+def _event_interval_with_payload(
+    ev: dict[str, Any],
+    *,
+    tz: timezone,
+) -> Optional[tuple[datetime, datetime, dict[str, Any]]]:
+    s = ev.get("start")
+    e = ev.get("end")
+    if not isinstance(s, str) or not isinstance(e, str):
+        return None
+
+    # All-day events show up as YYYY-MM-DD.
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        try:
+            sd = _parse_date(s)
+            ed = _parse_date(e)
+            start_dt, _ = _to_all_day_range(sd, tz=tz)
+            end_dt, _ = _to_all_day_range(ed, tz=tz)
+            if end_dt <= start_dt:
+                return None
+            return start_dt, end_dt, ev
+        except Exception:
+            return None
+
+    try:
+        start_dt = _parse_rfc3339(s)
+        end_dt = _parse_rfc3339(e)
+    except Exception:
+        return None
+    if end_dt <= start_dt:
+        return None
+    return start_dt, end_dt, ev
+
+
+def detect_conflicting_events(
+    *,
+    events: list[dict[str, Any]],
+    start: str,
+    end: str,
+    max_conflicts: int = 3,
+) -> list[dict[str, Any]]:
+    """Return up to N events that overlap the desired [start,end) interval."""
+
+    desired_start = _parse_rfc3339(start)
+    desired_end = _parse_rfc3339(end)
+    if desired_end <= desired_start:
+        return []
+
+    tzinfo = desired_start.tzinfo or timezone.utc
+    if not isinstance(tzinfo, timezone):
+        tzinfo = timezone.utc
+
+    conflicts: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        it = _event_interval_with_payload(ev, tz=tzinfo)
+        if it is None:
+            continue
+        s, e, payload = it
+        # Overlap test: [a,b) overlaps [c,d) iff max(a,c) < min(b,d)
+        if max(s, desired_start) < min(e, desired_end):
+            ev_id = payload.get("id")
+            if isinstance(ev_id, str) and ev_id:
+                if ev_id in seen_ids:
+                    continue
+                seen_ids.add(ev_id)
+            conflicts.append(payload)
+            if len(conflicts) >= int(max_conflicts):
+                break
+    return conflicts
+
+
+def suggest_alternative_slots(
+    *,
+    events: list[dict[str, Any]],
+    time_min: str,
+    duration_minutes: int,
+    suggestions: int = 3,
+    days: int = 7,
+    preferred_windows: Optional[list[tuple[str, str]]] = None,
+) -> list[dict[str, str]]:
+    """Suggest the next N free slots starting from time_min.
+
+    Unlike `_compute_free_slots` (single window), this supports a union of
+    preferred windows (e.g. morning + afternoon).
+    """
+
+    if duration_minutes <= 0:
+        raise ValueError("duration_minutes_must_be_positive")
+    if suggestions <= 0:
+        return []
+    if days <= 0:
+        return []
+
+    window_start = _parse_rfc3339(time_min)
+    window_end = window_start + timedelta(days=int(days))
+
+    tzinfo = window_start.tzinfo or timezone.utc
+    if not isinstance(tzinfo, timezone):
+        tzinfo = timezone.utc
+
+    busy = _merge_intervals(_extract_busy_intervals(events, tz=tzinfo))
+
+    # Preferred union windows (Issue #168): default to 08-12 and 13-18.
+    win_pairs = preferred_windows
+    if not isinstance(win_pairs, list) or not win_pairs:
+        win_pairs = [("08:00", "12:00"), ("13:00", "18:00")]
+
+    allowed: list[tuple[time, time]] = []
+    for a, b in win_pairs:
+        s_t, _ = _parse_hhmm(a, default=time(8, 0))
+        e_t, is_24 = _parse_hhmm(b, default=time(18, 0))
+        if is_24:
+            raise ValueError("preferred_windows_end_cannot_be_24_for_multi_window")
+        allowed.append((s_t, e_t))
+
+    busy.extend(
+        _busy_outside_allowed_windows(
+            window_start=window_start,
+            window_end=window_end,
+            allowed_windows=allowed,
+        )
+    )
+    busy.sort(key=lambda t: t[0])
+    busy = _merge_intervals(busy)
+
+    # Clip busy intervals to the window.
+    clipped: list[tuple[datetime, datetime]] = []
+    for s, e in busy:
+        if e <= window_start or s >= window_end:
+            continue
+        clipped.append((max(s, window_start), min(e, window_end)))
+    clipped = _merge_intervals(clipped)
+
+    required = timedelta(minutes=int(duration_minutes))
+    out: list[dict[str, str]] = []
+
+    cursor = window_start
+    for s, e in clipped:
+        if s > cursor and (s - cursor) >= required:
+            slot_end = cursor + required
+            out.append({"start": cursor.replace(microsecond=0).isoformat(), "end": slot_end.replace(microsecond=0).isoformat()})
+            if len(out) >= int(suggestions):
+                return out
+        if e > cursor:
+            cursor = e
+
+    if window_end > cursor and (window_end - cursor) >= required:
+        slot_end = cursor + required
+        out.append({"start": cursor.replace(microsecond=0).isoformat(), "end": slot_end.replace(microsecond=0).isoformat()})
+
+    return out[: int(suggestions)]
+
+
 def _dedupe_normalized_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Dedupe normalized event dicts.
 

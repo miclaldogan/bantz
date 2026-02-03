@@ -32,6 +32,12 @@ from bantz.planning.plan_draft import (
     plan_draft_to_dict,
 )
 
+try:
+    from bantz.google.calendar import detect_conflicting_events, suggest_alternative_slots
+except Exception:  # pragma: no cover
+    detect_conflicting_events = None
+    suggest_alternative_slots = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -225,6 +231,17 @@ def _map_choice_from_text(*, menu_id: str, user_text: str) -> Optional[str]:
             return "3"
         return None
 
+    if mid == "conflict_slots":
+        if has_any("iptal", "vazgec", "bosver"):
+            return "0"
+        if has_any("bir", "ilk"):
+            return "1"
+        if has_any("iki", "ikinci"):
+            return "2"
+        if has_any("uc", "ucuncu"):
+            return "3"
+        return None
+
     if mid == "event_pick":
         if has_any("iptal", "vazgec", "bosver"):
             return "0"
@@ -314,6 +331,32 @@ def _render_calendar_free_slots(
         slot_times.append((sh, eh))
 
     return JarvisVoice.format_free_slots_menu(slot_times, duration_minutes, seed)
+
+
+def _render_calendar_conflict_slots(
+    *,
+    slots: list[dict[str, str]],
+    tz_name: Optional[str],
+    duration_minutes: int,
+) -> str:
+    if not slots:
+        return "Bu saat dolu görünüyor, ama uygun alternatif bulamadım. Başka bir saat söyler misiniz?"
+
+    slot_times: list[tuple[str, str]] = []
+    for s in slots[:3]:
+        if not isinstance(s, dict):
+            continue
+        start = str(s.get("start") or "")
+        end = str(s.get("end") or "")
+        sh = _format_hhmm(start, tz_name=tz_name)
+        eh = _format_hhmm(end, tz_name=tz_name)
+        slot_times.append((sh, eh))
+
+    lines: list[str] = [f"Seçtiğiniz saat dolu. {duration_minutes} dk için uygun alternatifler:"]
+    for idx, (sh, eh) in enumerate(slot_times[:3], start=1):
+        lines.append(f"{idx}. {sh}–{eh}")
+    lines.append("0. Vazgeç")
+    return "\n".join(lines)
 
 
 def _render_calendar_create_event_result(
@@ -1129,7 +1172,7 @@ def _hard_lock_calendar_route(state: dict[str, Any]) -> Optional[str]:
         pending_choice = state.get(_PENDING_CHOICE_KEY)
         if isinstance(pending_choice, dict):
             menu_id = str(pending_choice.get("menu_id") or "").strip()
-            if menu_id in {"event_pick", "free_slots", "calendar_next"}:
+            if menu_id in {"event_pick", "free_slots", "calendar_next", "conflict_slots"}:
                 return _ROUTE_CALENDAR_QUERY
     except Exception:
         return None
@@ -2849,6 +2892,114 @@ class BrainLoop:
                         ),
                     )
 
+                if menu_id == "conflict_slots":
+                    allowed = {"0", "1", "2", "3"}
+                    mapped = _map_choice_from_text(menu_id=menu_id, user_text=user_text)
+                    parsed = _parse_menu_choice(user_text, allowed=allowed, default="")
+                    is_explicit = mapped is not None or parsed != ""
+                    choice = mapped if isinstance(mapped, str) and mapped in allowed else (parsed if parsed in allowed else default)
+
+                    # 2-stage reprompt: if unclear, first reprompt, then apply default
+                    if not is_explicit:
+                        count = _get_reprompt_count(state)
+                        if count < 1:
+                            state[_REPROMPT_COUNT_KEY] = count + 1
+                            reprompt = _render_reprompt(menu_id)
+                            try:
+                                self._events.publish(EventType.QUESTION.value, {"question": reprompt}, source="brain")
+                            except Exception:
+                                pass
+                            opts = pending_choice.get("options")
+                            return BrainResult(
+                                kind="ask_user",
+                                text=reprompt,
+                                steps_used=0,
+                                metadata=_std_metadata(
+                                    ctx=ctx,
+                                    state=state,
+                                    menu_id=menu_id,
+                                    options=opts if isinstance(opts, dict) else None,
+                                    reprompt_for=menu_id,
+                                ),
+                            )
+                        # second unclear -> default
+
+                    state.pop(_REPROMPT_COUNT_KEY, None)
+
+                    slots = pending_choice.get("slots")
+                    if not isinstance(slots, list):
+                        slots = []
+
+                    if choice == "0":
+                        state.pop(_PENDING_CHOICE_KEY, None)
+                        state[_DIALOG_STATE_KEY] = "IDLE"
+                        return BrainResult(
+                            kind="say",
+                            text="Vazgeçtim.",
+                            steps_used=0,
+                            metadata=_std_metadata(ctx=ctx, state=state, menu_id="conflict_slots"),
+                        )
+
+                    idx = int(choice) - 1
+                    if idx < 0 or idx >= len(slots):
+                        state.pop(_PENDING_CHOICE_KEY, None)
+                        state[_DIALOG_STATE_KEY] = "IDLE"
+                        return BrainResult(kind="say", text="Vazgeçtim.", steps_used=0, metadata=_std_metadata(ctx=ctx, state=state, menu_id="conflict_slots"))
+
+                    slot = slots[idx] if isinstance(slots[idx], dict) else {}
+                    start = str(slot.get("start") or "").strip()
+                    end = str(slot.get("end") or "").strip()
+                    if not start or not end:
+                        state.pop(_PENDING_CHOICE_KEY, None)
+                        state[_DIALOG_STATE_KEY] = "IDLE"
+                        return BrainResult(kind="say", text="Seçilen alternatif geçersiz.", steps_used=0, metadata=_std_metadata(ctx=ctx, state=state, menu_id="conflict_slots"))
+
+                    summary = str(pending_choice.get("summary") or "(etkinlik)").strip() or "(etkinlik)"
+                    tz_override = str(pending_choice.get("timezone") or "").strip() or None
+
+                    # Clear pending choice, move into pending confirmation.
+                    state.pop(_PENDING_CHOICE_KEY, None)
+                    state[_DIALOG_STATE_KEY] = "PENDING_CONFIRMATION"
+                    pending_action = {
+                        "type": "CALL_TOOL",
+                        "name": "calendar.create_event",
+                        "params": {"summary": summary, "start": start, "end": end},
+                    }
+                    try:
+                        state[_PENDING_ACTION_KEY] = {
+                            "action": pending_action,
+                            "decision": {"risk_level": "MED", "requires_confirmation": True, "allowed": False},
+                            "original_user_input": user_text,
+                            "render_tz_name": tz_override,
+                        }
+                    except Exception:
+                        pass
+
+                    default_tz = str(ctx.get("tz_name") or "") or None
+                    if tz_override:
+                        sh = _format_hhmm_with_tz(start, tz_name=tz_override, include_abbr=True)
+                        eh = _format_hhmm_with_tz(end, tz_name=tz_override, include_abbr=True)
+                    else:
+                        sh = _format_hhmm(start, tz_name=default_tz)
+                        eh = _format_hhmm(end, tz_name=default_tz)
+                    prompt = JarvisVoice.format_confirmation(summary, sh, eh)
+                    try:
+                        self._events.publish(EventType.QUESTION.value, {"question": prompt}, source="brain")
+                    except Exception:
+                        pass
+                    return BrainResult(
+                        kind="ask_user",
+                        text=prompt,
+                        steps_used=0,
+                        metadata=_std_metadata(
+                            ctx=ctx,
+                            state=state,
+                            menu_id="pending_confirmation",
+                            action_type="create_event",
+                            requires_confirmation=True,
+                        ),
+                    )
+
                 if menu_id == "event_pick":
                     allowed = {"0", "1", "2", "3"}
                     mapped = _map_choice_from_text(menu_id=menu_id, user_text=user_text)
@@ -3942,6 +4093,123 @@ class BrainLoop:
                     else:
                         start = iso_from_date_hhmm(date_iso=date_iso, hhmm=hhmm, offset=offset)
                     end = add_minutes(start, int(duration_minutes))
+
+                    # Issue #168: conflict detection + smart alternatives (deterministic only).
+                    if isinstance(ctx, dict) and bool(ctx.get("deterministic_render")):
+                        tool = None
+                        try:
+                            tool = self._tools.get("calendar.list_events")
+                        except Exception:
+                            tool = None
+                        if (
+                            tool is not None
+                            and tool.function is not None
+                            and detect_conflicting_events is not None
+                            and suggest_alternative_slots is not None
+                        ):
+                            try:
+                                sdt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                                time_min = (sdt - timedelta(days=1)).replace(microsecond=0).isoformat()
+                                time_max = (sdt + timedelta(days=7)).replace(microsecond=0).isoformat()
+                                lr = tool.function(
+                                    time_min=time_min,
+                                    time_max=time_max,
+                                    max_results=250,
+                                    query=None,
+                                    single_events=True,
+                                    show_deleted=False,
+                                    order_by="startTime",
+                                )
+                                events = lr.get("events") if isinstance(lr, dict) else None
+                                if not isinstance(events, list):
+                                    events = []
+                                evs = [e for e in events if isinstance(e, dict)]
+
+                                conflicts = detect_conflicting_events(
+                                    events=evs,
+                                    start=start,
+                                    end=end,
+                                    max_conflicts=3,
+                                )
+                                if conflicts:
+                                    alternatives = suggest_alternative_slots(
+                                        events=evs,
+                                        time_min=start,
+                                        duration_minutes=int(duration_minutes),
+                                        suggestions=3,
+                                        days=7,
+                                        preferred_windows=[("08:00", "12:00"), ("13:00", "18:00")],
+                                    )
+                                    tz_render = tz_override or (str(ctx.get("tz_name") or "") or None)
+                                    rendered = _render_calendar_conflict_slots(
+                                        slots=alternatives if isinstance(alternatives, list) else [],
+                                        tz_name=tz_render,
+                                        duration_minutes=int(duration_minutes),
+                                    )
+
+                                    if isinstance(alternatives, list) and alternatives:
+                                        options: dict[str, str] = {"0": "Vazgeç"}
+                                        try:
+                                            for idx, s in enumerate(alternatives[:3], start=1):
+                                                st = str((s or {}).get("start") or "").strip()
+                                                en = str((s or {}).get("end") or "").strip()
+                                                if st and en:
+                                                    options[str(idx)] = f"{st}–{en}"
+                                        except Exception:
+                                            pass
+                                        try:
+                                            if isinstance(state, dict):
+                                                state[_PENDING_CHOICE_KEY] = {
+                                                    "menu_id": "conflict_slots",
+                                                    "default": "0",
+                                                    "summary": summary,
+                                                    "duration": int(duration_minutes),
+                                                    "slots": alternatives[:3],
+                                                    "timezone": tz_override,
+                                                }
+                                                state[_DIALOG_STATE_KEY] = "PENDING_CHOICE"
+                                        except Exception:
+                                            pass
+                                        try:
+                                            self._events.publish(EventType.QUESTION.value, {"question": rendered}, source="brain")
+                                        except Exception:
+                                            pass
+                                        trace["intent"] = "calendar.create"
+                                        trace["next_action"] = "ask_alternatives"
+                                        trace["safety"] = ["write_requires_confirmation"]
+                                        trace["conflict"] = {"count": len(conflicts)}
+                                        return BrainResult(
+                                            kind="ask_user",
+                                            text=rendered,
+                                            steps_used=0,
+                                            metadata=_std_metadata(
+                                                ctx=ctx,
+                                                state=state,
+                                                menu_id="conflict_slots",
+                                                options=options,
+                                                action_type="create_event",
+                                                requires_confirmation=True,
+                                            ),
+                                        )
+
+                                    # Conflict but no alternatives -> slot-fill a new time.
+                                    try:
+                                        if isinstance(state, dict):
+                                            state[_CALENDAR_PENDING_INTENT_KEY] = {
+                                                "type": "create_event",
+                                                "source_text": base_text,
+                                                "missing": ["start_time"],
+                                                "title": summary,
+                                                "day_hint": day_hint,
+                                                "start_hhmm": None,
+                                                "duration_minutes": int(duration_minutes),
+                                                "timezone": tz_override,
+                                            }
+                                    except Exception:
+                                        pass
+                                    return _ask_slot_fill("start_time", missing_list=["start_time"])
+                            except Exception:
+                                pass
 
                     trace["intent"] = "calendar.create"
                     trace["slots"] = {
