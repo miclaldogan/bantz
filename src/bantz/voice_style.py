@@ -23,12 +23,15 @@ def _pick_variant(variants: list[str], seed: str) -> str:
     
     Same seed always returns same variant (test-stable).
     Different seeds give variety (no robot feel).
+    
+    Uses SHA-256 instead of MD5 for better security practices.
     """
     if not variants:
         return ""
     if len(variants) == 1:
         return variants[0]
-    h = int(hashlib.md5(seed.encode()).hexdigest(), 16)
+    # Use SHA-256 instead of MD5 for security best practices
+    h = int(hashlib.sha256(seed.encode()).hexdigest(), 16)
     return variants[h % len(variants)]
 
 
