@@ -150,14 +150,23 @@ def cmd_calendar_update(args: argparse.Namespace) -> int:
 
     from bantz.google.calendar import update_event
 
-    resp = update_event(
-        calendar_id=args.calendar_id,
-        event_id=str(args.event_id),
-        start=str(args.start),
-        end=str(args.end),
-        summary=args.summary,
-        description=args.description,
-        location=args.location,
+    # Build kwargs with only provided fields (partial update support)
+    kwargs = {"event_id": str(args.event_id)}
+    
+    if args.calendar_id:
+        kwargs["calendar_id"] = args.calendar_id
+    if args.summary:
+        kwargs["summary"] = args.summary
+    if args.start:
+        kwargs["start"] = str(args.start)
+    if args.end:
+        kwargs["end"] = str(args.end)
+    if args.location:
+        kwargs["location"] = args.location
+    if args.description:
+        kwargs["description"] = args.description
+    
+    resp = update_event(**kwargs)
     )
     _print_json(resp)
     return 0 if resp.get("ok") else 1
@@ -263,14 +272,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_create.add_argument("--yes", action="store_true", help="Confirm write operation")
     p_create.set_defaults(func=cmd_calendar_create)
 
-    p_update = cal_sub.add_parser("update", help="Update an event (write)")
+    p_update = cal_sub.add_parser("update", help="Update an event with partial updates (write)")
     add_calendar_common(p_update)
     p_update.add_argument("--event-id", required=True, help="Google Calendar event id")
-    p_update.add_argument("--start", required=True, help="RFC3339 datetime")
-    p_update.add_argument("--end", required=True, help="RFC3339 datetime")
-    p_update.add_argument("--summary", default=None)
-    p_update.add_argument("--description", default=None)
-    p_update.add_argument("--location", default=None)
+    p_update.add_argument("--summary", default=None, help="New event title/summary")
+    p_update.add_argument("--start", default=None, help="RFC3339 datetime (requires --end)")
+    p_update.add_argument("--end", default=None, help="RFC3339 datetime (requires --start)")
+    p_update.add_argument("--location", default=None, help="Event location")
+    p_update.add_argument("--description", default=None, help="Event description")
     p_update.add_argument("--yes", action="store_true", help="Confirm write operation")
     p_update.set_defaults(func=cmd_calendar_update)
 
