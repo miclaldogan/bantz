@@ -2,12 +2,12 @@
 
 > **Karar (MVP):** LLM-first architecture - Tek model tüm işleri yapar
 >
-> **Not (2026-01-31):** Kod tarafında **hibrit (3B planner + 8B finalizer)** desteği eklendi; üretim kararı için **real vLLM ölçümü** şart.
+> **Not (2026-02-04):** Yerel GPU kısıtı nedeniyle **lokal 7B/8B planı şimdilik askıda**. Strateji: **vLLM ile 3B (router/planner)** + yazı kalitesi için **Gemini (cloud)**.
 
 ## Executive Summary
 
 Bantz, **tek-model stratejisi** ile başlar:
-- **Model:** Qwen/Qwen2.5-3B-Instruct (veya benzer 3B-7B instruct model)
+- **Model:** Qwen/Qwen2.5-3B-Instruct (yerel, hız odaklı)
 - **Roller:** Router, Orchestrator, Chat - hepsi aynı model
 - **Avantaj:** Tutarlı kişilik, basit deployment, hızlı iterasyon
 - **Hedef Latency:** p95 < 200ms (3B model, vLLM ile)

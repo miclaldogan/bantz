@@ -11,7 +11,7 @@
 Bantz uses **vLLM** for local LLM inference:
 - ✅ OpenAI API compatible (`/v1/chat/completions`)
 - ✅ Prefix caching + batching
-- ✅ Supports small + larger model setups (e.g., 3B + 7B/8B)
+- ✅ Local baseline: 3B vLLM (speed-first) + quality tier via Gemini (cloud)
 
 ---
 
