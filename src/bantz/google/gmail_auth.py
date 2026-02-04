@@ -4,15 +4,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 import os
+import json
 
 
 # Canonical Gmail OAuth scopes.
 # Accept short forms like "gmail.readonly" too.
 _GMAIL_SCOPE_PREFIX = "https://www.googleapis.com/auth/"
 
+GMAIL_METADATA_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.metadata",
+]
+
+# NOTE: `gmail.metadata` cannot fetch message bodies (`format=full`) and
+# disallows some query parameters. Use `gmail.readonly` when the code needs
+# to read message content.
 GMAIL_READONLY_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.metadata",
 ]
 
 GMAIL_SEND_SCOPES = [
@@ -177,15 +184,37 @@ def get_gmail_credentials(
     creds: Any = None
 
     if cfg.token_path.exists():
-        # Important: do NOT pass `scopes=` here.
-        creds = Credentials.from_authorized_user_file(str(cfg.token_path))
+        # If the stored token was originally issued with `gmail.metadata`, we
+        # must force a clean re-consent to drop that scope when the caller
+        # requests readonly-only. Otherwise Gmail can reject body reads
+        # (`format=full`) with "Metadata scope doesn't allow format FULL".
+        try:
+            token_obj = json.loads(cfg.token_path.read_text(encoding="utf-8"))
+            token_scopes = token_obj.get("scopes") or token_obj.get("scope")
+            if isinstance(token_scopes, str):
+                token_scopes = token_scopes.split()
+            normalized_token_scopes = _normalize_gmail_scopes(list(token_scopes or []))
+        except Exception:
+            normalized_token_scopes = []
 
-        # If token is valid but scopes are insufficient, force re-consent.
-        has_scopes = getattr(creds, "has_scopes", None)
-        if callable(has_scopes) and not has_scopes(requested_scopes):
-            effective = _effective_scopes(getattr(creds, "scopes", None))
-            if not set(requested_scopes).issubset(effective):
-                creds = None
+        if (
+            requested_scopes == ["https://www.googleapis.com/auth/gmail.readonly"]
+            and "https://www.googleapis.com/auth/gmail.metadata" in normalized_token_scopes
+        ):
+            creds = None
+        else:
+        # Load with the requested scopes so a token that also contains
+        # `gmail.metadata` does not inadvertently restrict operations that
+        # require `gmail.readonly` (e.g. fetching bodies with `format=full`).
+            creds = Credentials.from_authorized_user_file(str(cfg.token_path), scopes=requested_scopes)
+
+        if creds is not None:
+            # If token is valid but scopes are insufficient, force re-consent.
+            has_scopes = getattr(creds, "has_scopes", None)
+            if callable(has_scopes) and not has_scopes(requested_scopes):
+                effective = _effective_scopes(getattr(creds, "scopes", None))
+                if not set(requested_scopes).issubset(effective):
+                    creds = None
 
     if creds is not None and getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
         creds.refresh(Request())
@@ -193,9 +222,13 @@ def get_gmail_credentials(
     if creds is None or not getattr(creds, "valid", False):
         flow = InstalledAppFlow.from_client_secrets_file(str(cfg.client_secret_path), scopes=requested_scopes)
         try:
-            creds = flow.run_local_server(port=0, open_browser=False)
+            # Prefer opening the user's browser; fall back for headless setups.
+            creds = flow.run_local_server(port=0, open_browser=True)
         except Exception:
-            creds = flow.run_console()
+            try:
+                creds = flow.run_local_server(port=0, open_browser=False)
+            except Exception:
+                creds = flow.run_console()
 
         cfg.token_path.parent.mkdir(parents=True, exist_ok=True)
         cfg.token_path.write_text(creds.to_json(), encoding="utf-8")
