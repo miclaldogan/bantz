@@ -89,7 +89,7 @@ def test_gmail_list_messages_inbox_defaults_and_pagination():
     # Ensure query/pagination wired correctly
     service.users.return_value.messages.return_value.list.assert_called_once()
     _, kwargs = service.users.return_value.messages.return_value.list.call_args
-    assert kwargs["q"] == "in:inbox"
+    assert kwargs["labelIds"] == ["INBOX"]
     assert kwargs["maxResults"] == 2
     assert kwargs["pageToken"] == "p1"
 
@@ -107,10 +107,10 @@ def test_gmail_list_messages_unread_only_query():
     assert out["query"] == "is:unread"
 
     _, kwargs = service.users.return_value.messages.return_value.list.call_args
-    assert kwargs["q"] == "is:unread"
+    assert kwargs["labelIds"] == ["INBOX", "UNREAD"]
 
 
-def test_gmail_unread_count_uses_is_unread_query():
+def test_gmail_unread_count_uses_unread_label():
     service = Mock(name="gmail_service")
     users = service.users.return_value
     messages = users.messages.return_value
@@ -124,7 +124,7 @@ def test_gmail_unread_count_uses_is_unread_query():
 
     messages.list.assert_called_once()
     _, kwargs = messages.list.call_args
-    assert kwargs["q"] == "is:unread"
+    assert kwargs["labelIds"] == ["UNREAD"]
 
 
 def _b64url(s: str) -> str:

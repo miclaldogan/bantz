@@ -179,14 +179,20 @@ def gmail_list_messages(
     if not isinstance(max_results, int) or max_results <= 0:
         raise ValueError("max_results must be a positive integer")
 
+    # NOTE: We intentionally avoid Gmail search `q=` here because the
+    # `https://www.googleapis.com/auth/gmail.metadata` scope rejects `q`.
+    # Listing by labels works with both `gmail.metadata` and `gmail.readonly`.
     q = "is:unread" if unread_only else "in:inbox"
+    label_ids = ["INBOX"]
+    if unread_only:
+        label_ids.append("UNREAD")
 
     try:
         svc = service or authenticate_gmail(scopes=GMAIL_READONLY_SCOPES)
 
         list_kwargs: dict[str, Any] = {
             "userId": "me",
-            "q": q,
+            "labelIds": label_ids,
             "maxResults": max_results,
         }
         if page_token:
@@ -258,9 +264,10 @@ def gmail_list_messages(
 
 
 def gmail_unread_count(*, service: Any = None) -> dict[str, Any]:
-    """Return an estimated unread count using Gmail search query.
+    """Return an estimated unread count.
 
-    Uses `q="is:unread"` and reads `resultSizeEstimate`.
+    We avoid Gmail search queries (`q=`) so this works under the
+    `gmail.metadata` scope as well.
     """
 
     try:
@@ -268,7 +275,7 @@ def gmail_unread_count(*, service: Any = None) -> dict[str, Any]:
         resp = (
             svc.users()
             .messages()
-            .list(userId="me", q="is:unread", maxResults=1)
+            .list(userId="me", labelIds=["UNREAD"], maxResults=1)
             .execute()
             or {}
         )
