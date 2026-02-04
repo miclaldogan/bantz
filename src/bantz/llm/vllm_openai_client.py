@@ -89,9 +89,60 @@ class VLLMOpenAIClient(LLMClient):
         self.timeout_seconds = float(timeout_seconds)
         self.track_ttft = track_ttft
         self.ttft_phase = ttft_phase
+
+        # Cache for /v1/models capabilities.
+        self._cached_model_context_len: Optional[int] = None
         
         # Lazy-import OpenAI client
         self._client: Optional[object] = None
+
+    def get_model_context_length(self, *, timeout_seconds: float = 1.5) -> Optional[int]:
+        """Best-effort discovery of the served model's context length.
+
+        Uses vLLM's OpenAI-compatible `/v1/models` endpoint when available.
+        Returns `None` if unavailable or if the server doesn't report it.
+        """
+
+        if self._cached_model_context_len is not None:
+            return int(self._cached_model_context_len)
+
+        try:
+            import requests
+        except ModuleNotFoundError:
+            return None
+
+        try:
+            r = requests.get(
+                f"{self.base_url}/v1/models",
+                timeout=float(timeout_seconds),
+            )
+            if r.status_code != 200:
+                return None
+
+            data = r.json() or {}
+            models_list = data.get("data", [])
+            if not isinstance(models_list, list) or not models_list:
+                return None
+
+            chosen = None
+            wanted = str(self.model or "").strip()
+            for item in models_list:
+                if not isinstance(item, dict):
+                    continue
+                if wanted and str(item.get("id") or "").strip() == wanted:
+                    chosen = item
+                    break
+            if chosen is None:
+                # Fallback: first entry.
+                chosen = models_list[0] if isinstance(models_list[0], dict) else None
+
+            context_len = _extract_context_len(chosen) if isinstance(chosen, dict) else None
+            if context_len is not None and context_len > 0:
+                self._cached_model_context_len = int(context_len)
+                return int(context_len)
+            return None
+        except Exception:
+            return None
     
     def _get_client(self):
         """Lazy-initialize OpenAI client."""
@@ -454,3 +505,77 @@ def _metrics_enabled() -> bool:
     if not raw:
         return False
     return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _extract_context_len(model_item: dict[str, Any]) -> Optional[int]:
+    """Extract context length from a `/v1/models` entry.
+
+    vLLM deployments sometimes include fields like `max_model_len`. We keep the
+    parsing best-effort and conservative.
+    """
+
+    if not isinstance(model_item, dict):
+        return None
+
+    candidates: list[Any] = []
+    for key in (
+        "max_model_len",
+        "max_context_length",
+        "context_length",
+        "max_position_embeddings",
+    ):
+        if key in model_item:
+            candidates.append(model_item.get(key))
+
+    meta = model_item.get("metadata")
+    if isinstance(meta, dict):
+        for key in (
+            "max_model_len",
+            "max_context_length",
+            "context_length",
+            "max_position_embeddings",
+        ):
+            if key in meta:
+                candidates.append(meta.get(key))
+
+    # If the server stashes capabilities in a nested structure, try a small recursive walk.
+    def walk(obj: Any, depth: int = 0) -> None:
+        if depth > 3:
+            return
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                lk = str(k).lower()
+                if lk in {
+                    "max_model_len",
+                    "max_context_length",
+                    "context_length",
+                    "max_position_embeddings",
+                }:
+                    candidates.append(v)
+                else:
+                    walk(v, depth + 1)
+        elif isinstance(obj, list):
+            for v in obj[:10]:
+                walk(v, depth + 1)
+
+    walk(model_item)
+
+    best: Optional[int] = None
+    for v in candidates:
+        try:
+            iv = int(v)
+        except Exception:
+            continue
+        if iv <= 0:
+            continue
+        if best is None or iv > best:
+            best = iv
+
+    # Sanity bounds.
+    if best is None:
+        return None
+    if best < 256:
+        return None
+    if best > 262144:
+        return None
+    return int(best)
