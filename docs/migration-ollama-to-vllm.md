@@ -22,7 +22,7 @@ Bantz has fully migrated to vLLM for local LLM inference. Here's why:
 ✅ **OpenAI-compatible API**: Standard interface  
 ✅ **Streaming Support**: Real-time token delivery  
 ✅ **TTFT Monitoring**: Built-in performance tracking (Issue #158)  
-✅ **Multi-model Support**: Run 3B + 7B simultaneously (Issue #179)  
+✅ **Tiered Quality**: Keep local 3B fast; use Gemini for writing-heavy quality (Issue #179)  
 
 ### Production-Ready
 
@@ -63,10 +63,13 @@ sudo systemctl stop ollama
 # Runs on http://localhost:8001
 ```
 
-**7B Finalizer (Quality)**
+**Quality (Writing-heavy tasks)**
+
+Use Gemini API (cloud) instead of running a local 7B/8B model:
 ```bash
-./scripts/vllm/start_7b.sh
-# Runs on http://localhost:8002
+export BANTZ_CLOUD_MODE=cloud
+export QUALITY_PROVIDER=gemini
+export GEMINI_API_KEY="your-key"
 ```
 
 **Manual Start**
@@ -285,7 +288,7 @@ GPU Utilization: 90-95% ✅ Better efficiency
 ✅ **3x higher throughput** (15 tok/s → 50+ tok/s)  
 ✅ **Better GPU utilization** (60% → 95%)  
 ✅ **Streaming support** with TTFT monitoring  
-✅ **Multi-model support** (3B + 7B simultaneously)  
+✅ **Tiered quality** (3B local + Gemini cloud)  
 ✅ **Production-ready** infrastructure  
 ✅ **OpenAI-compatible** API  
 ✅ **Better error handling**  
@@ -305,7 +308,7 @@ If you encounter issues during migration:
 - **Phase 1 (✅ Completed)**: vLLM integration (Issue #131)
 - **Phase 2 (✅ Completed)**: Hybrid orchestrators (Issues #157, #158)
 - **Phase 3 (✅ Completed)**: Ollama deprecation (Issue #159)
-- **Phase 4 (Upcoming)**: Multi-model vLLM support (Issue #179)
+- **Phase 4 (Upcoming)**: Tiered quality (3B local + Gemini cloud) (Issue #179)
 
 ---
 

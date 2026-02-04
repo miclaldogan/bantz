@@ -188,7 +188,7 @@ From Issue #126, these scenarios are validated:
 
 ## 🔄 Migration from vLLM-Only
 
-If you were using vLLM dual-server setup (3B + 7B), this hybrid approach offers:
+If you were planning a local "quality" model (7B/8B), this hybrid approach offers:
 
 - ✅ Better quality (Gemini > 7B local)
 - ✅ Lower latency (no 7B inference)
@@ -241,7 +241,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KE
 - [ ] Streaming Gemini responses
 - [ ] Multi-turn dialog optimization
 - [ ] Caching for repeated queries
-- [ ] Fallback to local 7B if Gemini unavailable
+- [ ] (Optional) Better fallback strategy if Gemini unavailable
 - [ ] A/B testing framework (Gemini vs local)
 
 ## 🎉 Success Metrics

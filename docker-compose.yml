@@ -45,6 +45,7 @@ services:
         capabilities: [gpu]
 
   vllm-7b:
+    profiles: ["legacy-local-quality"]
     build:
       context: .
       dockerfile: docker/vllm/Dockerfile

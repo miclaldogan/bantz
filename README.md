@@ -2,7 +2,7 @@
 
 Bantz is a local-first assistant for Linux (CLI + voice + optional browser extension).
 
-- **LLM backend:** vLLM (OpenAI-compatible API) only
+- **LLM backend:** vLLM (OpenAI-compatible API) for local speed, with optional Gemini for quality writing
 - **Google integrations:** OAuth2 (Calendar is implemented; Gmail token flow supported)
 
 ## Quickstart (vLLM)
@@ -22,7 +22,14 @@ Recommended helper scripts:
 
 ```bash
 ./scripts/vllm/start_3b.sh   # port 8001 (fast)
-./scripts/vllm/start_7b.sh   # port 8002 (quality)
+```
+
+For high-quality writing (mail drafts, long summaries), enable Gemini (cloud):
+
+```bash
+export BANTZ_CLOUD_MODE=cloud
+export QUALITY_PROVIDER=gemini
+export GEMINI_API_KEY="PASTE_YOUR_KEY_HERE"
 ```
 
 ### 3) Point Bantz to vLLM
@@ -59,7 +66,7 @@ More details: docs/setup/vllm.md
 - docs/setup/docker-vllm.md
 - docs/setup/google-vision.md
 
-## Hybrid Orchestrator Architecture (Issues #134, #135, #157)
+## Hybrid Orchestrator Architecture (Issues #134, #135)
 
 Bantz supports flexible hybrid LLM architectures for optimal quality/latency balance:
 
@@ -84,46 +91,11 @@ orchestrator = create_gemini_hybrid_orchestrator(
 )
 ```
 
-### Option 2: Flexible vLLM Hybrid (Issue #157)
-**3B Router + 7B vLLM Finalizer (with fallback)**
-- Phase 1: 3B router (vLLM port 8001) - fast planning
-- Phase 2: Tool execution
-- Phase 3: 7B finalizer (vLLM port 8002) - quality responses
-- **Fallback**: If 7B down, uses 3B router response
-- **Use case**: Fully local, privacy-preserving, graceful degradation
-
-```python
-from bantz.brain.flexible_hybrid_orchestrator import create_flexible_hybrid_orchestrator
-from bantz.llm.vllm_openai_client import VLLMOpenAIClient
-
-router = VLLMOpenAIClient(base_url="http://localhost:8001", model="Qwen/Qwen2.5-3B-Instruct")
-finalizer = VLLMOpenAIClient(base_url="http://localhost:8002", model="Qwen/Qwen2.5-7B-Instruct")
-
-orchestrator = create_flexible_hybrid_orchestrator(
-    router_client=router,
-    finalizer_client=finalizer,
-)
-```
-
-### Benchmark (Issue #157)
-
-Compare 3B-only vs 3B+7B hybrid quality:
-
-```bash
-# Start both servers
-./scripts/vllm/start_3b.sh   # port 8001
-./scripts/vllm/start_7b.sh   # port 8002
-
-# Run benchmark
-python scripts/bench_hybrid_quality.py --num-tests 30
-# Results: artifacts/results/bench_hybrid_quality.json
-```
-
 ### Architecture Benefits
 - **Low latency**: 3B router for fast planning (~40ms)
-- **High quality**: 7B/Gemini for natural responses
-- **Resilience**: Fallback to 3B if finalizer unavailable
-- **Flexible**: Choose Gemini (cloud) or 7B (local)
+- **High quality**: Gemini for natural responses
+- **Resilience**: Falls back to 3B if cloud is disabled/unavailable
+- **Flexible**: Run fully local or hybrid (3B+Gemini)
 - **Target TTFT**: <500ms total (planning 40ms + execution + finalize 100ms)
 
 ## TTFT Monitoring & Optimization (Issue #158)
@@ -178,7 +150,7 @@ print(f"Router p95: {stats.p95_ms}ms")
 
 ### Performance Targets
 - **Router (3B)**: p95 < 300ms (typical: ~40-50ms ✅)
-- **Finalizer (7B)**: p95 < 500ms (typical: ~100-150ms ✅)
+- **Finalizer (Gemini)**: p95 varies by network/model
 - **Total latency**: <500ms for "Jarvis feel" UX
 
 ## JSON Schema Validation (Issue #156)
@@ -298,7 +270,7 @@ Bantz includes a full benchmark suite for comparing LLM modes and tracking regre
 
 #### Benchmark Modes
 - **3B-only**: Single Qwen 2.5 3B for all tasks (fast, lower quality)
-- **Hybrid**: 3B router + 7B finalizer (balanced quality/latency)
+- **Hybrid**: 3B router + Gemini finalizer (recommended quality)
 - **Both**: Compare both modes side-by-side
 
 #### Metrics Tracked
@@ -315,8 +287,8 @@ python scripts/bench_hybrid_vs_3b_only.py --mode both
 # 3B-only mode
 python scripts/bench_hybrid_vs_3b_only.py --mode 3b_only
 
-# Hybrid mode (3B router + 7B finalizer)
-python scripts/bench_hybrid_vs_3b_only.py --mode hybrid
+# Hybrid mode (3B router + Gemini finalizer)
+python scripts/bench_hybrid_vs_3b_only.py --mode hybrid --use-gemini --gemini-api-key "$GEMINI_API_KEY"
 
 # Generate markdown report
 python scripts/generate_benchmark_report.py

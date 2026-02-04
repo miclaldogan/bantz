@@ -1,27 +1,23 @@
 # vLLM Model Configuration for Bantz
-# Epic LLM-1 (Issue #155): vLLM Dual-Server Infrastructure
 #
-# Strategy: SEQUENTIAL (due to RTX 4060 8GB VRAM constraints)
-# - 3B model (port 8001): Fast router/orchestrator, always-on baseline
-# - 7B model (port 8002): High-quality chat (manual switch, requires stopping 3B)
+# Current strategy:
+# - Local: vLLM 3B on port 8001 for fast routing/planning/tool selection
+# - Quality writing: Gemini (cloud) when enabled via env (see docs/setup/vllm.md)
 #
-# RTX 4060 8GB VRAM Constraints:
-#   - 3B AWQ: ~3.0GB VRAM (concurrent safe)
-#   - 7B AWQ: ~5.6GB VRAM (exclusive mode, requires 3B stopped)
+# Note: Local 7B/8B is intentionally NOT part of the default workflow
+# due to typical laptop VRAM constraints.
 #
 # Startup Scripts:
 #   ./scripts/vllm/start_3b.sh   # Start 3B router (baseline)
-#   ./scripts/vllm/start_7b.sh   # Start 7B chat (stops 3B first)
 #   ./scripts/vllm/stop.sh
 
-model_strategy: sequential  # Sequential mode: 3B or 7B, not both simultaneously
+model_strategy: single  # Single local model (3B). Quality tier handled via Gemini.
 
 models:
   router:
     name: "Qwen/Qwen2.5-3B-Instruct-AWQ"
     provider: "vllm"
     context_window: 2048
-    quantization: null  # FP16 (fits in VRAM)
     endpoint: "http://localhost:8001/v1"
     port: 8001
     quantization: "awq_marlin"
@@ -41,18 +37,18 @@ models:
     quantization: "awq_marlin"
     
   chat:
-    name: "Qwen/Qwen2.5-7B-Instruct-AWQ"
+    name: "Qwen/Qwen2.5-3B-Instruct-AWQ"
     provider: "vllm"
-    endpoint: "http://localhost:8002/v1"
-    port: 8002
+    endpoint: "http://localhost:8001/v1"
+    port: 8001
     context_window: 2048
     quantization: "awq_marlin"
     max_model_len: 2048
-    gpu_memory_utilization: 0.65
-    vram_usage_gb: 5.6
-    ttft_ms: 65  # Estimated (not yet benchmarked)
-    role: "chat, reasoning, complex responses"
-    enabled: false  # Sequential mode - manual switch required
+    gpu_memory_utilization: 0.70
+    vram_usage_gb: 3.0
+    ttft_ms: 41  # Same server as router
+    role: "chat (local baseline); upgrade via Gemini quality tier when enabled"
+    enabled: true
 
 # Single-model fallback (for comparison or resource-constrained setups)
 single_model:
@@ -154,31 +150,17 @@ memory:
     - ssn
 
 # =============================================================================
-# vLLM Server Configuration (Updated for Split Strategy - Issue #153)
+# vLLM Server Configuration
 # =============================================================================
 vllm_server:
-  # Option 1: Single vLLM instance with model switching (Recommended)
+  # Single vLLM instance
   base_url: "http://127.0.0.1:8001"
   api_key: "EMPTY"
   timeout_seconds: 30
   max_retries: 2
-  
-  # Server startup for split strategy (load 8B, use 3B via separate endpoint if needed)
-  # python -m vllm.entrypoints.openai.api_server \
-  #   --model Qwen/Qwen2.5-8B-Instruct \
-  #   --port 8001 \
-  #   --dtype auto \
-  #   --max-model-len 4096 \
-  #   --gpu-memory-utilization 0.85 \
-  #   --max-num-seqs 16
-  
-  # Option 2: Separate endpoints for 3B and 8B (if parallel needed)
-  # endpoints:
-  #   small: "http://127.0.0.1:8001"  # 3B for router/orchestrator
-  #   large: "http://127.0.0.1:8002"  # 8B for chat
-  
-  # RTX 4060 Optimization
-  gpu_memory_utilization: 0.85  # Leave headroom for KV cache (5.5GB peak + 2.5GB buffer)
+
+  # GPU optimization
+  gpu_memory_utilization: 0.85  # Leave headroom for KV cache
   max_model_len: 4096           # Sufficient for most conversations
   max_num_seqs: 16              # Batch size for throughput
   enable_prefix_caching: true   # Speed up repeated prompts
@@ -262,9 +244,9 @@ benchmark:
 # - Consistency: Same "personality" across all interactions
 # - Simplicity: 1 model = 1 GPU = easier deployment
 # - Speed: 3B model fast enough for Jarvis UX (<200ms p95)
-# - Cost: Lower than 7B, acceptable for MVP
+# - Cost: Lowest local footprint for MVP
 #
 # Future Considerations:
 # - If router latency > 150ms: Switch to 1.5B for router only
-# - If chat needs better quality: Upgrade to 7B for orchestrator/chat
+# - If chat needs better quality: Enable Gemini quality tier (cloud)
 # - If multi-user: Implement batch inference or multiple instances
