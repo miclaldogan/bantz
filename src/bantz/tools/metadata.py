@@ -38,6 +38,11 @@ TOOL_REGISTRY: dict[str, ToolRisk] = {
     "gmail.unread_count": ToolRisk.SAFE,
     "gmail.get_message": ToolRisk.SAFE,
     "gmail.send": ToolRisk.MODERATE,
+    "gmail.send_to_contact": ToolRisk.MODERATE,
+    "contacts.upsert": ToolRisk.SAFE,
+    "contacts.resolve": ToolRisk.SAFE,
+    "contacts.list": ToolRisk.SAFE,
+    "contacts.delete": ToolRisk.SAFE,
     "gmail.create_draft": ToolRisk.SAFE,
     "gmail.list_drafts": ToolRisk.SAFE,
     "gmail.update_draft": ToolRisk.SAFE,
@@ -96,6 +101,7 @@ TOOL_REGISTRY: dict[str, ToolRisk] = {
 ALWAYS_CONFIRM_TOOLS: set[str] = {
     "gmail.send",
     "gmail.send_draft",
+    "gmail.send_to_contact",
 }
 
 
@@ -201,6 +207,7 @@ def get_confirmation_prompt(tool_name: str, params: dict) -> str:
         "database.delete": "Delete from database? This cannot be undone.",
         "gmail.send": "Send email to '{to}' with subject '{subject}'?",
         "gmail.send_draft": "Send draft '{draft_id}'?",
+        "gmail.send_to_contact": "Send email to contact '{name}' with subject '{subject}'?",
     }
     
     # Get template or use generic

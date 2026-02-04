@@ -57,6 +57,10 @@ cuda-keyring_*.deb
 .env
 .env.local
 
+# Local user data
+contacts.json
+contacts.local.json
+
 # Node modules
 node_modules/
 
