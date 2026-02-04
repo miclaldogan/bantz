@@ -37,6 +37,7 @@ TOOL_REGISTRY: dict[str, ToolRisk] = {
     "gmail.list_messages": ToolRisk.SAFE,
     "gmail.unread_count": ToolRisk.SAFE,
     "gmail.get_message": ToolRisk.SAFE,
+    "gmail.send": ToolRisk.MODERATE,
     "time.now": ToolRisk.SAFE,
     "time.date": ToolRisk.SAFE,
     "weather.current": ToolRisk.SAFE,
@@ -83,6 +84,12 @@ TOOL_REGISTRY: dict[str, ToolRisk] = {
     "email.delete": ToolRisk.DESTRUCTIVE,
     "database.delete": ToolRisk.DESTRUCTIVE,
     "database.update": ToolRisk.DESTRUCTIVE,
+}
+
+
+# Moderate tools that must always require confirmation.
+ALWAYS_CONFIRM_TOOLS: set[str] = {
+    "gmail.send",
 }
 
 
@@ -151,6 +158,10 @@ def requires_confirmation(tool_name: str, llm_requested: bool = False) -> bool:
     # DESTRUCTIVE tools ALWAYS require confirmation (firewall)
     if is_destructive(tool_name):
         return True
+
+    # Some MODERATE tools still require confirmation by policy.
+    if tool_name in ALWAYS_CONFIRM_TOOLS:
+        return True
     
     # Non-destructive tools respect LLM decision
     return llm_requested
@@ -182,6 +193,7 @@ def get_confirmation_prompt(tool_name: str, params: dict) -> str:
         "app.close": "Close application '{app_name}'? Unsaved work may be lost.",
         "email.delete": "Delete email '{subject}'? This cannot be undone.",
         "database.delete": "Delete from database? This cannot be undone.",
+        "gmail.send": "Send email to '{to}' with subject '{subject}'?",
     }
     
     # Get template or use generic

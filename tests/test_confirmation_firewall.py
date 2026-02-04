@@ -453,6 +453,13 @@ def test_moderate_tools_respect_llm_decision(tool_registry):
     assert requires_confirmation(tool_name, llm_requested=True) is True
 
 
+def test_gmail_send_requires_confirmation_even_if_llm_does_not_request_it():
+    tool_name = "gmail.send"
+    assert get_tool_risk(tool_name) == ToolRisk.MODERATE
+    assert is_destructive(tool_name) is False
+    assert requires_confirmation(tool_name, llm_requested=False) is True
+
+
 def test_confirmation_flow_full_cycle(tool_registry, audit_logger):
     """Test full confirmation flow from request to execution."""
     executor = Executor(tool_registry)

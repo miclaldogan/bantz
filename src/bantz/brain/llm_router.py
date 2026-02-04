@@ -146,6 +146,7 @@ TOOL_PLAN:
 - "gmail.list_messages": Gmail gelen kutusu listele (read-only)
 - "gmail.unread_count": Gmail okunmamış sayısı (read-only)
 - "gmail.get_message": Gmail mesajını oku + thread genişlet (read-only)
+- "gmail.send": Gmail ile mail gönder (confirmation required)
 - Birden fazla tool sıralı çağrılabilir.
 
 TIME AWARENESS:
