@@ -1634,8 +1634,58 @@ class BrainLoop:
             out = str(out or "").strip()
             if not out:
                 return draft_text
+
+            # Issue #215: no-new-facts guard (dates/times/numbers must not be invented).
+            try:
+                from bantz.llm.no_new_facts import find_new_numeric_facts
+
+                allowed_sources = [str(draft_text or ""), str(user_text or "")]
+                violates, new_tokens = find_new_numeric_facts(
+                    allowed_texts=allowed_sources,
+                    candidate_text=out,
+                )
+                if violates:
+                    # One minimal retry with stricter instruction.
+                    sys_msg_retry = (
+                        sys_msg
+                        + "\nSTRICT_NO_NEW_FACTS: DRAFT'ta olmayan hiçbir sayı/saat/tarih ekleme. "
+                        "Gerekirse sayısal detayları çıkar.\n"
+                    )
+                    out2 = finalizer.chat(
+                        [
+                            LLMMessage(role="system", content=sys_msg_retry),
+                            LLMMessage(role="user", content=user_msg),
+                        ],
+                        temperature=0.3,
+                        max_tokens=220,
+                    )
+                    out2 = str(out2 or "").strip()
+                    if out2:
+                        violates2, _new2 = find_new_numeric_facts(
+                            allowed_texts=allowed_sources,
+                            candidate_text=out2,
+                        )
+                        if not violates2:
+                            out = out2
+                        else:
+                            return draft_text
+                    else:
+                        return draft_text
+            except Exception:
+                # Guard is best-effort; do not block user.
+                pass
+
             return _role_sanitize_text(out)
-        except Exception:
+        except Exception as e:
+            # Issue #215: reason-code logging (size-only; no prompt/user content).
+            try:
+                import re
+
+                m = re.search(r"\breason=([a-z_]+)\b", str(e))
+                code = str(m.group(1)) if m else "unknown_error"
+                logger.warning("finalizer_failed backend=gemini reason=%s", code)
+            except Exception:
+                pass
             return draft_text
 
     def run(
