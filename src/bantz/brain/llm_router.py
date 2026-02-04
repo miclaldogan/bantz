@@ -146,6 +146,7 @@ TOOL_PLAN:
 - "gmail.list_messages": Gmail gelen kutusu listele (read-only)
 - "gmail.unread_count": Gmail okunmamış sayısı (read-only)
 - "gmail.get_message": Gmail mesajını oku + thread genişlet (read-only)
+- "gmail.download_attachment": Gmail attachment indir (confirmation required)
 - "gmail.query_from_nl": Doğal dil → Gmail query (SAFE)
 - "gmail.smart_search": Doğal dille Gmail araması (SAFE)
 - "gmail.search_template_upsert": Gmail arama şablonu kaydet (SAFE)

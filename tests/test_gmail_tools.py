@@ -8,6 +8,7 @@ from bantz.google.gmail import (
     gmail_add_label,
     gmail_archive,
     gmail_batch_modify,
+    gmail_download_attachment,
     gmail_get_message,
     gmail_list_labels,
     gmail_list_messages,
@@ -444,6 +445,106 @@ def test_gmail_send_builds_rfc2822_and_calls_gmail_api_send():
     assert kwargs["userId"] == "me"
     assert "raw" in kwargs["body"]
     assert isinstance(kwargs["body"]["raw"], str)
+
+
+def _b64url_bytes(data: bytes) -> str:
+    raw = base64.urlsafe_b64encode(data).decode("ascii")
+    return raw.rstrip("=")
+
+
+def test_gmail_download_attachment_writes_file_and_returns_metadata(tmp_path):
+    service = Mock(name="gmail_service")
+    users = service.users.return_value
+    messages = users.messages.return_value
+
+    # Full message used for metadata lookup
+    msg_get_req = Mock(name="msg_get_req")
+    msg_get_req.execute.return_value = {
+        "id": "m1",
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "parts": [
+                {
+                    "mimeType": "application/pdf",
+                    "filename": "file.pdf",
+                    "body": {"attachmentId": "att1", "size": 3},
+                }
+            ],
+        },
+    }
+
+    # attachments().get(...)
+    att_get_req = Mock(name="att_get_req")
+    att_get_req.execute.return_value = {
+        "data": _b64url_bytes(b"abc"),
+        "size": 3,
+    }
+
+    # Wire calls: messages.get(...) then messages.attachments().get(...)
+    messages.get.return_value = msg_get_req
+    attachments_api = messages.attachments.return_value
+    attachments_api.get.return_value = att_get_req
+
+    out_path = tmp_path / "file.pdf"
+    out = gmail_download_attachment(
+        message_id="m1",
+        attachment_id="att1",
+        save_path=str(out_path),
+        service=service,
+    )
+
+    assert out["ok"] is True
+    assert out["saved_path"].endswith("file.pdf")
+    assert out["filename"] == "file.pdf"
+    assert out["declared_size_bytes"] == 3
+    assert out["size_bytes"] == 3
+    assert any("untrusted" in w.lower() for w in out["warnings"])
+    assert out_path.read_bytes() == b"abc"
+
+    messages.get.assert_called_once()
+    attachments_api.get.assert_called_once()
+
+
+def test_gmail_download_attachment_warns_on_large_declared_size(tmp_path):
+    service = Mock(name="gmail_service")
+    users = service.users.return_value
+    messages = users.messages.return_value
+
+    msg_get_req = Mock(name="msg_get_req")
+    msg_get_req.execute.return_value = {
+        "id": "m1",
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "parts": [
+                {
+                    "mimeType": "application/octet-stream",
+                    "filename": "big.bin",
+                    "body": {"attachmentId": "att_big", "size": 11 * 1024 * 1024},
+                }
+            ],
+        },
+    }
+
+    att_get_req = Mock(name="att_get_req")
+    att_get_req.execute.return_value = {
+        "data": _b64url_bytes(b"x"),
+        "size": 11 * 1024 * 1024,
+    }
+
+    messages.get.return_value = msg_get_req
+    attachments_api = messages.attachments.return_value
+    attachments_api.get.return_value = att_get_req
+
+    out_path = tmp_path / "big.bin"
+    out = gmail_download_attachment(
+        message_id="m1",
+        attachment_id="att_big",
+        save_path=str(out_path),
+        service=service,
+    )
+
+    assert out["ok"] is True
+    assert any("larger than 10mb" in w.lower() for w in out["warnings"])
 
 
 def _mock_gmail_label_modify_service(*, labels: list[dict] | None = None) -> Mock:

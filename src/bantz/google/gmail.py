@@ -10,8 +10,10 @@ Return payloads follow the tool-friendly `{ok: bool, ...}` pattern.
 from __future__ import annotations
 
 import base64
+import os
 import re
 from email.message import EmailMessage
+from pathlib import Path
 from typing import Any, Optional
 
 from bantz.google.gmail_auth import GMAIL_MODIFY_SCOPES, GMAIL_READONLY_SCOPES, GMAIL_SEND_SCOPES, authenticate_gmail
@@ -310,6 +312,7 @@ def _extract_bodies_and_attachments(payload: dict[str, Any]) -> tuple[Optional[s
             # Attachment detection: keep it simple and read-only.
             attachments.append(
                 {
+                    "attachmentId": str(attachment_id) if attachment_id else None,
                     "filename": filename or None,
                     "mimeType": mime or None,
                     "size": int(size) if isinstance(size, int) else None,
@@ -329,6 +332,136 @@ def _extract_bodies_and_attachments(payload: dict[str, Any]) -> tuple[Optional[s
     plain = "\n".join([c for c in plain_chunks if c.strip()]).strip() or None
     html = "\n".join([c for c in html_chunks if c.strip()]).strip() or None
     return plain, html, attachments
+
+
+def _resolve_save_path(save_path: str) -> Path:
+    raw = str(save_path or "").strip()
+    if not raw:
+        raise ValueError("save_path must be non-empty")
+    return Path(os.path.expanduser(raw)).resolve()
+
+
+def _find_attachment_metadata(payload: dict[str, Any], attachment_id: str) -> dict[str, Any]:
+    target = str(attachment_id or "").strip()
+    if not target:
+        return {}
+
+    def walk(part: dict[str, Any]) -> Optional[dict[str, Any]]:
+        body = part.get("body") if isinstance(part.get("body"), dict) else {}
+        att_id = body.get("attachmentId")
+        if isinstance(att_id, str) and att_id == target:
+            size = body.get("size")
+            return {
+                "filename": str(part.get("filename") or "") or None,
+                "mimeType": str(part.get("mimeType") or "") or None,
+                "size": int(size) if isinstance(size, int) else None,
+            }
+        for child in _collect_parts(part):
+            found = walk(child)
+            if found is not None:
+                return found
+        return None
+
+    found = walk(payload)
+    return found or {}
+
+
+def gmail_download_attachment(
+    *,
+    message_id: str,
+    attachment_id: str,
+    save_path: str,
+    overwrite: bool = False,
+    service: Any = None,
+) -> dict[str, Any]:
+    """Download a Gmail attachment to disk (Issue #176).
+
+    WARNING: Downloaded files are untrusted. Consider scanning before opening.
+    """
+
+    mid = str(message_id or "").strip()
+    aid = str(attachment_id or "").strip()
+    if not mid:
+        raise ValueError("message_id must be non-empty")
+    if not aid:
+        raise ValueError("attachment_id must be non-empty")
+
+    path = _resolve_save_path(save_path)
+    if path.exists() and not overwrite:
+        return {"ok": False, "error": "file_exists", "saved_path": str(path)}
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_READONLY_SCOPES)
+
+        # Fetch full message once to extract attachment metadata (filename/mimeType/declared size).
+        msg = (
+            svc.users()
+            .messages()
+            .get(userId="me", id=mid, format="full")
+            .execute()
+            or {}
+        )
+        payload = msg.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        meta = _find_attachment_metadata(payload, aid)
+
+        att = (
+            svc.users()
+            .messages()
+            .attachments()
+            .get(userId="me", messageId=mid, id=aid)
+            .execute()
+            or {}
+        )
+
+        data = att.get("data")
+        if not isinstance(data, str) or not data.strip():
+            return {
+                "ok": False,
+                "error": "missing_attachment_data",
+                "saved_path": str(path),
+            }
+
+        blob = _b64url_decode(data)
+
+        declared_size = att.get("size")
+        if not isinstance(declared_size, int):
+            declared_size = meta.get("size") if isinstance(meta.get("size"), int) else None
+
+        warnings: list[str] = [
+            "Downloaded files are untrusted; consider scanning for malware before opening.",
+        ]
+        threshold = 10 * 1024 * 1024
+        size_for_warning = declared_size if isinstance(declared_size, int) else len(blob)
+        if size_for_warning > threshold:
+            warnings.append("Attachment is larger than 10MB; downloading/saving may be slow.")
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp, "wb") as f:
+            f.write(blob)
+        tmp.replace(path)
+
+        return {
+            "ok": True,
+            "message_id": mid,
+            "attachment_id": aid,
+            "saved_path": str(path),
+            "filename": meta.get("filename") or path.name,
+            "mimeType": meta.get("mimeType"),
+            "declared_size_bytes": declared_size,
+            "size_bytes": len(blob),
+            "warnings": warnings,
+        }
+    except Exception as e:  # pragma: no cover
+        return {
+            "ok": False,
+            "error": str(e),
+            "message_id": mid,
+            "attachment_id": aid,
+            "saved_path": str(path),
+        }
 
 
 def _summarize_full_message(msg: dict[str, Any]) -> dict[str, Any]:

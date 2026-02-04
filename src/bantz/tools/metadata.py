@@ -37,6 +37,7 @@ TOOL_REGISTRY: dict[str, ToolRisk] = {
     "gmail.list_messages": ToolRisk.SAFE,
     "gmail.unread_count": ToolRisk.SAFE,
     "gmail.get_message": ToolRisk.SAFE,
+    "gmail.download_attachment": ToolRisk.MODERATE,
     "gmail.query_from_nl": ToolRisk.SAFE,
     "gmail.smart_search": ToolRisk.SAFE,
     "gmail.search_template_upsert": ToolRisk.SAFE,
@@ -115,6 +116,7 @@ ALWAYS_CONFIRM_TOOLS: set[str] = {
     "gmail.send",
     "gmail.send_draft",
     "gmail.send_to_contact",
+    "gmail.download_attachment",
 }
 
 
@@ -221,6 +223,7 @@ def get_confirmation_prompt(tool_name: str, params: dict) -> str:
         "gmail.send": "Send email to '{to}' with subject '{subject}'?",
         "gmail.send_draft": "Send draft '{draft_id}'?",
         "gmail.send_to_contact": "Send email to contact '{name}' with subject '{subject}'?",
+        "gmail.download_attachment": "Download attachment '{attachment_id}' from email '{message_id}' to '{save_path}'?",
         "gmail.archive": "Archive email '{message_id}' (remove INBOX label)?",
         "gmail.batch_modify": "Batch modify labels for multiple emails?",
     }
