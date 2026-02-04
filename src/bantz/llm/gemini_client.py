@@ -13,6 +13,7 @@ from bantz.llm.base import (
     LLMMessage,
     LLMResponse,
     LLMConnectionError,
+    LLMModelNotFoundError,
     LLMTimeoutError,
     LLMInvalidResponseError,
 )
@@ -127,6 +128,7 @@ class GeminiClient(LLMClient):
             payload.setdefault("generationConfig", {})["seed"] = int(seed)
 
         t0 = time.perf_counter()
+        prompt_tokens_est = _estimate_prompt_tokens(payload)
         try:
             r = requests.post(
                 url,
@@ -137,12 +139,22 @@ class GeminiClient(LLMClient):
             )
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
+            # Map HTTP errors to stable reason codes.
             if r.status_code >= 500:
-                raise LLMConnectionError(f"Gemini server error: {r.status_code}")
+                raise LLMConnectionError(f"Gemini server_error status={r.status_code} reason=server_error")
+            if r.status_code in {401, 403}:
+                raise LLMConnectionError(
+                    f"Gemini auth_error status={r.status_code} reason=auth_error"
+                )
             if r.status_code == 429:
-                raise LLMConnectionError("Gemini rate limited (429)")
+                raise LLMConnectionError("Gemini rate_limited status=429 reason=rate_limited")
+            if r.status_code == 404:
+                raise LLMModelNotFoundError("Gemini model_not_found status=404 reason=model_not_found")
             if r.status_code >= 400:
-                raise LLMInvalidResponseError(f"Gemini request failed: {r.status_code} {r.text[:300]}")
+                # Do not include response body (avoid accidentally logging user content).
+                raise LLMInvalidResponseError(
+                    f"Gemini invalid_request status={r.status_code} reason=invalid_request"
+                )
 
             data = r.json() or {}
             candidates = data.get("candidates") or []
@@ -160,6 +172,9 @@ class GeminiClient(LLMClient):
             prompt_tokens = int(usage.get("promptTokenCount") or -1)
             completion_tokens = int(usage.get("candidatesTokenCount") or -1)
             total_tokens = int(usage.get("totalTokenCount") or -1)
+
+            if prompt_tokens < 0:
+                prompt_tokens = int(prompt_tokens_est)
 
             if _metrics_enabled():
                 metrics_logger.info(
@@ -180,9 +195,48 @@ class GeminiClient(LLMClient):
             )
 
         except requests.Timeout as e:
-            raise LLMTimeoutError(f"Gemini request timeout ({self._timeout_seconds}s)") from e
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            if _metrics_enabled():
+                metrics_logger.info(
+                    "llm_call_failed backend=%s model=%s latency_ms=%s reason=%s prompt_tokens=%s",
+                    self.backend_name,
+                    self.model_name,
+                    elapsed_ms,
+                    "timeout",
+                    int(prompt_tokens_est),
+                )
+            raise LLMTimeoutError(
+                f"Gemini timeout reason=timeout timeout_s={self._timeout_seconds}"
+            ) from e
+        except requests.RequestException as e:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            if _metrics_enabled():
+                metrics_logger.info(
+                    "llm_call_failed backend=%s model=%s latency_ms=%s reason=%s prompt_tokens=%s",
+                    self.backend_name,
+                    self.model_name,
+                    elapsed_ms,
+                    "connection_error",
+                    int(prompt_tokens_est),
+                )
+            raise LLMConnectionError(
+                f"Gemini connection_error reason=connection_error"
+            ) from e
+        except (LLMConnectionError, LLMModelNotFoundError, LLMTimeoutError, LLMInvalidResponseError):
+            # Preserve upstream reason codes.
+            raise
         except Exception as e:
-            raise LLMInvalidResponseError(f"Gemini response parsing failed: {e}") from e
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            if _metrics_enabled():
+                metrics_logger.info(
+                    "llm_call_failed backend=%s model=%s latency_ms=%s reason=%s prompt_tokens=%s",
+                    self.backend_name,
+                    self.model_name,
+                    elapsed_ms,
+                    "parse_error",
+                    int(prompt_tokens_est),
+                )
+            raise LLMInvalidResponseError(f"Gemini parse_error reason=parse_error") from e
 
     def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
         messages = [LLMMessage(role="user", content=prompt)]
@@ -195,3 +249,26 @@ def _metrics_enabled() -> bool:
     if not raw:
         return False
     return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _estimate_prompt_tokens(payload: dict) -> int:
+    """Best-effort token estimate for metrics when Gemini omits usageMetadata."""
+
+    try:
+        total_chars = 0
+        sys_inst = payload.get("systemInstruction") or {}
+        for p in (sys_inst.get("parts") or []):
+            if isinstance(p, dict):
+                total_chars += len(str(p.get("text") or ""))
+
+        for c in (payload.get("contents") or []):
+            if not isinstance(c, dict):
+                continue
+            for p in (c.get("parts") or []):
+                if isinstance(p, dict):
+                    total_chars += len(str(p.get("text") or ""))
+
+        # Rough heuristic: ~4 chars/token.
+        return max(0, int(total_chars) // 4)
+    except Exception:
+        return -1

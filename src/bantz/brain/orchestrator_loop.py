@@ -631,6 +631,55 @@ class OrchestratorLoop:
 
             return replace(orchestrator_output, assistant_reply=orchestrator_output.question)
 
+        def _extract_reason_code(err: Exception) -> str:
+            try:
+                import re
+
+                m = re.search(r"\breason=([a-z_]+)\b", str(err))
+                if m:
+                    return str(m.group(1))
+            except Exception:
+                pass
+            return "unknown_error"
+
+        def _fast_finalize_with_planner() -> str | None:
+            try:
+                planner_llm = getattr(self.orchestrator, "_llm", None)
+                if planner_llm is None or not hasattr(planner_llm, "complete_text"):
+                    return None
+
+                planner_decision = {
+                    "route": orchestrator_output.route,
+                    "calendar_intent": orchestrator_output.calendar_intent,
+                    "slots": orchestrator_output.slots,
+                    "tool_plan": orchestrator_output.tool_plan,
+                    "requires_confirmation": orchestrator_output.requires_confirmation,
+                }
+
+                prompt_lines = [
+                    "Kimlik / Roller:",
+                    "- Sen BANTZ'sın. Kullanıcı USER'dır.",
+                    "- Türkçe konuş; 'Efendim' hitabını kullan.",
+                    "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
+                    "- Yeni sayı/saat/tarih uydurma; verilenleri koru.",
+                    "",
+                    "PLANNER_DECISION (JSON):",
+                    json.dumps(planner_decision, ensure_ascii=False),
+                ]
+                if tool_results:
+                    prompt_lines.extend(["", "TOOL_RESULTS (JSON):", json.dumps(tool_results, ensure_ascii=False)])
+                prompt_lines.extend(["", f"USER: {user_input}", "ASSISTANT:"])
+                fast_prompt = "\n".join(prompt_lines)
+
+                try:
+                    fast_text = planner_llm.complete_text(prompt=fast_prompt, temperature=0.2, max_tokens=256)
+                except TypeError:
+                    fast_text = planner_llm.complete_text(prompt=fast_prompt)
+                fast_text = str(fast_text or "").strip()
+                return fast_text or None
+            except Exception:
+                return None
+
         # Hybrid mode: if a finalizer LLM is provided, optionally generate the
         # user-facing reply using that model (e.g., Gemini), while keeping planning/tool
         # decisions from the planner model (e.g., 3B).
@@ -740,6 +789,75 @@ class OrchestratorLoop:
                     final_text = self.finalizer_llm.complete_text(prompt=finalizer_prompt)
 
                 final_text = str(final_text or "").strip()
+
+                # Issue #215: no-new-facts guard (numbers/time/date must not be invented).
+                if final_text:
+                    try:
+                        from bantz.llm.no_new_facts import find_new_numeric_facts
+
+                        allowed_sources = [
+                            user_input,
+                            dialog_summary or "",
+                            json.dumps(planner_decision, ensure_ascii=False),
+                            json.dumps(tool_results or [], ensure_ascii=False),
+                        ]
+                        violates, new_tokens = find_new_numeric_facts(
+                            allowed_texts=allowed_sources,
+                            candidate_text=final_text,
+                        )
+
+                        if violates:
+                            # One minimal retry with stricter constraint.
+                            state.update_trace(
+                                finalizer_attempted=True,
+                                finalizer_guard="no_new_facts",
+                                finalizer_guard_violation=True,
+                                finalizer_guard_new_tokens_count=len(new_tokens),
+                            )
+                            retry_prompt = (
+                                finalizer_prompt
+                                + "\n\nSTRICT_NO_NEW_FACTS: Sadece verilen metinlerde geçen sayı/saat/tarihleri kullan. "
+                                "Yeni rakam ekleme. Gerekirse rakam içeren detayları çıkar.\n"
+                            )
+                            try:
+                                final_text2 = self.finalizer_llm.complete_text(
+                                    prompt=retry_prompt,
+                                    temperature=0.2,
+                                    max_tokens=256,
+                                )
+                            except TypeError:
+                                final_text2 = self.finalizer_llm.complete_text(prompt=retry_prompt)
+                            final_text2 = str(final_text2 or "").strip()
+                            if final_text2:
+                                violates2, _new2 = find_new_numeric_facts(
+                                    allowed_texts=allowed_sources,
+                                    candidate_text=final_text2,
+                                )
+                                if not violates2:
+                                    final_text = final_text2
+                                else:
+                                    final_text = ""
+                            else:
+                                final_text = ""
+                    except Exception:
+                        # Guard is best-effort; continue.
+                        pass
+
+                if not final_text:
+                    # Guard rejected the quality output; fall back cleanly.
+                    fallback_text = _fast_finalize_with_planner()
+                    if fallback_text:
+                        from dataclasses import replace
+
+                        state.update_trace(
+                            response_tier=tier_name or "quality",
+                            response_tier_reason=tier_reason or "quality_finalizer",
+                            finalizer_attempted=True,
+                            finalizer_used=False,
+                            finalizer_fallback="planner",
+                        )
+                        return replace(orchestrator_output, assistant_reply=fallback_text)
+
                 if final_text:
                     from dataclasses import replace
 
@@ -747,10 +865,34 @@ class OrchestratorLoop:
                         response_tier=tier_name or "quality",
                         response_tier_reason=tier_reason or "quality_finalizer",
                         finalizer_used=True,
+                        finalizer_attempted=True,
                     )
 
                     return replace(orchestrator_output, assistant_reply=final_text)
-            except Exception:
+            except Exception as e:
+                # Issue #215: clean fallback on auth/limit/etc errors with reason code.
+                try:
+                    from bantz.llm.base import LLMClientError
+
+                    if isinstance(e, LLMClientError):
+                        code = _extract_reason_code(e)
+                        state.update_trace(
+                            response_tier=tier_name or "quality",
+                            response_tier_reason=tier_reason or "quality_finalizer",
+                            finalizer_attempted=True,
+                            finalizer_used=False,
+                            finalizer_error_code=code,
+                            finalizer_error_backend=str(getattr(self.finalizer_llm, "backend_name", "") or ""),
+                        )
+
+                        fallback_text = _fast_finalize_with_planner()
+                        if fallback_text:
+                            from dataclasses import replace
+
+                            return replace(orchestrator_output, assistant_reply=fallback_text)
+                except Exception:
+                    pass
+
                 # Fall back to non-hybrid behavior below.
                 pass
 
@@ -766,49 +908,11 @@ class OrchestratorLoop:
             should_fast_finalize = bool(tool_results) and not bool(orchestrator_output.ask_user)
             if should_fast_finalize:
                 try:
-                    planner_llm = getattr(self.orchestrator, "_llm", None)
-                    if planner_llm is not None and hasattr(planner_llm, "complete_text"):
-                        planner_decision = {
-                            "route": orchestrator_output.route,
-                            "calendar_intent": orchestrator_output.calendar_intent,
-                            "slots": orchestrator_output.slots,
-                            "tool_plan": orchestrator_output.tool_plan,
-                            "requires_confirmation": orchestrator_output.requires_confirmation,
-                        }
+                    fallback_text = _fast_finalize_with_planner()
+                    if fallback_text:
+                        from dataclasses import replace
 
-                        fast_prompt = "\n".join(
-                            [
-                                "Kimlik / Roller:",
-                                "- Sen BANTZ'sın. Kullanıcı USER'dır.",
-                                "- Türkçe konuş; 'Efendim' hitabını kullan.",
-                                "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
-                                "- Takvim sonuçlarını kısa ve net özetle; varsa maddeler halinde yaz.",
-                                "",
-                                "PLANNER_DECISION (JSON):",
-                                json.dumps(planner_decision, ensure_ascii=False),
-                                "",
-                                "TOOL_RESULTS (JSON):",
-                                json.dumps(tool_results, ensure_ascii=False),
-                                "",
-                                f"USER: {user_input}",
-                                "ASSISTANT:",
-                            ]
-                        )
-
-                        try:
-                            fast_text = planner_llm.complete_text(
-                                prompt=fast_prompt,
-                                temperature=0.2,
-                                max_tokens=256,
-                            )
-                        except TypeError:
-                            fast_text = planner_llm.complete_text(prompt=fast_prompt)
-
-                        fast_text = str(fast_text or "").strip()
-                        if fast_text:
-                            from dataclasses import replace
-
-                            return replace(orchestrator_output, assistant_reply=fast_text)
+                        return replace(orchestrator_output, assistant_reply=fallback_text)
                 except Exception:
                     # Best-effort; continue to default behavior.
                     pass
