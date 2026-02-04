@@ -62,6 +62,7 @@ TOOL_REGISTRY: dict[str, ToolRisk] = {
     "gmail.update_draft": ToolRisk.SAFE,
     "gmail.delete_draft": ToolRisk.SAFE,
     "gmail.send_draft": ToolRisk.MODERATE,
+    "gmail.generate_reply": ToolRisk.MODERATE,
     "time.now": ToolRisk.SAFE,
     "time.date": ToolRisk.SAFE,
     "weather.current": ToolRisk.SAFE,
@@ -117,6 +118,7 @@ ALWAYS_CONFIRM_TOOLS: set[str] = {
     "gmail.send_draft",
     "gmail.send_to_contact",
     "gmail.download_attachment",
+    "gmail.generate_reply",
 }
 
 
@@ -226,6 +228,7 @@ def get_confirmation_prompt(tool_name: str, params: dict) -> str:
         "gmail.download_attachment": "Download attachment '{attachment_id}' from email '{message_id}' to '{save_path}'?",
         "gmail.archive": "Archive email '{message_id}' (remove INBOX label)?",
         "gmail.batch_modify": "Batch modify labels for multiple emails?",
+        "gmail.generate_reply": "Generate a reply draft for email '{message_id}' based on intent '{user_intent}'?",
     }
     
     # Get template or use generic

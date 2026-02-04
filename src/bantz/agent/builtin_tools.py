@@ -1449,6 +1449,69 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    # ─────────────────────────────────────────────────────────────────
+    # Gmail Tools (Google) - Auto Reply (Issue #177)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.google.gmail_reply import gmail_generate_reply as google_gmail_generate_reply
+    except Exception:  # pragma: no cover
+        google_gmail_generate_reply = None
+
+    reg.register(
+        Tool(
+            name="gmail.generate_reply",
+            description=(
+                "Generate 3 reply suggestions (short/medium/detailed) for a Gmail message and create a reply draft. "
+                "MODERATE (creates draft), confirmation required."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "Gmail message id to reply to"},
+                    "user_intent": {"type": "string", "description": "What the user wants to reply (natural language)"},
+                    "base": {
+                        "type": "string",
+                        "description": "Reply base/style: default|formal|friendly (default: default)",
+                    },
+                    "reply_all": {
+                        "type": ["boolean", "null"],
+                        "description": "Override reply-all detection (true/false). If null, auto-detect.",
+                    },
+                    "include_quote": {
+                        "type": "boolean",
+                        "description": "If true, append a quoted original-message block to the reply.",
+                        "default": False,
+                    },
+                },
+                "required": ["message_id", "user_intent"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "message_id": {"type": "string"},
+                    "thread_id": {"type": "string"},
+                    "draft_id": {"type": "string"},
+                    "base": {"type": "string"},
+                    "reply_all": {"type": "boolean"},
+                    "to": {"type": "array", "items": {"type": "string"}},
+                    "cc": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "include_quote": {"type": "boolean"},
+                    "options": {"type": "array"},
+                    "selected_style": {"type": "string"},
+                    "preview": {"type": "string"},
+                    "llm_backend": {"type": "string"},
+                    "llm_model": {"type": "string"},
+                },
+                "required": ["ok", "message_id", "thread_id", "draft_id", "options"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_gmail_generate_reply,
+        )
+    )
+
     try:
         from bantz.google.gmail import gmail_delete_draft as google_gmail_delete_draft
     except Exception:  # pragma: no cover
