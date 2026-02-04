@@ -652,6 +652,185 @@ def build_default_registry() -> ToolRegistry:
     )
 
     # ─────────────────────────────────────────────────────────────────
+    # Contacts (local) - name → email (Issue: contacts shortcuts)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.contacts.store import (
+            contacts_delete as contacts_delete_fn,
+            contacts_list as contacts_list_fn,
+            contacts_resolve as contacts_resolve_fn,
+            contacts_upsert as contacts_upsert_fn,
+        )
+    except Exception:  # pragma: no cover
+        contacts_upsert_fn = None
+        contacts_resolve_fn = None
+        contacts_list_fn = None
+        contacts_delete_fn = None
+
+    reg.register(
+        Tool(
+            name="contacts.upsert",
+            description="Save a contact mapping (name → email). SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Contact name (e.g., 'Ali')"},
+                    "email": {"type": "string", "description": "Email address"},
+                    "notes": {"type": "string", "description": "Optional notes"},
+                },
+                "required": ["name", "email"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "contact": {"type": "object"},
+                    "path": {"type": "string"},
+                },
+                "required": ["ok", "contact", "path"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=contacts_upsert_fn,
+        )
+    )
+
+    reg.register(
+        Tool(
+            name="contacts.resolve",
+            description="Resolve a contact name to an email. SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Contact name"},
+                },
+                "required": ["name"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "name": {"type": "string"},
+                    "key": {"type": "string"},
+                    "email": {"type": "string"},
+                    "notes": {"type": ["string", "null"]},
+                    "path": {"type": "string"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "key", "path"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=contacts_resolve_fn,
+        )
+    )
+
+    reg.register(
+        Tool(
+            name="contacts.list",
+            description="List saved contacts. SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prefix": {"type": "string", "description": "Optional name prefix filter"},
+                    "limit": {"type": "integer", "description": "Max results (default: 50)"},
+                },
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "contacts": {"type": "array"},
+                    "path": {"type": "string"},
+                },
+                "required": ["ok", "contacts", "path"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=contacts_list_fn,
+        )
+    )
+
+    reg.register(
+        Tool(
+            name="contacts.delete",
+            description="Delete a saved contact. SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Contact name"},
+                },
+                "required": ["name"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "deleted": {"type": "boolean"},
+                    "key": {"type": "string"},
+                    "path": {"type": "string"},
+                },
+                "required": ["ok", "deleted", "key", "path"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=contacts_delete_fn,
+        )
+    )
+
+    # Convenience wrapper: send email to a saved contact name.
+    try:
+        from bantz.contacts.store import contacts_resolve as _contacts_resolve
+        from bantz.google.gmail import gmail_send as _gmail_send
+
+        def gmail_send_to_contact(*, name: str, subject: str, body: str, cc: str | None = None, bcc: str | None = None):
+            resolved = _contacts_resolve(name=name)
+            if not resolved.get("ok"):
+                return {
+                    "ok": False,
+                    "error": f"contact_not_found: {name}",
+                    "name": name,
+                }
+            return _gmail_send(to=str(resolved.get("email") or ""), subject=subject, body=body, cc=cc, bcc=bcc)
+
+    except Exception:  # pragma: no cover
+        gmail_send_to_contact = None
+
+    reg.register(
+        Tool(
+            name="gmail.send_to_contact",
+            description="Send an email to a saved contact name via Gmail. Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Saved contact name"},
+                    "subject": {"type": "string", "description": "Email subject"},
+                    "body": {"type": "string", "description": "Email body (plain text)"},
+                    "cc": {"type": "string", "description": "Optional CC emails"},
+                    "bcc": {"type": "string", "description": "Optional BCC emails"},
+                },
+                "required": ["name", "subject", "body"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "to": {"type": "array", "items": {"type": "string"}},
+                    "subject": {"type": "string"},
+                    "message_id": {"type": "string"},
+                    "thread_id": {"type": "string"},
+                    "label_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+                },
+                "required": ["ok"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=gmail_send_to_contact,
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────
     # Gmail Tools (Google) - Drafts (Issue #173)
     # ─────────────────────────────────────────────────────────────────
     try:
