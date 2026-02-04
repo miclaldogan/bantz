@@ -37,6 +37,13 @@ TOOL_REGISTRY: dict[str, ToolRisk] = {
     "gmail.list_messages": ToolRisk.SAFE,
     "gmail.unread_count": ToolRisk.SAFE,
     "gmail.get_message": ToolRisk.SAFE,
+    "gmail.list_labels": ToolRisk.SAFE,
+    "gmail.add_label": ToolRisk.SAFE,
+    "gmail.remove_label": ToolRisk.SAFE,
+    "gmail.mark_read": ToolRisk.SAFE,
+    "gmail.mark_unread": ToolRisk.SAFE,
+    "gmail.archive": ToolRisk.MODERATE,
+    "gmail.batch_modify": ToolRisk.MODERATE,
     "gmail.send": ToolRisk.MODERATE,
     "gmail.send_to_contact": ToolRisk.MODERATE,
     "contacts.upsert": ToolRisk.SAFE,
@@ -208,6 +215,8 @@ def get_confirmation_prompt(tool_name: str, params: dict) -> str:
         "gmail.send": "Send email to '{to}' with subject '{subject}'?",
         "gmail.send_draft": "Send draft '{draft_id}'?",
         "gmail.send_to_contact": "Send email to contact '{name}' with subject '{subject}'?",
+        "gmail.archive": "Archive email '{message_id}' (remove INBOX label)?",
+        "gmail.batch_modify": "Batch modify labels for multiple emails?",
     }
     
     # Get template or use generic
