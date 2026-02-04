@@ -32,27 +32,42 @@ def _require_yes(args: argparse.Namespace, *, action: str) -> None:
 
 def cmd_env(_args: argparse.Namespace) -> int:
     from bantz.google.auth import get_google_auth_config
+    from bantz.google.service_account import get_google_service_account_config
+    from bantz.security.secrets import mask_path
 
     cfg = get_google_auth_config()
+    sa_cfg = get_google_service_account_config()
     
-    # Redact sensitive client secret value for security
-    client_secret_env = os.getenv("BANTZ_GOOGLE_CLIENT_SECRET")
-    client_secret_display = "***REDACTED***" if client_secret_env else None
+    def _present(*names: str) -> bool:
+        for n in names:
+            if str(os.getenv(n, "") or "").strip():
+                return True
+        return False
+
+    # Never print secret values; only presence booleans.
+    gemini_key_present = _present("GEMINI_API_KEY", "GOOGLE_API_KEY", "BANTZ_GEMINI_API_KEY")
+    client_secret_present = _present("BANTZ_GOOGLE_CLIENT_SECRET")
+    gmail_client_secret_present = _present("BANTZ_GMAIL_CLIENT_SECRET")
     
     out = {
-        "client_secret_path": str(cfg.client_secret_path),
+        "client_secret_path": mask_path(str(cfg.client_secret_path)),
         "client_secret_exists": cfg.client_secret_path.exists(),
-        "token_path": str(cfg.token_path),
+        "token_path": mask_path(str(cfg.token_path)),
         "token_exists": cfg.token_path.exists(),
+        "service_account_path": mask_path(str(sa_cfg.service_account_path)),
+        "service_account_exists": sa_cfg.service_account_path.exists(),
         "calendar_id": os.getenv("BANTZ_GOOGLE_CALENDAR_ID") or None,
-        "gmail_token_path": _default_gmail_token_path(),
+        "gmail_token_path": mask_path(_default_gmail_token_path()),
         "env": {
-            "BANTZ_GOOGLE_CLIENT_SECRET": client_secret_display,
-            "BANTZ_GOOGLE_TOKEN_PATH": os.getenv("BANTZ_GOOGLE_TOKEN_PATH") or None,
+            "BANTZ_GOOGLE_CLIENT_SECRET_present": bool(client_secret_present),
+            "BANTZ_GOOGLE_TOKEN_PATH_present": _present("BANTZ_GOOGLE_TOKEN_PATH"),
             "BANTZ_GOOGLE_CALENDAR_ID": os.getenv("BANTZ_GOOGLE_CALENDAR_ID") or None,
-            "BANTZ_GOOGLE_GMAIL_TOKEN_PATH": os.getenv("BANTZ_GOOGLE_GMAIL_TOKEN_PATH") or None,
-            "BANTZ_GMAIL_CLIENT_SECRET": "***REDACTED***" if os.getenv("BANTZ_GMAIL_CLIENT_SECRET") else None,
-            "BANTZ_GMAIL_TOKEN_PATH": os.getenv("BANTZ_GMAIL_TOKEN_PATH") or None,
+            "BANTZ_GOOGLE_GMAIL_TOKEN_PATH_present": _present("BANTZ_GOOGLE_GMAIL_TOKEN_PATH"),
+            "BANTZ_GMAIL_CLIENT_SECRET_present": bool(gmail_client_secret_present),
+            "BANTZ_GMAIL_TOKEN_PATH_present": _present("BANTZ_GMAIL_TOKEN_PATH"),
+            "BANTZ_GOOGLE_SERVICE_ACCOUNT_present": _present("BANTZ_GOOGLE_SERVICE_ACCOUNT"),
+            "GOOGLE_APPLICATION_CREDENTIALS_present": _present("GOOGLE_APPLICATION_CREDENTIALS"),
+            "GEMINI_API_KEY_present": bool(gemini_key_present),
         },
     }
     _print_json(out)
@@ -73,8 +88,8 @@ def cmd_auth_calendar(args: argparse.Namespace) -> int:
     out = {
         "ok": True,
         "scopes": list(scopes),
-        "client_secret_path": str(args.client_secret) if args.client_secret else None,
-        "token_path": str(args.token_path) if args.token_path else None,
+        "client_secret_path": "…/" + os.path.basename(str(args.client_secret)) if args.client_secret else None,
+        "token_path": "…/" + os.path.basename(str(args.token_path)) if args.token_path else None,
         "granted_scopes": getattr(creds, "scopes", None),
         "note": "Token written (or refreshed) successfully.",
     }
@@ -102,7 +117,7 @@ def cmd_auth_gmail(args: argparse.Namespace) -> int:
     out = {
         "ok": True,
         "scopes": list(scopes),
-        "token_path": str(token_path),
+        "token_path": "…/" + os.path.basename(str(token_path)),
         "granted_scopes": getattr(creds, "scopes", None),
         "note": "Gmail token written (or refreshed) successfully.",
     }
@@ -322,6 +337,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    # Load env vars from .env / BANTZ_ENV_FILE (Issue #216).
+    try:
+        from bantz.security.env_loader import load_env
+
+        load_env()
+    except Exception:
+        pass
+
+    # Redact secrets from any logs emitted by downstream modules.
+    try:
+        from bantz.security.secrets import install_secrets_redaction_filter
+
+        install_secrets_redaction_filter()
+    except Exception:
+        pass
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -334,16 +365,33 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         return int(fn(args))
     except FileNotFoundError as e:
-        print(f"❌ {e}", file=sys.stderr)
+        try:
+            from bantz.security.secrets import mask_secrets
+
+            msg = mask_secrets(str(e))
+        except Exception:
+            msg = str(e)
+        print(f"❌ {msg}", file=sys.stderr)
         return 2
     except RuntimeError as e:
-        msg = str(e)
+        try:
+            from bantz.security.secrets import mask_secrets
+
+            msg = mask_secrets(str(e))
+        except Exception:
+            msg = str(e)
         if "dependencies" in msg.lower() and "google" in msg.lower():
-            print(f"❌ {e}", file=sys.stderr)
+            print(f"❌ {msg}", file=sys.stderr)
             print("\n💡 Install Google deps: pip install -e '.[calendar]'", file=sys.stderr)
             return 2
-        print(f"❌ {e}", file=sys.stderr)
+        print(f"❌ {msg}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"❌ {e}", file=sys.stderr)
+        try:
+            from bantz.security.secrets import mask_secrets
+
+            msg = mask_secrets(str(e))
+        except Exception:
+            msg = str(e)
+        print(f"❌ {msg}", file=sys.stderr)
         return 1

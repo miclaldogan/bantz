@@ -6,6 +6,8 @@ from typing import Any, Optional
 import os
 import json
 
+from bantz.security.secrets import mask_path
+
 
 # Canonical Gmail OAuth scopes.
 # Accept short forms like "gmail.readonly" too.
@@ -171,7 +173,7 @@ def get_gmail_credentials(
     if not cfg.client_secret_path.exists():
         raise FileNotFoundError(
             "Gmail client secret not found. Set BANTZ_GMAIL_CLIENT_SECRET "
-            f"(default: {DEFAULT_GMAIL_CLIENT_SECRET_PATH}). Missing: {cfg.client_secret_path}"
+            f"(default: {DEFAULT_GMAIL_CLIENT_SECRET_PATH}). Missing: {mask_path(str(cfg.client_secret_path))}"
         )
 
     try:

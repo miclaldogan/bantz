@@ -27,9 +27,13 @@ Recommended helper scripts:
 For high-quality writing (mail drafts, long summaries), enable Gemini (cloud):
 
 ```bash
-export BANTZ_CLOUD_MODE=cloud
-export QUALITY_PROVIDER=gemini
-export GEMINI_API_KEY="PASTE_YOUR_KEY_HERE"
+# Prefer .env to avoid leaking keys into shell history.
+# See: docs/secrets-hygiene.md
+cat > .env <<'EOF'
+BANTZ_CLOUD_MODE=cloud
+QUALITY_PROVIDER=gemini
+GEMINI_API_KEY=PASTE_YOUR_KEY_HERE
+EOF
 ```
 
 ### 3) Point Bantz to vLLM
@@ -78,6 +82,8 @@ Bantz supports flexible hybrid LLM architectures for optimal quality/latency bal
 - **Use case**: Best quality, cloud dependency acceptable
 
 ```python
+import os
+
 from bantz.brain.gemini_hybrid_orchestrator import create_gemini_hybrid_orchestrator
 from bantz.llm.vllm_openai_client import VLLMOpenAIClient
 
@@ -87,7 +93,7 @@ router = VLLMOpenAIClient(
 )
 orchestrator = create_gemini_hybrid_orchestrator(
     router_client=router,
-    gemini_api_key="YOUR_API_KEY"
+    gemini_api_key=os.getenv("GEMINI_API_KEY", "")
 )
 ```
 
@@ -288,7 +294,7 @@ python scripts/bench_hybrid_vs_3b_only.py --mode both
 python scripts/bench_hybrid_vs_3b_only.py --mode 3b_only
 
 # Hybrid mode (3B router + Gemini finalizer)
-python scripts/bench_hybrid_vs_3b_only.py --mode hybrid --use-gemini --gemini-api-key "$GEMINI_API_KEY"
+python scripts/bench_hybrid_vs_3b_only.py --mode hybrid --use-gemini
 
 # Generate markdown report
 python scripts/generate_benchmark_report.py

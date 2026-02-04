@@ -451,6 +451,24 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
+    # Load env vars from .env / BANTZ_ENV_FILE (Issue #216).
+    # This enables setting secrets without putting them in shell history.
+    try:
+        from bantz.security.env_loader import load_env
+
+        load_env()
+    except Exception:
+        # Never block CLI startup due to env loading.
+        pass
+
+    # Redact secrets from standard logging output (Issue #216).
+    try:
+        from bantz.security.secrets import install_secrets_redaction_filter
+
+        install_secrets_redaction_filter()
+    except Exception:
+        pass
+
     if argv and argv[0] == "google":
         from bantz.google.cli import main as google_main
 
@@ -593,7 +611,13 @@ Kullanım örnekleri:
                 print("\n⚠️ Warmup iptal edildi.")
                 return 130
             except Exception as e:
-                print(f"❌ Warmup başarısız: {e}")
+                try:
+                    from bantz.security.secrets import mask_secrets
+
+                    msg = mask_secrets(str(e))
+                except Exception:
+                    msg = str(e)
+                print(f"❌ Warmup başarısız: {msg}")
                 return 1
             print("✅ Warmup tamam. Artık voice modunda indirmeye takılmaz.")
             return 0

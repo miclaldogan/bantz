@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Optional
 import os
 
+from bantz.security.secrets import mask_path
+
 
 DEFAULT_SERVICE_ACCOUNT_PATH = "~/.config/bantz/google/service_account.json"
 
@@ -49,7 +51,7 @@ def get_service_account_credentials(
         raise FileNotFoundError(
             "Google service account JSON not found. Set BANTZ_GOOGLE_SERVICE_ACCOUNT or "
             "GOOGLE_APPLICATION_CREDENTIALS, or place the file at "
-            f"{DEFAULT_SERVICE_ACCOUNT_PATH}. Missing: {cfg.service_account_path}"
+            f"{DEFAULT_SERVICE_ACCOUNT_PATH}. Missing: {mask_path(str(cfg.service_account_path))}"
         )
 
     try:
