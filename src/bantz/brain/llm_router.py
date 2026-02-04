@@ -147,6 +147,11 @@ TOOL_PLAN:
 - "gmail.unread_count": Gmail okunmamış sayısı (read-only)
 - "gmail.get_message": Gmail mesajını oku + thread genişlet (read-only)
 - "gmail.send": Gmail ile mail gönder (confirmation required)
+- "gmail.create_draft": Gmail taslağı oluştur (SAFE)
+- "gmail.list_drafts": Gmail taslaklarını listele (SAFE)
+- "gmail.update_draft": Gmail taslağını güncelle (SAFE)
+- "gmail.send_draft": Gmail taslağını gönder (confirmation required)
+- "gmail.delete_draft": Gmail taslağını sil (SAFE)
 - Birden fazla tool sıralı çağrılabilir.
 
 TIME AWARENESS:

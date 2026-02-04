@@ -450,3 +450,311 @@ def gmail_send(
             "thread_id": "",
             "label_ids": None,
         }
+
+
+def _draft_message_fields_from_full_payload(payload: dict[str, Any]) -> dict[str, str]:
+    """Extract draft fields from a message payload.
+
+    Used to preserve missing fields when updating a draft.
+    """
+
+    to_value = _get_header(payload, "To") or ""
+    cc_value = _get_header(payload, "Cc") or ""
+    bcc_value = _get_header(payload, "Bcc") or ""
+    subject_value = _get_header(payload, "Subject") or ""
+
+    plain, html, _attachments = _extract_bodies_and_attachments(payload)
+    body_value = plain
+    if body_value is None and html is not None:
+        body_value = _strip_html(html)
+
+    return {
+        "to": to_value,
+        "cc": cc_value,
+        "bcc": bcc_value,
+        "subject": subject_value,
+        "body": str(body_value or ""),
+    }
+
+
+def gmail_create_draft(
+    *,
+    to: str,
+    subject: str,
+    body: str,
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+    service: Any = None,
+) -> dict[str, Any]:
+    """Create a Gmail draft (Issue #173)."""
+
+    to_list = _parse_recipients(to)
+    if not to_list:
+        raise ValueError("to must be non-empty")
+
+    subj = str(subject or "").strip()
+    if not subj:
+        raise ValueError("subject must be non-empty")
+
+    try:
+        msg = EmailMessage()
+        msg["To"] = ", ".join(to_list)
+        msg["Subject"] = subj
+
+        cc_list = _parse_recipients(cc)
+        if cc_list:
+            msg["Cc"] = ", ".join(cc_list)
+
+        bcc_list = _parse_recipients(bcc)
+        if bcc_list:
+            msg["Bcc"] = ", ".join(bcc_list)
+
+        msg.set_content(str(body or ""))
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+        svc = service or authenticate_gmail(scopes=GMAIL_SEND_SCOPES)
+        resp = (
+            svc.users()
+            .drafts()
+            .create(userId="me", body={"message": {"raw": raw}})
+            .execute()
+            or {}
+        )
+
+        message = resp.get("message") if isinstance(resp.get("message"), dict) else {}
+        return {
+            "ok": True,
+            "draft_id": str(resp.get("id") or ""),
+            "message_id": str(message.get("id") or ""),
+            "thread_id": str(message.get("threadId") or ""),
+            "to": to_list,
+            "subject": subj,
+        }
+    except Exception as e:  # pragma: no cover
+        return {
+            "ok": False,
+            "error": str(e),
+            "draft_id": "",
+            "message_id": "",
+            "thread_id": "",
+            "to": to_list,
+            "subject": subj,
+        }
+
+
+def gmail_list_drafts(
+    *,
+    max_results: int = 10,
+    page_token: Optional[str] = None,
+    service: Any = None,
+) -> dict[str, Any]:
+    """List Gmail drafts with basic metadata (Issue #173)."""
+
+    if not isinstance(max_results, int) or max_results <= 0:
+        raise ValueError("max_results must be a positive integer")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_SEND_SCOPES)
+        list_kwargs: dict[str, Any] = {"userId": "me", "maxResults": max_results}
+        if page_token:
+            list_kwargs["pageToken"] = page_token
+
+        list_resp = svc.users().drafts().list(**list_kwargs).execute() or {}
+
+        refs = list_resp.get("drafts")
+        if not isinstance(refs, list):
+            refs = []
+
+        next_page_token = list_resp.get("nextPageToken")
+        estimated_count = list_resp.get("resultSizeEstimate")
+        if not isinstance(estimated_count, int):
+            estimated_count = None
+
+        out: list[dict[str, Any]] = []
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            did = ref.get("id")
+            if not did:
+                continue
+            draft = (
+                svc.users()
+                .drafts()
+                .get(
+                    userId="me",
+                    id=str(did),
+                    format="metadata",
+                    metadataHeaders=["From", "To", "Subject", "Date"],
+                )
+                .execute()
+                or {}
+            )
+            msg = draft.get("message") if isinstance(draft.get("message"), dict) else {}
+            payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+
+            out.append(
+                {
+                    "draft_id": str(draft.get("id") or did),
+                    "message_id": str(msg.get("id") or ""),
+                    "from": _get_header(payload, "From"),
+                    "to": _get_header(payload, "To"),
+                    "subject": _get_header(payload, "Subject"),
+                    "date": _get_header(payload, "Date"),
+                    "snippet": str(msg.get("snippet") or ""),
+                }
+            )
+
+        return {
+            "ok": True,
+            "drafts": out,
+            "estimated_count": estimated_count,
+            "next_page_token": str(next_page_token) if next_page_token else None,
+        }
+    except Exception as e:  # pragma: no cover
+        return {
+            "ok": False,
+            "error": str(e),
+            "drafts": [],
+            "estimated_count": None,
+            "next_page_token": None,
+        }
+
+
+def gmail_update_draft(
+    *,
+    draft_id: str,
+    updates: dict[str, Any],
+    service: Any = None,
+) -> dict[str, Any]:
+    """Update an existing Gmail draft (Issue #173).
+
+    Supports partial updates by reading the current draft when needed.
+    Allowed keys: to, subject, body, cc, bcc.
+    """
+
+    if not draft_id or not str(draft_id).strip():
+        raise ValueError("draft_id must be non-empty")
+
+    if not isinstance(updates, dict) or not updates:
+        raise ValueError("updates must be a non-empty dict")
+
+    allowed = {"to", "subject", "body", "cc", "bcc"}
+    if not any(k in updates for k in allowed):
+        raise ValueError("updates contains no supported fields")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_SEND_SCOPES)
+
+        need_existing = any(k not in updates for k in ("to", "subject", "body", "cc", "bcc"))
+        existing: dict[str, str] = {}
+        if need_existing:
+            draft = (
+                svc.users().drafts().get(userId="me", id=str(draft_id).strip(), format="full").execute() or {}
+            )
+            msg = draft.get("message") if isinstance(draft.get("message"), dict) else {}
+            payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+            existing = _draft_message_fields_from_full_payload(payload)
+
+        to_value = str(updates.get("to") if updates.get("to") is not None else existing.get("to") or "").strip()
+        subject_value = str(
+            updates.get("subject") if updates.get("subject") is not None else existing.get("subject") or ""
+        ).strip()
+        body_value = str(updates.get("body") if updates.get("body") is not None else existing.get("body") or "")
+        cc_value = updates.get("cc") if "cc" in updates else existing.get("cc")
+        bcc_value = updates.get("bcc") if "bcc" in updates else existing.get("bcc")
+
+        to_list = _parse_recipients(to_value)
+        if not to_list:
+            raise ValueError("to must be non-empty")
+        if not subject_value:
+            raise ValueError("subject must be non-empty")
+
+        msg_out = EmailMessage()
+        msg_out["To"] = ", ".join(to_list)
+        msg_out["Subject"] = subject_value
+
+        cc_list = _parse_recipients(str(cc_value)) if cc_value is not None else []
+        if cc_list:
+            msg_out["Cc"] = ", ".join(cc_list)
+        bcc_list = _parse_recipients(str(bcc_value)) if bcc_value is not None else []
+        if bcc_list:
+            msg_out["Bcc"] = ", ".join(bcc_list)
+
+        msg_out.set_content(body_value)
+        raw = base64.urlsafe_b64encode(msg_out.as_bytes()).decode("utf-8")
+
+        resp = (
+            svc.users()
+            .drafts()
+            .update(userId="me", id=str(draft_id).strip(), body={"id": str(draft_id).strip(), "message": {"raw": raw}})
+            .execute()
+            or {}
+        )
+
+        message = resp.get("message") if isinstance(resp.get("message"), dict) else {}
+        return {
+            "ok": True,
+            "draft_id": str(resp.get("id") or draft_id),
+            "message_id": str(message.get("id") or ""),
+            "thread_id": str(message.get("threadId") or ""),
+        }
+    except Exception as e:  # pragma: no cover
+        return {
+            "ok": False,
+            "error": str(e),
+            "draft_id": str(draft_id),
+            "message_id": "",
+            "thread_id": "",
+        }
+
+
+def gmail_send_draft(*, draft_id: str, service: Any = None) -> dict[str, Any]:
+    """Send a Gmail draft (Issue #173)."""
+
+    if not draft_id or not str(draft_id).strip():
+        raise ValueError("draft_id must be non-empty")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_SEND_SCOPES)
+        resp = (
+            svc.users()
+            .drafts()
+            .send(userId="me", body={"id": str(draft_id).strip()})
+            .execute()
+            or {}
+        )
+
+        label_ids = resp.get("labelIds")
+        if not isinstance(label_ids, list):
+            label_ids = None
+
+        return {
+            "ok": True,
+            "draft_id": str(draft_id),
+            "message_id": str(resp.get("id") or ""),
+            "thread_id": str(resp.get("threadId") or ""),
+            "label_ids": label_ids,
+        }
+    except Exception as e:  # pragma: no cover
+        return {
+            "ok": False,
+            "error": str(e),
+            "draft_id": str(draft_id),
+            "message_id": "",
+            "thread_id": "",
+            "label_ids": None,
+        }
+
+
+def gmail_delete_draft(*, draft_id: str, service: Any = None) -> dict[str, Any]:
+    """Delete a Gmail draft (Issue #173)."""
+
+    if not draft_id or not str(draft_id).strip():
+        raise ValueError("draft_id must be non-empty")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_SEND_SCOPES)
+        svc.users().drafts().delete(userId="me", id=str(draft_id).strip()).execute()
+        return {"ok": True, "draft_id": str(draft_id)}
+    except Exception as e:  # pragma: no cover
+        return {"ok": False, "error": str(e), "draft_id": str(draft_id)}

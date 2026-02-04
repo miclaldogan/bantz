@@ -651,6 +651,178 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    # ─────────────────────────────────────────────────────────────────
+    # Gmail Tools (Google) - Drafts (Issue #173)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.google.gmail import gmail_create_draft as google_gmail_create_draft
+    except Exception:  # pragma: no cover
+        google_gmail_create_draft = None
+
+    reg.register(
+        Tool(
+            name="gmail.create_draft",
+            description="Create a Gmail draft (SAFE).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Recipient email(s)"},
+                    "subject": {"type": "string", "description": "Email subject"},
+                    "body": {"type": "string", "description": "Plain-text body"},
+                },
+                "required": ["to", "subject", "body"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "draft_id": {"type": "string"},
+                    "message_id": {"type": "string"},
+                    "thread_id": {"type": "string"},
+                    "to": {"type": "array", "items": {"type": "string"}},
+                    "subject": {"type": "string"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "draft_id", "message_id", "thread_id", "to", "subject"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_create_draft,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_list_drafts as google_gmail_list_drafts
+    except Exception:  # pragma: no cover
+        google_gmail_list_drafts = None
+
+    reg.register(
+        Tool(
+            name="gmail.list_drafts",
+            description="List Gmail drafts with basic metadata (SAFE).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "max_results": {"type": "integer", "description": "Max results (default: 10)"},
+                    "page_token": {"type": "string", "description": "Pagination token"},
+                },
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "drafts": {"type": "array"},
+                    "estimated_count": {"type": ["integer", "null"]},
+                    "next_page_token": {"type": ["string", "null"]},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "drafts", "estimated_count", "next_page_token"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_list_drafts,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_update_draft as google_gmail_update_draft
+    except Exception:  # pragma: no cover
+        google_gmail_update_draft = None
+
+    reg.register(
+        Tool(
+            name="gmail.update_draft",
+            description="Update a Gmail draft (SAFE).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "draft_id": {"type": "string", "description": "Draft id"},
+                    "updates": {"type": "object", "description": "Fields to update (to, subject, body, cc, bcc)"},
+                },
+                "required": ["draft_id", "updates"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "draft_id": {"type": "string"},
+                    "message_id": {"type": "string"},
+                    "thread_id": {"type": "string"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "draft_id", "message_id", "thread_id"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_update_draft,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_send_draft as google_gmail_send_draft
+    except Exception:  # pragma: no cover
+        google_gmail_send_draft = None
+
+    reg.register(
+        Tool(
+            name="gmail.send_draft",
+            description="Send a Gmail draft (MODERATE, confirmation required).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "draft_id": {"type": "string", "description": "Draft id"},
+                },
+                "required": ["draft_id"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "draft_id": {"type": "string"},
+                    "message_id": {"type": "string"},
+                    "thread_id": {"type": "string"},
+                    "label_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "draft_id", "message_id", "thread_id", "label_ids"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_gmail_send_draft,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_delete_draft as google_gmail_delete_draft
+    except Exception:  # pragma: no cover
+        google_gmail_delete_draft = None
+
+    reg.register(
+        Tool(
+            name="gmail.delete_draft",
+            description="Delete a Gmail draft (SAFE).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "draft_id": {"type": "string", "description": "Draft id"},
+                },
+                "required": ["draft_id"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "draft_id": {"type": "string"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "draft_id"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_delete_draft,
+        )
+    )
+
     try:
         from bantz.google.calendar import find_free_slots as google_calendar_find_free_slots
     except Exception:  # pragma: no cover
