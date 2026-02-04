@@ -599,6 +599,50 @@ def build_default_registry() -> ToolRegistry:
     )
 
     # ─────────────────────────────────────────────────────────────────
+    # Gmail Tools (Google) - Attachment Download (Issue #176)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.google.gmail import gmail_download_attachment as google_gmail_download_attachment
+    except Exception:  # pragma: no cover
+        google_gmail_download_attachment = None
+
+    reg.register(
+        Tool(
+            name="gmail.download_attachment",
+            description="Download a Gmail attachment to disk. Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "Gmail message id"},
+                    "attachment_id": {"type": "string", "description": "Attachment id (from gmail.get_message attachments)"},
+                    "save_path": {"type": "string", "description": "File path to save to"},
+                    "overwrite": {"type": "boolean", "description": "Overwrite existing file (default: false)"},
+                },
+                "required": ["message_id", "attachment_id", "save_path"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "message_id": {"type": "string"},
+                    "attachment_id": {"type": "string"},
+                    "saved_path": {"type": "string"},
+                    "filename": {"type": "string"},
+                    "mimeType": {"type": ["string", "null"]},
+                    "declared_size_bytes": {"type": ["integer", "null"]},
+                    "size_bytes": {"type": ["integer", "null"]},
+                    "warnings": {"type": "array", "items": {"type": "string"}},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "saved_path"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_gmail_download_attachment,
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────
     # Gmail Tools (Google) - Smart Search (Issue #175)
     # ─────────────────────────────────────────────────────────────────
     try:
