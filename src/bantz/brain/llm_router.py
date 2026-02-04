@@ -169,6 +169,7 @@ TOOL_PLAN:
 - "gmail.create_draft": Gmail taslağı oluştur (SAFE)
 - "gmail.list_drafts": Gmail taslaklarını listele (SAFE)
 - "gmail.update_draft": Gmail taslağını güncelle (SAFE)
+- "gmail.generate_reply": Gmail mesajına cevap taslağı + 3 öneri üret (confirmation required)
 - "gmail.send_draft": Gmail taslağını gönder (confirmation required)
 - "gmail.delete_draft": Gmail taslağını sil (SAFE)
 - Birden fazla tool sıralı çağrılabilir.
