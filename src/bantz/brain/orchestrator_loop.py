@@ -315,10 +315,19 @@ class OrchestratorLoop:
             logger.debug(f"  Recent History: {len(conversation_history)} turns")
             logger.debug(f"  Tool Results: {len(context.get('last_tool_results', []))}")
         
-        # Call orchestrator with memory-lite summary
+        # Session context injection (Issue #191): datetime/location hints.
+        try:
+            from bantz.brain.prompt_engineering import build_session_context
+
+            session_context = build_session_context()
+        except Exception:
+            session_context = None
+
+        # Call orchestrator with memory-lite summary + session context
         output = self.orchestrator.route(
             user_input=user_input,
             dialog_summary=dialog_summary if dialog_summary else None,
+            session_context=session_context,
         )
         
         if self.config.debug:
@@ -660,60 +669,62 @@ class OrchestratorLoop:
                 context = state.get_context_for_llm()
                 dialog_summary = self.memory.to_prompt_block()
 
-                prompt_lines = [
-                    "Kimlik / Roller:",
-                    "- Sen BANTZ'sın. Kullanıcı USER'dır.",
-                    "- Türkçe konuş; 'Efendim' hitabını kullan.",
-                    "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
-                    "",
-                ]
-
-                if dialog_summary:
-                    prompt_lines.append(f"DIALOG_SUMMARY:\n{dialog_summary}\n")
-
-                prompt_lines.append("PLANNER_DECISION (JSON):")
-                prompt_lines.append(
-                    json.dumps(
-                        {
-                            "route": orchestrator_output.route,
-                            "calendar_intent": orchestrator_output.calendar_intent,
-                            "slots": orchestrator_output.slots,
-                            "tool_plan": orchestrator_output.tool_plan,
-                            "requires_confirmation": orchestrator_output.requires_confirmation,
-                            "confirmation_prompt": orchestrator_output.confirmation_prompt,
-                            "ask_user": orchestrator_output.ask_user,
-                            "question": orchestrator_output.question,
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-
-                if tool_results:
-                    prompt_lines.append("\nTOOL_RESULTS (JSON):")
-                    prompt_lines.append(json.dumps(tool_results, ensure_ascii=False))
+                planner_decision = {
+                    "route": orchestrator_output.route,
+                    "calendar_intent": orchestrator_output.calendar_intent,
+                    "slots": orchestrator_output.slots,
+                    "tool_plan": orchestrator_output.tool_plan,
+                    "requires_confirmation": orchestrator_output.requires_confirmation,
+                    "confirmation_prompt": orchestrator_output.confirmation_prompt,
+                    "ask_user": orchestrator_output.ask_user,
+                    "question": orchestrator_output.question,
+                }
 
                 recent = context.get("recent_conversation")
-                if isinstance(recent, list) and recent:
-                    prompt_lines.append("\nRECENT_TURNS:")
-                    for turn in recent[-2:]:
-                        if isinstance(turn, dict):
-                            u = str(turn.get("user") or "").strip()
-                            a = str(turn.get("assistant") or "").strip()
-                            if u:
-                                prompt_lines.append(f"USER: {u}")
-                            if a:
-                                prompt_lines.append(f"ASSISTANT: {a}")
+                recent_turns = recent if isinstance(recent, list) else None
 
-                prompt_lines.append(f"\nUSER: {user_input}\nASSISTANT:")
+                try:
+                    from bantz.brain.prompt_engineering import PromptBuilder, build_session_context
+
+                    session_context = build_session_context()
+                    seed = str(session_context.get("session_id") or "default")
+                    builder = PromptBuilder(token_budget=3500, experiment="issue191_orchestrator_finalizer")
+                    built = builder.build_finalizer_prompt(
+                        route=orchestrator_output.route,
+                        user_input=user_input,
+                        planner_decision=planner_decision,
+                        tool_results=tool_results or None,
+                        dialog_summary=dialog_summary or None,
+                        recent_turns=recent_turns,
+                        session_context=session_context,
+                        seed=seed,
+                    )
+                    finalizer_prompt = built.prompt
+                except Exception:
+                    # Fallback to simple prompt if prompt builder fails.
+                    finalizer_prompt = "\n".join(
+                        [
+                            "Kimlik / Roller:",
+                            "- Sen BANTZ'sın. Kullanıcı USER'dır.",
+                            "- Türkçe konuş; 'Efendim' hitabını kullan.",
+                            "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
+                            "",
+                            f"DIALOG_SUMMARY:\n{dialog_summary}\n" if dialog_summary else "",
+                            "PLANNER_DECISION (JSON):",
+                            json.dumps(planner_decision, ensure_ascii=False),
+                            "\nTOOL_RESULTS (JSON):\n" + json.dumps(tool_results, ensure_ascii=False) if tool_results else "",
+                            f"\nUSER: {user_input}\nASSISTANT:",
+                        ]
+                    ).strip()
 
                 try:
                     final_text = self.finalizer_llm.complete_text(
-                        prompt="\n".join(prompt_lines),
+                        prompt=finalizer_prompt,
                         temperature=0.2,
                         max_tokens=256,
                     )
                 except TypeError:
-                    final_text = self.finalizer_llm.complete_text(prompt="\n".join(prompt_lines))
+                    final_text = self.finalizer_llm.complete_text(prompt=finalizer_prompt)
 
                 final_text = str(final_text or "").strip()
                 if final_text:
