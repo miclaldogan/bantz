@@ -197,15 +197,24 @@ def get_gmail_credentials(
         except Exception:
             normalized_token_scopes = []
 
+        # If the stored token file includes explicit scopes and they don't
+        # cover the requested scopes, force re-consent. Constructing
+        # Credentials with a new `scopes=` value does NOT upgrade the refresh
+        # token on disk.
+        if normalized_token_scopes:
+            effective_token_scopes = _effective_scopes(normalized_token_scopes)
+            if not set(requested_scopes).issubset(effective_token_scopes):
+                creds = None
+
         if (
             requested_scopes == ["https://www.googleapis.com/auth/gmail.readonly"]
             and "https://www.googleapis.com/auth/gmail.metadata" in normalized_token_scopes
         ):
             creds = None
         else:
-        # Load with the requested scopes so a token that also contains
-        # `gmail.metadata` does not inadvertently restrict operations that
-        # require `gmail.readonly` (e.g. fetching bodies with `format=full`).
+            # Load with the requested scopes so a token that also contains
+            # `gmail.metadata` does not inadvertently restrict operations that
+            # require `gmail.readonly` (e.g. fetching bodies with `format=full`).
             creds = Credentials.from_authorized_user_file(str(cfg.token_path), scopes=requested_scopes)
 
         if creds is not None:

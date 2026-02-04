@@ -58,11 +58,15 @@ def test_scope_escalation_forces_reconsent(monkeypatch, tmp_path: Path):
             return json.dumps({"scopes": self.scopes})
 
     # Token exists but is read-only.
-    token.write_text(json.dumps({"dummy": True}), encoding="utf-8")
+    token.write_text(
+        json.dumps({"scopes": ["https://www.googleapis.com/auth/gmail.readonly"]}),
+        encoding="utf-8",
+    )
 
     class DummyCredentials:
         @staticmethod
-        def from_authorized_user_file(_path: str):
+        def from_authorized_user_file(_path: str, scopes=None):
+            _ = scopes
             return DummyCreds(scopes=["https://www.googleapis.com/auth/gmail.readonly"], valid=True)
 
     class DummyFlow:
@@ -130,7 +134,8 @@ def test_token_refresh_when_expired(monkeypatch, tmp_path: Path):
 
     class DummyCredentials:
         @staticmethod
-        def from_authorized_user_file(_path: str):
+        def from_authorized_user_file(_path: str, scopes=None):
+            _ = scopes
             return DummyCreds()
 
     class DummyInstalledAppFlow:
