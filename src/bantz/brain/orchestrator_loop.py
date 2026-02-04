@@ -632,10 +632,17 @@ class OrchestratorLoop:
             return replace(orchestrator_output, assistant_reply=orchestrator_output.question)
 
         # Hybrid mode: if a finalizer LLM is provided, optionally generate the
-        # user-facing reply using that model (e.g., 7B), while keeping planning/tool
+        # user-facing reply using that model (e.g., Gemini), while keeping planning/tool
         # decisions from the planner model (e.g., 3B).
+        use_finalizer: bool = False
+        tier_reason: str = ""
+        tier_name: str = ""
+
         if self.finalizer_llm is not None:
             use_finalizer = True
+            tier_name = "quality"
+            tier_reason = "finalizer_default"
+
             try:
                 # Default behavior is unchanged unless tiering is enabled.
                 from bantz.llm.tiered import decide_tier
@@ -646,16 +653,20 @@ class OrchestratorLoop:
                     tool_names=orchestrator_output.tool_plan,
                     requires_confirmation=bool(orchestrator_output.requires_confirmation),
                 )
+
                 if decision.reason == "tiering_disabled":
                     use_finalizer = True
+                    tier_name = "quality"
+                    tier_reason = "tiering_disabled_default_quality"
                 else:
                     use_finalizer = bool(decision.use_quality)
+                    tier_name = "quality" if use_finalizer else "fast"
+                    tier_reason = str(decision.reason)
 
                 if str(os.getenv("BANTZ_TIERED_DEBUG", "")).strip().lower() in {"1", "true", "yes", "on"}:
-                    tier = "quality" if use_finalizer else "fast"
                     logger.info(
                         "[tiered] orchestrator_finalizer tier=%s reason=%s c=%s w=%s r=%s",
-                        tier,
+                        tier_name,
                         decision.reason,
                         decision.complexity,
                         decision.writing,
@@ -663,6 +674,8 @@ class OrchestratorLoop:
                     )
             except Exception:
                 use_finalizer = True
+                tier_name = "quality"
+                tier_reason = "tiering_error_default_quality"
 
         if self.finalizer_llm is not None and use_finalizer:
             try:
@@ -730,10 +743,75 @@ class OrchestratorLoop:
                 if final_text:
                     from dataclasses import replace
 
+                    state.update_trace(
+                        response_tier=tier_name or "quality",
+                        response_tier_reason=tier_reason or "quality_finalizer",
+                        finalizer_used=True,
+                    )
+
                     return replace(orchestrator_output, assistant_reply=final_text)
             except Exception:
                 # Fall back to non-hybrid behavior below.
                 pass
+
+        # Tiered fast path (no quality finalizer): for tool-based routes, produce
+        # a user-facing reply without escalating to the cloud finalizer.
+        if self.finalizer_llm is not None and not use_finalizer:
+            state.update_trace(
+                response_tier=tier_name or "fast",
+                response_tier_reason=tier_reason or "fast_ok",
+                finalizer_used=False,
+            )
+
+            should_fast_finalize = bool(tool_results) and not bool(orchestrator_output.ask_user)
+            if should_fast_finalize:
+                try:
+                    planner_llm = getattr(self.orchestrator, "_llm", None)
+                    if planner_llm is not None and hasattr(planner_llm, "complete_text"):
+                        planner_decision = {
+                            "route": orchestrator_output.route,
+                            "calendar_intent": orchestrator_output.calendar_intent,
+                            "slots": orchestrator_output.slots,
+                            "tool_plan": orchestrator_output.tool_plan,
+                            "requires_confirmation": orchestrator_output.requires_confirmation,
+                        }
+
+                        fast_prompt = "\n".join(
+                            [
+                                "Kimlik / Roller:",
+                                "- Sen BANTZ'sın. Kullanıcı USER'dır.",
+                                "- Türkçe konuş; 'Efendim' hitabını kullan.",
+                                "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
+                                "- Takvim sonuçlarını kısa ve net özetle; varsa maddeler halinde yaz.",
+                                "",
+                                "PLANNER_DECISION (JSON):",
+                                json.dumps(planner_decision, ensure_ascii=False),
+                                "",
+                                "TOOL_RESULTS (JSON):",
+                                json.dumps(tool_results, ensure_ascii=False),
+                                "",
+                                f"USER: {user_input}",
+                                "ASSISTANT:",
+                            ]
+                        )
+
+                        try:
+                            fast_text = planner_llm.complete_text(
+                                prompt=fast_prompt,
+                                temperature=0.2,
+                                max_tokens=256,
+                            )
+                        except TypeError:
+                            fast_text = planner_llm.complete_text(prompt=fast_prompt)
+
+                        fast_text = str(fast_text or "").strip()
+                        if fast_text:
+                            from dataclasses import replace
+
+                            return replace(orchestrator_output, assistant_reply=fast_text)
+                except Exception:
+                    # Best-effort; continue to default behavior.
+                    pass
 
         if not tool_results:
             return orchestrator_output
