@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import base64
 import re
+from email.message import EmailMessage
 from typing import Any, Optional
 
-from bantz.google.gmail_auth import GMAIL_READONLY_SCOPES, authenticate_gmail
+from bantz.google.gmail_auth import GMAIL_READONLY_SCOPES, GMAIL_SEND_SCOPES, authenticate_gmail
 
 
 _BODY_TRUNCATE_LIMIT = 5000
@@ -347,3 +348,105 @@ def gmail_get_message(
         return {"ok": True, "message": message, "thread": thread_out}
     except Exception as e:  # pragma: no cover
         return {"ok": False, "error": str(e), "message": None, "thread": None}
+
+
+def _parse_recipients(value: Optional[str]) -> list[str]:
+    """Parse recipient strings into a normalized list.
+
+    Accepts comma/semicolon-separated values. Ignores empty items.
+    """
+
+    if value is None:
+        return []
+    raw = str(value).strip()
+    if not raw:
+        return []
+    # Allow both comma and semicolon.
+    parts = re.split(r"[;,]", raw)
+    out: list[str] = []
+    for p in parts:
+        s = str(p).strip()
+        if not s:
+            continue
+        out.append(s)
+    return out
+
+
+def gmail_send(
+    *,
+    to: str,
+    subject: str,
+    body: str,
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+    service: Any = None,
+) -> dict[str, Any]:
+    """Send a plain-text email via Gmail (Issue #172).
+
+    - RFC2822 MIME message
+    - Base64url encoding
+    - Supports multiple recipients in to/cc/bcc (comma/semicolon separated)
+
+    Returns a tool-friendly payload.
+    """
+
+    to_list = _parse_recipients(to)
+    if not to_list:
+        raise ValueError("to must be non-empty")
+
+    subj = str(subject or "").strip()
+    if not subj:
+        raise ValueError("subject must be non-empty")
+
+    try:
+        msg = EmailMessage()
+        msg["To"] = ", ".join(to_list)
+        msg["Subject"] = subj
+
+        cc_list = _parse_recipients(cc)
+        if cc_list:
+            msg["Cc"] = ", ".join(cc_list)
+
+        bcc_list = _parse_recipients(bcc)
+        if bcc_list:
+            msg["Bcc"] = ", ".join(bcc_list)
+
+        msg.set_content(str(body or ""))
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+        svc = service or authenticate_gmail(scopes=GMAIL_SEND_SCOPES)
+        resp = (
+            svc.users()
+            .messages()
+            .send(userId="me", body={"raw": raw})
+            .execute()
+            or {}
+        )
+
+        label_ids = resp.get("labelIds")
+        if not isinstance(label_ids, list):
+            label_ids = None
+
+        return {
+            "ok": True,
+            "to": to_list,
+            "cc": cc_list or None,
+            "bcc": bcc_list or None,
+            "subject": subj,
+            "message_id": str(resp.get("id") or ""),
+            "thread_id": str(resp.get("threadId") or ""),
+            "label_ids": label_ids,
+        }
+    except Exception as e:  # pragma: no cover
+        return {
+            "ok": False,
+            "error": str(e),
+            "to": to_list,
+            "cc": _parse_recipients(cc) or None,
+            "bcc": _parse_recipients(bcc) or None,
+            "subject": str(subject or ""),
+            "message_id": "",
+            "thread_id": "",
+            "label_ids": None,
+        }

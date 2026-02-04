@@ -598,6 +598,59 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    # ─────────────────────────────────────────────────────────────────
+    # Gmail Tools (Google) - Send (Issue #172)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.google.gmail import gmail_send as google_gmail_send
+    except Exception:  # pragma: no cover
+        google_gmail_send = None
+
+    reg.register(
+        Tool(
+            name="gmail.send",
+            description="Send an email via Gmail (compose & send). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Recipient email(s). Comma/semicolon separated supported.",
+                    },
+                    "subject": {"type": "string", "description": "Email subject"},
+                    "body": {"type": "string", "description": "Plain-text email body"},
+                    "cc": {
+                        "type": "string",
+                        "description": "CC recipient(s). Comma/semicolon separated.",
+                    },
+                    "bcc": {
+                        "type": "string",
+                        "description": "BCC recipient(s). Comma/semicolon separated.",
+                    },
+                },
+                "required": ["to", "subject", "body"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "to": {"type": "array", "items": {"type": "string"}},
+                    "cc": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "bcc": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "subject": {"type": "string"},
+                    "message_id": {"type": "string"},
+                    "thread_id": {"type": "string"},
+                    "label_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "to", "subject", "message_id", "thread_id", "label_ids"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_gmail_send,
+        )
+    )
+
     try:
         from bantz.google.calendar import find_free_slots as google_calendar_find_free_slots
     except Exception:  # pragma: no cover

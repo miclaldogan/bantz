@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import base64
 
-from bantz.google.gmail import gmail_get_message, gmail_list_messages, gmail_unread_count
+from bantz.google.gmail import gmail_get_message, gmail_list_messages, gmail_unread_count, gmail_send
 
 
 def _make_get_response(
@@ -258,3 +258,36 @@ def test_gmail_get_message_thread_expansion():
     assert out["ok"] is True
     assert out["thread"]["id"] == "t3"
     assert [m["id"] for m in out["thread"]["messages"]] == ["m3", "m4"]
+
+
+def test_gmail_send_builds_rfc2822_and_calls_gmail_api_send():
+    service = Mock(name="gmail_service")
+    users = service.users.return_value
+    messages = users.messages.return_value
+
+    send_req = Mock(name="send_req")
+    send_req.execute.return_value = {"id": "msg123", "threadId": "thr456", "labelIds": ["SENT"]}
+    messages.send.return_value = send_req
+
+    out = gmail_send(
+        to="a@example.com, b@example.com",
+        subject="Hello",
+        body="Body text",
+        cc="c@example.com",
+        bcc="d@example.com; e@example.com",
+        service=service,
+    )
+
+    assert out["ok"] is True
+    assert out["message_id"] == "msg123"
+    assert out["thread_id"] == "thr456"
+    assert out["label_ids"] == ["SENT"]
+    assert out["to"] == ["a@example.com", "b@example.com"]
+    assert out["cc"] == ["c@example.com"]
+    assert out["bcc"] == ["d@example.com", "e@example.com"]
+
+    messages.send.assert_called_once()
+    _, kwargs = messages.send.call_args
+    assert kwargs["userId"] == "me"
+    assert "raw" in kwargs["body"]
+    assert isinstance(kwargs["body"]["raw"], str)
