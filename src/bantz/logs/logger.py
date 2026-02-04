@@ -12,13 +12,22 @@ class JsonlLogger:
     path: str
 
     def log(self, request: str, result: dict[str, Any], **fields: Any) -> None:
-        record = {
+        record: dict[str, Any] = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "request": request,
             "result": result,
         }
         if fields:
             record.update(fields)
+
+        # Best-effort secret masking (Issue #216).
+        try:
+            from bantz.security.secrets import sanitize
+
+            record = sanitize(record)
+        except Exception:
+            pass
+
         p = Path(self.path)
         p.parent.mkdir(parents=True, exist_ok=True)
         if not p.exists():
@@ -49,7 +58,7 @@ class JsonlLogger:
             result: Tool result (truncated)
             **extra_fields: Additional audit fields
         """
-        record = {
+        record: dict[str, Any] = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "event_type": "tool_execution",
             "tool_name": tool_name,
@@ -68,6 +77,14 @@ class JsonlLogger:
             record["result"] = result_str[:500] + "..." if len(result_str) > 500 else result_str
         
         record.update(extra_fields)
+
+        # Best-effort secret masking (Issue #216).
+        try:
+            from bantz.security.secrets import sanitize
+
+            record = sanitize(record)
+        except Exception:
+            pass
         
         p = Path(self.path)
         p.parent.mkdir(parents=True, exist_ok=True)

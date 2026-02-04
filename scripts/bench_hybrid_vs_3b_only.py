@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import statistics
 import time
 from dataclasses import dataclass, asdict
@@ -400,6 +401,22 @@ class HybridBenchmark:
 
 
 def main():
+    # Load env vars from .env / BANTZ_ENV_FILE (Issue #216).
+    try:
+        from bantz.security.env_loader import load_env
+
+        load_env()
+    except Exception:
+        pass
+
+    # Redact secrets from any logs emitted by this script.
+    try:
+        from bantz.security.secrets import install_secrets_redaction_filter
+
+        install_secrets_redaction_filter()
+    except Exception:
+        pass
+
     parser = argparse.ArgumentParser(description="Hybrid vs 3B-only benchmark")
     parser.add_argument(
         "--mode",
@@ -435,7 +452,9 @@ def main():
     )
     parser.add_argument(
         "--gemini-api-key",
-        help="Gemini API key (if using Gemini)",
+        help=(
+            "Gemini API key (discouraged: prefer GEMINI_API_KEY/GOOGLE_API_KEY env or .env via BANTZ_ENV_FILE)"
+        ),
     )
     
     args = parser.parse_args()
@@ -460,6 +479,13 @@ def main():
         logger.info(f"\n{'='*60}")
         logger.info(f"Running benchmark: {mode.upper()}")
         logger.info(f"{'='*60}\n")
+
+        if args.use_gemini and not args.gemini_api_key:
+            args.gemini_api_key = (
+                os.getenv("GEMINI_API_KEY")
+                or os.getenv("GOOGLE_API_KEY")
+                or os.getenv("BANTZ_GEMINI_API_KEY")
+            )
         
         benchmark = HybridBenchmark(
             mode=mode,

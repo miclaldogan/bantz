@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Optional
 import os
 
+from bantz.security.secrets import mask_path
+
 
 DEFAULT_CLIENT_SECRET_PATH = "~/.config/bantz/google/client_secret.json"
 DEFAULT_TOKEN_PATH = "~/.config/bantz/google/token.json"
@@ -55,7 +57,7 @@ def get_credentials(
     if not cfg.client_secret_path.exists():
         raise FileNotFoundError(
             "Google client secret not found. Set BANTZ_GOOGLE_CLIENT_SECRET "
-            f"or example to {DEFAULT_CLIENT_SECRET_PATH}. Missing: {cfg.client_secret_path}"
+            f"or example to {DEFAULT_CLIENT_SECRET_PATH}. Missing: {mask_path(str(cfg.client_secret_path))}"
         )
 
     # Lazy imports
