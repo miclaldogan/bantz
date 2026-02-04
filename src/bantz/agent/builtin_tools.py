@@ -599,6 +599,207 @@ def build_default_registry() -> ToolRegistry:
     )
 
     # ─────────────────────────────────────────────────────────────────
+    # Gmail Tools (Google) - Smart Search (Issue #175)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.google.gmail_query import gmail_query_from_nl as google_gmail_query_from_nl
+    except Exception:  # pragma: no cover
+        google_gmail_query_from_nl = None
+
+    reg.register(
+        Tool(
+            name="gmail.query_from_nl",
+            description="Convert natural language into a Gmail search query string (SAFE).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Natural language query"},
+                    "reference_date": {
+                        "type": "string",
+                        "description": "Optional ISO date (YYYY-MM-DD) used for relative phrases (tests)",
+                    },
+                    "inbox_only": {"type": "boolean", "description": "Default true; prepends in:inbox"},
+                },
+                "required": ["text"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "query": {"type": "string"},
+                    "parts": {"type": "array", "items": {"type": "string"}},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "query", "parts"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_query_from_nl,
+        )
+    )
+
+    try:
+        from bantz.google.gmail_smart_search import gmail_smart_search as google_gmail_smart_search
+    except Exception:  # pragma: no cover
+        google_gmail_smart_search = None
+
+    reg.register(
+        Tool(
+            name="gmail.smart_search",
+            description="Search Gmail using natural-language filters (SAFE, read-only).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query_nl": {"type": "string", "description": "Natural language query"},
+                    "max_results": {"type": "integer", "description": "Max results (default: 10)"},
+                    "page_token": {"type": "string", "description": "Pagination token"},
+                    "inbox_only": {"type": "boolean", "description": "Default true; includes in:inbox"},
+                    "template_name": {"type": "string", "description": "Optional saved template name"},
+                    "reference_date": {"type": "string", "description": "Optional ISO date for relative phrases"},
+                },
+                "required": ["query_nl"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "query": {"type": "string"},
+                    "estimated_count": {"type": ["integer", "null"]},
+                    "next_page_token": {"type": ["string", "null"]},
+                    "messages": {"type": "array"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "query", "estimated_count", "next_page_token", "messages"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_smart_search,
+        )
+    )
+
+    try:
+        from bantz.google.gmail_search_templates import (
+            templates_delete as google_gmail_templates_delete,
+            templates_get as google_gmail_templates_get,
+            templates_list as google_gmail_templates_list,
+            templates_upsert as google_gmail_templates_upsert,
+        )
+    except Exception:  # pragma: no cover
+        google_gmail_templates_upsert = None
+        google_gmail_templates_get = None
+        google_gmail_templates_list = None
+        google_gmail_templates_delete = None
+
+    reg.register(
+        Tool(
+            name="gmail.search_template_upsert",
+            description="Save a Gmail search template (name → query). SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Template name"},
+                    "query": {"type": "string", "description": "Gmail query string (q=)"},
+                },
+                "required": ["name", "query"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "template": {"type": "object"},
+                    "key": {"type": "string"},
+                    "path": {"type": "string"},
+                },
+                "required": ["ok", "template", "key", "path"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_templates_upsert,
+        )
+    )
+
+    reg.register(
+        Tool(
+            name="gmail.search_template_get",
+            description="Get a saved Gmail search template. SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Template name"},
+                },
+                "required": ["name"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "template": {"type": "object"},
+                    "key": {"type": "string"},
+                    "path": {"type": "string"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "key", "path"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_templates_get,
+        )
+    )
+
+    reg.register(
+        Tool(
+            name="gmail.search_template_list",
+            description="List saved Gmail search templates. SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prefix": {"type": "string", "description": "Optional name prefix"},
+                    "limit": {"type": "integer", "description": "Max results (default: 50)"},
+                },
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "templates": {"type": "array"},
+                    "path": {"type": "string"},
+                },
+                "required": ["ok", "templates", "path"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_templates_list,
+        )
+    )
+
+    reg.register(
+        Tool(
+            name="gmail.search_template_delete",
+            description="Delete a saved Gmail search template. SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Template name"},
+                },
+                "required": ["name"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "deleted": {"type": "boolean"},
+                    "key": {"type": "string"},
+                    "path": {"type": "string"},
+                },
+                "required": ["ok", "deleted", "key", "path"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_templates_delete,
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────
     # Gmail Tools (Google) - Labels & Archive (Issue #174)
     # ─────────────────────────────────────────────────────────────────
     try:
