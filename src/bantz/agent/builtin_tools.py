@@ -599,6 +599,239 @@ def build_default_registry() -> ToolRegistry:
     )
 
     # ─────────────────────────────────────────────────────────────────
+    # Gmail Tools (Google) - Labels & Archive (Issue #174)
+    # ─────────────────────────────────────────────────────────────────
+    try:
+        from bantz.google.gmail import gmail_list_labels as google_gmail_list_labels
+    except Exception:  # pragma: no cover
+        google_gmail_list_labels = None
+
+    reg.register(
+        Tool(
+            name="gmail.list_labels",
+            description="List Gmail labels (SAFE).",
+            parameters={"type": "object", "properties": {}},
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "labels": {"type": "array"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "labels"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_list_labels,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_add_label as google_gmail_add_label
+    except Exception:  # pragma: no cover
+        google_gmail_add_label = None
+
+    reg.register(
+        Tool(
+            name="gmail.add_label",
+            description="Add a label to a Gmail message (SAFE).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "Gmail message id"},
+                    "label": {"type": "string", "description": "Label name or id"},
+                },
+                "required": ["message_id", "label"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "message_id": {"type": "string"},
+                    "added": {"type": "array", "items": {"type": "string"}},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "message_id", "added"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_add_label,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_remove_label as google_gmail_remove_label
+    except Exception:  # pragma: no cover
+        google_gmail_remove_label = None
+
+    reg.register(
+        Tool(
+            name="gmail.remove_label",
+            description="Remove a label from a Gmail message (SAFE).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "Gmail message id"},
+                    "label": {"type": "string", "description": "Label name or id"},
+                },
+                "required": ["message_id", "label"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "message_id": {"type": "string"},
+                    "removed": {"type": "array", "items": {"type": "string"}},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "message_id", "removed"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_remove_label,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_archive as google_gmail_archive
+    except Exception:  # pragma: no cover
+        google_gmail_archive = None
+
+    reg.register(
+        Tool(
+            name="gmail.archive",
+            description="Archive a Gmail message (removes INBOX). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "Gmail message id"},
+                },
+                "required": ["message_id"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "message_id": {"type": "string"},
+                    "archived": {"type": "boolean"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "message_id", "archived"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_gmail_archive,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_mark_read as google_gmail_mark_read
+    except Exception:  # pragma: no cover
+        google_gmail_mark_read = None
+
+    reg.register(
+        Tool(
+            name="gmail.mark_read",
+            description="Mark a Gmail message as read (removes UNREAD). SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "Gmail message id"},
+                },
+                "required": ["message_id"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "message_id": {"type": "string"},
+                    "read": {"type": "boolean"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "message_id", "read"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_mark_read,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_mark_unread as google_gmail_mark_unread
+    except Exception:  # pragma: no cover
+        google_gmail_mark_unread = None
+
+    reg.register(
+        Tool(
+            name="gmail.mark_unread",
+            description="Mark a Gmail message as unread (adds UNREAD). SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "Gmail message id"},
+                },
+                "required": ["message_id"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "message_id": {"type": "string"},
+                    "unread": {"type": "boolean"},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "message_id", "unread"],
+            },
+            risk_level="LOW",
+            requires_confirmation=False,
+            function=google_gmail_mark_unread,
+        )
+    )
+
+    try:
+        from bantz.google.gmail import gmail_batch_modify as google_gmail_batch_modify
+    except Exception:  # pragma: no cover
+        google_gmail_batch_modify = None
+
+    reg.register(
+        Tool(
+            name="gmail.batch_modify",
+            description="Batch add/remove labels across messages. Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of Gmail message ids",
+                    },
+                    "add_labels": {"type": "array", "items": {"type": "string"}, "description": "Label names or ids to add"},
+                    "remove_labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Label names or ids to remove",
+                    },
+                },
+                "required": ["message_ids"],
+            },
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "message_ids": {"type": "array", "items": {"type": "string"}},
+                    "added": {"type": "array", "items": {"type": "string"}},
+                    "removed": {"type": "array", "items": {"type": "string"}},
+                    "error": {"type": "string"},
+                },
+                "required": ["ok", "message_ids", "added", "removed"],
+            },
+            risk_level="MED",
+            requires_confirmation=True,
+            function=google_gmail_batch_modify,
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────
     # Gmail Tools (Google) - Send (Issue #172)
     # ─────────────────────────────────────────────────────────────────
     try:

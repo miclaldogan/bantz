@@ -4,7 +4,19 @@ from unittest.mock import Mock
 
 import base64
 
-from bantz.google.gmail import gmail_get_message, gmail_list_messages, gmail_unread_count, gmail_send
+from bantz.google.gmail import (
+    gmail_add_label,
+    gmail_archive,
+    gmail_batch_modify,
+    gmail_get_message,
+    gmail_list_labels,
+    gmail_list_messages,
+    gmail_mark_read,
+    gmail_mark_unread,
+    gmail_remove_label,
+    gmail_send,
+    gmail_unread_count,
+)
 from bantz.google.gmail import (
     gmail_create_draft,
     gmail_delete_draft,
@@ -432,3 +444,117 @@ def test_gmail_send_builds_rfc2822_and_calls_gmail_api_send():
     assert kwargs["userId"] == "me"
     assert "raw" in kwargs["body"]
     assert isinstance(kwargs["body"]["raw"], str)
+
+
+def _mock_gmail_label_modify_service(*, labels: list[dict] | None = None) -> Mock:
+    service = Mock(name="gmail_service")
+    users = service.users.return_value
+
+    # labels().list(...).execute()
+    labels_api = users.labels.return_value
+    labels_list_req = Mock(name="labels_list_req")
+    labels_list_req.execute.return_value = {"labels": labels or []}
+    labels_api.list.return_value = labels_list_req
+
+    # messages().modify(...).execute()
+    messages_api = users.messages.return_value
+    modify_req = Mock(name="modify_req")
+    modify_req.execute.return_value = {"id": "m1"}
+    messages_api.modify.return_value = modify_req
+
+    # messages().batchModify(...).execute()
+    batch_req = Mock(name="batch_modify_req")
+    batch_req.execute.return_value = {}
+    messages_api.batchModify.return_value = batch_req
+
+    return service
+
+
+def test_gmail_list_labels_returns_normalized_list():
+    service = _mock_gmail_label_modify_service(
+        labels=[
+            {"id": "INBOX", "name": "INBOX", "type": "system"},
+            {"id": "Label_1", "name": "MyLabel", "type": "user"},
+        ]
+    )
+
+    out = gmail_list_labels(service=service)
+    assert out["ok"] is True
+    assert {l["id"] for l in out["labels"]} == {"INBOX", "Label_1"}
+
+    service.users.return_value.labels.return_value.list.assert_called_once_with(userId="me")
+
+
+def test_gmail_add_label_resolves_by_name_casefold_and_calls_modify():
+    service = _mock_gmail_label_modify_service(labels=[{"id": "Label_1", "name": "MyLabel", "type": "user"}])
+
+    out = gmail_add_label(message_id="m1", label="mylabel", service=service)
+    assert out["ok"] is True
+    assert out["added"] == ["Label_1"]
+
+    messages_api = service.users.return_value.messages.return_value
+    messages_api.modify.assert_called_once()
+    _, kwargs = messages_api.modify.call_args
+    assert kwargs["userId"] == "me"
+    assert kwargs["id"] == "m1"
+    assert kwargs["body"]["addLabelIds"] == ["Label_1"]
+
+
+def test_gmail_remove_label_resolves_by_id_and_calls_modify():
+    service = _mock_gmail_label_modify_service(labels=[])
+
+    out = gmail_remove_label(message_id="m1", label="Label_99", service=service)
+    assert out["ok"] is True
+    assert out["removed"] == ["Label_99"]
+
+    messages_api = service.users.return_value.messages.return_value
+    _, kwargs = messages_api.modify.call_args
+    assert kwargs["body"]["removeLabelIds"] == ["Label_99"]
+
+
+def test_gmail_archive_removes_inbox_label():
+    service = _mock_gmail_label_modify_service(labels=[])
+
+    out = gmail_archive(message_id="m1", service=service)
+    assert out["ok"] is True
+    assert out["archived"] is True
+
+    messages_api = service.users.return_value.messages.return_value
+    _, kwargs = messages_api.modify.call_args
+    assert kwargs["body"]["removeLabelIds"] == ["INBOX"]
+
+
+def test_gmail_mark_read_and_unread_use_unread_label():
+    service = _mock_gmail_label_modify_service(labels=[])
+
+    out_read = gmail_mark_read(message_id="m1", service=service)
+    assert out_read["ok"] is True
+
+    messages_api = service.users.return_value.messages.return_value
+    _, kwargs = messages_api.modify.call_args
+    assert kwargs["body"]["removeLabelIds"] == ["UNREAD"]
+
+    out_unread = gmail_mark_unread(message_id="m1", service=service)
+    assert out_unread["ok"] is True
+
+    # Second call is mark_unread
+    _, kwargs2 = messages_api.modify.call_args
+    assert kwargs2["body"]["addLabelIds"] == ["UNREAD"]
+
+
+def test_gmail_batch_modify_resolves_names_and_calls_batchmodify():
+    service = _mock_gmail_label_modify_service(labels=[{"id": "Label_1", "name": "MyLabel", "type": "user"}])
+
+    out = gmail_batch_modify(message_ids=["m1", "m2"], add_labels=["MyLabel"], remove_labels=["UNREAD"], service=service)
+    assert out["ok"] is True
+    assert out["message_ids"] == ["m1", "m2"]
+    assert out["added"] == ["Label_1"]
+    assert out["removed"] == ["UNREAD"]
+
+    messages_api = service.users.return_value.messages.return_value
+    messages_api.batchModify.assert_called_once()
+    _, kwargs = messages_api.batchModify.call_args
+    assert kwargs["userId"] == "me"
+    assert kwargs["body"]["ids"] == ["m1", "m2"]
+    assert kwargs["body"]["addLabelIds"] == ["Label_1"]
+    assert kwargs["body"]["removeLabelIds"] == ["UNREAD"]

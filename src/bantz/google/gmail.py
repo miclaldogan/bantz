@@ -14,10 +14,236 @@ import re
 from email.message import EmailMessage
 from typing import Any, Optional
 
-from bantz.google.gmail_auth import GMAIL_READONLY_SCOPES, GMAIL_SEND_SCOPES, authenticate_gmail
+from bantz.google.gmail_auth import GMAIL_MODIFY_SCOPES, GMAIL_READONLY_SCOPES, GMAIL_SEND_SCOPES, authenticate_gmail
 
 
 _BODY_TRUNCATE_LIMIT = 5000
+
+
+def gmail_list_labels(*, service: Any = None) -> dict[str, Any]:
+    """List available Gmail labels (Issue #174).
+
+    Returns label metadata: id, name, type.
+    """
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_READONLY_SCOPES)
+        resp = svc.users().labels().list(userId="me").execute() or {}
+        labels = resp.get("labels")
+        if not isinstance(labels, list):
+            labels = []
+        out: list[dict[str, Any]] = []
+        for l in labels:
+            if not isinstance(l, dict):
+                continue
+            out.append(
+                {
+                    "id": str(l.get("id") or ""),
+                    "name": str(l.get("name") or ""),
+                    "type": str(l.get("type") or ""),
+                }
+            )
+        return {"ok": True, "labels": out}
+    except Exception as e:  # pragma: no cover
+        return {"ok": False, "error": str(e), "labels": []}
+
+
+def _resolve_label_id(*, label: str, service: Any) -> str:
+    raw = str(label or "").strip()
+    if not raw:
+        raise ValueError("label must be non-empty")
+
+    # System labels are typically used as IDs too.
+    system = {"INBOX", "UNREAD", "SENT", "TRASH", "SPAM", "IMPORTANT", "STARRED", "DRAFT", "CATEGORY_PERSONAL"}
+    if raw.upper() in system:
+        return raw.upper()
+
+    # Heuristic: user label IDs are usually like "Label_123".
+    if raw.startswith("Label_"):
+        return raw
+
+    # Otherwise resolve by name.
+    resp = service.users().labels().list(userId="me").execute() or {}
+    labels = resp.get("labels")
+    if not isinstance(labels, list):
+        labels = []
+
+    target = raw.casefold()
+    for l in labels:
+        if not isinstance(l, dict):
+            continue
+        name = str(l.get("name") or "")
+        if name.casefold() == target:
+            lid = str(l.get("id") or "").strip()
+            if lid:
+                return lid
+
+    raise ValueError(f"label not found: {raw}")
+
+
+def gmail_add_label(*, message_id: str, label: str, service: Any = None) -> dict[str, Any]:
+    """Add a label to a message (Issue #174)."""
+
+    if not message_id or not str(message_id).strip():
+        raise ValueError("message_id must be non-empty")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_MODIFY_SCOPES)
+        label_id = _resolve_label_id(label=label, service=svc)
+        resp = (
+            svc.users()
+            .messages()
+            .modify(userId="me", id=str(message_id).strip(), body={"addLabelIds": [label_id]})
+            .execute()
+            or {}
+        )
+        return {"ok": True, "message_id": str(resp.get("id") or message_id), "added": [label_id]}
+    except Exception as e:  # pragma: no cover
+        return {"ok": False, "error": str(e), "message_id": str(message_id), "added": []}
+
+
+def gmail_remove_label(*, message_id: str, label: str, service: Any = None) -> dict[str, Any]:
+    """Remove a label from a message (Issue #174)."""
+
+    if not message_id or not str(message_id).strip():
+        raise ValueError("message_id must be non-empty")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_MODIFY_SCOPES)
+        label_id = _resolve_label_id(label=label, service=svc)
+        resp = (
+            svc.users()
+            .messages()
+            .modify(userId="me", id=str(message_id).strip(), body={"removeLabelIds": [label_id]})
+            .execute()
+            or {}
+        )
+        return {"ok": True, "message_id": str(resp.get("id") or message_id), "removed": [label_id]}
+    except Exception as e:  # pragma: no cover
+        return {"ok": False, "error": str(e), "message_id": str(message_id), "removed": []}
+
+
+def gmail_archive(*, message_id: str, service: Any = None) -> dict[str, Any]:
+    """Archive a message by removing the INBOX label (Issue #174)."""
+
+    if not message_id or not str(message_id).strip():
+        raise ValueError("message_id must be non-empty")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_MODIFY_SCOPES)
+        resp = (
+            svc.users()
+            .messages()
+            .modify(userId="me", id=str(message_id).strip(), body={"removeLabelIds": ["INBOX"]})
+            .execute()
+            or {}
+        )
+        return {"ok": True, "message_id": str(resp.get("id") or message_id), "archived": True}
+    except Exception as e:  # pragma: no cover
+        return {"ok": False, "error": str(e), "message_id": str(message_id), "archived": False}
+
+
+def gmail_mark_read(*, message_id: str, service: Any = None) -> dict[str, Any]:
+    """Mark a message as read by removing UNREAD (Issue #174)."""
+
+    if not message_id or not str(message_id).strip():
+        raise ValueError("message_id must be non-empty")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_MODIFY_SCOPES)
+        resp = (
+            svc.users()
+            .messages()
+            .modify(userId="me", id=str(message_id).strip(), body={"removeLabelIds": ["UNREAD"]})
+            .execute()
+            or {}
+        )
+        return {"ok": True, "message_id": str(resp.get("id") or message_id), "read": True}
+    except Exception as e:  # pragma: no cover
+        return {"ok": False, "error": str(e), "message_id": str(message_id), "read": False}
+
+
+def gmail_mark_unread(*, message_id: str, service: Any = None) -> dict[str, Any]:
+    """Mark a message as unread by adding UNREAD (Issue #174)."""
+
+    if not message_id or not str(message_id).strip():
+        raise ValueError("message_id must be non-empty")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_MODIFY_SCOPES)
+        resp = (
+            svc.users()
+            .messages()
+            .modify(userId="me", id=str(message_id).strip(), body={"addLabelIds": ["UNREAD"]})
+            .execute()
+            or {}
+        )
+        return {"ok": True, "message_id": str(resp.get("id") or message_id), "unread": True}
+    except Exception as e:  # pragma: no cover
+        return {"ok": False, "error": str(e), "message_id": str(message_id), "unread": False}
+
+
+def gmail_batch_modify(
+    *,
+    message_ids: list[str],
+    add_labels: Optional[list[str]] = None,
+    remove_labels: Optional[list[str]] = None,
+    service: Any = None,
+) -> dict[str, Any]:
+    """Batch modify messages (Issue #174).
+
+    Uses Gmail `batchModify` to add/remove label IDs across many messages.
+    `add_labels` and `remove_labels` may contain label IDs or label names.
+    """
+
+    ids = [str(x).strip() for x in (message_ids or []) if str(x).strip()]
+    if not ids:
+        raise ValueError("message_ids must be non-empty")
+
+    try:
+        svc = service or authenticate_gmail(scopes=GMAIL_MODIFY_SCOPES)
+
+        add_ids: list[str] = []
+        for l in add_labels or []:
+            add_ids.append(_resolve_label_id(label=str(l), service=svc))
+
+        remove_ids: list[str] = []
+        for l in remove_labels or []:
+            remove_ids.append(_resolve_label_id(label=str(l), service=svc))
+
+        # De-dup while preserving order.
+        def _dedup(seq: list[str]) -> list[str]:
+            seen: set[str] = set()
+            out: list[str] = []
+            for s in seq:
+                if s in seen:
+                    continue
+                seen.add(s)
+                out.append(s)
+            return out
+
+        add_ids = _dedup(add_ids)
+        remove_ids = _dedup(remove_ids)
+
+        svc.users().messages().batchModify(
+            userId="me",
+            body={"ids": ids, "addLabelIds": add_ids, "removeLabelIds": remove_ids},
+        ).execute()
+
+        return {
+            "ok": True,
+            "message_ids": ids,
+            "added": add_ids,
+            "removed": remove_ids,
+        }
+    except Exception as e:  # pragma: no cover
+        return {
+            "ok": False,
+            "error": str(e),
+            "message_ids": ids,
+            "added": [],
+            "removed": [],
+        }
 
 
 def _b64url_decode(data: str) -> bytes:
