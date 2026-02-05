@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, time as dtime
 from typing import Any, Optional
 
 from bantz.google.calendar import create_event, find_free_slots, list_events
+from bantz.tools.calendar_idempotency import create_event_with_idempotency
 
 
 @dataclass(frozen=True)
@@ -190,13 +191,22 @@ def calendar_create_event_tool(
     dur = int(duration) if duration is not None else 60
     end_dt = start_dt + timedelta(minutes=dur)
 
-    try:
+    # Use idempotency wrapper to prevent duplicate events
+    def do_create():
         return create_event(
             summary=summary,
             start=start_dt.isoformat(),
             end=end_dt.isoformat(),
             duration_minutes=dur,
             interactive=False,
+        )
+
+    try:
+        return create_event_with_idempotency(
+            title=summary,
+            start=start_dt.isoformat(),
+            end=end_dt.isoformat(),
+            create_fn=do_create,
         )
     except Exception as e:
         return {"ok": False, "error": str(e)}
