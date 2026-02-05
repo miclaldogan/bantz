@@ -114,6 +114,8 @@ TOOL_REGISTRY: dict[str, ToolRisk] = {
 
 # Moderate tools that must always require confirmation.
 ALWAYS_CONFIRM_TOOLS: set[str] = {
+    "calendar.create_event",
+    "calendar.update_event",
     "gmail.send",
     "gmail.send_draft",
     "gmail.send_to_contact",
@@ -210,36 +212,41 @@ def get_confirmation_prompt(tool_name: str, params: dict) -> str:
         >>> get_confirmation_prompt("calendar.delete_event", {"event_id": "abc123"})
         "Delete calendar event 'abc123'? This cannot be undone."
     """
-    # Tool-specific confirmation prompts
+    # Tool-specific confirmation prompts (Türkçe)
     prompts = {
-        "calendar.delete_event": "Delete calendar event '{event_id}'? This cannot be undone.",
-        "file.delete": "Delete file '{path}'? This cannot be undone.",
-        "file.move": "Move file from '{source}' to '{destination}'?",
-        "browser.submit_form": "Submit form on '{url}'? This may trigger a transaction.",
-        "payment.submit": "Submit payment of {amount} to {recipient}? This cannot be undone.",
-        "system.shutdown": "Shutdown system? All unsaved work will be lost.",
-        "system.execute_command": "Execute command '{command}'? This may modify your system.",
-        "app.close": "Close application '{app_name}'? Unsaved work may be lost.",
-        "email.delete": "Delete email '{subject}'? This cannot be undone.",
-        "database.delete": "Delete from database? This cannot be undone.",
-        "gmail.send": "Send email to '{to}' with subject '{subject}'?",
-        "gmail.send_draft": "Send draft '{draft_id}'?",
-        "gmail.send_to_contact": "Send email to contact '{name}' with subject '{subject}'?",
-        "gmail.download_attachment": "Download attachment '{attachment_id}' from email '{message_id}' to '{save_path}'?",
-        "gmail.archive": "Archive email '{message_id}' (remove INBOX label)?",
-        "gmail.batch_modify": "Batch modify labels for multiple emails?",
-        "gmail.generate_reply": "Generate a reply draft for email '{message_id}' based on intent '{user_intent}'?",
+        "calendar.create_event": "'{title}' etkinliği {time} için eklensin mi?",
+        "calendar.update_event": "'{title}' etkinliği güncellensin mi?",
+        "calendar.delete_event": "'{title}' etkinliği silinsin mi? Bu işlem geri alınamaz.",
+        "file.delete": "'{path}' dosyası silinsin mi? Bu işlem geri alınamaz.",
+        "file.move": "Dosya '{source}' → '{destination}' taşınsın mı?",
+        "browser.submit_form": "'{url}' adresinde form gönderilsin mi?",
+        "payment.submit": "{amount} tutarında {recipient} alıcısına ödeme yapılsın mı? Bu işlem geri alınamaz.",
+        "system.shutdown": "Sistem kapatılsın mı? Kaydedilmemiş işler kaybolacak.",
+        "system.execute_command": "'{command}' komutu çalıştırılsın mı?",
+        "app.close": "'{app_name}' uygulaması kapatılsın mı?",
+        "email.delete": "'{subject}' konulu e-posta silinsin mi?",
+        "database.delete": "Veritabanından silme yapılsın mı? Bu işlem geri alınamaz.",
+        "gmail.send": "'{to}' adresine '{subject}' konulu e-posta gönderilsin mi?",
+        "gmail.send_draft": "'{draft_id}' numaralı taslak gönderilsin mi?",
+        "gmail.send_to_contact": "'{name}' kişisine '{subject}' konulu e-posta gönderilsin mi?",
+        "gmail.download_attachment": "'{message_id}' e-postasındaki ek '{save_path}' konumuna indirilsin mi?",
+        "gmail.archive": "'{message_id}' e-postası arşivlensin mi?",
+        "gmail.batch_modify": "Birden fazla e-posta için etiket değişikliği yapılsın mı?",
+        "gmail.generate_reply": "'{message_id}' e-postasına yanıt taslağı oluşturulsun mu?",
     }
     
     # Get template or use generic
-    template = prompts.get(tool_name, f"Execute {tool_name}? This is a destructive operation.")
+    template = prompts.get(tool_name, f"{tool_name} çalıştırılsın mı? (evet/hayır)")
     
     # Format with parameters (safely handle missing params)
     try:
         return template.format(**params)
     except (KeyError, ValueError):
-        # Fallback if params don't match template
-        return f"Execute {tool_name}? This is a destructive operation."
+        # Fallback: Türkçe mesaj ile parametreleri göster
+        params_str = ", ".join(f"{k}={v}" for k, v in params.items()) if params else ""
+        if params_str:
+            return f"{tool_name} ({params_str}) çalıştırılsın mı? (evet/hayır)"
+        return f"{tool_name} çalıştırılsın mı? (evet/hayır)"
 
 
 def register_tool_risk(tool_name: str, risk: ToolRisk) -> None:

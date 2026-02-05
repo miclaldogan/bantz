@@ -673,6 +673,7 @@ def list_events(
     single_events: bool = True,
     show_deleted: bool = False,
     order_by: str = "startTime",
+    interactive: bool = True,
 ) -> dict[str, Any]:
     """List upcoming events from Google Calendar.
 
@@ -689,7 +690,7 @@ def list_events(
 
     # Get creds first (this will also validate secret file presence).
     from bantz.google.auth import get_credentials
-    creds = get_credentials(scopes=READONLY_SCOPES)
+    creds = get_credentials(scopes=READONLY_SCOPES, interactive=interactive)
 
     # Lazy import to keep base installs light.
     try:
@@ -760,6 +761,7 @@ def find_free_slots(
     calendar_id: Optional[str] = None,
     preferred_start: Optional[str] = None,
     preferred_end: Optional[str] = None,
+    interactive: bool = True,
 ) -> dict[str, Any]:
     """Find free time slots within a window.
 
@@ -778,6 +780,7 @@ def find_free_slots(
         single_events=True,
         show_deleted=False,
         order_by="startTime",
+        interactive=interactive,
     )
     events = resp.get("events") if isinstance(resp, dict) else None
     if not isinstance(events, list):
@@ -810,6 +813,7 @@ def create_event(
     location: Optional[str] = None,
     all_day: bool = False,
     recurrence: Optional[list[str]] = None,
+    interactive: bool = True,
 ) -> dict[str, Any]:
     """Create a calendar event (write).
 
@@ -908,7 +912,7 @@ def create_event(
         )
 
         from bantz.google.auth import get_credentials
-        creds = get_credentials(scopes=WRITE_SCOPES)
+        creds = get_credentials(scopes=WRITE_SCOPES, interactive=interactive)
 
         try:
             from googleapiclient.discovery import build  # type: ignore
@@ -972,7 +976,7 @@ def create_event(
     )
 
     from bantz.google.auth import get_credentials
-    creds = get_credentials(scopes=WRITE_SCOPES)
+    creds = get_credentials(scopes=WRITE_SCOPES, interactive=interactive)
 
     try:
         from googleapiclient.discovery import build  # type: ignore

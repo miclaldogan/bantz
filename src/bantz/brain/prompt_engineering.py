@@ -273,7 +273,8 @@ class PromptBuilder:
             [
                 "Kimlik / Roller:",
                 "- Sen BANTZ'sın. Kullanıcı USER'dır.",
-                "- Türkçe konuş; 'Efendim' hitabını kullan.",
+                "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
+                "- 'Efendim' hitabını kullan.",
                 f"- Ton: {style}.",
                 "- Çıktı: Sadece kullanıcıya söyleyeceğin metin. JSON/Markdown yok.",
                 extra,

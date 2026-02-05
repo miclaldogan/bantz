@@ -41,6 +41,7 @@ def get_credentials(
     scopes: list[str],
     client_secret_path: Optional[str] = None,
     token_path: Optional[str] = None,
+    interactive: bool = True,
 ):
     """Return Google OAuth credentials.
 
@@ -86,6 +87,24 @@ def get_credentials(
             out |= implied.get(s, set())
         return out
 
+    def _read_token_scopes() -> list[str]:
+        try:
+            import json
+
+            if not cfg.token_path.exists():
+                return []
+            obj = json.loads(cfg.token_path.read_text(encoding="utf-8"))
+            scopes = obj.get("scopes") or obj.get("scope")
+            if isinstance(scopes, str):
+                out = scopes.split()
+            elif isinstance(scopes, list):
+                out = [str(x) for x in scopes if str(x).strip()]
+            else:
+                out = []
+            return [s for s in out if s]
+        except Exception:
+            return []
+
     creds = None
     if cfg.token_path.exists():
         # Important: do NOT pass `scopes=` here.
@@ -106,12 +125,32 @@ def get_credentials(
         creds.refresh(Request())
 
     if creds is None or not getattr(creds, "valid", False):
+        if not interactive:
+            token_scopes = _read_token_scopes()
+            scope_hint = ""
+            if token_scopes:
+                scope_hint = f" token_scopes={sorted(set(token_scopes))}"
+
+            # Suggest the correct interactive auth mode based on requested scopes.
+            auth_cmd = "/auth calendar"
+            if any("calendar.events" in s for s in scopes):
+                auth_cmd = "/auth calendar write"
+
+            raise RuntimeError(
+                "Google OAuth yetkilendirmesi gerekli (token yok/uyumsuz ya da scope yetersiz). "
+                f"Takvim için '{auth_cmd}' çalıştırın veya 'bantz google auth calendar' kullanın. "
+                f"client_secret={mask_path(str(cfg.client_secret_path))} token={mask_path(str(cfg.token_path))}{scope_hint}"
+            )
+
         flow = InstalledAppFlow.from_client_secrets_file(str(cfg.client_secret_path), scopes=scopes)
         try:
-            creds = flow.run_local_server(port=0, open_browser=False)
+            creds = flow.run_local_server(port=0, open_browser=True)
         except Exception:
-            # Headless fallback.
-            creds = flow.run_console()
+            try:
+                creds = flow.run_local_server(port=0, open_browser=False)
+            except Exception:
+                # Headless fallback.
+                creds = flow.run_console()
 
         cfg.token_path.parent.mkdir(parents=True, exist_ok=True)
         cfg.token_path.write_text(creds.to_json(), encoding="utf-8")

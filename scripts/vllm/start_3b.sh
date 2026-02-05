@@ -29,14 +29,23 @@ echo "🚀 Starting vLLM server (3B AWQ) on port 8001..."
 echo "   Model: Qwen/Qwen2.5-3B-Instruct-AWQ"
 echo "   Quantization: awq_marlin (optimized)"
 echo "   Profile: dual-friendly defaults (override via env vars)"
-echo "   Max tokens: ${BANTZ_VLLM_3B_MAX_MODEL_LEN:-1024}"
+echo "   Max tokens: ${BANTZ_VLLM_3B_MAX_MODEL_LEN:-4096}"
 echo "   GPU utilization: ${BANTZ_VLLM_3B_GPU_UTIL:-0.45}"
 echo ""
 
-# Use global Python for now (no venv requirement).
-PYTHON_BIN="${BANTZ_VLLM_PYTHON:-python3}"
+# Choose a Python that can run vLLM reliably.
+# Prefer system Python if available to avoid venv version mismatches.
+if [ -n "${BANTZ_VLLM_PYTHON:-}" ]; then
+    PYTHON_BIN="$BANTZ_VLLM_PYTHON"
+elif /usr/bin/python3 -c "import vllm" >/dev/null 2>&1; then
+    PYTHON_BIN="/usr/bin/python3"
+else
+    PYTHON_BIN="python3"
+fi
+
 if ! "$PYTHON_BIN" -c "import vllm" >/dev/null 2>&1; then
     echo "❌ vLLM import edilemedi ($PYTHON_BIN). Önce vLLM'i kurun: pip install vllm" >&2
+    echo "   (İpucu: sistem Python'da kuruluysa: BANTZ_VLLM_PYTHON=/usr/bin/python3)" >&2
     exit 1
 fi
 
@@ -45,7 +54,7 @@ nohup "$PYTHON_BIN" -m vllm.entrypoints.openai.api_server \
     --quantization "${BANTZ_VLLM_3B_QUANT:-awq_marlin}" \
     --dtype "${BANTZ_VLLM_3B_DTYPE:-half}" \
     --port "${BANTZ_VLLM_3B_PORT:-8001}" \
-    --max-model-len "${BANTZ_VLLM_3B_MAX_MODEL_LEN:-1024}" \
+    --max-model-len "${BANTZ_VLLM_3B_MAX_MODEL_LEN:-4096}" \
     --gpu-memory-utilization "${BANTZ_VLLM_3B_GPU_UTIL:-0.45}" \
     --max-num-seqs "${BANTZ_VLLM_3B_MAX_NUM_SEQS:-32}" \
     --max-num-batched-tokens "${BANTZ_VLLM_3B_MAX_BATCH_TOKENS:-2048}" \

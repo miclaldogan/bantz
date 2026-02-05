@@ -156,13 +156,13 @@ def test_requires_confirmation_safe_respects_llm():
 
 
 def test_get_confirmation_prompt():
-    """Test confirmation prompt generation."""
+    """Test confirmation prompt generation (Turkish prompts)."""
     prompt = get_confirmation_prompt(
         "calendar.delete_event",
-        {"event_id": "evt123"}
+        {"title": "Test Etkinliği"}
     )
-    assert "evt123" in prompt
-    assert "Delete" in prompt or "delete" in prompt
+    assert "Test Etkinliği" in prompt
+    assert "silinsin" in prompt or "sil" in prompt.lower()
     
     prompt = get_confirmation_prompt(
         "file.delete",
@@ -443,13 +443,28 @@ def test_firewall_prevents_llm_override(tool_registry):
 
 
 def test_moderate_tools_respect_llm_decision(tool_registry):
-    """Test that MODERATE tools respect LLM confirmation decision."""
-    tool_name = "calendar.create_event"
+    """Test that MODERATE tools respect LLM confirmation decision.
     
-    # LLM says no confirmation - allow it
+    Note: Some MODERATE tools like calendar.create_event are in ALWAYS_CONFIRM_TOOLS
+    and always require confirmation regardless of LLM decision.
+    """
+    # clipboard.set is MODERATE but not in ALWAYS_CONFIRM_TOOLS
+    tool_name = "clipboard.set"
+    
+    # LLM says no confirmation - allow it (for regular MODERATE tools)
     assert requires_confirmation(tool_name, llm_requested=False) is False
     
     # LLM says confirmation needed - respect it
+    assert requires_confirmation(tool_name, llm_requested=True) is True
+
+
+def test_calendar_create_event_always_requires_confirmation():
+    """Test that calendar.create_event always requires confirmation."""
+    tool_name = "calendar.create_event"
+    assert get_tool_risk(tool_name) == ToolRisk.MODERATE
+    assert is_destructive(tool_name) is False
+    # Now in ALWAYS_CONFIRM_TOOLS, so always requires confirmation
+    assert requires_confirmation(tool_name, llm_requested=False) is True
     assert requires_confirmation(tool_name, llm_requested=True) is True
 
 

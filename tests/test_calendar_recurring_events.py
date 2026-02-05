@@ -117,7 +117,7 @@ class TestRecurringEventsTimeBased:
         mock_discovery.build = mock_build
         monkeypatch.setitem(__import__("sys").modules, "googleapiclient.discovery", mock_discovery)
 
-        def mock_creds(scopes):
+        def mock_creds(scopes, **kwargs):
             return MagicMock()
 
         monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -161,7 +161,7 @@ class TestRecurringEventsTimeBased:
         mock_discovery.build = mock_build
         monkeypatch.setitem(__import__("sys").modules, "googleapiclient.discovery", mock_discovery)
 
-        def mock_creds(scopes):
+        def mock_creds(scopes, **kwargs):
             return MagicMock()
 
         monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -198,7 +198,7 @@ class TestRecurringEventsTimeBased:
         mock_discovery.build = mock_build
         monkeypatch.setitem(__import__("sys").modules, "googleapiclient.discovery", mock_discovery)
 
-        def mock_creds(scopes):
+        def mock_creds(scopes, **kwargs):
             return MagicMock()
 
         monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -239,7 +239,7 @@ class TestRecurringEventsAllDay:
         mock_discovery.build = mock_build
         monkeypatch.setitem(__import__("sys").modules, "googleapiclient.discovery", mock_discovery)
 
-        def mock_creds(scopes):
+        def mock_creds(scopes, **kwargs):
             return MagicMock()
 
         monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)

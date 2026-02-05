@@ -8,6 +8,9 @@ from bantz.brain.llm_router import JarvisLLMRouter, RouterOutput
 class MockLLM:
     """Mock LLM for deterministic testing."""
 
+    # Provide a context length attribute for router budgeting (Issue #214)
+    model_context_length = 32768
+
     def __init__(self, responses: dict[str, str]):
         """Initialize with user_input -> JSON response mapping."""
         self._responses = responses
