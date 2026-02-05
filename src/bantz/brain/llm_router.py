@@ -837,22 +837,59 @@ USER: bu akşam sekize parti ekle
         return _trim_to_tokens(sp, token_budget)
 
     def _parse_json(self, raw_text: str) -> dict[str, Any]:
-        """Parse JSON from LLM output.
+        """Parse JSON from LLM output (Issue #228: enhanced validation).
 
         Uses the shared JSON protocol extractor for balanced-brace parsing.
+        Applies repair attempts and fallback defaults for robustness.
         """
 
-        from bantz.brain.json_protocol import extract_first_json_object
+        from bantz.brain.json_protocol import (
+            extract_first_json_object,
+            repair_common_json_issues,
+            validate_orchestrator_output,
+            apply_orchestrator_defaults,
+        )
 
-        return extract_first_json_object(str(raw_text or ""), strict=False)
+        text = str(raw_text or "")
+        
+        # First attempt: direct extraction
+        try:
+            parsed = extract_first_json_object(text, strict=False)
+            # Validate and log issues
+            is_valid, errors = validate_orchestrator_output(parsed, strict=False)
+            if errors:
+                logger.debug("[router_json] validation_issues: %s", errors)
+            return parsed
+        except Exception as e:
+            logger.debug("[router_json] first_parse_failed: %s", str(e)[:100])
+        
+        # Second attempt: repair common issues and retry
+        try:
+            repaired = repair_common_json_issues(text)
+            if repaired != text:
+                parsed = extract_first_json_object(repaired, strict=False)
+                is_valid, errors = validate_orchestrator_output(parsed, strict=False)
+                if errors:
+                    logger.debug("[router_json] repaired_validation_issues: %s", errors)
+                return parsed
+        except Exception as e:
+            logger.debug("[router_json] repair_parse_failed: %s", str(e)[:100])
+        
+        # Final attempt: re-raise the original error
+        return extract_first_json_object(text, strict=False)
 
     def _extract_output(self, parsed: dict[str, Any], raw_text: str) -> OrchestratorOutput:
-        """Extract OrchestratorOutput from parsed JSON (expanded with orchestrator fields)."""
-        route = str(parsed.get("route") or "unknown").strip().lower()
+        """Extract OrchestratorOutput from parsed JSON (Issue #228: enhanced validation)."""
+        from bantz.brain.json_protocol import apply_orchestrator_defaults
+        
+        # Apply defaults for missing/invalid fields
+        normalized = apply_orchestrator_defaults(parsed)
+        
+        route = str(normalized.get("route") or "unknown").strip().lower()
         if route not in {"calendar", "gmail", "smalltalk", "system", "unknown"}:
             route = "unknown"
 
-        calendar_intent = str(parsed.get("calendar_intent") or "none").strip().lower()
+        calendar_intent = str(normalized.get("calendar_intent") or "none").strip().lower()
         # Allow both high-level intents (create/modify/cancel/query) and tool-like intents
         # used by regression tests (list_events/create_event/update_event/delete_event).
         if not calendar_intent:
@@ -860,14 +897,14 @@ USER: bu akşam sekize parti ekle
         elif not re.match(r"^[a-z0-9_]+$", calendar_intent):
             calendar_intent = "none"
 
-        slots = parsed.get("slots") or {}
+        slots = normalized.get("slots") or {}
         if not isinstance(slots, dict):
             slots = {}
 
-        confidence = float(parsed.get("confidence") or 0.0)
+        confidence = float(normalized.get("confidence") or 0.0)
         confidence = max(0.0, min(1.0, confidence))
 
-        raw_tool_plan = parsed.get("tool_plan") or []
+        raw_tool_plan = normalized.get("tool_plan") or []
         tool_plan: list[str] = []
         if isinstance(raw_tool_plan, list):
             for item in raw_tool_plan:
