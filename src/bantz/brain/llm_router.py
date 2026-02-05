@@ -405,13 +405,44 @@ USER: bu akşam sekize parti ekle
             )
             return self._fallback_output(user_input, error=str(e))
 
-        # Parse JSON
-        try:
-            parsed = self._parse_json(raw_text)
-        except Exception as e:
-            logger.warning(f"Router JSON parse failed: {e}")
+        # Parse JSON (with repair attempts)
+        last_err: Optional[str] = None
+        parsed: Optional[dict[str, Any]] = None
+
+        for attempt in range(max(1, self._max_attempts)):
+            try:
+                parsed = self._parse_json(raw_text)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = str(e)
+                logger.warning(f"Router JSON parse failed: {e}")
+
+                # Attempt repair by asking the model to re-emit strict JSON.
+                # Keep the repair prompt small and deterministic.
+                if attempt + 1 >= max(1, self._max_attempts):
+                    break
+
+                repair_prompt = "\n".join(
+                    [
+                        "Sadece TEK bir geçerli JSON object döndür.",
+                        "Markdown yok. Açıklama yok. Yorum yok.",
+                        "Aşağıdaki metni, yukarıdaki schema'ya uygun TEK bir JSON object haline getir:",
+                        "",
+                        raw_text.strip()[:4000],
+                        "",
+                        "JSON:",
+                    ]
+                )
+
+                try:
+                    raw_text = self._llm.complete_text(prompt=repair_prompt, temperature=0.0, max_tokens=512)
+                except TypeError:
+                    raw_text = self._llm.complete_text(prompt=repair_prompt)
+
+        if parsed is None:
             # Fallback: unknown route with low confidence
-            return self._fallback_output(user_input, error=str(e))
+            return self._fallback_output(user_input, error=last_err or "parse_failed")
 
         # Validate and extract
         return self._extract_output(parsed, raw_text=raw_text)
@@ -599,44 +630,19 @@ USER: bu akşam sekize parti ekle
         return _trim_to_tokens(sp, token_budget)
 
     def _parse_json(self, raw_text: str) -> dict[str, Any]:
-        """Parse JSON from LLM output (tolerates markdown wrappers)."""
-        text = (raw_text or "").strip()
+        """Parse JSON from LLM output.
 
-        # Remove markdown code blocks
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
+        Uses the shared JSON protocol extractor for balanced-brace parsing.
+        """
 
-        text = text.strip()
+        from bantz.brain.json_protocol import extract_first_json_object
 
-        # Find the first JSON object start
-        start = text.find("{")
-        if start == -1:
-            raise ValueError("No JSON object found")
-
-        candidate = text[start:]
-
-        # Some models occasionally omit the final closing brace of the outer object.
-        # If braces are unbalanced, append the missing number of '}' characters.
-        brace_balance = candidate.count("{") - candidate.count("}")
-        if brace_balance > 0:
-            candidate = candidate + ("}" * brace_balance)
-
-        # Trim to the last closing brace (in case extra text follows)
-        end = candidate.rfind("}")
-        if end == -1:
-            raise ValueError("No JSON object found")
-
-        json_text = candidate[: end + 1]
-        return json.loads(json_text)
+        return extract_first_json_object(str(raw_text or ""), strict=False)
 
     def _extract_output(self, parsed: dict[str, Any], raw_text: str) -> OrchestratorOutput:
         """Extract OrchestratorOutput from parsed JSON (expanded with orchestrator fields)."""
         route = str(parsed.get("route") or "unknown").strip().lower()
-        if route not in {"calendar", "gmail", "smalltalk", "unknown"}:
+        if route not in {"calendar", "gmail", "smalltalk", "system", "unknown"}:
             route = "unknown"
 
         calendar_intent = str(parsed.get("calendar_intent") or "none").strip().lower()

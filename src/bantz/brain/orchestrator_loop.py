@@ -434,6 +434,23 @@ class OrchestratorLoop:
             "reasoning_summary": output.reasoning_summary,
         })
         
+        # Issue #284: Emit granular trace events for step-by-step visualization
+        self.event_bus.publish("intent.detected", {
+            "route": output.route,
+            "intent": output.calendar_intent,
+            "confidence": output.confidence,
+        })
+        
+        if output.slots:
+            self.event_bus.publish("slots.extracted", {
+                "slots": output.slots,
+            })
+        
+        if output.tool_plan:
+            self.event_bus.publish("tool.selected", {
+                "tools": output.tool_plan,
+            })
+        
         # Issue #282: Force mandatory tools if LLM returned empty tool_plan
         output = self._force_tool_plan(output)
         
@@ -749,6 +766,12 @@ class OrchestratorLoop:
         
         TODO: Implement proper LLM finalization call
         """
+        # Issue #284: Emit finalizer.start event for trace visualization
+        self.event_bus.publish("finalizer.start", {
+            "has_tool_results": bool(tool_results),
+            "tool_count": len(tool_results),
+        })
+        
         # If LLM asked a clarifying question, ensure we have a user-visible reply.
         if orchestrator_output.ask_user and orchestrator_output.question and not orchestrator_output.assistant_reply:
             from dataclasses import replace

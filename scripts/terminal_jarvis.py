@@ -534,32 +534,119 @@ class TerminalJarvis:
         self.state = OrchestratorState()
 
     def _on_event(self, event) -> None:
+        """Handle events for step-by-step trace visualization (Issue #284).
+        
+        When /trace is enabled, shows a beautiful step-by-step progress:
+        
+        [1/5] 🎯 Niyet tespit ediliyor...
+        [2/5] 📋 Slot çıkarıldı: window_hint=tomorrow
+        [3/5] 🔧 Tool seçildi: calendar.list_events
+        [4/5] ⚙️ Tool çalıştırılıyor...
+        [5/5] 🏁 Tamamlandı (1200ms)
+        """
         if not self._trace_enabled:
             return
+        
         et = str(getattr(event, "event_type", ""))
         data = getattr(event, "data", {}) or {}
 
+        # === Step 1: Turn Start ===
         if et == "turn.start":
-            ui = str(data.get("user_input") or "")
-            print(f"[trace] ACK: Anlaşıldı efendim. Başlıyorum. (input={ui!r})")
+            print("\n╭─────────────────────────────────────────╮")
+            print("│  🧠 BANTZ Düşünce Zinciri                │")
+            print("╰─────────────────────────────────────────╯")
+            print("[1/6] 🎯 Niyet tespit ediliyor...")
             return
-        if et == "llm.decision":
-            route = data.get("route")
-            intent = data.get("intent")
-            conf = data.get("confidence")
-            plan = data.get("tool_plan")
-            reasoning = data.get("reasoning_summary") or []
-            print(f"[trace] PLAN: route={route} intent={intent} confidence={conf} tools={plan}")
-            if reasoning:
-                print(f"[trace] REASON: {'; '.join(str(r) for r in reasoning)}")
+        
+        # === Step 2: Intent Detected ===
+        if et == "intent.detected":
+            route = data.get("route", "?")
+            intent = data.get("intent", "?")
+            conf = data.get("confidence", 0)
+            
+            route_emoji = {
+                "calendar": "📅",
+                "gmail": "📧",
+                "system": "⚙️",
+                "smalltalk": "💬",
+                "unknown": "❓",
+            }.get(route, "📋")
+            
+            print(f"[2/6] {route_emoji} Route: {route} | Intent: {intent} | Güven: {conf:.0%}")
             return
+        
+        # === Step 3: Slots Extracted ===
+        if et == "slots.extracted":
+            slots = data.get("slots", {})
+            if slots:
+                slot_items = []
+                for k, v in slots.items():
+                    if v:  # Only show non-empty slots
+                        slot_items.append(f"{k}={v}")
+                if slot_items:
+                    print(f"[3/6] 📋 Parametreler: {', '.join(slot_items)}")
+                else:
+                    print("[3/6] 📋 Parametreler: (slot yok)")
+            return
+        
+        # === Step 3 Alt: Tool Selected ===
+        if et == "tool.selected":
+            tools = data.get("tools", [])
+            if tools:
+                tool_str = ", ".join(tools)
+                print(f"[3/6] 🔧 Tool planı: {tool_str}")
+            return
+        
+        # === Step 4: Tool Call ===
         if et == "tool.call":
-            tool = data.get("tool")
-            print(f"[trace] TOOL: {tool} çalıştırılıyor...")
+            tool = data.get("tool", "?")
+            print(f"[4/6] ⚙️ Çalıştırılıyor: {tool}...")
             return
+        
+        # === Step 4 Alt: Tool Result ===
+        if et == "tool.result":
+            ok = data.get("success", data.get("ok", True))
+            tool = data.get("tool", "")
+            if ok:
+                print(f"[4/6] ✅ {tool} başarılı")
+            else:
+                err = str(data.get("error", ""))[:50]
+                print(f"[4/6] ❌ {tool} hata: {err}")
+            return
+        
+        # === Step 5: Finalizer ===
+        if et == "finalizer.start":
+            has_results = data.get("has_tool_results", False)
+            if has_results:
+                count = data.get("tool_count", 0)
+                print(f"[5/6] 📝 Yanıt hazırlanıyor ({count} sonuç)...")
+            else:
+                print("[5/6] 📝 Yanıt hazırlanıyor...")
+            return
+        
+        # === Step 6: Turn End ===
         if et == "turn.end":
-            ms = data.get("elapsed_ms")
-            print(f"[trace] DONE: {ms}ms")
+            ms = data.get("elapsed_ms", 0)
+            if ms < 500:
+                speed_emoji = "⚡"
+                speed_text = "Hızlı"
+            elif ms < 1500:
+                speed_emoji = "🚀"
+                speed_text = "Normal"
+            else:
+                speed_emoji = "🐢"
+                speed_text = "Yavaş"
+            
+            print(f"[6/6] 🏁 Tamamlandı! {speed_emoji} {ms}ms ({speed_text})")
+            print("╰─────────────────────────────────────────╯\n")
+            return
+        
+        # === Legacy: LLM Decision (backward compat) ===
+        if et == "llm.decision":
+            reasoning = data.get("reasoning_summary") or []
+            if reasoning:
+                reason_str = "; ".join(str(r) for r in reasoning[:3])
+                print(f"[trace] 💭 Düşünce: {reason_str}")
             return
 
     def _maybe_autoselect_vllm_model(self) -> None:

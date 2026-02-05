@@ -517,6 +517,7 @@ def gmail_list_messages(
     max_results: int = 10,
     unread_only: bool = False,
     page_token: Optional[str] = None,
+    interactive: bool = True,
     service: Any = None,
 ) -> dict[str, Any]:
     """List messages from Gmail inbox with basic metadata.
@@ -548,7 +549,7 @@ def gmail_list_messages(
         label_ids.append("UNREAD")
 
     try:
-        svc = service or authenticate_gmail(scopes=GMAIL_READONLY_SCOPES)
+        svc = service or authenticate_gmail(scopes=GMAIL_READONLY_SCOPES, interactive=interactive)
 
         list_kwargs: dict[str, Any] = {
             "userId": "me",
@@ -623,7 +624,7 @@ def gmail_list_messages(
         }
 
 
-def gmail_unread_count(*, service: Any = None) -> dict[str, Any]:
+def gmail_unread_count(*, interactive: bool = True, service: Any = None) -> dict[str, Any]:
     """Return an estimated unread count.
 
     We avoid Gmail search queries (`q=`) so this works under the
@@ -631,7 +632,7 @@ def gmail_unread_count(*, service: Any = None) -> dict[str, Any]:
     """
 
     try:
-        svc = service or authenticate_gmail(scopes=GMAIL_READONLY_SCOPES)
+        svc = service or authenticate_gmail(scopes=GMAIL_READONLY_SCOPES, interactive=interactive)
         resp = (
             svc.users()
             .messages()
@@ -650,6 +651,7 @@ def gmail_get_message(
     message_id: str,
     expand_thread: bool = False,
     max_thread_messages: int = 25,
+    interactive: bool = True,
     service: Any = None,
 ) -> dict[str, Any]:
     """Get a Gmail message body + attachments, optionally expanding its thread.
@@ -674,7 +676,7 @@ def gmail_get_message(
         raise ValueError("max_thread_messages must be a positive integer")
 
     try:
-        svc = service or authenticate_gmail(scopes=GMAIL_READONLY_SCOPES)
+        svc = service or authenticate_gmail(scopes=GMAIL_READONLY_SCOPES, interactive=interactive)
         msg = (
             svc.users()
             .messages()
@@ -738,6 +740,7 @@ def gmail_send(
     body: str,
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
+    interactive: bool = True,
     service: Any = None,
 ) -> dict[str, Any]:
     """Send a plain-text email via Gmail (Issue #172).
@@ -774,7 +777,7 @@ def gmail_send(
 
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
 
-        svc = service or authenticate_gmail(scopes=GMAIL_SEND_SCOPES)
+        svc = service or authenticate_gmail(scopes=GMAIL_SEND_SCOPES, interactive=interactive)
         resp = (
             svc.users()
             .messages()

@@ -36,6 +36,10 @@ GMAIL_MODIFY_SCOPES = [
 DEFAULT_GMAIL_CLIENT_SECRET_PATH = "~/.config/bantz/google/client_secret_gmail.json"
 DEFAULT_GMAIL_TOKEN_PATH = "~/.config/bantz/google/gmail_token.json"
 
+# Convenience fallback: many users keep a single OAuth client secret for both
+# Calendar and Gmail.
+DEFAULT_SHARED_CLIENT_SECRET_PATH = "~/.config/bantz/google/client_secret.json"
+
 
 @dataclass(frozen=True)
 class GmailAuthConfig:
@@ -151,6 +155,7 @@ def get_gmail_credentials(
     scopes: list[str],
     client_secret_path: Optional[str] = None,
     token_path: Optional[str] = None,
+    interactive: bool = True,
 ):
     """Return Google OAuth credentials for Gmail.
 
@@ -170,10 +175,29 @@ def get_gmail_credentials(
 
     cfg = get_gmail_auth_config(client_secret_path=client_secret_path, token_path=token_path)
 
-    if not cfg.client_secret_path.exists():
+    secret_path = cfg.client_secret_path
+
+    # Convenience fallback: if the Gmail-specific default secret is missing but a
+    # shared secret exists (common setup), use the shared file.
+    if not secret_path.exists():
+        try:
+            gmail_default = _resolve_path(DEFAULT_GMAIL_CLIENT_SECRET_PATH)
+            shared_default = _resolve_path(DEFAULT_SHARED_CLIENT_SECRET_PATH)
+            if (
+                client_secret_path is None
+                and not str(os.getenv("BANTZ_GMAIL_CLIENT_SECRET") or "").strip()
+                and not str(os.getenv("BANTZ_GOOGLE_CLIENT_SECRET") or "").strip()
+                and secret_path == gmail_default
+                and shared_default.exists()
+            ):
+                secret_path = shared_default
+        except Exception:
+            pass
+
+    if not secret_path.exists():
         raise FileNotFoundError(
             "Gmail client secret not found. Set BANTZ_GMAIL_CLIENT_SECRET "
-            f"(default: {DEFAULT_GMAIL_CLIENT_SECRET_PATH}). Missing: {mask_path(str(cfg.client_secret_path))}"
+            f"(default: {DEFAULT_GMAIL_CLIENT_SECRET_PATH}). Missing: {mask_path(str(secret_path))}"
         )
 
     try:
@@ -231,7 +255,34 @@ def get_gmail_credentials(
         creds.refresh(Request())
 
     if creds is None or not getattr(creds, "valid", False):
-        flow = InstalledAppFlow.from_client_secrets_file(str(cfg.client_secret_path), scopes=requested_scopes)
+        if not interactive:
+            # Suggest the correct interactive auth mode based on requested scopes.
+            auth_cmd = "/auth gmail"
+            if any("gmail.modify" in s for s in requested_scopes):
+                auth_cmd = "/auth gmail modify"
+            elif any("gmail.send" in s for s in requested_scopes) or any("gmail.compose" in s for s in requested_scopes):
+                auth_cmd = "/auth gmail send"
+
+            # Surface token scopes (non-secret) to help diagnose scope mixups.
+            scope_hint = ""
+            try:
+                if cfg.token_path.exists():
+                    token_obj = json.loads(cfg.token_path.read_text(encoding="utf-8"))
+                    token_scopes = token_obj.get("scopes") or token_obj.get("scope")
+                    if isinstance(token_scopes, str):
+                        token_scopes = token_scopes.split()
+                    token_scopes = [str(s) for s in (token_scopes or []) if str(s).strip()]
+                    if token_scopes:
+                        scope_hint = f" token_scopes={sorted(set(token_scopes))}"
+            except Exception:
+                scope_hint = ""
+
+            raise RuntimeError(
+                "Gmail OAuth yetkilendirmesi gerekli (token yok/uyumsuz). "
+                f"Gmail araçlarını kullanmadan önce '{auth_cmd}' ile yetkilendirme yapın. "
+                f"client_secret={mask_path(str(secret_path))} token={mask_path(str(cfg.token_path))}{scope_hint}"
+            )
+        flow = InstalledAppFlow.from_client_secrets_file(str(secret_path), scopes=requested_scopes)
         try:
             # Prefer opening the user's browser; fall back for headless setups.
             creds = flow.run_local_server(port=0, open_browser=True)
@@ -252,6 +303,7 @@ def authenticate_gmail(
     scopes: list[str],
     token_path: Optional[str] = None,
     secret_path: Optional[str] = None,
+    interactive: bool = True,
 ):
     """Authenticate and return a Gmail API service.
 
@@ -263,7 +315,12 @@ def authenticate_gmail(
         googleapiclient.discovery.Resource for Gmail v1
     """
 
-    creds = get_gmail_credentials(scopes=scopes, client_secret_path=secret_path, token_path=token_path)
+    creds = get_gmail_credentials(
+        scopes=scopes,
+        client_secret_path=secret_path,
+        token_path=token_path,
+        interactive=interactive,
+    )
 
     try:
         _Request, _Credentials, _InstalledAppFlow, build = _import_google_deps()

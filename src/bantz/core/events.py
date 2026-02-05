@@ -64,6 +64,17 @@ class EventType(Enum):
     JOB_RESUMED = "job.resumed"  # Job resumed
     JOB_CANCELLED = "job.cancelled"  # Job cancelled
     
+    # === Orchestrator Trace Events (Issue #284) ===
+    TURN_START = "turn.start"  # Turn başladı
+    INTENT_DETECTED = "intent.detected"  # Niyet tespit edildi
+    SLOTS_EXTRACTED = "slots.extracted"  # Slot'lar çıkarıldı  
+    TOOL_SELECTED = "tool.selected"  # Tool seçildi
+    TOOL_CALL = "tool.call"  # Tool çağrılıyor
+    TOOL_RESULT = "tool.result"  # Tool sonucu geldi
+    FINALIZER_START = "finalizer.start"  # Yanıt son haline getiriliyor
+    FINALIZER_END = "finalizer.end"  # Yanıt tamamlandı
+    TURN_END = "turn.end"  # Turn bitti
+    
     # === Legacy (for backward compatibility) ===
     REMINDER_FIRED = "reminder_fired"
     CHECKIN_TRIGGERED = "checkin_triggered"

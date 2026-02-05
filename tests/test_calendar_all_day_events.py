@@ -40,7 +40,7 @@ def test_create_all_day_event_single_day(monkeypatch: pytest.MonkeyPatch) -> Non
     mock_discovery.build = mock_build
     monkeypatch.setitem(__import__("sys").modules, "googleapiclient.discovery", mock_discovery)
 
-    def mock_creds(scopes):
+    def mock_creds(scopes, **kwargs):
         return MagicMock()
 
     monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -86,7 +86,7 @@ def test_create_all_day_event_multi_day(monkeypatch: pytest.MonkeyPatch) -> None
     mock_discovery.build = mock_build
     monkeypatch.setitem(__import__("sys").modules, "googleapiclient.discovery", mock_discovery)
 
-    def mock_creds(scopes):
+    def mock_creds(scopes, **kwargs):
         return MagicMock()
 
     monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -132,7 +132,7 @@ def test_create_all_day_event_with_location_description(monkeypatch: pytest.Monk
     mock_discovery.build = mock_build
     monkeypatch.setitem(__import__("sys").modules, "googleapiclient.discovery", mock_discovery)
 
-    def mock_creds(scopes):
+    def mock_creds(scopes, **kwargs):
         return MagicMock()
 
     monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -156,7 +156,7 @@ def test_create_all_day_event_with_location_description(monkeypatch: pytest.Monk
 
 def test_create_all_day_event_error_invalid_start_format(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test error when all_day=True but start is not a date format."""
-    def mock_creds(scopes):
+    def mock_creds(scopes, **kwargs):
         return MagicMock()
 
     monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -171,7 +171,7 @@ def test_create_all_day_event_error_invalid_start_format(monkeypatch: pytest.Mon
 
 def test_create_all_day_event_error_invalid_end_format(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test error when all_day=True but end is not a date format."""
-    def mock_creds(scopes):
+    def mock_creds(scopes, **kwargs):
         return MagicMock()
 
     monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -187,7 +187,7 @@ def test_create_all_day_event_error_invalid_end_format(monkeypatch: pytest.Monke
 
 def test_create_all_day_event_error_end_before_start(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test error when end date is before or equal to start date."""
-    def mock_creds(scopes):
+    def mock_creds(scopes, **kwargs):
         return MagicMock()
 
     monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -203,7 +203,7 @@ def test_create_all_day_event_error_end_before_start(monkeypatch: pytest.MonkeyP
 
 def test_create_all_day_event_error_end_equal_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test error when end date equals start date."""
-    def mock_creds(scopes):
+    def mock_creds(scopes, **kwargs):
         return MagicMock()
 
     monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -237,7 +237,7 @@ def test_create_time_based_event_not_affected(monkeypatch: pytest.MonkeyPatch) -
     mock_discovery.build = mock_build
     monkeypatch.setitem(__import__("sys").modules, "googleapiclient.discovery", mock_discovery)
 
-    def mock_creds(scopes):
+    def mock_creds(scopes, **kwargs):
         return MagicMock()
 
     monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
@@ -290,7 +290,7 @@ def test_list_events_parses_all_day_events(monkeypatch: pytest.MonkeyPatch) -> N
     mock_discovery.build = mock_build
     monkeypatch.setitem(__import__("sys").modules, "googleapiclient.discovery", mock_discovery)
 
-    def mock_creds(scopes):
+    def mock_creds(scopes, **kwargs):
         return MagicMock()
 
     monkeypatch.setattr("bantz.google.auth.get_credentials", mock_creds)
