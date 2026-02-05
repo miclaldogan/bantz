@@ -26,6 +26,112 @@ from typing import Any, Optional, Protocol
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# PromptBudgetConfig: Deterministic budget allocation for 1024-ctx models
+# (Issue #227)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PromptBudgetConfig:
+    """Deterministic prompt budget allocation for small-context models.
+    
+    Budget allocation is priority-based:
+    1. SYSTEM prompt (fixed, may be compacted if needed)
+    2. USER input (always included, minimal trim)
+    3. COMPLETION reserve (scaled to context size)
+    4. Optional blocks in priority order: SESSION > MEMORY > DIALOG
+    
+    The allocation ensures we never exceed context limits, with clear
+    per-section budgets and trim order.
+    """
+    
+    context_length: int = 1024
+    completion_reserve: int = 256  # Space for LLM response
+    safety_margin: int = 32  # Buffer for tokenizer mismatch
+    
+    # Section budget percentages (of remaining space after system+user+completion)
+    dialog_pct: float = 0.25  # 25% for dialog summary
+    memory_pct: float = 0.25  # 25% for retrieved memory
+    session_pct: float = 0.15  # 15% for session context
+    # Remaining (~35%) is extra buffer
+    
+    @classmethod
+    def for_context(cls, context_length: int) -> "PromptBudgetConfig":
+        """Create budget config scaled to context size."""
+        ctx = max(256, int(context_length))
+        
+        # Scale completion reserve with context
+        if ctx <= 1024:
+            completion = 256
+        elif ctx <= 2048:
+            completion = 512
+        else:
+            completion = 768
+            
+        return cls(
+            context_length=ctx,
+            completion_reserve=completion,
+            safety_margin=32,
+        )
+    
+    @property
+    def available_for_prompt(self) -> int:
+        """Total tokens available for prompt (excluding completion+safety)."""
+        return max(64, self.context_length - self.completion_reserve - self.safety_margin)
+    
+    def compute_section_budgets(
+        self,
+        *,
+        system_tokens: int,
+        user_tokens: int,
+    ) -> dict[str, int]:
+        """Compute per-section token budgets.
+        
+        Returns:
+            Dict with keys: system, user, dialog, memory, session
+        """
+        # Fixed allocations
+        sys_budget = min(system_tokens, int(self.available_for_prompt * 0.6))
+        usr_budget = min(user_tokens, int(self.available_for_prompt * 0.2))
+        
+        # Remaining for optional sections
+        remaining = max(0, self.available_for_prompt - sys_budget - usr_budget)
+        
+        return {
+            "system": sys_budget,
+            "user": usr_budget,
+            "dialog": int(remaining * self.dialog_pct),
+            "memory": int(remaining * self.memory_pct),
+            "session": int(remaining * self.session_pct),
+            "total": self.available_for_prompt,
+            "remaining": remaining,
+        }
+    
+    def log_budget_metrics(
+        self,
+        *,
+        prompt_tokens: int,
+        sections_used: dict[str, int],
+        trimmed: bool,
+        model_name: Optional[str] = None,
+    ) -> None:
+        """Log budget metrics (PII-safe)."""
+        logger.info(
+            "[router_budget] ctx=%d prompt_tokens=%d completion_reserve=%d "
+            "sys=%d user=%d dialog=%d memory=%d session=%d trimmed=%s model=%s",
+            self.context_length,
+            prompt_tokens,
+            self.completion_reserve,
+            sections_used.get("system", 0),
+            sections_used.get("user", 0),
+            sections_used.get("dialog", 0),
+            sections_used.get("memory", 0),
+            sections_used.get("session", 0),
+            trimmed,
+            model_name or "unknown",
+        )
+
+
 @dataclass(frozen=True)
 class OrchestratorOutput:
     """LLM Orchestrator decision output (expanded from RouterOutput).
@@ -387,12 +493,12 @@ USER: bu akşam sekize parti ekle
         Returns:
             RouterOutput with route, intent, slots, confidence, tool_plan, reply
         """
-        # Build prompt with context
+        # Build prompt with context using deterministic budget (Issue #227)
         context_len = self._get_model_context_length()
-        completion_cap = self._compute_router_max_tokens(context_len)
-        # Safety margin to account for mismatched tokenizers.
-        safety_margin = 32
-        prompt_budget = max(128, int(context_len) - int(completion_cap) - safety_margin)
+        budget_config = PromptBudgetConfig.for_context(context_len)
+        completion_cap = budget_config.completion_reserve
+        safety_margin = budget_config.safety_margin
+        prompt_budget = budget_config.available_for_prompt
 
         prompt, build_meta = self._build_prompt(
             user_input=user_input,
@@ -400,6 +506,7 @@ USER: bu akşam sekize parti ekle
             retrieved_memory=retrieved_memory,
             session_context=session_context,
             token_budget=prompt_budget,
+            budget_config=budget_config,
         )
 
         prompt_tokens = _estimate_tokens(prompt)
@@ -413,12 +520,19 @@ USER: bu akşam sekize parti ekle
         # If we're still too tight, attempt a second-pass rebuild with a smaller budget.
         if prompt_tokens + max_tokens + safety_margin > context_len:
             smaller_budget = max(64, int(context_len) - int(max_tokens) - safety_margin)
+            # Create a tighter budget config for retry
+            tighter_config = PromptBudgetConfig(
+                context_length=context_len,
+                completion_reserve=max_tokens,
+                safety_margin=safety_margin,
+            )
             prompt, build_meta = self._build_prompt(
                 user_input=user_input,
                 dialog_summary=dialog_summary,
                 retrieved_memory=retrieved_memory,
                 session_context=session_context,
                 token_budget=smaller_budget,
+                budget_config=tighter_config,
             )
             prompt_tokens = _estimate_tokens(prompt)
             max_tokens = self._compute_call_max_tokens(
@@ -427,6 +541,15 @@ USER: bu akşam sekize parti ekle
                 prompt_tokens=prompt_tokens,
                 safety_margin=safety_margin,
             )
+
+        # Log budget metrics (Issue #227 - PII-safe)
+        model_name = getattr(self._llm, "model_name", None)
+        budget_config.log_budget_metrics(
+            prompt_tokens=prompt_tokens,
+            sections_used=build_meta.get("sections_used", {}),
+            trimmed=build_meta.get("trimmed", False),
+            model_name=model_name,
+        )
 
         # Call LLM
         # JSON outputs can exceed small defaults (e.g. 200 tokens) and get truncated,
@@ -437,7 +560,7 @@ USER: bu akşam sekize parti ekle
             # Backward compatibility for mocks/adapters that only accept `prompt`.
             raw_text = self._llm.complete_text(prompt=prompt)
         except Exception as e:
-            # PII-safe logging: only sizes.
+            # PII-safe logging: only sizes (Issue #227).
             backend = getattr(self._llm, "backend_name", None)
             model = getattr(self._llm, "model_name", None)
             logger.warning(
@@ -503,16 +626,40 @@ USER: bu akşam sekize parti ekle
         retrieved_memory: Optional[str] = None,
         session_context: Optional[dict[str, Any]] = None,
         token_budget: Optional[int] = None,
+        budget_config: Optional[PromptBudgetConfig] = None,
     ) -> tuple[str, dict[str, Any]]:
         """Build router prompt with context.
 
         If `token_budget` is provided, trims optional blocks best-effort so the
-        prompt stays within that budget (Issue #214).
+        prompt stays within that budget (Issue #214, #227).
+        
+        Uses priority-based trimming order: DIALOG → MEMORY → SESSION
         """
 
         budget = int(token_budget) if token_budget is not None else 10_000_000
 
         system_prompt = self._maybe_compact_system_prompt(self._system_prompt, token_budget=budget)
+        system_tokens = _estimate_tokens(system_prompt)
+        user_tokens = _estimate_tokens(f"USER: {user_input}\nASSISTANT (sadece JSON):")
+        
+        # Compute section budgets if config provided (Issue #227)
+        if budget_config is not None:
+            section_budgets = budget_config.compute_section_budgets(
+                system_tokens=system_tokens,
+                user_tokens=user_tokens,
+            )
+        else:
+            # Fallback: equal distribution of remaining
+            remaining = max(0, budget - system_tokens - user_tokens)
+            section_budgets = {
+                "system": system_tokens,
+                "user": user_tokens,
+                "dialog": remaining // 3,
+                "memory": remaining // 3,
+                "session": remaining // 4,
+                "total": budget,
+                "remaining": remaining,
+            }
 
         base_lines = [system_prompt, ""]
         base_lines.append(f"USER: {user_input}")
@@ -522,24 +669,29 @@ USER: bu akşam sekize parti ekle
 
         trimmed_any = False
         lines: list[str] = [system_prompt, ""]
+        sections_used: dict[str, int] = {"system": system_tokens, "user": user_tokens}
 
         remaining = max(0, budget - base_tokens)
 
-        # Add dialog memory if available
-        if dialog_summary and remaining > 0:
+        # Add dialog memory if available (priority: lowest - trimmed first)
+        dialog_budget = min(section_budgets.get("dialog", remaining // 3), remaining)
+        if dialog_summary and dialog_budget > 0:
             header = "DIALOG_SUMMARY (önceki turlar):\n"
             overhead = _estimate_tokens(header) + 1
-            allow = max(0, remaining - overhead)
+            allow = max(0, dialog_budget - overhead)
             ds = str(dialog_summary)
             ds_trimmed = _trim_to_tokens(ds, allow)
             if ds_trimmed != ds:
                 trimmed_any = True
             if ds_trimmed:
                 lines.append(f"{header}{ds_trimmed}\n")
-                remaining = max(0, remaining - (overhead + _estimate_tokens(ds_trimmed)))
+                used = overhead + _estimate_tokens(ds_trimmed)
+                sections_used["dialog"] = used
+                remaining = max(0, remaining - used)
 
-        # Add retrieved memories (profile/episodic/session) if available
-        if retrieved_memory and remaining > 0:
+        # Add retrieved memories (priority: medium)
+        memory_budget = min(section_budgets.get("memory", remaining // 2), remaining)
+        if retrieved_memory and memory_budget > 0:
             header_lines = [
                 "RETRIEVED_MEMORY (hatırlanan bağlam):",
                 (
@@ -550,7 +702,7 @@ USER: bu akşam sekize parti ekle
                 ),
             ]
             overhead = _estimate_tokens("\n".join(header_lines) + "\n") + 1
-            allow = max(0, remaining - overhead)
+            allow = max(0, memory_budget - overhead)
             rm = str(retrieved_memory).strip()
             rm_trimmed = _trim_to_tokens(rm, allow)
             if rm_trimmed != rm:
@@ -559,10 +711,13 @@ USER: bu akşam sekize parti ekle
                 lines.extend(header_lines)
                 lines.append(rm_trimmed)
                 lines.append("")
-                remaining = max(0, remaining - (overhead + _estimate_tokens(rm_trimmed)))
+                used = overhead + _estimate_tokens(rm_trimmed)
+                sections_used["memory"] = used
+                remaining = max(0, remaining - used)
 
-        # Add session context hints
-        if session_context and remaining > 0:
+        # Add session context hints (priority: highest - trimmed last)
+        session_budget = min(section_budgets.get("session", remaining), remaining)
+        if session_context and session_budget > 0:
             try:
                 ctx_str = json.dumps(session_context, ensure_ascii=False, indent=2)
             except Exception:
@@ -570,13 +725,15 @@ USER: bu akşam sekize parti ekle
 
             header = "SESSION_CONTEXT:\n"
             overhead = _estimate_tokens(header) + 1
-            allow = max(0, remaining - overhead)
+            allow = max(0, session_budget - overhead)
             ctx_trimmed = _trim_to_tokens(ctx_str, allow)
             if ctx_trimmed != ctx_str:
                 trimmed_any = True
             if ctx_trimmed:
                 lines.append(f"{header}{ctx_trimmed}\n")
-                remaining = max(0, remaining - (overhead + _estimate_tokens(ctx_trimmed)))
+                used = overhead + _estimate_tokens(ctx_trimmed)
+                sections_used["session"] = used
+                remaining = max(0, remaining - used)
 
         # Add current user input
         lines.append(f"USER: {user_input}")
@@ -593,8 +750,10 @@ USER: bu akşam sekize parti ekle
             allow_for_head = max(0, budget - tail_tokens - 2)
             head = self._maybe_compact_system_prompt(system_prompt, token_budget=allow_for_head)
             prompt = "\n".join([head, "", keep_tail])
+            # Update sections_used to reflect hard truncation
+            sections_used = {"system": _estimate_tokens(head), "user": tail_tokens}
 
-        return prompt, {"trimmed": trimmed_any, "budget": budget}
+        return prompt, {"trimmed": trimmed_any, "budget": budget, "sections_used": sections_used}
 
     def _get_model_context_length(self) -> int:
         """Best-effort model context length for router budgeting (Issue #214)."""
