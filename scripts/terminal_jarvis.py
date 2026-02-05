@@ -403,6 +403,21 @@ def _looks_like_calendar_query(text: str) -> bool:
     return any(k in t for k in keys)
 
 
+def _normalize_elongated(text: str) -> str:
+    """Normalize elongated characters like 'haaaayırrr' → 'hayır'.
+    
+    Reduces consecutive repeated characters to single character.
+    Handles Turkish characters including ı, ü, ö, ş, ğ, ç.
+    
+    Issue #311: Accept elongated confirmations.
+    """
+    import re
+    if not text:
+        return text
+    # Reduce runs of 2+ identical chars to single char
+    return re.sub(r'(.)\1+', r'\1', text)
+
+
 def _is_confirmation_yes(text: str) -> bool:
     """Detect natural language confirmation (yes/ok/confirm).
     
@@ -411,12 +426,18 @@ def _is_confirmation_yes(text: str) -> bool:
     - "evet ekle dostum" → True
     - "tamam yap" → True
     - "ok devam" → True
+    - "eveeet" → True (elongated)
+    - "tamaaaam" → True (elongated)
     
     Issue #283: Accept natural language confirmations.
+    Issue #311: Accept elongated confirmations.
     """
     t = (text or "").strip().lower()
     if not t:
         return False
+    
+    # Normalize elongated characters: eveeet → evet, tamaaaam → tamam
+    t = _normalize_elongated(t)
     
     # Exact match for common confirmations
     yes_tokens = {"evet", "e", "ok", "tamam", "onay", "onaylıyorum", "kabul", "yes", "y", "olur", "peki"}
@@ -443,16 +464,22 @@ def _is_confirmation_no(text: str) -> bool:
     - "hayır" → True
     - "hayır vazgeç" → True
     - "iptal et lütfen" → True
+    - "haaaayırrr" → True (elongated)
+    - "yoook" → True (elongated)
     
     Issue #283: Accept natural language rejections.
+    Issue #311: Accept elongated confirmations.
     """
     t = (text or "").strip().lower()
     if not t:
         return False
     
+    # Normalize elongated characters: haaaayırrr → hayır, yoook → yok
+    t = _normalize_elongated(t)
+    
     # Exact match for common rejections
     # Note: Include ASCII variants for Turkish uppercase issues (HAYIR.lower() = hayir)
-    no_tokens = {"hayır", "hayir", "h", "no", "n", "iptal", "vazgeç", "vazgec", "reddet", "istemiyorum", "olmaz"}
+    no_tokens = {"hayır", "hayir", "h", "no", "n", "iptal", "vazgeç", "vazgec", "reddet", "istemiyorum", "olmaz", "yok"}
     if t in no_tokens:
         return True
     
@@ -462,7 +489,7 @@ def _is_confirmation_no(text: str) -> bool:
         return True
     
     # Startswith patterns
-    no_prefixes = ("hayır", "hayir", "iptal", "vazgeç", "vazgec", "no ", "reddet", "istemiyorum", "olmaz")
+    no_prefixes = ("hayır", "hayir", "iptal", "vazgeç", "vazgec", "no ", "reddet", "istemiyorum", "olmaz", "yok ")
     if t.startswith(no_prefixes):
         return True
     
