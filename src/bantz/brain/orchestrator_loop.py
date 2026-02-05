@@ -91,6 +91,78 @@ class OrchestratorLoop:
             )
         else:
             self.safety_guard = None
+        
+        # Route+Intent → Mandatory Tools mapping (Issue #282)
+        # Prevents hallucination when LLM returns empty tool_plan for queries
+        self._mandatory_tool_map: dict[tuple[str, str], list[str]] = {
+            # Calendar routes
+            ("calendar", "query"): ["calendar.list_events"],
+            ("calendar", "create"): ["calendar.create_event"],
+            ("calendar", "modify"): ["calendar.update_event"],
+            ("calendar", "cancel"): ["calendar.delete_event"],
+            # Gmail routes
+            ("gmail", "list"): ["gmail.list_messages"],
+            ("gmail", "query"): ["gmail.list_messages"],
+            ("gmail", "read"): ["gmail.get_message"],
+            ("gmail", "send"): ["gmail.send_message"],
+            # System routes
+            ("system", "time"): ["time.now"],
+            ("system", "status"): ["system.status"],
+            ("system", "query"): ["time.now"],  # Default for system queries
+        }
+    
+    def _force_tool_plan(self, output: OrchestratorOutput) -> OrchestratorOutput:
+        """Force mandatory tools based on route+intent (Issue #282).
+        
+        Prevents LLM hallucination by ensuring queries always have tool_plan.
+        If LLM returns empty tool_plan but route+intent requires tools,
+        we inject the mandatory tools.
+        
+        Args:
+            output: Original LLM output
+            
+        Returns:
+            Updated output with forced tool_plan if needed
+        """
+        # Skip if tool_plan already populated
+        if output.tool_plan:
+            return output
+        
+        # Skip if LLM is asking user for clarification (not ready to execute)
+        if output.ask_user:
+            return output
+        
+        # Skip for smalltalk/unknown - no tools needed
+        if output.route in ("smalltalk", "unknown"):
+            return output
+        
+        # Skip if intent is "none" - no action needed (e.g., email drafting)
+        if output.calendar_intent in ("none", ""):
+            return output
+        
+        # Lookup mandatory tools
+        key = (output.route, output.calendar_intent)
+        mandatory_tools = self._mandatory_tool_map.get(key)
+        
+        if not mandatory_tools:
+            # Try route-only fallback for system route
+            if output.route == "system":
+                mandatory_tools = ["time.now"]
+            elif output.route == "gmail":
+                mandatory_tools = ["gmail.list_messages"]
+            else:
+                # No mandatory tools for this route+intent
+                return output
+        
+        if self.config.debug:
+            logger.debug(f"[FORCE_TOOL_PLAN] Empty tool_plan for {key}, forcing: {mandatory_tools}")
+        
+        # Create new output with forced tool_plan
+        # We use dataclass replace pattern
+        from dataclasses import replace
+        updated_output = replace(output, tool_plan=mandatory_tools)
+        
+        return updated_output
     
     def process_turn(
         self,
@@ -274,6 +346,17 @@ class OrchestratorLoop:
             # Regression tests expect this to be iterable of strings.
             "tools_success": tools_success_names,
             "requires_confirmation": bool(final_output.requires_confirmation),
+            # Include final_output for terminal jarvis to access assistant_reply
+            "final_output": {
+                "assistant_reply": final_output.assistant_reply,
+                "route": final_output.route,
+                "calendar_intent": final_output.calendar_intent,
+                "confidence": final_output.confidence,
+                "tool_plan": final_output.tool_plan,
+                "requires_confirmation": final_output.requires_confirmation,
+                "confirmation_prompt": final_output.confirmation_prompt,
+                "reasoning_summary": final_output.reasoning_summary,
+            },
         }
 
         if final_output.confirmation_prompt:
@@ -348,7 +431,11 @@ class OrchestratorLoop:
             "confidence": output.confidence,
             "tool_plan": output.tool_plan,
             "requires_confirmation": output.requires_confirmation,
+            "reasoning_summary": output.reasoning_summary,
         })
+        
+        # Issue #282: Force mandatory tools if LLM returned empty tool_plan
+        output = self._force_tool_plan(output)
         
         return output
     
@@ -505,6 +592,11 @@ class OrchestratorLoop:
                     params.update(args)
                 else:
                     params = self._build_tool_params(tool_name, output.slots)
+
+                # Drop nulls (LLM JSON often includes explicit nulls for optional slots).
+                # Prevents spurious schema/type failures.
+                if isinstance(params, dict):
+                    params = {k: v for k, v in params.items() if v is not None}
                 
                 # Safety Guard: Validate tool arguments
                 if self.safety_guard:
@@ -527,16 +619,36 @@ class OrchestratorLoop:
                 
                 # Execute tool
                 result = tool.function(**params)
+
+                # Convention: tool functions often return a tool-friendly dict
+                # like {"ok": bool, "error": ...}. Treat ok=false as failure so
+                # the finalization phase can render a deterministic error.
+                tool_returned_ok = True
+                tool_error: Optional[str] = None
+                if isinstance(result, dict) and result.get("ok") is False:
+                    tool_returned_ok = False
+                    err_val = result.get("error")
+                    tool_error = str(err_val) if err_val is not None else "tool_returned_ok_false"
+
+                # Prefer JSON for structured tool outputs to help the finalizer.
+                try:
+                    if isinstance(result, (dict, list)):
+                        result_str = json.dumps(result, ensure_ascii=False)
+                    else:
+                        result_str = str(result)
+                except Exception:
+                    result_str = str(result)
                 
                 tool_results.append({
                     "tool": tool_name,
-                    "success": True,
-                    "result": str(result)[:500],  # Truncate
+                    "success": bool(tool_returned_ok),
+                    "result": result_str[:2000],  # Truncate
+                    "error": tool_error,
                     "risk_level": risk.value,
                 })
-                
+
                 # Add to state
-                state.add_tool_result(tool_name, result, success=True)
+                state.add_tool_result(tool_name, result, success=bool(tool_returned_ok))
                 
                 # Audit successful execution (Issue #160)
                 if self.audit_logger:
@@ -603,10 +715,22 @@ class OrchestratorLoop:
         """Build tool parameters from orchestrator slots.
         
         This maps orchestrator slots to tool-specific parameters.
+        Handles nested objects like gmail: {to, subject, body}.
         """
-        # TODO: Implement proper parameter mapping
-        # For now, pass slots directly (works for calendar tools)
-        return dict(slots)
+        params = dict(slots)
+        
+        # Gmail tools: flatten gmail nested object to top-level params
+        if tool_name.startswith("gmail."):
+            gmail_params = slots.get("gmail")
+            if isinstance(gmail_params, dict):
+                for key, val in gmail_params.items():
+                    if val is not None:
+                        params[key] = val
+        
+        # Calendar tools: use slots directly (already flat)
+        # System tools: use slots directly
+        
+        return params
     
     def _llm_finalization_phase(
         self,
@@ -630,6 +754,27 @@ class OrchestratorLoop:
             from dataclasses import replace
 
             return replace(orchestrator_output, assistant_reply=orchestrator_output.question)
+
+        # If any tools failed (excluding pending-confirmation placeholders),
+        # short-circuit with a deterministic error message.
+        # This prevents the finalizer LLM from hallucinating a "successful" outcome
+        # when the tool returned {ok:false} or otherwise failed.
+        if tool_results:
+            hard_failures = [
+                r
+                for r in tool_results
+                if (not r.get("success", False)) and (not r.get("pending_confirmation"))
+            ]
+            if hard_failures:
+                error_msg = "Üzgünüm efendim, bazı işlemler başarısız oldu:\n"
+                for result in hard_failures:
+                    tool_name = str(result.get("tool") or "")
+                    err = str(result.get("error") or "Unknown error")
+                    error_msg += f"- {tool_name}: {err}\n"
+
+                from dataclasses import replace
+
+                return replace(orchestrator_output, assistant_reply=error_msg.strip())
 
         def _extract_reason_code(err: Exception) -> str:
             try:
@@ -659,7 +804,8 @@ class OrchestratorLoop:
                 prompt_lines = [
                     "Kimlik / Roller:",
                     "- Sen BANTZ'sın. Kullanıcı USER'dır.",
-                    "- Türkçe konuş; 'Efendim' hitabını kullan.",
+                    "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
+                    "- 'Efendim' hitabını kullan.",
                     "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
                     "- Yeni sayı/saat/tarih uydurma; verilenleri koru.",
                     "",
@@ -668,7 +814,7 @@ class OrchestratorLoop:
                 ]
                 if tool_results:
                     prompt_lines.extend(["", "TOOL_RESULTS (JSON):", json.dumps(tool_results, ensure_ascii=False)])
-                prompt_lines.extend(["", f"USER: {user_input}", "ASSISTANT:"])
+                prompt_lines.extend(["", f"USER: {user_input}", "ASSISTANT (SADECE TÜRKÇE):"])
                 fast_prompt = "\n".join(prompt_lines)
 
                 try:
@@ -768,14 +914,16 @@ class OrchestratorLoop:
                         [
                             "Kimlik / Roller:",
                             "- Sen BANTZ'sın. Kullanıcı USER'dır.",
-                            "- Türkçe konuş; 'Efendim' hitabını kullan.",
+                            "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
+                            "- 'Efendim' hitabını kullan.",
                             "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
+                            "- Kısa ve öz cevap ver.",
                             "",
                             f"DIALOG_SUMMARY:\n{dialog_summary}\n" if dialog_summary else "",
                             "PLANNER_DECISION (JSON):",
                             json.dumps(planner_decision, ensure_ascii=False),
                             "\nTOOL_RESULTS (JSON):\n" + json.dumps(tool_results, ensure_ascii=False) if tool_results else "",
-                            f"\nUSER: {user_input}\nASSISTANT:",
+                            f"\nUSER: {user_input}\nASSISTANT (SADECE TÜRKÇE):",
                         ]
                     ).strip()
 
