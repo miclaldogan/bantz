@@ -42,6 +42,17 @@ AMBIGUOUS_TOKENS = {
     "okay", "yep", "sure", "fine", "alright", "olur", "peki"
 }
 
+# Route-independent safe tools (Issue #286)
+# These read-only tools can run regardless of route (even route=unknown)
+ROUTE_INDEPENDENT_SAFE_TOOLS = {
+    "time.now",           # Get current time - always safe
+    "system.status",      # Get system info - always safe  
+    "calendar.list_events",  # Read-only calendar query
+    "gmail.list_messages",   # Read-only email listing
+    "gmail.get_message",     # Read-only email reading
+    "gmail.unread_count",    # Read-only unread count
+}
+
 
 def normalize_confirmation(user_response: str) -> Literal["accept", "reject", "ambiguous", "unknown"]:
     """Normalize user confirmation response.
@@ -246,6 +257,7 @@ class SafetyGuard:
         """Filter tool plan based on route.
         
         If route=smalltalk but tool_plan has tools, drop them.
+        Route-independent safe tools (Issue #286) are allowed regardless of route.
         
         Args:
             route: Orchestrator route (calendar, smalltalk, unknown)
@@ -257,25 +269,42 @@ class SafetyGuard:
         if not self.policy.enforce_route_tool_match:
             return tool_plan, []
         
-        # If route is not a tool-allowed route, no tools should run
+        # If route is not a tool-allowed route, filter based on safety
         # (Issue #170 adds read-only Gmail tools under route="gmail").
-        allowed_routes = {"calendar", "gmail"}
-        if route not in allowed_routes and tool_plan:
-            violations = [
-                PolicyViolation(
-                    violation_type="route_tool_mismatch",
-                    tool_name=tool,
-                    reason=f"Route '{route}' does not allow tools",
-                    metadata={"route": route, "tool_plan": tool_plan},
-                )
-                for tool in tool_plan
-            ]
-            logger.warning(
-                f"Tool plan dropped: route={route} but tool_plan={tool_plan}"
-            )
-            return [], violations
+        # "system" route allows safe tools like time.now and system.status.
+        allowed_routes = {"calendar", "gmail", "system"}
         
-        return tool_plan, []
+        if route in allowed_routes:
+            # Route explicitly allows tools
+            return tool_plan, []
+        
+        # For non-allowed routes (smalltalk, unknown), check each tool
+        # Issue #286: Allow route-independent safe tools regardless of route
+        filtered_plan = []
+        violations = []
+        
+        for tool in tool_plan:
+            if tool in ROUTE_INDEPENDENT_SAFE_TOOLS:
+                # Safe tool - allow regardless of route
+                filtered_plan.append(tool)
+                logger.debug(
+                    f"Safe tool '{tool}' allowed despite route={route} (Issue #286)"
+                )
+            else:
+                # Not a safe tool - drop and record violation
+                violations.append(
+                    PolicyViolation(
+                        violation_type="route_tool_mismatch",
+                        tool_name=tool,
+                        reason=f"Route '{route}' does not allow tool '{tool}'",
+                        metadata={"route": route, "tool": tool},
+                    )
+                )
+                logger.warning(
+                    f"Tool '{tool}' dropped: route={route} does not allow this tool"
+                )
+        
+        return filtered_plan, violations
     
     def audit_decision(
         self,

@@ -164,14 +164,18 @@ def test_orchestrator_invalid_args_rejected():
 
 
 def test_orchestrator_route_tool_mismatch():
-    """Test tool plan is dropped for smalltalk route."""
-    # LLM returns smalltalk but somehow includes tools (LLM hallucination)
+    """Test UNSAFE tool plan is dropped for smalltalk route.
+    
+    Issue #286: Safe tools (like calendar.list_events) are now allowed
+    regardless of route. This test verifies UNSAFE tools are still blocked.
+    """
+    # LLM returns smalltalk but somehow includes unsafe tools (LLM hallucination)
     mock_response = {
         "route": "smalltalk",
         "calendar_intent": "none",
         "slots": {},
         "confidence": 1.0,
-        "tool_plan": ["calendar.list_events"],  # Shouldn't have tools!
+        "tool_plan": ["calendar.create_event"],  # UNSAFE tool - should be blocked
         "assistant_reply": "İyiyim efendim",
         "ask_user": False,
         "question": "",
@@ -199,7 +203,7 @@ def test_orchestrator_route_tool_mismatch():
     # Process turn
     output, state = loop.process_turn("nasılsın")
     
-    # Tool plan should be filtered (dropped)
+    # Unsafe tool should be filtered (dropped)
     assert state.trace.get("tools_executed") == 0
     # But response should still be delivered
     assert "İyiyim" in output.assistant_reply
