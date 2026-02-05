@@ -246,13 +246,17 @@ def _build_registry() -> ToolRegistry:
     reg.register(
         Tool(
             name="gmail.list_messages",
-            description="Gmail: list inbox messages (read-only)",
+            description="Gmail: list inbox messages with optional search query (read-only)",
             parameters={
                 "type": "object",
                 "properties": {
                     **common_slot_props,
                     "max_results": {"type": "integer"},
                     "unread_only": {"type": "boolean"},
+                    "query": {
+                        "type": "string",
+                        "description": "Gmail search query (from:, subject:, after:, label:). Examples: 'from:linkedin', 'from:amazon subject:order', 'label:CATEGORY_UPDATES'",
+                    },
                 },
                 "required": [],
                 "additionalProperties": True,

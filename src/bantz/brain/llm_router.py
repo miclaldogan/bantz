@@ -144,7 +144,7 @@ TOOL_PLAN:
 - "calendar.list_events": takvim sorgusu
 - "calendar.find_free_slots": boş slot ara
 - "calendar.create_event": etkinlik oluştur
-- "gmail.list_messages": Gmail gelen kutusu listele (read-only)
+- "gmail.list_messages": Gmail gelen kutusu listele (read-only) - query parametresi ile arama yapılabilir!
 - "gmail.unread_count": Gmail okunmamış sayısı (read-only)
 - "gmail.get_message": Gmail mesajını oku + thread genişlet (read-only)
 - "gmail.download_attachment": Gmail attachment indir (confirmation required)
@@ -174,6 +174,16 @@ TOOL_PLAN:
 - "gmail.send_draft": Gmail taslağını gönder (confirmation required)
 - "gmail.delete_draft": Gmail taslağını sil (SAFE)
 - Birden fazla tool sıralı çağrılabilir.
+
+GMAIL ARAMA ÖRNEKLERİ (Issue #285):
+gmail.list_messages tool'u "query" parametresi alır:
+- "linkedin maili var mı" → query="from:linkedin OR subject:LinkedIn"
+- "amazon siparişi" → query="from:amazon subject:order"
+- "dün gelen mailler" → query="after:YYYY/MM/DD" (dünün tarihi)
+- "güncellemeler kategorisi" → query="label:CATEGORY_UPDATES"
+- "promosyon mailleri" → query="label:CATEGORY_PROMOTIONS"
+- "sosyal mailleri" → query="label:CATEGORY_SOCIAL"
+- "okunmamış linkedinden" → query="from:linkedin" + unread_only=true
 
 TIME AWARENESS:
 - "bu akşam" → window_hint="evening"

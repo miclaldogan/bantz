@@ -22,16 +22,28 @@ def gmail_list_messages_tool(
     *,
     max_results: int = 5,
     unread_only: bool = False,
+    query: str = "",
     **_: Any,
 ) -> dict[str, Any]:
-    """Read-only: list recent inbox messages.
+    """Read-only: list recent inbox messages with optional search query.
 
-    Orchestrator slots are ignored; we keep args small & safe.
+    Args:
+        max_results: Max number of messages to return (default 5).
+        unread_only: If True, only return unread messages.
+        query: Gmail search query (from:, subject:, after:, label:, etc.).
+               Examples:
+               - "from:linkedin" → LinkedIn emails
+               - "from:amazon subject:sipariş" → Amazon orders
+               - "after:2026/02/01" → Emails after date
+               - "label:CATEGORY_UPDATES" → Updates category
+    
+    Issue #285: Added query parameter support.
     """
     try:
         return gmail_list_messages(
             max_results=int(max_results),
             unread_only=bool(unread_only),
+            query=query.strip() if query else None,
             interactive=False,
         )
     except Exception as e:

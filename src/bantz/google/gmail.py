@@ -516,6 +516,7 @@ def gmail_list_messages(
     *,
     max_results: int = 10,
     unread_only: bool = False,
+    query: Optional[str] = None,
     page_token: Optional[str] = None,
     interactive: bool = True,
     service: Any = None,
@@ -524,7 +525,9 @@ def gmail_list_messages(
 
     Args:
         max_results: Max number of messages to return.
-        unread_only: If True, query uses `is:unread`.
+        unread_only: If True, adds `is:unread` to query.
+        query: Gmail search query (from:, subject:, after:, label:, etc.).
+               Requires gmail.readonly scope. If None, lists inbox.
         page_token: Gmail `nextPageToken` from a previous call.
         service: Optional injected Gmail API service for testing.
 
@@ -540,12 +543,25 @@ def gmail_list_messages(
     if not isinstance(max_results, int) or max_results <= 0:
         raise ValueError("max_results must be a positive integer")
 
-    # NOTE: We intentionally avoid Gmail search `q=` here because the
-    # `https://www.googleapis.com/auth/gmail.metadata` scope rejects `q`.
-    # Listing by labels works with both `gmail.metadata` and `gmail.readonly`.
-    q = "is:unread" if unread_only else "in:inbox"
-    label_ids = ["INBOX"]
+    # Build query string
+    # If custom query provided, use gmail.readonly scope with `q=` parameter
+    # Otherwise fall back to label-based filtering (works with gmail.metadata)
+    q_parts: list[str] = []
+    use_query_search = bool(query and query.strip())
+    
+    if use_query_search:
+        q_parts.append(query.strip())
+    else:
+        q_parts.append("in:inbox")
+    
     if unread_only:
+        q_parts.append("is:unread")
+    
+    q = " ".join(q_parts)
+    
+    # Label-based filtering (for non-query mode)
+    label_ids = ["INBOX"] if not use_query_search else None
+    if unread_only and not use_query_search:
         label_ids.append("UNREAD")
 
     try:
@@ -553,9 +569,15 @@ def gmail_list_messages(
 
         list_kwargs: dict[str, Any] = {
             "userId": "me",
-            "labelIds": label_ids,
             "maxResults": max_results,
         }
+        
+        # Use q= for custom queries, labelIds for simple inbox listing
+        if use_query_search:
+            list_kwargs["q"] = q
+        elif label_ids:
+            list_kwargs["labelIds"] = label_ids
+            
         if page_token:
             list_kwargs["pageToken"] = page_token
 
