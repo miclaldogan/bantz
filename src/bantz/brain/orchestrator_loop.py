@@ -100,15 +100,25 @@ class OrchestratorLoop:
             ("calendar", "create"): ["calendar.create_event"],
             ("calendar", "modify"): ["calendar.update_event"],
             ("calendar", "cancel"): ["calendar.delete_event"],
-            # Gmail routes
+            # Gmail routes (calendar_intent is used for backwards compat)
             ("gmail", "list"): ["gmail.list_messages"],
             ("gmail", "query"): ["gmail.list_messages"],
             ("gmail", "read"): ["gmail.get_message"],
             ("gmail", "send"): ["gmail.send_message"],
+            ("gmail", "search"): ["gmail.smart_search"],  # Issue #317: Gmail label search
             # System routes
             ("system", "time"): ["time.now"],
             ("system", "status"): ["system.status"],
             ("system", "query"): ["time.now"],  # Default for system queries
+        }
+        
+        # Gmail intent mapping (gmail_intent → mandatory tools)
+        # Issue #317: Extended Gmail label/category support
+        self._gmail_intent_map: dict[str, list[str]] = {
+            "list": ["gmail.list_messages"],
+            "search": ["gmail.smart_search"],
+            "read": ["gmail.get_message"],
+            "send": ["gmail.send"],
         }
     
     def _force_tool_plan(self, output: OrchestratorOutput) -> OrchestratorOutput:
@@ -136,8 +146,25 @@ class OrchestratorLoop:
         if output.route in ("smalltalk", "unknown"):
             return output
         
+        # Issue #317: Check gmail_intent first for gmail route
+        gmail_intent = getattr(output, "gmail_intent", None) or ""
+        if output.route == "gmail" and gmail_intent and gmail_intent != "none":
+            mandatory_tools = self._gmail_intent_map.get(gmail_intent)
+            if mandatory_tools:
+                if self.config.debug:
+                    logger.debug(f"[FORCE_TOOL_PLAN] Gmail intent '{gmail_intent}', forcing: {mandatory_tools}")
+                from dataclasses import replace
+                return replace(output, tool_plan=mandatory_tools)
+        
         # Skip if intent is "none" - no action needed (e.g., email drafting)
         if output.calendar_intent in ("none", ""):
+            # For gmail without gmail_intent, try fallback based on route
+            if output.route == "gmail":
+                mandatory_tools = ["gmail.list_messages"]
+                if self.config.debug:
+                    logger.debug(f"[FORCE_TOOL_PLAN] Gmail fallback, forcing: {mandatory_tools}")
+                from dataclasses import replace
+                return replace(output, tool_plan=mandatory_tools)
             return output
         
         # Lookup mandatory tools
@@ -387,16 +414,47 @@ class OrchestratorLoop:
         # Build context for LLM
         context = state.get_context_for_llm()
         conversation_history = context.get("recent_conversation", [])
+        tool_results = context.get("last_tool_results", [])
         
         # Use memory-lite summary instead of rolling_summary from state (Issue #141)
         dialog_summary = self.memory.to_prompt_block()
+        
+        # Issue #339: Include conversation history and tool results in context
+        # Build enhanced context block
+        context_parts = []
+        
+        if dialog_summary:
+            context_parts.append(dialog_summary)
+        
+        # Add recent conversation (last 2 turns)
+        if conversation_history:
+            conv_lines = ["RECENT_CONVERSATION:"]
+            for turn in conversation_history[-2:]:
+                user_text = str(turn.get("user", ""))[:100]
+                asst_text = str(turn.get("assistant", ""))[:150]
+                conv_lines.append(f"  U: {user_text}")
+                conv_lines.append(f"  A: {asst_text}")
+            context_parts.append("\n".join(conv_lines))
+        
+        # Add recent tool results (for context continuity)
+        if tool_results:
+            result_lines = ["LAST_TOOL_RESULTS:"]
+            for tr in tool_results[-2:]:
+                tool_name = str(tr.get("tool", ""))
+                result_str = str(tr.get("result", ""))[:200]
+                success = tr.get("success", True)
+                status = "ok" if success else "fail"
+                result_lines.append(f"  {tool_name} ({status}): {result_str}")
+            context_parts.append("\n".join(result_lines))
+        
+        enhanced_summary = "\n\n".join(context_parts) if context_parts else None
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Planning Phase:")
             logger.debug(f"  User: {user_input}")
             logger.debug(f"  Dialog Summary (memory-lite): {dialog_summary or 'None'}")
             logger.debug(f"  Recent History: {len(conversation_history)} turns")
-            logger.debug(f"  Tool Results: {len(context.get('last_tool_results', []))}")
+            logger.debug(f"  Tool Results: {len(tool_results)}")
         
         # Session context injection (Issue #191): datetime/location hints.
         try:
@@ -406,10 +464,10 @@ class OrchestratorLoop:
         except Exception:
             session_context = None
 
-        # Call orchestrator with memory-lite summary + session context
+        # Call orchestrator with enhanced summary + session context
         output = self.orchestrator.route(
             user_input=user_input,
-            dialog_summary=dialog_summary if dialog_summary else None,
+            dialog_summary=enhanced_summary,
             session_context=session_context,
         )
         
@@ -608,7 +666,7 @@ class OrchestratorLoop:
                     params = dict(output.slots)
                     params.update(args)
                 else:
-                    params = self._build_tool_params(tool_name, output.slots)
+                    params = self._build_tool_params(tool_name, output.slots, output)
 
                 # Drop nulls (LLM JSON often includes explicit nulls for optional slots).
                 # Prevents spurious schema/type failures.
@@ -728,21 +786,40 @@ class OrchestratorLoop:
         
         return tool_results
     
-    def _build_tool_params(self, tool_name: str, slots: dict[str, Any]) -> dict[str, Any]:
+    def _build_tool_params(
+        self,
+        tool_name: str,
+        slots: dict[str, Any],
+        output: Optional["OrchestratorOutput"] = None,
+    ) -> dict[str, Any]:
         """Build tool parameters from orchestrator slots.
         
         This maps orchestrator slots to tool-specific parameters.
         Handles nested objects like gmail: {to, subject, body}.
+        
+        Args:
+            tool_name: Name of the tool to build params for
+            slots: Calendar/system slots dict
+            output: Full orchestrator output (for gmail params)
         """
         params = dict(slots)
         
-        # Gmail tools: flatten gmail nested object to top-level params
+        # Gmail tools: flatten gmail nested object to top-level params (Issue #317)
         if tool_name.startswith("gmail."):
+            # First check slots.gmail (legacy)
             gmail_params = slots.get("gmail")
             if isinstance(gmail_params, dict):
                 for key, val in gmail_params.items():
                     if val is not None:
                         params[key] = val
+            
+            # Then check output.gmail (Issue #317)
+            if output is not None:
+                gmail_obj = getattr(output, "gmail", None) or {}
+                if isinstance(gmail_obj, dict):
+                    for key, val in gmail_obj.items():
+                        if val is not None:
+                            params[key] = val
         
         # Calendar tools: use slots directly (already flat)
         # System tools: use slots directly

@@ -148,6 +148,10 @@ class OrchestratorOutput:
     tool_plan: list[str]  # ["calendar.list_events", ...]
     assistant_reply: str  # Chat/response text
     
+    # Gmail extensions (Issue #317)
+    gmail_intent: str = "none"  # list | search | read | send | none
+    gmail: dict[str, Any] = field(default_factory=dict)  # {to?, subject?, body?, label?, category?, natural_query?, search_term?}
+    
     # Orchestrator extensions (Issue #134)
     ask_user: bool = False  # Need clarification?
     question: str = ""  # Clarification question (if ask_user=True)
@@ -936,6 +940,12 @@ USER: bu akşam sekize parti ekle
         if not isinstance(reasoning_summary, list):
             reasoning_summary = []
         reasoning_summary = [str(r).strip() for r in reasoning_summary if r]
+        
+        # Gmail extensions (Issue #317)
+        gmail_intent = str(parsed.get("gmail_intent") or "none").strip().lower()
+        gmail_obj = parsed.get("gmail") or {}
+        if not isinstance(gmail_obj, dict):
+            gmail_obj = {}
 
         return OrchestratorOutput(
             route=route,
@@ -944,6 +954,8 @@ USER: bu akşam sekize parti ekle
             confidence=confidence,
             tool_plan=tool_plan,
             assistant_reply=assistant_reply,
+            gmail_intent=gmail_intent,
+            gmail=gmail_obj,
             ask_user=ask_user,
             question=question,
             requires_confirmation=requires_confirmation,
