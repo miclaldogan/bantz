@@ -8,6 +8,13 @@ from bantz.google.gmail import (
     gmail_send,
     gmail_unread_count,
 )
+from bantz.google.gmail_labels import (
+    GmailLabel,
+    build_smart_query,
+    detect_label_from_text,
+    format_labels_summary,
+    get_category_labels,
+)
 
 
 def gmail_unread_count_tool(**_: Any) -> dict[str, Any]:
@@ -23,9 +30,11 @@ def gmail_list_messages_tool(
     max_results: int = 5,
     unread_only: bool = False,
     query: str = "",
+    category: Optional[str] = None,
+    label: Optional[str] = None,
     **_: Any,
 ) -> dict[str, Any]:
-    """Read-only: list recent inbox messages with optional search query.
+    """Read-only: list recent inbox messages with optional search query and label filtering.
 
     Args:
         max_results: Max number of messages to return (default 5).
@@ -36,16 +45,42 @@ def gmail_list_messages_tool(
                - "from:amazon subject:sipariş" → Amazon orders
                - "after:2026/02/01" → Emails after date
                - "label:CATEGORY_UPDATES" → Updates category
+        category: Gmail category filter (Turkish or English).
+                  Examples: "sosyal", "promosyonlar", "güncellemeler", "forumlar"
+        label: Gmail label filter (Turkish or English).
+               Examples: "gelen kutusu", "gönderilenler", "yıldızlı", "önemli"
     
     Issue #285: Added query parameter support.
+    Issue #317: Added category and label parameter support with Turkish keywords.
     """
     try:
-        return gmail_list_messages(
+        # Build query from category/label if provided
+        final_query = query.strip() if query else ""
+        detected_label = None
+        
+        # Priority: explicit query > category > label
+        if not final_query:
+            # Check for category or label hint
+            label_hint = category or label
+            if label_hint:
+                label_match = detect_label_from_text(label_hint)
+                if label_match.detected and label_match.label:
+                    final_query = label_match.label.query_filter
+                    detected_label = label_match.label
+        
+        result = gmail_list_messages(
             max_results=int(max_results),
             unread_only=bool(unread_only),
-            query=query.strip() if query else None,
+            query=final_query if final_query else None,
             interactive=False,
         )
+        
+        # Add detected label info to result
+        if detected_label and isinstance(result, dict):
+            result["detected_label"] = detected_label.value
+            result["detected_label_tr"] = detected_label.display_name_tr
+        
+        return result
     except Exception as e:
         return {"ok": False, "error": str(e), "messages": []}
 
@@ -120,3 +155,77 @@ def gmail_send_tool(
         if "yetkilendirmesi gerekli" in msg.lower() or "oauth" in msg.lower():
             msg = f"{msg} (Önce '/auth gmail send' çalıştırın.)"
         return {"ok": False, "error": msg}
+
+
+def gmail_smart_search_tool(
+    *,
+    natural_query: str,
+    max_results: int = 5,
+    unread_only: bool = False,
+    **_: Any,
+) -> dict[str, Any]:
+    """Search Gmail using natural language with Turkish label detection.
+    
+    Automatically detects Gmail categories/labels from Turkish text.
+    
+    Args:
+        natural_query: Natural language search (Turkish/English).
+                       Examples:
+                       - "sosyal mailleri göster" → Social category
+                       - "promosyonlar kategorisindeki mailler" → Promotions
+                       - "güncellemeler kategorisinde ne var" → Updates
+                       - "gönderilen mailleri listele" → Sent
+                       - "yıldızlı mailleri göster" → Starred
+        max_results: Max number of messages to return (default 5).
+        unread_only: If True, only return unread messages.
+    
+    Issue #317: Gmail label/kategori desteği.
+    """
+    try:
+        # Build smart query from natural language
+        query, detected_label = build_smart_query(
+            natural_query,
+            include_unread_only=bool(unread_only),
+        )
+        
+        result = gmail_list_messages(
+            max_results=int(max_results),
+            unread_only=False,  # Already in query if needed
+            query=query,
+            interactive=False,
+        )
+        
+        # Enhance result with detection info
+        if isinstance(result, dict):
+            result["natural_query"] = natural_query
+            result["gmail_query"] = query
+            if detected_label:
+                result["detected_label"] = detected_label.value
+                result["detected_label_tr"] = detected_label.display_name_tr
+        
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e), "messages": []}
+
+
+def gmail_list_categories_tool(**_: Any) -> dict[str, Any]:
+    """List available Gmail categories with Turkish names.
+    
+    Returns category labels like Sosyal, Promosyonlar, Güncellemeler, Forumlar.
+    
+    Issue #317: Gmail label/kategori desteği.
+    """
+    categories = get_category_labels()
+    return {
+        "ok": True,
+        "categories": [
+            {
+                "id": cat.value,
+                "name_tr": cat.display_name_tr,
+                "name_en": cat.display_name_en,
+                "query_filter": cat.query_filter,
+            }
+            for cat in categories
+        ],
+        "summary_tr": format_labels_summary(categories, language="tr"),
+    }
