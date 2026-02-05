@@ -4,6 +4,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 import os
 
+from bantz.google.calendar_cache import cache_created_event, get_merged_events
+
 
 DEFAULT_CALENDAR_ID = "primary"
 READONLY_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
@@ -744,6 +746,14 @@ def list_events(
 
     events = _dedupe_normalized_events(events)
 
+    # Merge with cached events for immediate visibility of new events (#315)
+    events = get_merged_events(
+        events,
+        time_min=tmn,
+        time_max=tmx,
+        calendar_id=cal_id,
+    )
+
     return {
         "ok": True,
         "calendar_id": cal_id,
@@ -943,13 +953,29 @@ def create_event(
         start_obj = created.get("start") if isinstance(created.get("start"), dict) else {}
         end_obj = created.get("end") if isinstance(created.get("end"), dict) else {}
 
+        event_start = start_obj.get("date") or start_obj.get("dateTime") or start_date.isoformat()
+        event_end = end_obj.get("date") or end_obj.get("dateTime") or end_date.isoformat()
+        event_id = created.get("id")
+
+        # Cache newly created event for immediate visibility (#315)
+        if event_id:
+            cache_created_event(
+                event_id=event_id,
+                summary=created.get("summary") or summary.strip(),
+                start=event_start,
+                end=event_end,
+                location=location,
+                description=description,
+                calendar_id=cal_id,
+            )
+
         return {
             "ok": True,
-            "id": created.get("id"),
+            "id": event_id,
             "htmlLink": created.get("htmlLink"),
             "summary": created.get("summary") or summary.strip(),
-            "start": start_obj.get("date") or start_obj.get("dateTime") or start_date.isoformat(),
-            "end": end_obj.get("date") or end_obj.get("dateTime") or end_date.isoformat(),
+            "start": event_start,
+            "end": event_end,
             "all_day": True,
             "recurrence": created.get("recurrence"),
         }
@@ -1006,13 +1032,29 @@ def create_event(
     start_obj = created.get("start") if isinstance(created.get("start"), dict) else {}
     end_obj = created.get("end") if isinstance(created.get("end"), dict) else {}
 
+    event_start = start_obj.get("dateTime") or start_obj.get("date") or start_dt.isoformat()
+    event_end = end_obj.get("dateTime") or end_obj.get("date") or end_dt.isoformat()
+    event_id = created.get("id")
+
+    # Cache newly created event for immediate visibility (#315)
+    if event_id:
+        cache_created_event(
+            event_id=event_id,
+            summary=created.get("summary") or summary.strip(),
+            start=event_start,
+            end=event_end,
+            location=location,
+            description=description,
+            calendar_id=cal_id,
+        )
+
     return {
         "ok": True,
-        "id": created.get("id"),
+        "id": event_id,
         "htmlLink": created.get("htmlLink"),
         "summary": created.get("summary") or summary.strip(),
-        "start": start_obj.get("dateTime") or start_obj.get("date") or start_dt.isoformat(),
-        "end": end_obj.get("dateTime") or end_obj.get("date") or end_dt.isoformat(),
+        "start": event_start,
+        "end": event_end,
         "all_day": False,
         "recurrence": created.get("recurrence"),
     }
@@ -1047,6 +1089,10 @@ def delete_event(
 
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
     service.events().delete(calendarId=cal_id, eventId=str(event_id).strip()).execute()
+
+    # Remove from cache if present (#315)
+    from bantz.google.calendar_cache import get_calendar_cache
+    get_calendar_cache().remove_event(str(event_id).strip())
 
     return {"ok": True, "id": str(event_id).strip(), "calendar_id": cal_id}
 
