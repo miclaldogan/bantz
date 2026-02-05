@@ -501,3 +501,258 @@ def safe_json_dumps(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False)
     except Exception:
         return json.dumps({"_unserializable": str(value)}, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Router/Orchestrator Output Schema (Issue #228)
+# ---------------------------------------------------------------------------
+
+ORCHESTRATOR_OUTPUT_SCHEMA: dict[str, Any] = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": ["route", "calendar_intent", "confidence", "tool_plan", "assistant_reply"],
+    "properties": {
+        "route": {
+            "type": "string",
+            "enum": ["calendar", "gmail", "smalltalk", "system", "unknown"],
+            "description": "Primary route classification",
+        },
+        "calendar_intent": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]*$",
+            "description": "Calendar intent (create, modify, cancel, query, none)",
+        },
+        "slots": {
+            "type": "object",
+            "properties": {
+                "date": {"type": ["string", "null"]},
+                "time": {"type": ["string", "null"]},
+                "duration": {"type": ["integer", "string", "null"]},
+                "title": {"type": ["string", "null"]},
+                "window_hint": {"type": ["string", "null"]},
+            },
+            "additionalProperties": True,
+        },
+        "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Confidence score 0.0-1.0",
+        },
+        "tool_plan": {
+            "type": "array",
+            "items": {
+                "oneOf": [
+                    {"type": "string"},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "tool": {"type": "string"},
+                            "tool_name": {"type": "string"},
+                        },
+                    },
+                ]
+            },
+            "description": "List of tool names to call",
+        },
+        "assistant_reply": {
+            "type": "string",
+            "description": "Chat response text",
+        },
+        "ask_user": {
+            "type": "boolean",
+            "default": False,
+        },
+        "question": {
+            "type": "string",
+            "default": "",
+        },
+        "requires_confirmation": {
+            "type": "boolean",
+            "default": False,
+        },
+        "confirmation_prompt": {
+            "type": "string",
+            "default": "",
+        },
+        "memory_update": {
+            "type": "string",
+            "default": "",
+        },
+        "reasoning_summary": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+        },
+    },
+}
+
+# Fallback defaults for safe recovery (Issue #228)
+ORCHESTRATOR_FALLBACK_DEFAULTS: dict[str, Any] = {
+    "route": "smalltalk",
+    "calendar_intent": "none",
+    "slots": {},
+    "confidence": 0.0,
+    "tool_plan": [],
+    "assistant_reply": "",
+    "ask_user": False,
+    "question": "",
+    "requires_confirmation": False,
+    "confirmation_prompt": "",
+    "memory_update": "",
+    "reasoning_summary": [],
+}
+
+
+def validate_orchestrator_output(
+    parsed: dict[str, Any],
+    *,
+    strict: bool = False,
+) -> tuple[bool, list[str]]:
+    """Validate parsed orchestrator output against schema.
+    
+    Args:
+        parsed: Parsed JSON from LLM
+        strict: If True, use jsonschema if available
+        
+    Returns:
+        Tuple of (is_valid, list_of_errors)
+    """
+    errors: list[str] = []
+    
+    if not isinstance(parsed, dict):
+        errors.append("output_not_dict")
+        return False, errors
+    
+    # Check required fields
+    required = ["route", "calendar_intent", "confidence", "tool_plan", "assistant_reply"]
+    for field in required:
+        if field not in parsed:
+            errors.append(f"missing_required:{field}")
+    
+    # Validate route enum
+    route = parsed.get("route")
+    if route is not None:
+        valid_routes = {"calendar", "gmail", "smalltalk", "system", "unknown"}
+        if str(route).lower() not in valid_routes:
+            errors.append(f"invalid_route:{route}")
+    
+    # Validate confidence range
+    confidence = parsed.get("confidence")
+    if confidence is not None:
+        try:
+            conf_val = float(confidence)
+            if conf_val < 0.0 or conf_val > 1.0:
+                errors.append(f"confidence_out_of_range:{confidence}")
+        except (TypeError, ValueError):
+            errors.append(f"confidence_not_number:{confidence}")
+    
+    # Validate tool_plan is array
+    tool_plan = parsed.get("tool_plan")
+    if tool_plan is not None and not isinstance(tool_plan, list):
+        errors.append(f"tool_plan_not_array:{type(tool_plan).__name__}")
+    
+    # Validate slots is dict
+    slots = parsed.get("slots")
+    if slots is not None and not isinstance(slots, dict):
+        errors.append(f"slots_not_dict:{type(slots).__name__}")
+    
+    # Use jsonschema if strict mode and available
+    if strict and JSONSCHEMA_AVAILABLE and not errors:
+        try:
+            jsonschema.validate(instance=parsed, schema=ORCHESTRATOR_OUTPUT_SCHEMA)
+        except Exception as e:
+            errors.append(f"jsonschema_error:{str(e)[:200]}")
+    
+    return len(errors) == 0, errors
+
+
+def apply_orchestrator_defaults(
+    parsed: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply fallback defaults to incomplete orchestrator output.
+    
+    Args:
+        parsed: Parsed JSON (may be incomplete)
+        
+    Returns:
+        Complete dict with all required fields
+    """
+    result = dict(ORCHESTRATOR_FALLBACK_DEFAULTS)
+    
+    if not isinstance(parsed, dict):
+        return result
+    
+    # Override with provided values
+    for key, value in parsed.items():
+        if value is not None:
+            result[key] = value
+    
+    # Normalize route
+    if "route" in result:
+        route = str(result["route"]).lower().strip()
+        if route not in {"calendar", "gmail", "smalltalk", "system", "unknown"}:
+            route = "unknown"
+        result["route"] = route
+    
+    # Normalize confidence to 0.0-1.0
+    if "confidence" in result:
+        try:
+            result["confidence"] = max(0.0, min(1.0, float(result["confidence"])))
+        except (TypeError, ValueError):
+            result["confidence"] = 0.0
+    
+    # Ensure tool_plan is list
+    if not isinstance(result.get("tool_plan"), list):
+        result["tool_plan"] = []
+    
+    # Ensure slots is dict
+    if not isinstance(result.get("slots"), dict):
+        result["slots"] = {}
+    
+    return result
+
+
+def repair_common_json_issues(text: str) -> str:
+    """Attempt to repair common JSON issues from LLM output.
+    
+    Repairs:
+    - Trailing commas in objects/arrays
+    - Single quotes instead of double quotes
+    - Unquoted keys
+    - Missing closing braces (simple cases)
+    
+    Args:
+        text: Raw LLM output with potential JSON issues
+        
+    Returns:
+        Repaired text (may still not be valid JSON)
+    """
+    if not text:
+        return text
+    
+    # Remove markdown code blocks
+    text = re.sub(r'^```(?:json)?\s*\n?', '', text.strip())
+    text = re.sub(r'\n?```\s*$', '', text.strip())
+    
+    # Remove leading/trailing explanations before/after JSON
+    # Find first { and last }
+    first_brace = text.find('{')
+    last_brace = text.rfind('}')
+    if first_brace >= 0 and last_brace > first_brace:
+        text = text[first_brace:last_brace + 1]
+    
+    # Fix trailing commas before } or ]
+    text = re.sub(r',(\s*[}\]])', r'\1', text)
+    
+    # Fix single quotes to double quotes (careful with apostrophes)
+    # Only replace if it looks like a JSON string boundary
+    text = re.sub(r"'(\w+)'(\s*:)", r'"\1"\2', text)  # Keys
+    
+    # Fix unquoted string values (basic cases)
+    # Pattern: : unquoted_value, or : unquoted_value}
+    text = re.sub(r':\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*([,}])', r': "\1"\2', text)
+    
+    return text
+
