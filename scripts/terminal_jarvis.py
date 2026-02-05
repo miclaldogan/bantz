@@ -49,8 +49,10 @@ from bantz.tools.calendar_tools import (
 )
 from bantz.tools.gmail_tools import (
     gmail_get_message_tool,
+    gmail_list_categories_tool,
     gmail_list_messages_tool,
     gmail_send_tool,
+    gmail_smart_search_tool,
     gmail_unread_count_tool,
 )
 from bantz.tools.system_tools import system_status
@@ -85,7 +87,10 @@ OUTPUT SCHEMA (zorunlu):
   "gmail": {
     "to": "email veya null",
     "subject": "konu veya null",
-    "body": "metin veya null"
+    "body": "metin veya null",
+    "label": "yıldızlı, gönderilenler, önemli, gelen kutusu veya null",
+    "category": "sosyal, promosyonlar, güncellemeler, forumlar veya null",
+    "natural_query": "Türkçe doğal dil arama ifadesi veya null"
   },
   "confidence": 0.0-1.0,
   "tool_plan": ["tool_name", ...],
@@ -121,11 +126,21 @@ KULLANILABILIR TOOLLAR (sadece bunlar):
 - calendar.find_free_slots (boş slot bul)
 - calendar.create_event (etkinlik oluştur - onay gerekli!)
 - gmail.unread_count (okunmamış sayısı)
-- gmail.list_messages (mail listele)
+- gmail.list_messages (mail listele - category/label ile filtrele)
+- gmail.smart_search (Türkçe doğal dil ile mail ara - yıldızlı, sosyal vs.)
 - gmail.get_message (mail oku)
 - gmail.send (mail gönder - onay gerekli!)
 - system.status (cpu/ram durumu)
 - time.now (şu anki saat/tarih)
+
+GMAIL ARAMA ÖRNEKLERİ (Türkçe label/kategori):
+- "yıldızlı maillerim" / "son yıldızlı mail" → gmail.smart_search, natural_query="yıldızlı"
+- "sosyal mailleri" / "sosyal kategorisi" → gmail.smart_search, natural_query="sosyal"
+- "promosyonlar" / "reklam mailleri" → gmail.smart_search, natural_query="promosyonlar"
+- "güncellemeler" / "bildirimler" → gmail.smart_search, natural_query="güncellemeler"
+- "gelen kutusu" → gmail.list_messages, label="gelen kutusu"
+- "gönderilenler" / "gönderdiğim mailler" → gmail.list_messages, label="gönderilenler"
+- "önemli mailler" → gmail.smart_search, natural_query="önemli"
 
 ÖRNEKLER:
 
@@ -246,7 +261,7 @@ def _build_registry() -> ToolRegistry:
     reg.register(
         Tool(
             name="gmail.list_messages",
-            description="Gmail: list inbox messages with optional search query (read-only)",
+            description="Gmail: list inbox messages with optional search query and label filtering (read-only)",
             parameters={
                 "type": "object",
                 "properties": {
@@ -257,11 +272,40 @@ def _build_registry() -> ToolRegistry:
                         "type": "string",
                         "description": "Gmail search query (from:, subject:, after:, label:). Examples: 'from:linkedin', 'from:amazon subject:order', 'label:CATEGORY_UPDATES'",
                     },
+                    "category": {
+                        "type": "string",
+                        "description": "Gmail category filter (Turkish/English): sosyal, promosyonlar, güncellemeler, forumlar, social, promotions, updates, forums",
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Gmail label filter (Turkish/English): gelen kutusu, gönderilenler, yıldızlı, önemli, starred, important",
+                    },
                 },
                 "required": [],
                 "additionalProperties": True,
             },
             function=gmail_list_messages_tool,
+        )
+    )
+    reg.register(
+        Tool(
+            name="gmail.smart_search",
+            description="Gmail: search with Turkish natural language label detection. Automatically detects 'sosyal', 'promosyonlar', 'güncellemeler', 'yıldızlı' etc.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    **common_slot_props,
+                    "natural_query": {
+                        "type": "string",
+                        "description": "Natural language search query in Turkish/English. E.g., 'sosyal mailleri', 'promosyonlar kategorisi', 'yıldızlı mailleri'",
+                    },
+                    "max_results": {"type": "integer"},
+                    "unread_only": {"type": "boolean"},
+                },
+                "required": ["natural_query"],
+                "additionalProperties": True,
+            },
+            function=gmail_smart_search_tool,
         )
     )
     reg.register(
