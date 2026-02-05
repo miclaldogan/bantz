@@ -218,3 +218,55 @@ class TestElongatedEdgeCases:
         assert _normalize_elongated("öööö") == "ö"
         assert _normalize_elongated("çççç") == "ç"
         assert _normalize_elongated("ğğğğ") == "ğ"
+
+
+# ============================================================================
+# Test Action Words as Confirmation (Issue #316)
+# ============================================================================
+
+class TestActionWordConfirmations:
+    """Test that action words like 'ekle', 'yap', 'koy' are accepted as yes."""
+    
+    def test_ekle_is_yes(self):
+        """'ekle' should be detected as yes confirmation."""
+        assert _is_confirmation_yes("ekle") is True
+    
+    def test_ekle_bakalim_is_yes(self):
+        """'ekle bakalım' should be detected as yes confirmation."""
+        assert _is_confirmation_yes("ekle bakalım") is True
+    
+    def test_ekle_onu_is_yes(self):
+        """'ekle onu' should be detected as yes confirmation."""
+        assert _is_confirmation_yes("ekle onu") is True
+    
+    def test_yap_is_yes(self):
+        """'yap' should be detected as yes confirmation."""
+        assert _is_confirmation_yes("yap") is True
+    
+    def test_yap_hadi_is_yes(self):
+        """'yap hadi' should be detected as yes confirmation."""
+        assert _is_confirmation_yes("yap hadi") is True
+    
+    def test_koy_is_yes(self):
+        """'koy' should be detected as yes confirmation."""
+        assert _is_confirmation_yes("koy") is True
+    
+    def test_koy_onu_is_yes(self):
+        """'koy onu' should be detected as yes confirmation."""
+        assert _is_confirmation_yes("koy onu") is True
+    
+    def test_kaydet_is_yes(self):
+        """'kaydet' should be detected as yes confirmation."""
+        assert _is_confirmation_yes("kaydet") is True
+    
+    def test_kaydet_lutfen_is_yes(self):
+        """'kaydet lütfen' should be detected as yes confirmation."""
+        assert _is_confirmation_yes("kaydet lütfen") is True
+    
+    def test_ekleee_elongated_is_yes(self):
+        """'ekleee' (elongated) should be detected as yes."""
+        assert _is_confirmation_yes("ekleee") is True
+    
+    def test_yappp_elongated_is_yes(self):
+        """'yappp' (elongated) should be detected as yes."""
+        assert _is_confirmation_yes("yappp") is True
