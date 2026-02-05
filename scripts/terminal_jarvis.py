@@ -444,7 +444,8 @@ def _is_confirmation_yes(text: str) -> bool:
     t = _normalize_elongated(t)
     
     # Exact match for common confirmations
-    yes_tokens = {"evet", "e", "ok", "tamam", "onay", "onaylıyorum", "kabul", "yes", "y", "olur", "peki"}
+    # Issue #316: Added 'ekle', 'yap', 'koy', 'kaydet' as action confirmations
+    yes_tokens = {"evet", "e", "ok", "tamam", "onay", "onaylıyorum", "kabul", "yes", "y", "olur", "peki", "ekle", "yap", "koy", "kaydet"}
     if t in yes_tokens:
         return True
     
@@ -454,7 +455,7 @@ def _is_confirmation_yes(text: str) -> bool:
         return True
     
     # Startswith patterns (handles "evet," "tamam." etc. with punctuation)
-    yes_prefixes = ("evet", "tamam", "ok ", "onay", "kabul", "yes ", "olur")
+    yes_prefixes = ("evet", "tamam", "ok ", "onay", "kabul", "yes ", "olur", "ekle", "yap ", "koy ", "kaydet")
     if t.startswith(yes_prefixes):
         return True
     
