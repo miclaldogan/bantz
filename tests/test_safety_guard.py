@@ -252,14 +252,19 @@ def test_confirmation_reject_unknown():
 # ============================================================================
 
 def test_filter_tool_plan_smalltalk():
-    """Test tool plan is dropped for smalltalk route."""
+    """Test tool plan is filtered for smalltalk route.
+    
+    Issue #286: Safe tools (like calendar.list_events) are now allowed
+    regardless of route. This test verifies UNSAFE tools are still blocked.
+    """
     policy = ToolSecurityPolicy(enforce_route_tool_match=True)
     guard = SafetyGuard(policy=policy)
     
-    # Smalltalk route should not have tools
+    # Smalltalk route should block unsafe tools like calendar.create_event
+    # but allow safe tools like calendar.list_events (Issue #286)
     filtered, violations = guard.filter_tool_plan(
         route="smalltalk",
-        tool_plan=["calendar.list_events"],
+        tool_plan=["calendar.create_event"],  # Unsafe tool
     )
     
     assert filtered == []
