@@ -305,7 +305,77 @@ Sohbette samimi ve kısa cevap ver.
                 f"{response.tokens_used} tokens"
             )
             
-            return response.content.strip()
+            gemini_text = response.content.strip()
+            
+            # Issue #357: no-new-facts guard (numbers/time/date must not be invented).
+            # Gemini should not hallucinate numeric facts that aren't in the input sources.
+            if gemini_text:
+                try:
+                    from bantz.llm.no_new_facts import find_new_numeric_facts
+                    
+                    # Build allowed sources: user input, context, tool results
+                    allowed_sources = [user_input]
+                    if dialog_summary:
+                        allowed_sources.append(dialog_summary)
+                    if router_output.slots:
+                        allowed_sources.append(json.dumps(router_output.slots, ensure_ascii=False))
+                    if tool_results:
+                        allowed_sources.append(json.dumps(tool_results, ensure_ascii=False))
+                    
+                    violates, new_tokens = find_new_numeric_facts(
+                        allowed_texts=allowed_sources,
+                        candidate_text=gemini_text,
+                    )
+                    
+                    if violates:
+                        logger.warning(
+                            f"[HYBRID] Gemini response contains new numeric facts: {new_tokens}, retrying with strict constraint"
+                        )
+                        
+                        # Retry with stricter prompt
+                        strict_system = system_prompt + (
+                            "\n\nSTRICT_NO_NEW_FACTS: Sadece verilen context'te geçen sayı/saat/tarihleri kullan. "
+                            "Yeni rakam ekleme. Gerekirse rakam içeren detayları çıkar."
+                        )
+                        
+                        retry_messages = [
+                            LLMMessage(role="system", content=strict_system),
+                            LLMMessage(role="user", content=user_prompt),
+                        ]
+                        
+                        retry_response = self._gemini.chat_detailed(
+                            messages=retry_messages,
+                            temperature=0.2,  # Lower temperature for stricter adherence
+                            max_tokens=self._config.gemini_max_tokens,
+                        )
+                        
+                        retry_text = retry_response.content.strip()
+                        
+                        if retry_text:
+                            # Check retry result
+                            violates2, _new2 = find_new_numeric_facts(
+                                allowed_texts=allowed_sources,
+                                candidate_text=retry_text,
+                            )
+                            
+                            if not violates2:
+                                logger.info("[HYBRID] Retry succeeded, using corrected response")
+                                gemini_text = retry_text
+                            else:
+                                # Retry still violates, fall back to router response
+                                logger.warning("[HYBRID] Retry still violates guard, falling back to router response")
+                                gemini_text = router_output.assistant_reply or "Anladım efendim."
+                        else:
+                            # Empty retry, fall back to router response
+                            logger.warning("[HYBRID] Empty retry response, falling back to router response")
+                            gemini_text = router_output.assistant_reply or "Anladım efendim."
+                            
+                except Exception as guard_exc:
+                    # Guard is best-effort, don't block user
+                    logger.debug(f"[HYBRID] no-new-facts guard error: {guard_exc}")
+                    # Continue with original Gemini response
+            
+            return gemini_text
             
         except Exception as e:
             logger.error(f"[HYBRID] Gemini finalization failed: {e}")
