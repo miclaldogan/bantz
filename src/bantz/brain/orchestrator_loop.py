@@ -921,7 +921,18 @@ class OrchestratorLoop:
             try:
                 tool = self.tools.get(tool_name)
                 if tool is None:
-                    raise ValueError(f"Tool not found: {tool_name}")
+                    logger.error("[TOOLS] Tool not found in registry: %s", tool_name)
+                    self.event_bus.publish("tool.not_found", {
+                        "tool": tool_name,
+                        "route": output.route,
+                    })
+                    tool_results.append({
+                        "tool": tool_name,
+                        "success": False,
+                        "error": f"Efendim, '{tool_name}' işlemi şu an kullanılamıyor.",
+                        "user_message": f"Efendim, '{tool_name}' işlemi şu an kullanılamıyor.",
+                    })
+                    continue
                 
                 if tool.function is None:
                     raise ValueError(f"Tool {tool_name} has no function implementation")
