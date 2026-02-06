@@ -128,12 +128,21 @@ class OrchestratorLoop:
         If LLM returns empty tool_plan but route+intent requires tools,
         we inject the mandatory tools.
         
+        Issue #347: Respects router's confidence threshold. If router cleared
+        tool_plan due to low confidence, we honor that decision instead of
+        forcing tools back in. Only force tools when confidence is adequate.
+        
         Args:
             output: Original LLM output
             
         Returns:
             Updated output with forced tool_plan if needed
         """
+        # Issue #347: Skip if confidence is too low - router wants clarification
+        # Confidence threshold: 0.7 (same as router's default threshold)
+        if output.confidence < 0.7:
+            return output
+        
         # Skip if tool_plan already populated
         if output.tool_plan:
             return output
