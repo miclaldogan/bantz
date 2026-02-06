@@ -267,6 +267,8 @@ class GeminiHybridOrchestrator:
             dialog_summary=dialog_summary,
             session_context=session_context,
             retrieved_memory=retrieved_memory,
+            temperature=self._config.router_temperature,
+            max_tokens_override=self._config.router_max_tokens,
         )
         
         logger.debug(
