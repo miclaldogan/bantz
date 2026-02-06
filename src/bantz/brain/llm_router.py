@@ -489,13 +489,18 @@ USER: bu akşam sekize parti ekle
         dialog_summary: Optional[str] = None,
         retrieved_memory: Optional[str] = None,
         session_context: Optional[dict[str, Any]] = None,
+        temperature: Optional[float] = None,
+        max_tokens_override: Optional[int] = None,
     ) -> RouterOutput:
         """Route user input through LLM.
         
         Args:
             user_input: User's message
             dialog_summary: Previous turns summary (for memory)
+            retrieved_memory: Retrieved long-term memory
             session_context: Session info (timezone, windows, etc.)
+            temperature: Temperature for LLM call (default 0.0 for deterministic routing)
+            max_tokens_override: Override for max_tokens (default uses budget calculation)
         
         Returns:
             RouterOutput with route, intent, slots, confidence, tool_plan, reply
@@ -561,8 +566,16 @@ USER: bu akşam sekize parti ekle
         # Call LLM
         # JSON outputs can exceed small defaults (e.g. 200 tokens) and get truncated,
         # causing parse failures. Use a safer default.
+        # Use provided temperature/max_tokens or defaults (Issue #362)
+        call_temperature = temperature if temperature is not None else 0.0
+        call_max_tokens = max_tokens_override if max_tokens_override is not None else max_tokens
+        
         try:
-            raw_text = self._llm.complete_text(prompt=prompt, temperature=0.0, max_tokens=max_tokens)
+            raw_text = self._llm.complete_text(
+                prompt=prompt,
+                temperature=call_temperature,
+                max_tokens=call_max_tokens
+            )
         except TypeError:
             # Backward compatibility for mocks/adapters that only accept `prompt`.
             raw_text = self._llm.complete_text(prompt=prompt)
