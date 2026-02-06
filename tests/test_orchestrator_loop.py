@@ -385,3 +385,34 @@ class TestToolFailureHandling:
         assert "başarısız oldu" in result.assistant_reply
         assert "calendar_create_event" in result.assistant_reply
         assert "Calendar API timeout" in result.assistant_reply
+
+
+class TestToolNotFoundHandling:
+    """Ensure missing tools return user-friendly errors (Issue #366)."""
+
+    def test_tool_not_found_returns_user_message(self, orchestrator_loop, mock_tools):
+        from bantz.brain.orchestrator_loop import OrchestratorOutput, OrchestratorState
+
+        mock_tools.get = Mock(return_value=None)
+
+        output = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="query",
+            slots={},
+            confidence=0.9,
+            tool_plan=["calendar.missing_tool"],
+            assistant_reply="",
+            ask_user=False,
+            question="",
+            requires_confirmation=False,
+        )
+
+        state = OrchestratorState()
+
+        tool_results = orchestrator_loop._execute_tools_phase(output, state)
+
+        assert len(tool_results) == 1
+        result = tool_results[0]
+        assert result["success"] is False
+        assert "kullanılamıyor" in result["error"].lower()
+        assert "kullanılamıyor" in result["user_message"].lower()
