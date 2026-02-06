@@ -745,17 +745,61 @@ USER: bu akşam sekize parti ekle
 
         prompt = "\n".join(lines)
 
-        # Hard guard: if still over budget, truncate from the top (keep the final USER+ASSISTANT).
+        # Hard guard: if still over budget, we need to be more aggressive.
+        # Issue #358: Instead of completely dropping all context, preserve high-priority
+        # sections (memory, session) in truncated form.
         prompt_tokens = _estimate_tokens(prompt)
         if prompt_tokens > budget:
             trimmed_any = True
+            
+            # Strategy: Keep system (compact), retrieved_memory (truncated), user input.
+            # Drop: dialog_summary (lowest priority when budget is extremely tight)
             keep_tail = f"USER: {user_input}\nASSISTANT (sadece JSON):"
             tail_tokens = _estimate_tokens(keep_tail)
-            allow_for_head = max(0, budget - tail_tokens - 2)
-            head = self._maybe_compact_system_prompt(system_prompt, token_budget=allow_for_head)
-            prompt = "\n".join([head, "", keep_tail])
+            
+            # Reserve space for compact system prompt and user input
+            allow_for_head = max(0, budget - tail_tokens - 100)  # 100 token buffer
+            compact_system = self._maybe_compact_system_prompt(system_prompt, token_budget=allow_for_head // 2)
+            system_tokens = _estimate_tokens(compact_system)
+            
+            # Remaining budget for memory and session
+            remaining_for_context = max(0, budget - system_tokens - tail_tokens - 20)
+            
+            rebuild_lines = [compact_system, ""]
+            
+            # Add truncated retrieved_memory if present (higher priority than dialog)
+            if retrieved_memory and remaining_for_context > 100:
+                memory_allow = min(200, remaining_for_context // 2)  # Reserve reasonable space
+                rm_compact = _trim_to_tokens(str(retrieved_memory).strip(), memory_allow)
+                if rm_compact:
+                    rebuild_lines.append("RETRIEVED_MEMORY (truncated):")
+                    rebuild_lines.append(rm_compact)
+                    rebuild_lines.append("")
+                    remaining_for_context -= _estimate_tokens(rm_compact) + 20
+            
+            # Add truncated session context if present and space allows
+            if session_context and remaining_for_context > 50:
+                try:
+                    ctx_str = json.dumps(session_context, ensure_ascii=False)
+                except Exception:
+                    ctx_str = str(session_context)
+                ctx_compact = _trim_to_tokens(ctx_str, min(150, remaining_for_context))
+                if ctx_compact:
+                    rebuild_lines.append("SESSION_CONTEXT (truncated):")
+                    rebuild_lines.append(ctx_compact)
+                    rebuild_lines.append("")
+            
+            rebuild_lines.append(keep_tail)
+            prompt = "\n".join(rebuild_lines)
+            
             # Update sections_used to reflect hard truncation
-            sections_used = {"system": _estimate_tokens(head), "user": tail_tokens}
+            sections_used = {
+                "system": system_tokens,
+                "user": tail_tokens,
+                "memory": _estimate_tokens(str(retrieved_memory or "")[:200]) if retrieved_memory else 0,
+                "session": _estimate_tokens(str(session_context or "")[:150]) if session_context else 0,
+                "hard_truncation": True,
+            }
 
         return prompt, {"trimmed": trimmed_any, "budget": budget, "sections_used": sections_used}
 
