@@ -287,11 +287,11 @@ class OrchestratorLoop:
 
         This is a backward-compat shim used by golden regression tests.
 
-        Notes:
-        - If a destructive tool requires confirmation, the first cycle will set
-          `state.pending_confirmation` and not execute the tool.
-        - If `confirmation_token` is provided and a pending confirmation exists,
-          we attempt a second execution pass in the same call.
+                Notes:
+                - If a destructive tool requires confirmation, the first cycle will add
+                    to `state.pending_confirmations` and not execute the tool.
+                - If `confirmation_token` is provided and a pending confirmation exists,
+                    we attempt a second execution pass for the next queued confirmation.
         """
         if state is None:
             state = OrchestratorState()
@@ -316,7 +316,7 @@ class OrchestratorLoop:
         # Optional: if confirmation was requested and user provided a token,
         # attempt to execute the pending tool immediately.
         if confirmation_token is not None and state.has_pending_confirmation():
-            pending = state.pending_confirmation or {}
+            pending = state.peek_pending_confirmation() or {}
             pending_tool = str(pending.get("tool") or "").strip()
 
             if self.safety_guard and pending_tool:
@@ -329,7 +329,9 @@ class OrchestratorLoop:
                 accepted = str(confirmation_token).strip().lower() in {"yes", "y", "evet", "e", "1", "ok", "tamam"}
 
             if accepted:
-                # Second execution pass: state already has pending confirmation.
+                # Mark the pending tool as confirmed for this execution pass.
+                state.confirmed_tool = pending_tool or None
+                # Second execution pass: execute only the confirmed tool.
                 tool_results_2 = self._execute_tools_phase(orchestrator_output, state)
                 final_output = self._llm_finalization_phase(
                     user_input,
@@ -340,7 +342,7 @@ class OrchestratorLoop:
                 self._update_state_phase(user_input, final_output, tool_results_2, state)
                 tool_results = tool_results_2
             else:
-                # User rejected/unclear: clear pending confirmation and return.
+                # User rejected/unclear: clear all pending confirmations and return.
                 state.clear_pending_confirmation()
 
         # Build a trace dict in the format expected by regression tests.
@@ -550,24 +552,6 @@ class OrchestratorLoop:
         """
         if not output.tool_plan:
             return []
-        
-        # Issue #350: Block ALL tool execution if confirmation is pending
-        # This prevents executing other tools while waiting for user confirmation
-        if state.has_pending_confirmation():
-            pending = state.pending_confirmation
-            tool_name = pending.get("tool", "unknown")
-            prompt = pending.get("prompt", "Confirm to continue")
-            logger.warning(
-                f"[FIREWALL] Cannot execute tools - confirmation pending for {tool_name}. "
-                f"User must confirm first."
-            )
-            return [{
-                "tool": "blocked",
-                "success": False,
-                "error": f"Confirmation required for {tool_name}: {prompt}",
-                "pending_confirmation": True,
-                "confirmation_prompt": prompt,
-            }]
 
         # Support both legacy `tool_plan: ["tool.name", ...]` and richer
         # forms emitted by some tests/models: `tool_plan: [{"name": ..., "args": {...}}, ...]`.
@@ -604,6 +588,88 @@ class OrchestratorLoop:
                     )
         
         tool_results = []
+
+        # Issue #351: Confirmation queue support (multiple destructive tools)
+        # If a confirmation is already pending, block all tools unless the
+        # pending tool is explicitly confirmed for this execution pass.
+        confirmed_override_tool: Optional[str] = None
+        if state.has_pending_confirmation():
+            pending = state.peek_pending_confirmation() or {}
+            pending_tool = str(pending.get("tool") or "").strip()
+
+            if state.confirmed_tool and pending_tool and pending_tool == state.confirmed_tool:
+                # Confirmation accepted for the head of the queue.
+                confirmed_override_tool = pending_tool
+                state.pop_pending_confirmation()
+                state.confirmed_tool = None
+                filtered_tool_plan = [pending_tool]
+            else:
+                prompt = str(pending.get("prompt") or "Confirm to continue")
+                logger.warning(
+                    f"[FIREWALL] Cannot execute tools - confirmation pending for {pending_tool}. "
+                    f"User must confirm first."
+                )
+                return [{
+                    "tool": "blocked",
+                    "success": False,
+                    "error": f"Confirmation required for {pending_tool}: {prompt}",
+                    "pending_confirmation": True,
+                    "confirmation_prompt": prompt,
+                }]
+
+        # If no confirmation is pending, pre-scan tool_plan and queue all
+        # confirmations in order, then return a pending confirmation placeholder.
+        if not state.has_pending_confirmation():
+            try:
+                from bantz.tools.metadata import (
+                    get_tool_risk,
+                    is_destructive,
+                    requires_confirmation as check_confirmation,
+                    get_confirmation_prompt,
+                )
+
+                confirmations_to_queue: list[dict[str, Any]] = []
+                for tool_name in filtered_tool_plan:
+                    needs_confirmation = check_confirmation(
+                        tool_name,
+                        llm_requested=bool(output.requires_confirmation)
+                    )
+                    if needs_confirmation:
+                        risk = get_tool_risk(tool_name)
+                        prompt = get_confirmation_prompt(tool_name, output.slots)
+                        confirmations_to_queue.append({
+                            "tool": tool_name,
+                            "prompt": prompt,
+                            "slots": output.slots,
+                            "risk_level": risk.value,
+                        })
+
+                        # Audit confirmation request
+                        if self.safety_guard:
+                            self.safety_guard.audit_decision(
+                                decision_type="confirmation_required",
+                                tool_name=tool_name,
+                                allowed=False,
+                                reason=f"Destructive tool ({risk.value}) requires user confirmation",
+                                metadata={"prompt": prompt, "params": output.slots},
+                            )
+
+                if confirmations_to_queue:
+                    for confirmation in confirmations_to_queue:
+                        state.add_pending_confirmation(confirmation)
+
+                    first = state.peek_pending_confirmation() or {}
+                    tool_results.append({
+                        "tool": str(first.get("tool") or ""),
+                        "success": False,
+                        "pending_confirmation": True,
+                        "risk_level": str(first.get("risk_level") or ""),
+                        "confirmation_prompt": str(first.get("prompt") or ""),
+                    })
+                    return tool_results
+            except Exception:
+                # Best-effort: if pre-scan fails, fall back to existing logic.
+                pass
         
         for tool_name in filtered_tool_plan:
             if self.config.debug:
@@ -641,7 +707,13 @@ class OrchestratorLoop:
                 tool_name,
                 llm_requested=bool(output.requires_confirmation)
             )
-            
+
+            was_confirmed = False
+            if confirmed_override_tool and tool_name == confirmed_override_tool:
+                # This tool was explicitly confirmed (queue head accepted).
+                needs_confirmation = False
+                was_confirmed = True
+
             if needs_confirmation:
                 # FIREWALL: Destructive tools always need confirmation
                 # Even if LLM didn't request it
@@ -650,47 +722,38 @@ class OrchestratorLoop:
                         f"[FIREWALL] Tool {tool_name} is DESTRUCTIVE but LLM didn't request confirmation. "
                         f"Enforcing confirmation requirement (Issue #160)."
                     )
-                
-                if not state.has_pending_confirmation():
-                    # First time asking - don't execute yet
-                    prompt = get_confirmation_prompt(tool_name, output.slots)
-                    logger.info(f"[FIREWALL] Tool {tool_name} ({risk.value}) requires confirmation.")
-                    
-                    state.set_pending_confirmation({
-                        "tool": tool_name,
-                        "prompt": prompt,
-                        "slots": output.slots,
-                        "risk_level": risk.value,
-                    })
-                    
-                    tool_results.append({
-                        "tool": tool_name,
-                        "success": False,
-                        "pending_confirmation": True,
-                        "risk_level": risk.value,
-                        "confirmation_prompt": prompt,
-                    })
-                    
-                    # Audit confirmation request
-                    if self.safety_guard:
-                        self.safety_guard.audit_decision(
-                            decision_type="confirmation_required",
-                            tool_name=tool_name,
-                            allowed=False,
-                            reason=f"Destructive tool ({risk.value}) requires user confirmation",
-                            metadata={"prompt": prompt, "params": output.slots},
-                        )
-                    
-                    continue
-                else:
-                    # Confirmation already pending - this is the confirmed execution
-                    logger.info(f"Tool {tool_name} executing with confirmation.")
-                    state.clear_pending_confirmation()
-                    # Issue #352: Track that this tool WAS confirmed
-                    was_confirmed = True
-            else:
-                # Tool doesn't need confirmation
-                was_confirmed = False
+
+                # If we reach here, confirmation wasn't queued in pre-scan.
+                # Queue it now and return a pending confirmation placeholder.
+                prompt = get_confirmation_prompt(tool_name, output.slots)
+                logger.info(f"[FIREWALL] Tool {tool_name} ({risk.value}) requires confirmation.")
+
+                state.add_pending_confirmation({
+                    "tool": tool_name,
+                    "prompt": prompt,
+                    "slots": output.slots,
+                    "risk_level": risk.value,
+                })
+
+                tool_results.append({
+                    "tool": tool_name,
+                    "success": False,
+                    "pending_confirmation": True,
+                    "risk_level": risk.value,
+                    "confirmation_prompt": prompt,
+                })
+
+                # Audit confirmation request
+                if self.safety_guard:
+                    self.safety_guard.audit_decision(
+                        decision_type="confirmation_required",
+                        tool_name=tool_name,
+                        allowed=False,
+                        reason=f"Destructive tool ({risk.value}) requires user confirmation",
+                        metadata={"prompt": prompt, "params": output.slots},
+                    )
+
+                return tool_results
             
             # Get tool definition
             try:
