@@ -192,6 +192,9 @@ class OrchestratorConfig:
     require_confirmation_for: list[str] = None  # Tools requiring confirmation
     enable_safety_guard: bool = True  # Enable safety & policy checks (Issue #140)
     security_policy: Optional[ToolSecurityPolicy] = None  # Custom security policy
+    memory_max_tokens: int = 1000  # Memory-lite token budget (Issue #368)
+    memory_max_turns: int = 10  # Memory-lite max turns (Issue #368)
+    memory_pii_filter: bool = True  # Memory-lite PII filtering (Issue #368)
     
     def __post_init__(self):
         if self.require_confirmation_for is None:
@@ -236,9 +239,9 @@ class OrchestratorLoop:
         
         # Initialize memory-lite (Issue #141)
         self.memory = DialogSummaryManager(
-            max_tokens=500,
-            max_turns=5,
-            pii_filter_enabled=True,
+            max_tokens=self.config.memory_max_tokens,
+            max_turns=self.config.memory_max_turns,
+            pii_filter_enabled=self.config.memory_pii_filter,
         )
         
         # Initialize safety guard (Issue #140)
