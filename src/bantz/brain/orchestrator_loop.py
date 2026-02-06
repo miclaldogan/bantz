@@ -686,6 +686,11 @@ class OrchestratorLoop:
                     # Confirmation already pending - this is the confirmed execution
                     logger.info(f"Tool {tool_name} executing with confirmation.")
                     state.clear_pending_confirmation()
+                    # Issue #352: Track that this tool WAS confirmed
+                    was_confirmed = True
+            else:
+                # Tool doesn't need confirmation
+                was_confirmed = False
             
             # Get tool definition
             try:
@@ -770,7 +775,7 @@ class OrchestratorLoop:
                             tool_name=tool_name,
                             risk_level=risk_level.value,
                             success=True,
-                            confirmed=state.has_pending_confirmation(),  # Was it confirmed?
+                            confirmed=was_confirmed,  # Issue #352: Use tracked confirmation flag
                             params=params,
                             result=result,
                         )
