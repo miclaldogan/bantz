@@ -128,7 +128,7 @@ class GeminiHybridOrchestrator:
         *,
         user_input: str,
         dialog_summary: str = "",
-        tool_results: Optional[dict[str, Any]] = None,
+        tool_results: Optional[list[dict[str, Any]]] = None,
         session_context: Optional[dict[str, Any]] = None,
         retrieved_memory: Optional[str] = None,
     ) -> OrchestratorOutput:
@@ -137,7 +137,7 @@ class GeminiHybridOrchestrator:
         Args:
             user_input: User message
             dialog_summary: Rolling dialog context
-            tool_results: Results from previous tool execution (if any)
+            tool_results: Results from previous tool execution (list of dicts)
             session_context: Session context (timezone, location hints)
             retrieved_memory: Retrieved long-term memory
             
@@ -215,7 +215,7 @@ class GeminiHybridOrchestrator:
         router_output: OrchestratorOutput,
         user_input: str,
         dialog_summary: str,
-        tool_results: Optional[dict[str, Any]],
+        tool_results: Optional[list[dict[str, Any]]],
     ) -> str:
         """Generate natural language response using Gemini.
         
@@ -223,7 +223,7 @@ class GeminiHybridOrchestrator:
             router_output: Output from 3B router
             user_input: Original user input
             dialog_summary: Dialog context
-            tool_results: Tool execution results
+            tool_results: Tool execution results (list of dicts)
             
         Returns:
             Natural language response (Jarvis style)
@@ -244,6 +244,7 @@ class GeminiHybridOrchestrator:
                 context_parts.append(f"Extracted Slots: {slots_str}")
         
         if tool_results:
+            # tool_results is now list[dict], convert to JSON
             results_str = json.dumps(tool_results, ensure_ascii=False)
             context_parts.append(f"Tool Results: {results_str}")
         
