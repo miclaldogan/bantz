@@ -47,6 +47,121 @@ from bantz.llm.gemini_client import GeminiClient
 logger = logging.getLogger(__name__)
 
 
+def _summarize_tool_results_for_gemini(
+    tool_results: list[dict[str, Any]],
+    max_chars: int = 2000,
+) -> tuple[str, bool]:
+    """Summarize tool results for Gemini context, preventing overflow.
+    
+    Prevents context overflow by truncating large tool results to max_chars.
+    Uses smart truncation:
+    - Lists: First 5 items + metadata
+    - Dicts with "events": Calendar-aware preview (5 events + metadata)
+    - Large strings/dicts: Truncate to 500 chars
+    - Fallback: Keep only first 3 tools if still too large
+    
+    Args:
+        tool_results: List of tool results to summarize
+        max_chars: Maximum characters allowed (default 2000 = ~2KB)
+        
+    Returns:
+        Tuple of (summary_str, was_truncated)
+    """
+    if not tool_results:
+        return "", False
+    
+    def _truncate_single_result(result: Any, max_size: int = 500) -> tuple[Any, bool]:
+        """Truncate a single result value."""
+        truncated = False
+        
+        if isinstance(result, list):
+            if len(result) > 5:
+                truncated = True
+                preview = result[:5]
+                return {
+                    "_preview": preview,
+                    "_truncated": True,
+                    "_total_count": len(result),
+                    "_message": f"Showing first 5 of {len(result)} items"
+                }, truncated
+            return result, False
+            
+        elif isinstance(result, dict):
+            # Special handling for calendar events
+            if "events" in result and isinstance(result["events"], list):
+                events = result["events"]
+                if len(events) > 5:
+                    truncated = True
+                    return {
+                        "events": events[:5],
+                        "_preview": True,
+                        "_total_events": len(events),
+                        "_message": f"Showing first 5 of {len(events)} events",
+                        **{k: v for k, v in result.items() if k != "events"}
+                    }, truncated
+                return result, False
+            
+            # Generic dict truncation
+            result_str = json.dumps(result, ensure_ascii=False)
+            if len(result_str) > max_size:
+                truncated = True
+                return f"{result_str[:max_size]}... (truncated from {len(result_str)} chars)", truncated
+            return result, False
+            
+        elif isinstance(result, str):
+            if len(result) > max_size:
+                truncated = True
+                return f"{result[:max_size]}... (truncated from {len(result)} chars)", truncated
+            return result, False
+            
+        return result, False
+    
+    # First pass: Try to fit all tool results with smart truncation
+    summarized_results = []
+    any_truncated = False
+    
+    for tool_result in tool_results:
+        summarized = tool_result.copy()
+        if "result" in summarized:
+            truncated_result, was_truncated = _truncate_single_result(summarized["result"])
+            summarized["result"] = truncated_result
+            any_truncated = any_truncated or was_truncated
+        summarized_results.append(summarized)
+    
+    # Convert to JSON and check size
+    try:
+        results_str = json.dumps(summarized_results, ensure_ascii=False)
+    except (TypeError, ValueError):
+        # Fallback to string representation if JSON fails
+        results_str = str(summarized_results)
+        any_truncated = True
+    
+    # If still too large, keep only first 3 tools and truncate more aggressively
+    if len(results_str) > max_chars:
+        any_truncated = True
+        aggressive_results = []
+        for tool_result in tool_results[:3]:  # Only first 3 tools
+            aggressive = {
+                "tool_name": tool_result.get("tool_name", "unknown"),
+                "status": tool_result.get("status", "unknown"),
+            }
+            if "result" in tool_result:
+                result_preview, _ = _truncate_single_result(tool_result["result"], max_size=200)
+                aggressive["result"] = result_preview
+            aggressive_results.append(aggressive)
+        
+        try:
+            results_str = json.dumps(aggressive_results, ensure_ascii=False)
+        except (TypeError, ValueError):
+            results_str = str(aggressive_results)
+        
+        # Final truncation if still too large
+        if len(results_str) > max_chars:
+            results_str = results_str[:max_chars] + "... (truncated)"
+    
+    return results_str, any_truncated
+
+
 class Local3BRouterProtocol(Protocol):
     """Protocol for local 3B router (vLLM)."""
 
@@ -244,9 +359,13 @@ class GeminiHybridOrchestrator:
                 context_parts.append(f"Extracted Slots: {slots_str}")
         
         if tool_results:
-            # tool_results is now list[dict], convert to JSON
-            results_str = json.dumps(tool_results, ensure_ascii=False)
+            # tool_results is now list[dict], convert to JSON with size control
+            results_str, was_truncated = _summarize_tool_results_for_gemini(tool_results, max_chars=2000)
             context_parts.append(f"Tool Results: {results_str}")
+            if was_truncated:
+                logger.warning(
+                    f"Tool results truncated for Gemini context (original size exceeded 2KB)"
+                )
         
         context = "\n\n".join(context_parts)
         
