@@ -900,6 +900,27 @@ USER: bu akşam sekize parti ekle
 
         return _trim_to_tokens(sp, token_budget)
 
+    def _extract_json_error_reason(self, err: Exception) -> str:
+        """Extract a coarse reason code for JSON parse failures."""
+        msg = str(err).lower()
+        if "no json" in msg or "no json object" in msg:
+            return "no_json_object"
+        if "unbalanced" in msg or "brace" in msg:
+            return "unbalanced_json"
+        if "expecting value" in msg or "invalid" in msg:
+            return "invalid_json"
+        return err.__class__.__name__.lower()
+
+    def _publish_json_event(self, event_type: str, details: dict[str, Any]) -> None:
+        """Publish router JSON events to event bus if available."""
+        try:
+            event_bus = getattr(self._llm, "event_bus", None)
+            if event_bus and hasattr(event_bus, "publish"):
+                event_bus.publish(f"router.json.{event_type}", details)
+        except Exception:
+            # Best-effort only
+            pass
+
     def _parse_json(self, raw_text: str) -> dict[str, Any]:
         """Parse JSON from LLM output (Issue #228: enhanced validation).
 
@@ -923,9 +944,17 @@ USER: bu akşam sekize parti ekle
             is_valid, errors = validate_orchestrator_output(parsed, strict=False)
             if errors:
                 logger.debug("[router_json] validation_issues: %s", errors)
+                self._publish_json_event("validation_warning", {
+                    "errors": errors,
+                    "phase": "first_parse",
+                })
             return parsed
         except Exception as e:
             logger.debug("[router_json] first_parse_failed: %s", str(e)[:100])
+            self._publish_json_event("parse_failed", {
+                "reason": self._extract_json_error_reason(e),
+                "phase": "first_parse",
+            })
         
         # Second attempt: repair common issues and retry
         try:
@@ -935,9 +964,17 @@ USER: bu akşam sekize parti ekle
                 is_valid, errors = validate_orchestrator_output(parsed, strict=False)
                 if errors:
                     logger.debug("[router_json] repaired_validation_issues: %s", errors)
+                    self._publish_json_event("validation_warning", {
+                        "errors": errors,
+                        "phase": "repair_parse",
+                    })
                 return parsed
         except Exception as e:
             logger.debug("[router_json] repair_parse_failed: %s", str(e)[:100])
+            self._publish_json_event("parse_failed", {
+                "reason": self._extract_json_error_reason(e),
+                "phase": "repair_parse",
+            })
         
         # Final attempt: re-raise the original error
         return extract_first_json_object(text, strict=False)
