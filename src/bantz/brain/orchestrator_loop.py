@@ -806,6 +806,9 @@ class OrchestratorLoop:
         This maps orchestrator slots to tool-specific parameters.
         Handles nested objects like gmail: {to, subject, body}.
         
+        Issue #340: Applies field aliasing for common LLM variations
+        (recipient → to, email → to, address → to, etc.)
+        
         Args:
             tool_name: Name of the tool to build params for
             slots: Calendar/system slots dict
@@ -829,6 +832,25 @@ class OrchestratorLoop:
                     for key, val in gmail_obj.items():
                         if val is not None:
                             params[key] = val
+            
+            # Issue #340: Apply field aliasing for gmail.send
+            # LLM often uses alternative field names (recipient, email, address, etc.)
+            if tool_name == "gmail.send":
+                # Alias: recipient/email/address/emails → to
+                for alias in ["recipient", "email", "address", "emails", "to_address"]:
+                    if alias in params and "to" not in params:
+                        params["to"] = params.pop(alias)
+                        break
+                
+                # Alias: message/text/content → body
+                for alias in ["message", "text", "content", "message_body"]:
+                    if alias in params and "body" not in params:
+                        params["body"] = params.pop(alias)
+                        break
+                
+                # Alias: title → subject
+                if "title" in params and "subject" not in params:
+                    params["subject"] = params.pop("title")
         
         # Calendar tools: use slots directly (already flat)
         # System tools: use slots directly
