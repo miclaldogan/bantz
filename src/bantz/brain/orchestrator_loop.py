@@ -466,10 +466,19 @@ class OrchestratorLoop:
             logger.debug(f"  Tool Results: {len(tool_results)}")
         
         # Session context injection (Issue #191): datetime/location hints.
+        # Issue #339: Add recent conversation to session_context for multi-turn memory
         try:
             from bantz.brain.prompt_engineering import build_session_context
 
             session_context = build_session_context()
+            
+            # Add recent conversation for anaphora resolution (Issue #339)
+            # This helps LLM understand references like "saat kaçta" (what time) 
+            # by looking at previous turns ("bugün için toplantı var")
+            # NOTE: Use state.conversation_history directly (not from get_context_for_llm)
+            # because get_context_for_llm limits to [-2:] for legacy compatibility
+            if state.conversation_history:
+                session_context["recent_conversation"] = state.conversation_history[-3:]  # Last 3 turns
         except Exception:
             session_context = None
 
