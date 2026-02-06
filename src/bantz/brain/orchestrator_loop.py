@@ -26,6 +26,68 @@ from bantz.core.events import EventBus, EventType
 logger = logging.getLogger(__name__)
 
 
+def _summarize_tool_result(result: Any, max_items: int = 5, max_chars: int = 500) -> str:
+    """Smart summarization of tool results that preserves structure.
+    
+    Issue #353: Avoid naive string truncation that breaks JSON and loses
+    structured data. Instead, intelligently summarize based on type.
+    
+    Args:
+        result: Tool result (dict, list, string, or other)
+        max_items: Maximum number of items to show for lists
+        max_chars: Maximum characters for final summary
+        
+    Returns:
+        Human-readable summary string
+    """
+    try:
+        if result is None:
+            return "None"
+            
+        # Handle lists: show total count + first N items
+        if isinstance(result, list):
+            total = len(result)
+            if total == 0:
+                return "[]"
+            preview = result[:max_items]
+            preview_json = json.dumps(preview, ensure_ascii=False)
+            if len(preview_json) > max_chars:
+                preview_json = preview_json[:max_chars] + "..."
+            if total > max_items:
+                return f"[{total} items, showing first {len(preview)}] {preview_json}"
+            return preview_json
+            
+        # Handle dicts: show keys + truncated JSON
+        if isinstance(result, dict):
+            if not result:
+                return "{}"
+            keys = list(result.keys())
+            result_json = json.dumps(result, ensure_ascii=False)
+            if len(result_json) > max_chars:
+                result_json = result_json[:max_chars] + "..."
+            return f"{{keys: {keys}}} {result_json}"
+            
+        # Handle strings: smart truncation
+        if isinstance(result, str):
+            if len(result) > max_chars:
+                return result[:max_chars] + f"... ({len(result)} chars total)"
+            return result
+            
+        # Other types: convert to string with length limit
+        result_str = str(result)
+        if len(result_str) > max_chars:
+            return result_str[:max_chars] + "..."
+        return result_str
+        
+    except Exception as e:
+        # Fallback: safe string conversion
+        try:
+            s = str(result)
+            return s[:max_chars] if len(s) > max_chars else s
+        except Exception:
+            return f"<error serializing result: {e}>"
+
+
 @dataclass
 class OrchestratorConfig:
     """Configuration for orchestrator loop."""
@@ -452,7 +514,8 @@ class OrchestratorLoop:
             result_lines = ["LAST_TOOL_RESULTS:"]
             for tr in tool_results[-2:]:
                 tool_name = str(tr.get("tool", ""))
-                result_str = str(tr.get("result", ""))[:200]
+                # Issue #353: Use result_summary instead of truncated result
+                result_str = str(tr.get("result_summary", ""))[:200]
                 success = tr.get("success", True)
                 status = "ok" if success else "fail"
                 result_lines.append(f"  {tool_name} ({status}): {result_str}")
@@ -809,19 +872,15 @@ class OrchestratorLoop:
                     err_val = result.get("error")
                     tool_error = str(err_val) if err_val is not None else "tool_returned_ok_false"
 
-                # Prefer JSON for structured tool outputs to help the finalizer.
-                try:
-                    if isinstance(result, (dict, list)):
-                        result_str = json.dumps(result, ensure_ascii=False)
-                    else:
-                        result_str = str(result)
-                except Exception:
-                    result_str = str(result)
+                # Issue #353: Preserve structured data + smart summarization
+                # Store both raw_result (for finalizer LLM) and result_summary (for logs)
+                result_summary = _summarize_tool_result(result, max_items=5, max_chars=500)
                 
                 tool_results.append({
                     "tool": tool_name,
                     "success": bool(tool_returned_ok),
-                    "result": result_str[:2000],  # Truncate
+                    "raw_result": result,  # ✅ Original structured data
+                    "result_summary": result_summary,  # ✅ Smart summary for display
                     "error": tool_error,
                     "risk_level": risk.value,
                 })
@@ -1039,7 +1098,18 @@ class OrchestratorLoop:
                     json.dumps(planner_decision, ensure_ascii=False),
                 ]
                 if tool_results:
-                    prompt_lines.extend(["", "TOOL_RESULTS (JSON):", json.dumps(tool_results, ensure_ascii=False)])
+                    # Issue #353: Use raw_result for finalizer (structured data)
+                    # Build finalizer-optimized version with raw results
+                    finalizer_results = []
+                    for r in tool_results:
+                        finalizer_r = {
+                            "tool": r.get("tool"),
+                            "success": r.get("success"),
+                            "result": r.get("raw_result"),  # ✅ Use structured data
+                            "error": r.get("error"),
+                        }
+                        finalizer_results.append(finalizer_r)
+                    prompt_lines.extend(["", "TOOL_RESULTS (JSON):", json.dumps(finalizer_results, ensure_ascii=False)])
                 prompt_lines.extend(["", f"USER: {user_input}", "ASSISTANT (SADECE TÜRKÇE):"])
                 fast_prompt = "\n".join(prompt_lines)
 
@@ -1131,11 +1201,24 @@ class OrchestratorLoop:
                     session_context = build_session_context()
                     seed = str(session_context.get("session_id") or "default")
                     builder = PromptBuilder(token_budget=3500, experiment="issue191_orchestrator_finalizer")
+                    
+                    # Issue #353: Prepare tool_results with raw_result for finalizer
+                    finalizer_results = []
+                    if tool_results:
+                        for r in tool_results:
+                            finalizer_r = {
+                                "tool": r.get("tool"),
+                                "success": r.get("success"),
+                                "result": r.get("raw_result"),  # ✅ Use structured data
+                                "error": r.get("error"),
+                            }
+                            finalizer_results.append(finalizer_r)
+                    
                     built = builder.build_finalizer_prompt(
                         route=orchestrator_output.route,
                         user_input=user_input,
                         planner_decision=planner_decision,
-                        tool_results=tool_results or None,
+                        tool_results=finalizer_results or None,  # ✅ Use processed results
                         dialog_summary=dialog_summary or None,
                         recent_turns=recent_turns,
                         session_context=session_context,
@@ -1144,6 +1227,18 @@ class OrchestratorLoop:
                     finalizer_prompt = built.prompt
                 except Exception:
                     # Fallback to simple prompt if prompt builder fails.
+                    # Issue #353: Use raw_result in fallback too
+                    finalizer_results = []
+                    if tool_results:
+                        for r in tool_results:
+                            finalizer_r = {
+                                "tool": r.get("tool"),
+                                "success": r.get("success"),
+                                "result": r.get("raw_result"),  # ✅ Use structured data
+                                "error": r.get("error"),
+                            }
+                            finalizer_results.append(finalizer_r)
+                    
                     finalizer_prompt = "\n".join(
                         [
                             "Kimlik / Roller:",
@@ -1156,7 +1251,7 @@ class OrchestratorLoop:
                             f"DIALOG_SUMMARY:\n{dialog_summary}\n" if dialog_summary else "",
                             "PLANNER_DECISION (JSON):",
                             json.dumps(planner_decision, ensure_ascii=False),
-                            "\nTOOL_RESULTS (JSON):\n" + json.dumps(tool_results, ensure_ascii=False) if tool_results else "",
+                            "\nTOOL_RESULTS (JSON):\n" + json.dumps(finalizer_results, ensure_ascii=False) if finalizer_results else "",
                             f"\nUSER: {user_input}\nASSISTANT (SADECE TÜRKÇE):",
                         ]
                     ).strip()
