@@ -186,6 +186,73 @@ class TestToolRouteFinalizerUsage:
         # Verify finalizer was called
         mock_finalizer_llm.complete_text.assert_called_once()
         assert result.assistant_reply == "Gemini ile finalize edildi efendim."
+
+
+# =============================================================================
+# Issue #365: Gmail params filtering
+# =============================================================================
+
+
+class TestGmailParamFiltering:
+    """Ensure Gmail tools do not receive calendar slots."""
+
+    def test_gmail_params_exclude_calendar_slots(self, orchestrator_loop):
+        from bantz.brain.llm_router import OrchestratorOutput
+
+        slots = {
+            "date": "2026-02-10",
+            "time": "14:00",
+            "duration": 60,
+        }
+
+        output = OrchestratorOutput(
+            route="gmail",
+            calendar_intent="none",
+            slots=slots,
+            confidence=0.9,
+            tool_plan=["gmail.send"],
+            assistant_reply="",
+            gmail={"to": "x@y.com", "subject": "Test", "body": "Merhaba"},
+            ask_user=False,
+            question="",
+            requires_confirmation=False,
+        )
+
+        params = orchestrator_loop._build_tool_params("gmail.send", slots, output)
+
+        assert "to" in params and params["to"] == "x@y.com"
+        assert "subject" in params and params["subject"] == "Test"
+        assert "body" in params and params["body"] == "Merhaba"
+        assert "date" not in params
+        assert "time" not in params
+        assert "duration" not in params
+
+    def test_calendar_tool_keeps_slots(self, orchestrator_loop):
+        from bantz.brain.llm_router import OrchestratorOutput
+
+        slots = {
+            "date": "2026-02-10",
+            "time": "14:00",
+            "duration": 60,
+        }
+
+        output = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="create",
+            slots=slots,
+            confidence=0.9,
+            tool_plan=["calendar.create_event"],
+            assistant_reply="",
+            ask_user=False,
+            question="",
+            requires_confirmation=False,
+        )
+
+        params = orchestrator_loop._build_tool_params("calendar.create_event", slots, output)
+
+        assert params["date"] == "2026-02-10"
+        assert params["time"] == "14:00"
+        assert params["duration"] == 60
         
 
 class TestFinalizationErrorHandling:
