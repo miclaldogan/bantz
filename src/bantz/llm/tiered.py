@@ -264,6 +264,7 @@ def decide_tier(
     *,
     tool_names: Optional[Iterable[str]] = None,
     requires_confirmation: bool = False,
+    route: str = "unknown",
 ) -> TierDecision:
     """Decide whether to escalate to the quality model.
 
@@ -314,6 +315,43 @@ def decide_tier(
     complexity = score_complexity(text)
     writing = score_writing_need(text)
     risk = score_risk(text, tool_names=tool_names, requires_confirmation=requires_confirmation)
+
+    # Smalltalk tiering (Issue #367)
+    route_norm = (route or "").strip().lower()
+    if route_norm in {"smalltalk", "smalltalk_stage1"}:
+        simple_greetings = [
+            "merhaba",
+            "selam",
+            "selamlar",
+            "günaydın",
+            "iyi akşamlar",
+            "iyi geceler",
+            "naber",
+            "nasılsın",
+        ]
+        complex_prompts = [
+            "nedir",
+            "ne demek",
+            "açıkla",
+            "anlat",
+            "nasıl",
+            "neden",
+            "niye",
+            "farkı",
+            "karşılaştır",
+            "düşünüyorsun",
+            "yorumla",
+        ]
+
+        if _contains_any(text, simple_greetings):
+            d = TierDecision(False, "smalltalk_simple", complexity, writing, risk)
+            emit(d)
+            return d
+
+        if _contains_any(text, complex_prompts):
+            d = TierDecision(True, "smalltalk_complex", complexity, writing, risk)
+            emit(d)
+            return d
 
     min_complexity = _env_int("BANTZ_TIERED_MIN_COMPLEXITY", 4)
     min_writing = _env_int("BANTZ_TIERED_MIN_WRITING", 4)

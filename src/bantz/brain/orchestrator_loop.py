@@ -1275,6 +1275,7 @@ class OrchestratorLoop:
                         user_input,
                         tool_names=orchestrator_output.tool_plan,
                         requires_confirmation=bool(orchestrator_output.requires_confirmation),
+                        route=orchestrator_output.route,
                     )
 
                     if decision.reason == "tiering_disabled":
