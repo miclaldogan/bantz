@@ -934,43 +934,51 @@ class OrchestratorLoop:
         tier_name: str = ""
 
         if self.finalizer_llm is not None:
-            use_finalizer = True
-            tier_name = "quality"
-            tier_reason = "finalizer_default"
-
-            try:
-                # Default behavior is unchanged unless tiering is enabled.
-                from bantz.llm.tiered import decide_tier
-                import os
-
-                decision = decide_tier(
-                    user_input,
-                    tool_names=orchestrator_output.tool_plan,
-                    requires_confirmation=bool(orchestrator_output.requires_confirmation),
-                )
-
-                if decision.reason == "tiering_disabled":
-                    use_finalizer = True
-                    tier_name = "quality"
-                    tier_reason = "tiering_disabled_default_quality"
-                else:
-                    use_finalizer = bool(decision.use_quality)
-                    tier_name = "quality" if use_finalizer else "fast"
-                    tier_reason = str(decision.reason)
-
-                if str(os.getenv("BANTZ_TIERED_DEBUG", "")).strip().lower() in {"1", "true", "yes", "on"}:
-                    logger.info(
-                        "[tiered] orchestrator_finalizer tier=%s reason=%s c=%s w=%s r=%s",
-                        tier_name,
-                        decision.reason,
-                        decision.complexity,
-                        decision.writing,
-                        decision.risk,
-                    )
-            except Exception:
+            # Issue #346: Always use quality finalizer for smalltalk route.
+            # Smalltalk is conversational/narrative content that benefits from Gemini's
+            # natural language generation quality, even when no tools were executed.
+            if orchestrator_output.route == "smalltalk":
                 use_finalizer = True
                 tier_name = "quality"
-                tier_reason = "tiering_error_default_quality"
+                tier_reason = "smalltalk_route_always_quality"
+            else:
+                use_finalizer = True
+                tier_name = "quality"
+                tier_reason = "finalizer_default"
+
+                try:
+                    # Default behavior is unchanged unless tiering is enabled.
+                    from bantz.llm.tiered import decide_tier
+                    import os
+
+                    decision = decide_tier(
+                        user_input,
+                        tool_names=orchestrator_output.tool_plan,
+                        requires_confirmation=bool(orchestrator_output.requires_confirmation),
+                    )
+
+                    if decision.reason == "tiering_disabled":
+                        use_finalizer = True
+                        tier_name = "quality"
+                        tier_reason = "tiering_disabled_default_quality"
+                    else:
+                        use_finalizer = bool(decision.use_quality)
+                        tier_name = "quality" if use_finalizer else "fast"
+                        tier_reason = str(decision.reason)
+
+                    if str(os.getenv("BANTZ_TIERED_DEBUG", "")).strip().lower() in {"1", "true", "yes", "on"}:
+                        logger.info(
+                            "[tiered] orchestrator_finalizer tier=%s reason=%s c=%s w=%s r=%s",
+                            tier_name,
+                            decision.reason,
+                            decision.complexity,
+                            decision.writing,
+                            decision.risk,
+                        )
+                except Exception:
+                    use_finalizer = True
+                    tier_name = "quality"
+                    tier_reason = "tiering_error_default_quality"
 
         if self.finalizer_llm is not None and use_finalizer:
             try:
