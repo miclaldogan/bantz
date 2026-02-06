@@ -1067,15 +1067,32 @@ class OrchestratorLoop:
             slots: Calendar/system slots dict
             output: Full orchestrator output (for gmail params)
         """
-        params = dict(slots)
+        params: dict[str, Any] = {}
         
-        # Gmail tools: flatten gmail nested object to top-level params (Issue #317)
+        # Gmail tools: whitelist gmail params only (Issue #365)
         if tool_name.startswith("gmail."):
+            gmail_valid_params = {
+                "to",
+                "subject",
+                "body",
+                "cc",
+                "bcc",
+                "label",
+                "category",
+                "query",
+                "search_term",
+                "natural_query",
+                "message_id",
+                "max_results",
+                "unread_only",
+                "prefer_unread",
+            }
+
             # First check slots.gmail (legacy)
             gmail_params = slots.get("gmail")
             if isinstance(gmail_params, dict):
                 for key, val in gmail_params.items():
-                    if val is not None:
+                    if key in gmail_valid_params and val is not None:
                         params[key] = val
             
             # Then check output.gmail (Issue #317)
@@ -1083,7 +1100,7 @@ class OrchestratorLoop:
                 gmail_obj = getattr(output, "gmail", None) or {}
                 if isinstance(gmail_obj, dict):
                     for key, val in gmail_obj.items():
-                        if val is not None:
+                        if key in gmail_valid_params and val is not None:
                             params[key] = val
             
             # Issue #340: Apply field aliasing for gmail.send
@@ -1105,8 +1122,9 @@ class OrchestratorLoop:
                 if "title" in params and "subject" not in params:
                     params["subject"] = params.pop("title")
         
-        # Calendar tools: use slots directly (already flat)
-        # System tools: use slots directly
+        else:
+            # Calendar/system tools: use slots directly (already flat)
+            params = dict(slots)
         
         return params
     
