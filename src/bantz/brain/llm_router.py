@@ -996,10 +996,6 @@ USER: bu akşam sekize parti ekle
                         tool_plan.append(name)
                         tool_plan_with_args.append({"name": name, "args": {}})
 
-        # Apply confidence threshold: if below threshold, clear tool_plan
-        if confidence < self._confidence_threshold:
-            tool_plan = []
-
         assistant_reply = str(parsed.get("assistant_reply") or "").strip()
 
         # Orchestrator extensions (Issue #134)
@@ -1013,6 +1009,16 @@ USER: bu akşam sekize parti ekle
         if not isinstance(reasoning_summary, list):
             reasoning_summary = []
         reasoning_summary = [str(r).strip() for r in reasoning_summary if r]
+
+        # Apply confidence threshold: if below threshold, clear tools and ask for clarification
+        if confidence < self._confidence_threshold:
+            tool_plan = []
+            tool_plan_with_args = []
+            if not assistant_reply:
+                assistant_reply = "Efendim, tam anlayamadım. Tekrar eder misiniz?"
+            ask_user = True
+            if not question:
+                question = assistant_reply
         
         # Gmail extensions (Issue #317)
         gmail_intent = str(parsed.get("gmail_intent") or "none").strip().lower()

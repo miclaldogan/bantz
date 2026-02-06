@@ -86,6 +86,8 @@ def test_router_calendar_create_low_confidence():
     # Tool plan cleared due to low confidence
     assert result.tool_plan == []
     assert "Süre ne olsun" in result.assistant_reply
+    assert result.ask_user is True
+    assert "Süre ne olsun" in result.question
 
 
 def test_router_calendar_query_evening():
@@ -133,6 +135,25 @@ def test_router_confidence_threshold_blocks_tools():
     # Tool plan cleared due to confidence < threshold
     assert result.tool_plan == []
     assert "Hangi tarih" in result.assistant_reply
+    assert result.ask_user is True
+    assert "Hangi tarih" in result.question
+
+
+def test_router_low_confidence_empty_reply_sets_clarification():
+    """Low confidence with empty reply should auto-generate clarification."""
+    llm = MockLLM({
+        "boş yanıt": '{"route": "calendar", "calendar_intent": "query", "slots": {}, "confidence": 0.4, "tool_plan": ["calendar.list_events"], "assistant_reply": ""}'
+    })
+
+    router = JarvisLLMRouter(llm=llm, confidence_threshold=0.7)
+    result = router.route(user_input="boş yanıt")
+
+    assert result.confidence == 0.4
+    assert result.tool_plan == []
+    assert result.ask_user is True
+    assert result.assistant_reply
+    assert "anlayamadım" in result.assistant_reply.lower()
+    assert result.question == result.assistant_reply
 
 
 def test_router_fallback_on_parse_error():
