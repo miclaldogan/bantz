@@ -1606,6 +1606,51 @@ class BrainLoop:
 
             finalizer = self._calendar_finalizer_llm
 
+            # Issue #355: Add tool results to finalizer prompt.
+            # BrainLoop's observations have a different structure than OrchestratorLoop's tool_results.
+            # observations = [{"name": "tool_name", "result": result_data}, ...]
+            # We need to format these for the finalizer so it can understand what data was returned.
+            tool_results_text = ""
+            if observations:
+                tool_results_text = "TOOL_RESULTS:\n"
+                # Show last 3 tools (most recent context)
+                recent_obs = observations[-3:]
+                for obs in recent_obs:
+                    if not isinstance(obs, dict):
+                        continue
+                    
+                    tool_name = str(obs.get("tool") or obs.get("name") or "unknown").strip()
+                    result = obs.get("result")
+                    
+                    # Smart summarization for different result types
+                    if result is None:
+                        result_preview = "None"
+                    elif isinstance(result, list):
+                        total = len(result)
+                        if total == 0:
+                            result_preview = "[]"
+                        elif total <= 3:
+                            result_preview = json.dumps(result[:3], ensure_ascii=False)[:300]
+                        else:
+                            # For large lists, show count + first few items
+                            preview = json.dumps(result[:3], ensure_ascii=False)[:200]
+                            result_preview = f"[{total} items, showing first 3] {preview}..."
+                    elif isinstance(result, dict):
+                        result_json = json.dumps(result, ensure_ascii=False)
+                        if len(result_json) > 300:
+                            result_preview = result_json[:300] + "..."
+                        else:
+                            result_preview = result_json
+                    else:
+                        result_str = str(result)
+                        if len(result_str) > 300:
+                            result_preview = result_str[:300] + "..."
+                        else:
+                            result_preview = result_str
+                    
+                    tool_results_text += f"  {tool_name}: {result_preview}\n"
+                tool_results_text += "\n"
+
             # Keep payload minimal: only include what the user would already see.
             from bantz.llm import LLMMessage
 
@@ -1614,11 +1659,13 @@ class BrainLoop:
                 "Görev: DRAFT cevabı daha doğal, kısa ve yardımcı bir dille yeniden yaz.\n"
                 "Kural: DRAFT içindeki gerçekleri KESİN değiştirme (sayı/saat/tarih/başlık).\n"
                 "Yeni etkinlik uydurma, ekstra detay ekleme. JSON/Markdown/backtick yazma.\n"
+                "TOOL_RESULTS'tan gelen bilgileri kullanarak daha bilgili cevap ver.\n"
             )
             user_msg = (
                 f"USER: {str(user_text or '').strip()}\n\n"
                 f"ROUTE: {route_norm or 'unknown'}\n"
                 f"LAST_TOOL: {last_tool or 'none'}\n\n"
+                f"{tool_results_text}"
                 f"DRAFT:\n{str(draft_text or '').strip()}\n\n"
                 "ASSISTANT:"
             )
