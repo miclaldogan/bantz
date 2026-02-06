@@ -192,7 +192,7 @@ class TestForceToolPlanGmail:
         assert result.tool_plan == ["gmail.get_message"]
     
     def test_gmail_send_forces_send_message(self, loop):
-        """Gmail + send with empty tool_plan should force send_message."""
+        """Gmail + send with empty tool_plan should force gmail.send."""
         output = OrchestratorOutput(
             route="gmail",
             calendar_intent="send",
@@ -204,7 +204,7 @@ class TestForceToolPlanGmail:
         
         result = loop._force_tool_plan(output)
         
-        assert result.tool_plan == ["gmail.send_message"]
+        assert result.tool_plan == ["gmail.send"]
     
     def test_gmail_unknown_intent_fallback(self, loop):
         """Gmail with unknown intent should fallback to list_messages."""

@@ -58,7 +58,7 @@ class TestRouteIndependentSafeToolsConstant:
         assert "calendar.create_event" not in ROUTE_INDEPENDENT_SAFE_TOOLS
         assert "calendar.delete_event" not in ROUTE_INDEPENDENT_SAFE_TOOLS
         assert "calendar.update_event" not in ROUTE_INDEPENDENT_SAFE_TOOLS
-        assert "gmail.send_message" not in ROUTE_INDEPENDENT_SAFE_TOOLS
+        assert "gmail.send" not in ROUTE_INDEPENDENT_SAFE_TOOLS
 
 
 # ============================================================================
@@ -160,10 +160,10 @@ class TestFilterToolPlanUnsafeTools:
         assert violations[0].tool_name == "calendar.delete_event"
     
     def test_gmail_send_blocked_on_route_unknown(self, guard):
-        """gmail.send_message should be blocked when route=unknown."""
+        """gmail.send should be blocked when route=unknown."""
         filtered, violations = guard.filter_tool_plan(
             route="unknown",
-            tool_plan=["gmail.send_message"],
+            tool_plan=["gmail.send"],
         )
         
         assert filtered == []
@@ -224,10 +224,10 @@ class TestFilterToolPlanAllowedRoutes:
         """route=gmail should allow all gmail tools."""
         filtered, violations = guard.filter_tool_plan(
             route="gmail",
-            tool_plan=["gmail.list_messages", "gmail.send_message"],
+            tool_plan=["gmail.list_messages", "gmail.send"],
         )
         
-        assert filtered == ["gmail.list_messages", "gmail.send_message"]
+        assert filtered == ["gmail.list_messages", "gmail.send"]
         assert len(violations) == 0
     
     def test_system_route_allows_system_tools(self, guard):
@@ -252,8 +252,8 @@ class TestFilterToolPlanEnforcementDisabled:
         """All tools should be allowed when enforcement is disabled."""
         filtered, violations = guard_no_enforcement.filter_tool_plan(
             route="unknown",
-            tool_plan=["calendar.create_event", "gmail.send_message"],
+            tool_plan=["calendar.create_event", "gmail.send"],
         )
         
-        assert filtered == ["calendar.create_event", "gmail.send_message"]
+        assert filtered == ["calendar.create_event", "gmail.send"]
         assert len(violations) == 0

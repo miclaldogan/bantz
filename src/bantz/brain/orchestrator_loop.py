@@ -104,7 +104,7 @@ class OrchestratorLoop:
             ("gmail", "list"): ["gmail.list_messages"],
             ("gmail", "query"): ["gmail.list_messages"],
             ("gmail", "read"): ["gmail.get_message"],
-            ("gmail", "send"): ["gmail.send_message"],
+            ("gmail", "send"): ["gmail.send"],
             ("gmail", "search"): ["gmail.smart_search"],  # Issue #317: Gmail label search
             # System routes
             ("system", "time"): ["time.now"],
