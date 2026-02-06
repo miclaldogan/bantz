@@ -145,8 +145,11 @@ class OrchestratorOutput:
     calendar_intent: str  # create | modify | cancel | query | none
     slots: dict[str, Any]  # {date?, time?, duration?, title?, window_hint?}
     confidence: float  # 0.0-1.0
-    tool_plan: list[str]  # ["calendar.list_events", ...]
+    tool_plan: list[str]  # ["calendar.list_events", ...] (names only)
     assistant_reply: str  # Chat/response text
+    
+    # Tool plan with args (Issue #360)
+    tool_plan_with_args: list[dict[str, Any]] = field(default_factory=list)  # [{"name": "...", "args": {...}}]
     
     # Gmail extensions (Issue #317)
     gmail_intent: str = "none"  # list | search | read | send | none
@@ -954,18 +957,31 @@ USER: bu akşam sekize parti ekle
 
         raw_tool_plan = normalized.get("tool_plan") or []
         tool_plan: list[str] = []
+        tool_plan_with_args: list[dict[str, Any]] = []  # Issue #360: preserve args
+        
         if isinstance(raw_tool_plan, list):
             for item in raw_tool_plan:
                 if isinstance(item, str):
                     name = item
+                    tool_plan.append(name)
+                    # Add to tool_plan_with_args with no args
+                    tool_plan_with_args.append({"name": name, "args": {}})
                 elif isinstance(item, dict):
                     name = item.get("name") or item.get("tool") or item.get("tool_name")
+                    name = str(name or "").strip()
+                    
+                    if name:
+                        tool_plan.append(name)
+                        # Preserve full dict with args (Issue #360)
+                        args = item.get("args", {})
+                        if not isinstance(args, dict):
+                            args = {}
+                        tool_plan_with_args.append({"name": name, "args": args})
                 else:
-                    name = str(item)
-
-                name = str(name or "").strip()
-                if name:
-                    tool_plan.append(name)
+                    name = str(item or "").strip()
+                    if name:
+                        tool_plan.append(name)
+                        tool_plan_with_args.append({"name": name, "args": {}})
 
         # Apply confidence threshold: if below threshold, clear tool_plan
         if confidence < self._confidence_threshold:
@@ -997,6 +1013,7 @@ USER: bu akşam sekize parti ekle
             slots=slots,
             confidence=confidence,
             tool_plan=tool_plan,
+            tool_plan_with_args=tool_plan_with_args,  # Issue #360
             assistant_reply=assistant_reply,
             gmail_intent=gmail_intent,
             gmail=gmail_obj,
