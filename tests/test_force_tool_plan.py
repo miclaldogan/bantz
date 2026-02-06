@@ -436,3 +436,163 @@ class TestMandatoryToolMapCoverage:
         assert ("system", "time") in loop._mandatory_tool_map
         assert ("system", "status") in loop._mandatory_tool_map
         assert ("system", "query") in loop._mandatory_tool_map
+
+
+# ============================================================================
+# Issue #347: Low Confidence Tool Forcing
+# ============================================================================
+
+class TestLowConfidenceToolForcing:
+    """Test that low confidence outputs are not forced (Issue #347)."""
+    
+    def test_low_confidence_calendar_query_not_forced(self, loop):
+        """
+        Calendar query with confidence < 0.7 should NOT force tools.
+        Router cleared tool_plan due to low confidence - respect that decision.
+        """
+        output = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="query",
+            slots={},
+            confidence=0.5,  # ❌ Low confidence
+            tool_plan=[],
+            assistant_reply="",
+        )
+        
+        result = loop._force_tool_plan(output)
+        
+        # Should NOT force tools - confidence too low
+        assert result.tool_plan == []
+        assert result.confidence == 0.5
+    
+    def test_low_confidence_gmail_list_not_forced(self, loop):
+        """Gmail list with confidence < 0.7 should NOT force tools."""
+        output = OrchestratorOutput(
+            route="gmail",
+            calendar_intent="list",
+            slots={},
+            confidence=0.6,  # ❌ Low confidence
+            tool_plan=[],
+            assistant_reply="",
+        )
+        
+        result = loop._force_tool_plan(output)
+        
+        # Should NOT force tools
+        assert result.tool_plan == []
+    
+    def test_borderline_confidence_not_forced(self, loop):
+        """Confidence exactly at threshold (0.7) should be forced."""
+        output = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="query",
+            slots={},
+            confidence=0.7,  # ✅ At threshold
+            tool_plan=[],
+            assistant_reply="",
+        )
+        
+        result = loop._force_tool_plan(output)
+        
+        # Should force tools - at threshold
+        assert result.tool_plan == ["calendar.list_events"]
+    
+    def test_high_confidence_forces_tools(self, loop):
+        """High confidence should force tools as expected."""
+        output = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="query",
+            slots={},
+            confidence=0.95,  # ✅ High confidence
+            tool_plan=[],
+            assistant_reply="",
+        )
+        
+        result = loop._force_tool_plan(output)
+        
+        # Should force tools
+        assert result.tool_plan == ["calendar.list_events"]
+    
+    def test_ask_user_not_forced_even_high_confidence(self, loop):
+        """
+        Even with high confidence, if ask_user=True, don't force tools.
+        Router wants clarification from user.
+        """
+        output = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="query",
+            slots={},
+            confidence=0.95,
+            tool_plan=[],
+            assistant_reply="",
+            ask_user=True,  # ❌ Asking for clarification
+            question="Hangi tarihi kontrol etmemi istersiniz?",
+        )
+        
+        result = loop._force_tool_plan(output)
+        
+        # Should NOT force tools - asking user
+        assert result.tool_plan == []
+        assert result.ask_user is True
+    
+    def test_low_confidence_with_ask_user_not_forced(self, loop):
+        """Low confidence + ask_user should definitely not force tools."""
+        output = OrchestratorOutput(
+            route="gmail",
+            calendar_intent="query",
+            slots={},
+            confidence=0.4,  # ❌ Very low
+            tool_plan=[],
+            assistant_reply="",
+            ask_user=True,  # ❌ Asking
+            question="Ne aramak istersiniz?",
+        )
+        
+        result = loop._force_tool_plan(output)
+        
+        # Should NOT force tools
+        assert result.tool_plan == []
+    
+    def test_confidence_threshold_documentation(self, loop):
+        """
+        Document the confidence threshold value used.
+        This is the same as router's confidence threshold.
+        """
+        # Threshold is 0.7 (documented in _force_tool_plan docstring)
+        # Test boundary conditions
+        
+        # Below threshold
+        output_low = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="query",
+            slots={},
+            confidence=0.69,
+            tool_plan=[],
+            assistant_reply="",
+        )
+        result_low = loop._force_tool_plan(output_low)
+        assert result_low.tool_plan == []
+        
+        # At threshold
+        output_exact = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="query",
+            slots={},
+            confidence=0.7,
+            tool_plan=[],
+            assistant_reply="",
+        )
+        result_exact = loop._force_tool_plan(output_exact)
+        assert result_exact.tool_plan == ["calendar.list_events"]
+        
+        # Above threshold
+        output_high = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="query",
+            slots={},
+            confidence=0.71,
+            tool_plan=[],
+            assistant_reply="",
+        )
+        result_high = loop._force_tool_plan(output_high)
+        assert result_high.tool_plan == ["calendar.list_events"]
