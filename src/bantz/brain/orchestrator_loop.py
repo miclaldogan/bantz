@@ -550,6 +550,24 @@ class OrchestratorLoop:
         """
         if not output.tool_plan:
             return []
+        
+        # Issue #350: Block ALL tool execution if confirmation is pending
+        # This prevents executing other tools while waiting for user confirmation
+        if state.has_pending_confirmation():
+            pending = state.pending_confirmation
+            tool_name = pending.get("tool", "unknown")
+            prompt = pending.get("prompt", "Confirm to continue")
+            logger.warning(
+                f"[FIREWALL] Cannot execute tools - confirmation pending for {tool_name}. "
+                f"User must confirm first."
+            )
+            return [{
+                "tool": "blocked",
+                "success": False,
+                "error": f"Confirmation required for {tool_name}: {prompt}",
+                "pending_confirmation": True,
+                "confirmation_prompt": prompt,
+            }]
 
         # Support both legacy `tool_plan: ["tool.name", ...]` and richer
         # forms emitted by some tests/models: `tool_plan: [{"name": ..., "args": {...}}, ...]`.
