@@ -627,20 +627,24 @@ class OrchestratorLoop:
         
         # Session context injection (Issue #191): datetime/location hints.
         # Issue #339: Add recent conversation to session_context for multi-turn memory
-        try:
-            from bantz.brain.prompt_engineering import build_session_context
-
-            session_context = build_session_context()
-            
-            # Add recent conversation for anaphora resolution (Issue #339)
-            # This helps LLM understand references like "saat kaçta" (what time) 
-            # by looking at previous turns ("bugün için toplantı var")
-            # NOTE: Use state.conversation_history directly (not from get_context_for_llm)
-            # because get_context_for_llm limits to [-2:] for legacy compatibility
-            if state.conversation_history:
-                session_context["recent_conversation"] = state.conversation_history[-3:]  # Last 3 turns
-        except Exception:
-            session_context = None
+        # Issue #359: Use state.session_context if available (preserves timezone/locale)
+        session_context = state.session_context
+        
+        if not session_context:
+            # Fallback: build fresh session context
+            try:
+                from bantz.brain.prompt_engineering import build_session_context
+                session_context = build_session_context()
+            except Exception:
+                session_context = None
+        
+        # Add recent conversation for anaphora resolution (Issue #339)
+        # This helps LLM understand references like "saat kaçta" (what time) 
+        # by looking at previous turns ("bugün için toplantı var")
+        # NOTE: Use state.conversation_history directly (not from get_context_for_llm)
+        # because get_context_for_llm limits to [-2:] for legacy compatibility
+        if session_context and state.conversation_history:
+            session_context["recent_conversation"] = state.conversation_history[-3:]  # Last 3 turns
 
         # Call orchestrator with enhanced summary + session context
         output = self.orchestrator.route(
@@ -1286,11 +1290,22 @@ class OrchestratorLoop:
                 recent = context.get("recent_conversation")
                 recent_turns = recent if isinstance(recent, list) else None
 
-                try:
-                    from bantz.brain.prompt_engineering import PromptBuilder, build_session_context
+                # Issue #359: Use state.session_context if available (preserves timezone/locale)
+                session_context = state.session_context
+                
+                if not session_context:
+                    # Fallback: build fresh session context
+                    try:
+                        from bantz.brain.prompt_engineering import build_session_context
+                        session_context = build_session_context()
+                    except Exception:
+                        session_context = None
 
-                    session_context = build_session_context()
-                    seed = str(session_context.get("session_id") or "default")
+                seed = str(session_context.get("session_id") or "default") if session_context else "default"
+                
+                try:
+                    from bantz.brain.prompt_engineering import PromptBuilder
+                    
                     builder = PromptBuilder(token_budget=3500, experiment="issue191_orchestrator_finalizer")
                     
                     # Issue #353, #354: Prepare tool_results with budget control
