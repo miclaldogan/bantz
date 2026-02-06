@@ -88,6 +88,101 @@ def _summarize_tool_result(result: Any, max_items: int = 5, max_chars: int = 500
             return f"<error serializing result: {e}>"
 
 
+def _prepare_tool_results_for_finalizer(
+    tool_results: list[dict[str, Any]],
+    max_tokens: int = 2000,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Prepare tool results for finalizer prompt with token budget control.
+    
+    Issue #354: Finalizer prompts can overflow context when tool results are large.
+    This function intelligently truncates/summarizes results to fit within budget.
+    
+    Strategy:
+    1. Try full raw_result for each tool (best quality)
+    2. If budget exceeded, use result_summary instead (smart truncation)
+    3. If still too large, truncate summaries further
+    4. Return warning flag if truncation occurred
+    
+    Args:
+        tool_results: List of tool result dicts with raw_result and result_summary
+        max_tokens: Maximum tokens to allocate for tool results section
+        
+    Returns:
+        Tuple of (processed_results, was_truncated)
+    """
+    if not tool_results:
+        return [], False
+    
+    # Rough token estimation: ~4 chars per token for JSON
+    def estimate_result_tokens(results: list[dict]) -> int:
+        try:
+            json_str = json.dumps(results, ensure_ascii=False)
+            return len(json_str) // 4
+        except Exception:
+            # Fallback: assume worst case
+            return max_tokens + 1
+    
+    # Step 1: Try using raw_result for all tools (best quality)
+    finalizer_results = []
+    for r in tool_results:
+        finalizer_r = {
+            "tool": r.get("tool"),
+            "success": r.get("success"),
+            "result": r.get("raw_result"),  # Full structured data
+            "error": r.get("error"),
+        }
+        finalizer_results.append(finalizer_r)
+    
+    tokens = estimate_result_tokens(finalizer_results)
+    if tokens <= max_tokens:
+        # Fits within budget, use raw results
+        return finalizer_results, False
+    
+    # Step 2: Budget exceeded, use result_summary instead
+    logger.warning(
+        f"[FINALIZER] Tool results ({tokens} tokens) exceed budget ({max_tokens}), "
+        f"using summaries instead of raw data"
+    )
+    
+    finalizer_results = []
+    for r in tool_results:
+        finalizer_r = {
+            "tool": r.get("tool"),
+            "success": r.get("success"),
+            "result": r.get("result_summary", ""),  # Use summary
+            "error": r.get("error"),
+        }
+        finalizer_results.append(finalizer_r)
+    
+    tokens = estimate_result_tokens(finalizer_results)
+    if tokens <= max_tokens:
+        # Summaries fit within budget
+        return finalizer_results, True
+    
+    # Step 3: Even summaries are too large, truncate aggressively
+    logger.warning(
+        f"[FINALIZER] Tool result summaries ({tokens} tokens) still exceed budget, "
+        f"truncating to first 3 tools"
+    )
+    
+    # Keep only first 3 tools and truncate their summaries
+    truncated_results = []
+    for r in finalizer_results[:3]:
+        summary = str(r.get("result", ""))
+        if len(summary) > 200:
+            summary = summary[:200] + "..."
+        
+        truncated_r = {
+            "tool": r.get("tool"),
+            "success": r.get("success"),
+            "result": summary,
+            "error": r.get("error"),
+        }
+        truncated_results.append(truncated_r)
+    
+    return truncated_results, True
+
+
 @dataclass
 class OrchestratorConfig:
     """Configuration for orchestrator loop."""
@@ -1098,17 +1193,13 @@ class OrchestratorLoop:
                     json.dumps(planner_decision, ensure_ascii=False),
                 ]
                 if tool_results:
-                    # Issue #353: Use raw_result for finalizer (structured data)
-                    # Build finalizer-optimized version with raw results
-                    finalizer_results = []
-                    for r in tool_results:
-                        finalizer_r = {
-                            "tool": r.get("tool"),
-                            "success": r.get("success"),
-                            "result": r.get("raw_result"),  # ✅ Use structured data
-                            "error": r.get("error"),
-                        }
-                        finalizer_results.append(finalizer_r)
+                    # Issue #353, #354: Use raw_result with token budget control
+                    finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
+                        tool_results,
+                        max_tokens=1500  # Leave room for planner decision + user input
+                    )
+                    if was_truncated:
+                        logger.info("[FAST_FINALIZE] Tool results truncated to fit budget")
                     prompt_lines.extend(["", "TOOL_RESULTS (JSON):", json.dumps(finalizer_results, ensure_ascii=False)])
                 prompt_lines.extend(["", f"USER: {user_input}", "ASSISTANT (SADECE TÜRKÇE):"])
                 fast_prompt = "\n".join(prompt_lines)
@@ -1202,23 +1293,19 @@ class OrchestratorLoop:
                     seed = str(session_context.get("session_id") or "default")
                     builder = PromptBuilder(token_budget=3500, experiment="issue191_orchestrator_finalizer")
                     
-                    # Issue #353: Prepare tool_results with raw_result for finalizer
-                    finalizer_results = []
-                    if tool_results:
-                        for r in tool_results:
-                            finalizer_r = {
-                                "tool": r.get("tool"),
-                                "success": r.get("success"),
-                                "result": r.get("raw_result"),  # ✅ Use structured data
-                                "error": r.get("error"),
-                            }
-                            finalizer_results.append(finalizer_r)
+                    # Issue #353, #354: Prepare tool_results with budget control
+                    finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
+                        tool_results or [],
+                        max_tokens=2000  # Allocate 2000 tokens for tool results
+                    )
+                    if was_truncated:
+                        logger.info("[FINALIZER] Tool results truncated to fit token budget")
                     
                     built = builder.build_finalizer_prompt(
                         route=orchestrator_output.route,
                         user_input=user_input,
                         planner_decision=planner_decision,
-                        tool_results=finalizer_results or None,  # ✅ Use processed results
+                        tool_results=finalizer_results or None,  # ✅ Budget-controlled results
                         dialog_summary=dialog_summary or None,
                         recent_turns=recent_turns,
                         session_context=session_context,
@@ -1227,17 +1314,13 @@ class OrchestratorLoop:
                     finalizer_prompt = built.prompt
                 except Exception:
                     # Fallback to simple prompt if prompt builder fails.
-                    # Issue #353: Use raw_result in fallback too
-                    finalizer_results = []
-                    if tool_results:
-                        for r in tool_results:
-                            finalizer_r = {
-                                "tool": r.get("tool"),
-                                "success": r.get("success"),
-                                "result": r.get("raw_result"),  # ✅ Use structured data
-                                "error": r.get("error"),
-                            }
-                            finalizer_results.append(finalizer_r)
+                    # Issue #353, #354: Use budget-controlled results in fallback
+                    finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
+                        tool_results or [],
+                        max_tokens=2000
+                    )
+                    if was_truncated:
+                        logger.warning("[FINALIZER_FALLBACK] Tool results truncated to fit budget")
                     
                     finalizer_prompt = "\n".join(
                         [
