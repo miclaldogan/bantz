@@ -238,3 +238,48 @@ def test_orchestrate_with_retrieved_memory():
     assert 'tool_results' in params
     assert 'session_context' in params
     assert 'retrieved_memory' in params
+
+
+def test_tool_results_type_is_list():
+    """Test that tool_results is list[dict], not dict (Issue #344)."""
+    
+    import inspect
+    from typing import get_type_hints
+    
+    # Get type hints for orchestrate method
+    hints = get_type_hints(GeminiHybridOrchestrator.orchestrate)
+    
+    # tool_results should be Optional[list[dict[str, Any]]]
+    tool_results_hint = hints.get('tool_results')
+    assert tool_results_hint is not None
+    
+    # Verify it's a list type (not dict)
+    import typing
+    if hasattr(typing, 'get_origin'):
+        # Python 3.8+
+        origin = typing.get_origin(tool_results_hint)
+        # Should be Union (from Optional)
+        if origin is typing.Union:
+            args = typing.get_args(tool_results_hint)
+            # First arg should be list
+            list_arg = args[0]
+            list_origin = typing.get_origin(list_arg)
+            assert list_origin is list, f"Expected list, got {list_origin}"
+
+
+def test_finalize_with_gemini_accepts_list():
+    """Test that _finalize_with_gemini accepts list[dict] for tool_results (Issue #344)."""
+    
+    import inspect
+    
+    # Get _finalize_with_gemini signature
+    sig = inspect.signature(GeminiHybridOrchestrator._finalize_with_gemini)
+    params = sig.parameters
+    
+    assert 'tool_results' in params
+    
+    # Verify annotation contains 'list'
+    annotation = params['tool_results'].annotation
+    annotation_str = str(annotation)
+    assert 'list' in annotation_str.lower(), f"Expected list in annotation, got {annotation_str}"
+
