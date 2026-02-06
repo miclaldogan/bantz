@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+import os
 from typing import Any, Optional, Protocol, Literal
 
 from bantz.brain.llm_router import OrchestratorOutput, JarvisLLMOrchestrator
@@ -92,8 +93,8 @@ class FlexibleHybridConfig:
     router_max_tokens: int = 512
     
     # Finalizer (Gemini OR 7B vLLM)
-    finalizer_type: Literal["gemini", "vllm_7b"] = "vllm_7b"
-    finalizer_model: str = "Qwen/Qwen2.5-7B-Instruct"
+    finalizer_type: Literal["gemini", "vllm_7b"] = "gemini"
+    finalizer_model: str = "gemini-1.5-flash"
     finalizer_temperature: float = 0.6
     finalizer_max_tokens: int = 512
     
@@ -101,6 +102,33 @@ class FlexibleHybridConfig:
     fallback_to_3b: bool = True
     enable_streaming: bool = False
     confidence_threshold: float = 0.7
+
+    @classmethod
+    def from_env(cls) -> "FlexibleHybridConfig":
+        """Create config from environment variables.
+
+        Supported env vars:
+            BANTZ_FINALIZER_TYPE: "gemini" or "vllm_7b" (default: gemini)
+            BANTZ_FINALIZER_MODEL: optional override for finalizer model
+        """
+        finalizer_type = os.getenv("BANTZ_FINALIZER_TYPE", "gemini").strip().lower()
+        if finalizer_type not in {"gemini", "vllm_7b"}:
+            logger.warning(
+                "[FLEXIBLE-HYBRID] Invalid BANTZ_FINALIZER_TYPE=%s, defaulting to gemini",
+                finalizer_type,
+            )
+            finalizer_type = "gemini"
+
+        env_model = os.getenv("BANTZ_FINALIZER_MODEL", "").strip()
+        if env_model:
+            finalizer_model = env_model
+        else:
+            finalizer_model = "gemini-1.5-flash" if finalizer_type == "gemini" else "Qwen/Qwen2.5-7B-Instruct"
+
+        return cls(
+            finalizer_type=finalizer_type,  # type: ignore[arg-type]
+            finalizer_model=finalizer_model,
+        )
 
 
 class FlexibleHybridOrchestrator:
@@ -138,7 +166,7 @@ class FlexibleHybridOrchestrator:
         """
         self._router_orchestrator = router_orchestrator
         self._finalizer = finalizer
-        self._config = config or FlexibleHybridConfig()
+        self._config = config or FlexibleHybridConfig.from_env()
         
         # Check finalizer availability
         self._finalizer_available = self._check_finalizer_availability()
@@ -427,7 +455,7 @@ def create_flexible_hybrid_orchestrator(
         ... )
     """
     
-    config = config or FlexibleHybridConfig()
+    config = config or FlexibleHybridConfig.from_env()
     
     # Create Jarvis router orchestrator
     jarvis_router = JarvisLLMOrchestrator(llm_client=router_client)

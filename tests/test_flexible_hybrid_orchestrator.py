@@ -76,8 +76,8 @@ class TestFlexibleHybridConfig:
         assert config.router_model == "Qwen/Qwen2.5-3B-Instruct"
         assert config.router_temperature == 0.0
         
-        assert config.finalizer_type == "vllm_7b"
-        assert config.finalizer_model == "Qwen/Qwen2.5-7B-Instruct"
+        assert config.finalizer_type == "gemini"
+        assert config.finalizer_model == "gemini-1.5-flash"
         assert config.finalizer_temperature == 0.6
         
         assert config.fallback_to_3b is True
@@ -97,6 +97,36 @@ class TestFlexibleHybridConfig:
         assert config.finalizer_model == "gemini-1.5-pro"
         assert config.finalizer_temperature == 0.8
         assert config.fallback_to_3b is False
+
+    def test_config_from_env_defaults(self, monkeypatch):
+        """Test env-based config defaults to Gemini."""
+        monkeypatch.delenv("BANTZ_FINALIZER_TYPE", raising=False)
+        monkeypatch.delenv("BANTZ_FINALIZER_MODEL", raising=False)
+
+        config = FlexibleHybridConfig.from_env()
+
+        assert config.finalizer_type == "gemini"
+        assert config.finalizer_model == "gemini-1.5-flash"
+
+    def test_config_from_env_vllm_7b(self, monkeypatch):
+        """Test env-based config for 7B finalizer."""
+        monkeypatch.setenv("BANTZ_FINALIZER_TYPE", "vllm_7b")
+        monkeypatch.delenv("BANTZ_FINALIZER_MODEL", raising=False)
+
+        config = FlexibleHybridConfig.from_env()
+
+        assert config.finalizer_type == "vllm_7b"
+        assert config.finalizer_model == "Qwen/Qwen2.5-7B-Instruct"
+
+    def test_config_from_env_model_override(self, monkeypatch):
+        """Test env-based model override."""
+        monkeypatch.setenv("BANTZ_FINALIZER_TYPE", "gemini")
+        monkeypatch.setenv("BANTZ_FINALIZER_MODEL", "gemini-1.5-pro")
+
+        config = FlexibleHybridConfig.from_env()
+
+        assert config.finalizer_type == "gemini"
+        assert config.finalizer_model == "gemini-1.5-pro"
 
 
 class TestFlexibleHybridOrchestrator:
@@ -244,7 +274,7 @@ class TestFlexibleHybridOrchestrator:
             router_orchestrator=router,
             finalizer=finalizer,
         )
-        assert orchestrator._get_active_finalizer_type() == "vllm_7b"
+        assert orchestrator._get_active_finalizer_type() == "gemini"
         
         # Test with unavailable finalizer
         finalizer = MockFinalizer(available=False)
@@ -276,7 +306,7 @@ class TestCreateFlexibleHybridOrchestrator:
         )
         
         assert orchestrator is not None
-        assert orchestrator._config.finalizer_type == "vllm_7b"
+        assert orchestrator._config.finalizer_type == "gemini"
     
     def test_create_with_custom_config(self):
         """Test creation with custom config."""

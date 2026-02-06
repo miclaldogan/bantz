@@ -95,6 +95,12 @@ orchestrator = create_gemini_hybrid_orchestrator(
     router_client=router,
     gemini_api_key=os.getenv("GEMINI_API_KEY", "")
 )
+
+**Flexible Hybrid defaults (Issue #363):**
+- Default finalizer is **Gemini** (3B router + Gemini finalizer)
+- Override with env vars if you prefer local 7B:
+    - `BANTZ_FINALIZER_TYPE=gemini|vllm_7b`
+    - `BANTZ_FINALIZER_MODEL=gemini-1.5-flash|Qwen/Qwen2.5-7B-Instruct`
 ```
 
 ### Architecture Benefits
