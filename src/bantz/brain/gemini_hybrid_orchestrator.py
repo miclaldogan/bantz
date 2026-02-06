@@ -129,6 +129,8 @@ class GeminiHybridOrchestrator:
         user_input: str,
         dialog_summary: str = "",
         tool_results: Optional[dict[str, Any]] = None,
+        session_context: Optional[dict[str, Any]] = None,
+        retrieved_memory: Optional[str] = None,
     ) -> OrchestratorOutput:
         """Orchestrate user input through hybrid pipeline.
         
@@ -136,6 +138,8 @@ class GeminiHybridOrchestrator:
             user_input: User message
             dialog_summary: Rolling dialog context
             tool_results: Results from previous tool execution (if any)
+            session_context: Session context (timezone, location hints)
+            retrieved_memory: Retrieved long-term memory
             
         Returns:
             OrchestratorOutput with route, intent, slots, and final response
@@ -144,8 +148,10 @@ class GeminiHybridOrchestrator:
         # Phase 1: 3B Router - Fast routing & slot extraction
         logger.info("[HYBRID] Phase 1: 3B Router")
         router_output = self._router_orchestrator.route(
-            user_text=user_input,
+            user_input=user_input,
             dialog_summary=dialog_summary,
+            session_context=session_context,
+            retrieved_memory=retrieved_memory,
         )
         
         logger.debug(

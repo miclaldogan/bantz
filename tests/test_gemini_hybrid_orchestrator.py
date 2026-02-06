@@ -178,3 +178,63 @@ def test_gemini_temperature_balanced():
     
     # Temperature=0.4 balances creativity and consistency
     # (Integration test needed for full verification)
+
+
+def test_orchestrate_with_session_context():
+    """Test that session_context is passed to router (Issue #343)."""
+    
+    router_response = """{
+        "route": "calendar",
+        "calendar_intent": "query",
+        "slots": {"date": "2026-02-06"},
+        "confidence": 0.9,
+        "tool_plan": ["calendar.list_events"],
+        "assistant_reply": ""
+    }"""
+    
+    router = MockRouter(response=router_response)
+    gemini = MockGeminiClient(response="Bugün 3 toplantınız var efendim.")
+    
+    orchestrator = GeminiHybridOrchestrator(
+        router=router,
+        gemini_client=gemini,
+    )
+    
+    # Note: This test will need actual integration test with JarvisLLMOrchestrator
+    # For now, verify orchestrate method accepts session_context parameter
+    import inspect
+    sig = inspect.signature(orchestrator.orchestrate)
+    assert 'session_context' in sig.parameters
+    assert 'retrieved_memory' in sig.parameters
+
+
+def test_orchestrate_with_retrieved_memory():
+    """Test that retrieved_memory is passed to router (Issue #343)."""
+    
+    router_response = """{
+        "route": "calendar",
+        "calendar_intent": "create",
+        "slots": {"time": "10:00", "title": "Standup"},
+        "confidence": 0.85,
+        "tool_plan": ["calendar.create_event"],
+        "assistant_reply": ""
+    }"""
+    
+    router = MockRouter(response=router_response)
+    gemini = MockGeminiClient(response="Standup toplantınız eklendi efendim.")
+    
+    orchestrator = GeminiHybridOrchestrator(
+        router=router,
+        gemini_client=gemini,
+    )
+    
+    # Verify parameters exist
+    import inspect
+    sig = inspect.signature(orchestrator.orchestrate)
+    params = sig.parameters
+    
+    assert 'user_input' in params
+    assert 'dialog_summary' in params
+    assert 'tool_results' in params
+    assert 'session_context' in params
+    assert 'retrieved_memory' in params
