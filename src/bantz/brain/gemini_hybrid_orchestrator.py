@@ -252,15 +252,70 @@ class GeminiHybridOrchestrator:
         Args:
             user_input: User message
             dialog_summary: Rolling dialog context
-            tool_results: Results from previous tool execution (list of dicts)
+            tool_results: Results from previous tool execution (list of dicts).
+                          If provided, Gemini finalization will include them.
             session_context: Session context (timezone, location hints)
             retrieved_memory: Retrieved long-term memory
             
         Returns:
             OrchestratorOutput with route, intent, slots, and final response
+            
+        Note:
+            For best results with tool-based routes, prefer the two-phase API:
+            1. plan() → get router output + execute tools externally
+            2. finalize() → pass tool_results to Gemini
+            
+            The single-call orchestrate() works but Gemini won't see tool
+            results unless you pass them explicitly.
         """
         
         # Phase 1: 3B Router - Fast routing & slot extraction
+        router_output = self.plan(
+            user_input=user_input,
+            dialog_summary=dialog_summary,
+            session_context=session_context,
+            retrieved_memory=retrieved_memory,
+        )
+        
+        # If ask_user or low confidence, skip finalization
+        if router_output.ask_user:
+            return router_output
+        if router_output.confidence < self._config.confidence_threshold:
+            return router_output
+        
+        # Phase 2: Tool execution happens externally (BrainLoop/OrchestratorLoop)
+        # If tool_results were passed in, they'll be forwarded to Gemini.
+        
+        # Phase 3: Gemini Finalizer
+        return self.finalize(
+            router_output=router_output,
+            user_input=user_input,
+            dialog_summary=dialog_summary,
+            tool_results=tool_results,
+        )
+    
+    def plan(
+        self,
+        *,
+        user_input: str,
+        dialog_summary: str = "",
+        session_context: Optional[dict[str, Any]] = None,
+        retrieved_memory: Optional[str] = None,
+    ) -> OrchestratorOutput:
+        """Phase 1 only: Run 3B router to get routing decision without finalization.
+        
+        Issue #408: Two-phase API so callers can execute tools between
+        plan() and finalize(), ensuring Gemini sees real tool results.
+        
+        Args:
+            user_input: User message
+            dialog_summary: Rolling dialog context
+            session_context: Session context
+            retrieved_memory: Retrieved long-term memory
+            
+        Returns:
+            OrchestratorOutput from 3B router (no Gemini finalization)
+        """
         logger.info("[HYBRID] Phase 1: 3B Router")
         router_output = self._router_orchestrator.route(
             user_input=user_input,
@@ -277,28 +332,50 @@ class GeminiHybridOrchestrator:
             f"confidence={router_output.confidence:.2f}"
         )
         
-        # If ask_user is set, return immediately (no finalization needed)
+        return router_output
+    
+    def finalize(
+        self,
+        *,
+        router_output: OrchestratorOutput,
+        user_input: str,
+        dialog_summary: str = "",
+        tool_results: Optional[list[dict[str, Any]]] = None,
+    ) -> OrchestratorOutput:
+        """Phase 3 only: Run Gemini finalizer with tool results.
+        
+        Issue #408: Two-phase API — call this after external tool execution
+        so Gemini gets the actual tool results instead of None.
+        
+        Args:
+            router_output: Output from plan() phase
+            user_input: Original user input
+            dialog_summary: Rolling dialog context
+            tool_results: Results from tool execution (list of dicts)
+            
+        Returns:
+            OrchestratorOutput with Gemini-generated assistant_reply
+        """
+        # If ask_user is set, return immediately
         if router_output.ask_user:
             logger.info("[HYBRID] Router wants clarification, skipping Gemini")
             return router_output
         
-        # If confidence too low, return router's ask_user response
+        # If confidence too low, return as-is
         if router_output.confidence < self._config.confidence_threshold:
             logger.warning(
                 f"[HYBRID] Low confidence ({router_output.confidence:.2f}), "
-                f"skipping tools and Gemini"
+                f"skipping Gemini"
             )
             return router_output
         
-        # Phase 2: Tool execution happens externally (BrainLoop)
-        # (This orchestrator doesn't execute tools, just plans them)
-        
-        # Phase 3: Gemini Finalizer - Natural language response
+        # Skip finalization if disabled
         if not self._config.enable_gemini_finalization:
             logger.info("[HYBRID] Gemini finalization disabled, using router response")
             return router_output
         
-        logger.info("[HYBRID] Phase 3: Gemini Finalizer")
+        logger.info("[HYBRID] Phase 3: Gemini Finalizer (tool_results=%s)",
+                     "present" if tool_results else "none")
         final_response = self._finalize_with_gemini(
             router_output=router_output,
             user_input=user_input,
