@@ -16,6 +16,7 @@ Design:
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -154,6 +155,10 @@ class PIIFilter:
 class DialogSummaryManager:
     """Manage rolling dialog summary with token limit.
     
+    Thread-safe (Issue #415): All mutable operations protected by
+    ``threading.Lock`` to prevent race conditions during concurrent
+    barge-in or async pipeline access.
+    
     Memory-lite strategy:
     - Store last N turns (configurable)
     - Max 500 tokens total (evict oldest if exceeded)
@@ -188,16 +193,17 @@ class DialogSummaryManager:
         self.max_turns = max_turns
         self.pii_filter_enabled = pii_filter_enabled
         self.summaries: list[CompactSummary] = []
+        self._lock = threading.Lock()
     
     def add_turn(self, summary: CompactSummary) -> None:
-        """Add new turn summary to rolling window.
+        """Add new turn summary to rolling window (thread-safe).
         
         Automatically:
         - Filters PII if enabled
         - Evicts oldest turns if over token limit
         - Keeps max N turns regardless of token count
         """
-        # Filter PII before storing
+        # Filter PII before acquiring lock (CPU-bound, no shared state)
         if self.pii_filter_enabled:
             summary.user_intent = PIIFilter.filter(summary.user_intent)
             summary.action_taken = PIIFilter.filter(summary.action_taken)
@@ -205,18 +211,19 @@ class DialogSummaryManager:
                 PIIFilter.filter(item) for item in summary.pending_items
             ]
         
-        self.summaries.append(summary)
-        
-        # Enforce max turns limit
-        while len(self.summaries) > self.max_turns:
-            self.summaries.pop(0)
-        
-        # Enforce token limit (evict oldest)
-        while self._estimate_tokens() > self.max_tokens and len(self.summaries) > 1:
-            self.summaries.pop(0)
+        with self._lock:
+            self.summaries.append(summary)
+            
+            # Enforce max turns limit
+            while len(self.summaries) > self.max_turns:
+                self.summaries.pop(0)
+            
+            # Enforce token limit (evict oldest)
+            while self._estimate_tokens_unlocked() > self.max_tokens and len(self.summaries) > 1:
+                self.summaries.pop(0)
     
-    def _estimate_tokens(self) -> int:
-        """Estimate total tokens in all summaries.
+    def _estimate_tokens_unlocked(self) -> int:
+        """Estimate total tokens (caller must hold _lock).
         
         Issue #406: Uses unified token estimator (chars4 heuristic).
         """
@@ -224,9 +231,14 @@ class DialogSummaryManager:
 
         text = "\n".join(s.to_prompt_block() for s in self.summaries)
         return estimate_tokens(text)
+
+    def _estimate_tokens(self) -> int:
+        """Estimate total tokens in all summaries (thread-safe)."""
+        with self._lock:
+            return self._estimate_tokens_unlocked()
     
     def to_prompt_block(self) -> str:
-        """Generate DIALOG_SUMMARY block for orchestrator prompt.
+        """Generate DIALOG_SUMMARY block for orchestrator prompt (thread-safe).
         
         Returns:
             Formatted summary block for injection into LLM prompt.
@@ -237,26 +249,30 @@ class DialogSummaryManager:
               Turn 1: User asked about calendar, I listed events.
               Turn 2: User requested meeting, I created event. Pending: confirmation
         """
-        if not self.summaries:
-            return ""
-        
-        lines = ["DIALOG_SUMMARY (last few turns):"]
-        for summary in self.summaries:
-            lines.append(f"  {summary.to_prompt_block()}")
-        
-        return "\n".join(lines)
+        with self._lock:
+            if not self.summaries:
+                return ""
+            
+            lines = ["DIALOG_SUMMARY (last few turns):"]
+            for summary in self.summaries:
+                lines.append(f"  {summary.to_prompt_block()}")
+            
+            return "\n".join(lines)
     
     def clear(self) -> None:
-        """Clear all summaries (e.g., session reset)."""
-        self.summaries.clear()
+        """Clear all summaries (thread-safe)."""
+        with self._lock:
+            self.summaries.clear()
     
     def get_latest(self) -> Optional[CompactSummary]:
-        """Get most recent summary."""
-        return self.summaries[-1] if self.summaries else None
+        """Get most recent summary (thread-safe)."""
+        with self._lock:
+            return self.summaries[-1] if self.summaries else None
     
     def __len__(self) -> int:
-        """Number of turns in memory."""
-        return len(self.summaries)
+        """Number of turns in memory (thread-safe)."""
+        with self._lock:
+            return len(self.summaries)
     
     def __str__(self) -> str:
         return self.to_prompt_block()
