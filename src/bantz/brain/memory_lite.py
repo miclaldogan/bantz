@@ -70,14 +70,25 @@ class CompactSummary:
 class PIIFilter:
     """Filter Personally Identifiable Information from summaries.
     
-    Patterns:
+    Supports both international and Turkish-specific PII patterns.
+    
+    International patterns:
     - Email: user@example.com → <EMAIL>
-    - Phone: 555-123-4567 → <PHONE>
+    - Phone (US): 555-123-4567 → <PHONE>
     - Credit Card: 1234-5678-9012-3456 → <CREDIT_CARD>
     - SSN: 123-45-6789 → <SSN>
-    - Address: 123 Main Street → <ADDRESS>
+    - Address (EN): 123 Main Street → <ADDRESS>
+    - URL: https://example.com → <URL>
+    
+    Turkish patterns (Issue #414):
+    - TC Kimlik No: 11 haneli rakam → <TC_KIMLIK>
+    - TR Phone: +90 5xx xxx xx xx → <TR_PHONE>
+    - IBAN: TR + 24 rakam → <IBAN>
+    - Turkish Address: Mahalle/Cadde/Sokak → <TR_ADDRESS>
+    - License Plate: 34 ABC 123 → <PLAKA>
     """
     
+    # ── International patterns ────────────────────────────────────────
     PATTERNS = {
         "email": r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
         "phone": r'\b(\+?\d{1,3}[\s-])?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b',
@@ -86,14 +97,35 @@ class PIIFilter:
         "address": r'\b\d+\s+[A-Za-z]+\s+(Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln)\b',
         "url": r'https?://[^\s]+',
     }
+
+    # ── Turkish-specific patterns (Issue #414) ────────────────────────
+    TR_PATTERNS = {
+        # TC Kimlik: exactly 11 digits at word boundary
+        # (must start with non-zero, exactly 11 digits)
+        "tc_kimlik": r'\b[1-9]\d{10}\b',
+        # TR Phone: +90 5xx or 05xx with various separators
+        "tr_phone": r'(?:\+90[\s.-]?|0)5\d{2}[\s.-]?\d{3}[\s.-]?\d{2}[\s.-]?\d{2}\b',
+        # IBAN: TR + 2 check digits + 5 bank code + 16 account
+        "iban": r'\bTR\s?\d{2}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{2}\b',
+        # Turkish address: Mahalle, Cadde, Sokak, Bulvar patterns
+        "tr_address": (
+            r'\b\w+\s+'
+            r'(?:Mahallesi|Mah\.|Caddesi|Cad\.|Sokak|Sok\.|Sokağı|Bulvarı|Blv\.)'
+            r'(?:\s+[^,\n]{1,60})?'
+        ),
+        # License plate: 2-digit city code + up to 3 letters + up to 4 digits
+        # e.g. 34 ABC 123, 06 A 1234, 01 AB 123
+        "plaka": r'\b(?:0[1-9]|[1-7]\d|8[01])\s?[A-Z]{1,3}\s?\d{1,4}\b',
+    }
     
     @classmethod
-    def filter(cls, text: str, enabled: bool = True) -> str:
+    def filter(cls, text: str, enabled: bool = True, *, locale: str = "auto") -> str:
         """Replace PII with placeholders.
         
         Args:
             text: Input text potentially containing PII
             enabled: If False, return text unchanged (for debugging)
+            locale: ``"auto"`` (detect), ``"tr"`` (Turkish), ``"en"`` (English only)
         
         Returns:
             Filtered text with PII replaced by <TYPE> placeholders
@@ -102,6 +134,13 @@ class PIIFilter:
             return text
         
         filtered = text
+
+        # Apply Turkish patterns FIRST (IBAN before credit_card to avoid partial matches)
+        if locale in ("tr", "auto"):
+            for pii_type, pattern in cls.TR_PATTERNS.items():
+                filtered = re.sub(pattern, f"<{pii_type.upper()}>", filtered)
+
+        # Then apply international patterns
         for pii_type, pattern in cls.PATTERNS.items():
             filtered = re.sub(pattern, f"<{pii_type.upper()}>", filtered, flags=re.IGNORECASE)
         
