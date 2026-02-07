@@ -10,6 +10,7 @@ No hard-coded routing - LLM controls everything.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import time
@@ -349,6 +350,7 @@ class OrchestratorConfig:
     memory_max_tokens: int = 1000  # Memory-lite token budget (Issue #368)
     memory_max_turns: int = 10  # Memory-lite max turns (Issue #368)
     memory_pii_filter: bool = True  # Memory-lite PII filtering (Issue #368)
+    tool_timeout_seconds: float = 30.0  # Per-tool execution timeout (Issue #431)
     
     def __post_init__(self):
         if self.require_confirmation_for is None:
@@ -1136,8 +1138,30 @@ class OrchestratorLoop:
                         })
                         continue
                 
-                # Execute tool
-                result = tool.function(**params)
+                # Execute tool (Issue #431: with timeout protection)
+                timeout = self.config.tool_timeout_seconds
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(tool.function, **params)
+                        result = future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    logger.error(
+                        "[TOOLS] Tool %s timed out after %.1fs",
+                        tool_name, timeout,
+                    )
+                    self.event_bus.publish("tool.timeout", {
+                        "tool": tool_name,
+                        "timeout_seconds": timeout,
+                    })
+                    tool_results.append({
+                        "tool": tool_name,
+                        "success": False,
+                        "error": f"Tool '{tool_name}' timed out after {timeout:.0f}s",
+                        "user_message": f"Efendim, '{tool_name}' işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.",
+                        "risk_level": risk.value,
+                    })
+                    state.add_tool_result(tool_name, f"timeout after {timeout}s", success=False)
+                    continue
 
                 # Convention: tool functions often return a tool-friendly dict
                 # like {"ok": bool, "error": ...}. Treat ok=false as failure so
