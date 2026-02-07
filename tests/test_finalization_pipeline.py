@@ -358,15 +358,27 @@ class TestDecideFinalizationTier:
         assert tier == "fast"
         assert reason == "no_finalizer"
 
-    def test_smalltalk_always_quality(self):
+    def test_simple_smalltalk_skips_quality(self):
+        """Issue #409: Simple greetings skip Gemini."""
         use_q, tier, reason = decide_finalization_tier(
             orchestrator_output=_make_output(route="smalltalk"),
             user_input="nasılsın?",
             has_finalizer=True,
         )
+        assert use_q is False
+        assert tier == "fast"
+        assert "simple_greeting" in reason
+
+    def test_complex_smalltalk_uses_quality(self):
+        """Issue #409: Complex smalltalk still uses Gemini."""
+        use_q, tier, reason = decide_finalization_tier(
+            orchestrator_output=_make_output(route="smalltalk"),
+            user_input="yapay zeka hakkında ne düşünüyorsun?",
+            has_finalizer=True,
+        )
         assert use_q is True
         assert tier == "quality"
-        assert "smalltalk" in reason
+        assert "complex_smalltalk" in reason
 
     def test_tiering_disabled_defaults_to_quality(self):
         """When tiering is disabled, defaults to quality."""
