@@ -7,7 +7,10 @@ for LLM-first orchestrator architecture.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bantz.brain.anaphora import ReferenceTable
 
 
 @dataclass
@@ -42,6 +45,9 @@ class OrchestratorState:
     
     # Session context (timezone, locale, datetime) - Issue #359
     session_context: Optional[dict[str, Any]] = None
+
+    # Issue #416: Last reference table for anaphora resolution
+    reference_table: Optional[ReferenceTable] = field(default=None)
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue)."""
@@ -122,3 +128,4 @@ class OrchestratorState:
         self.trace = {}
         self.conversation_history = []
         self.turn_count = 0
+        self.reference_table = None

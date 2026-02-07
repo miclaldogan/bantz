@@ -892,6 +892,18 @@ class OrchestratorLoop:
                 status = "ok" if success else "fail"
                 result_lines.append(f"  {tool_name} ({status}): {result_str}")
             context_parts.append("\n".join(result_lines))
+
+        # Issue #416: Inject REFERENCE_TABLE for anaphora resolution
+        # Enables 3B router to resolve "ilkini", "sonuncusu", "#2" etc.
+        if tool_results:
+            from bantz.brain.anaphora import ReferenceTable
+
+            ref_table = ReferenceTable.from_tool_results(tool_results)
+            ref_block = ref_table.to_prompt_block()
+            if ref_block:
+                context_parts.append(ref_block)
+                # Store reference table in state for later use
+                state.reference_table = ref_table
         
         enhanced_summary = "\n\n".join(context_parts) if context_parts else None
         
