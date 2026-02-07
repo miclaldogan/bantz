@@ -9,8 +9,15 @@ from bantz.brain.brain_loop import (
     CallTool,
     Fail,
 )
+from bantz.brain.unified_loop import (
+    UnifiedBrain,
+    UnifiedConfig,
+    UnifiedResult,
+    create_brain,
+)
 
 __all__ = [
+    # Legacy — prefer UnifiedBrain / create_brain() for new code.
     "BrainLoop",
     "BrainLoopConfig",
     "BrainResult",
@@ -20,4 +27,9 @@ __all__ = [
     "AskUser",
     "CallTool",
     "Fail",
+    # Unified interface (Issue #403)
+    "UnifiedBrain",
+    "UnifiedConfig",
+    "UnifiedResult",
+    "create_brain",
 ]

@@ -1477,6 +1477,16 @@ class BrainLoop:
         router: Optional[Any] = None,
         memory_manager: Optional[Any] = None,
     ):
+        # Issue #403: deprecation notice — prefer unified_loop.create_brain()
+        import warnings as _w
+        _w.warn(
+            "BrainLoop is deprecated and will be removed in a future release. "
+            "Use bantz.brain.create_brain(mode='jarvis', ...) instead. "
+            "See Issue #403 for migration details.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         self._llm = llm
         self._tools = tools
         self._events = event_bus or get_event_bus()
