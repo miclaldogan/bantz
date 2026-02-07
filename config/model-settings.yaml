@@ -63,7 +63,7 @@ single_model:
 # =============================================================================
 router:
   temperature: 0.0  # Deterministic routing
-  max_tokens: 128   # Sufficient for JSON output
+  max_tokens: 256   # Issue #418: increased from 128 to avoid JSON truncation with slim schema
   top_p: 1.0
   stop_sequences:
     - "}"
