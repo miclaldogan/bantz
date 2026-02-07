@@ -482,6 +482,85 @@ USER: bu akşam sekize parti ekle
         # Router budgeting (Issue #214)
         self._cached_context_len: Optional[int] = None
 
+        # Issue #372: Router health check
+        self._router_healthy: bool = self._check_router_health()
+        self._consecutive_failures: int = 0
+        self._max_consecutive_failures: int = 3  # Mark unhealthy after N failures
+
+    def _check_router_health(self) -> bool:
+        """Check if the router LLM backend is healthy.
+        
+        Issue #372: Probe the LLM backend at init time. Uses:
+        1. health_check() if available (VLLMOpenAIClient.is_available)
+        2. is_available() if available
+        3. Assumes healthy (for mock/test clients without health methods)
+        
+        Returns:
+            True if backend appears healthy or health unknown, False if definitely unhealthy
+        """
+        try:
+            # Option 1: Explicit health_check method
+            if hasattr(self._llm, "health_check"):
+                return bool(self._llm.health_check())
+            
+            # Option 2: is_available method (VLLMOpenAIClient)
+            if hasattr(self._llm, "is_available"):
+                return bool(self._llm.is_available(timeout_seconds=2.0))
+            
+            # Option 3: No health method → assume healthy (mock clients, etc.)
+            return True
+        except Exception as e:
+            logger.warning(f"[router_health] Health check failed: {e}")
+            return False
+
+    def _fallback_route(self, user_input: str) -> "OrchestratorOutput":
+        """Produce a graceful fallback routing decision when router is unhealthy.
+        
+        Issue #372: Instead of crashing, return a safe output with:
+        - route="unknown", confidence=0.0
+        - Empty tool plan (no tool execution without routing)
+        - ask_user=True with a user-friendly explanation
+        - Logs the fallback event
+        
+        Args:
+            user_input: Original user input
+            
+        Returns:
+            Safe OrchestratorOutput with ask_user=True
+        """
+        logger.error(
+            "[router_health] Router unhealthy, returning fallback for input (len=%d)",
+            len(user_input),
+        )
+        
+        # Publish event for telemetry
+        event_bus = getattr(self._llm, "event_bus", None)
+        if event_bus and hasattr(event_bus, "publish"):
+            try:
+                event_bus.publish("router.fallback", {
+                    "reason": "router_unhealthy",
+                    "input_len": len(user_input),
+                })
+            except Exception:
+                pass
+        
+        return OrchestratorOutput(
+            route="unknown",
+            calendar_intent="none",
+            slots={},
+            confidence=0.0,
+            tool_plan=[],
+            assistant_reply="Efendim, şu an asistan hizmetinde teknik bir sorun var. Kısa süre sonra tekrar deneyin.",
+            ask_user=True,
+            question="Efendim, şu an asistan hizmetinde teknik bir sorun var. Kısa süre sonra tekrar deneyin.",
+            raw_output={"error": "router_unhealthy", "fallback": True},
+        )
+
+    @property
+    def is_healthy(self) -> bool:
+        """Public read-only property for router health status (Issue #372)."""
+        return self._router_healthy
+
     def route(
         self,
         *,
@@ -505,6 +584,16 @@ USER: bu akşam sekize parti ekle
         Returns:
             RouterOutput with route, intent, slots, confidence, tool_plan, reply
         """
+        # Issue #372: Health check gate — if router is unhealthy, return fallback
+        if not self._router_healthy:
+            # Periodic re-check: try to recover on each call
+            self._router_healthy = self._check_router_health()
+            if not self._router_healthy:
+                return self._fallback_route(user_input)
+            else:
+                logger.info("[router_health] Router recovered, resuming normal operation")
+                self._consecutive_failures = 0
+
         # Build prompt with context using deterministic budget (Issue #227)
         context_len = self._get_model_context_length()
         budget_config = PromptBudgetConfig.for_context(context_len)
@@ -580,6 +669,15 @@ USER: bu akşam sekize parti ekle
             # Backward compatibility for mocks/adapters that only accept `prompt`.
             raw_text = self._llm.complete_text(prompt=prompt)
         except Exception as e:
+            # Issue #372: Track consecutive failures and mark unhealthy
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._max_consecutive_failures:
+                self._router_healthy = False
+                logger.error(
+                    "[router_health] Router marked unhealthy after %d consecutive failures",
+                    self._consecutive_failures,
+                )
+            
             # PII-safe logging: only sizes (Issue #227).
             backend = getattr(self._llm, "backend_name", None)
             model = getattr(self._llm, "model_name", None)
@@ -594,7 +692,10 @@ USER: bu akşam sekize parti ekle
                 bool(build_meta.get("trimmed")),
                 str(e)[:200],
             )
-            return self._fallback_output(user_input, error=str(e))
+            return self._fallback_route(user_input) if not self._router_healthy else self._fallback_output(user_input, error=str(e))
+
+        # Issue #372: LLM call succeeded → reset failure counter
+        self._consecutive_failures = 0
 
         # Parse JSON (with repair attempts)
         last_err: Optional[str] = None
