@@ -134,6 +134,11 @@ class FlexibleHybridConfig:
 class FlexibleHybridOrchestrator:
     """Flexible hybrid orchestrator: 3B router + (Gemini OR 7B) finalizer.
     
+    .. deprecated::
+        Use ``bantz.brain.hybrid_orchestrator.HybridOrchestrator`` instead.
+        ``FlexibleHybridOrchestrator`` will be removed in a future release.
+        See Issue #412 for migration details.
+
     This implements Issue #157:
     - Phase 1: 3B router (fast planning)
     - Phase 2: Tool execution
@@ -164,6 +169,14 @@ class FlexibleHybridOrchestrator:
             finalizer: Finalizer LLM (Gemini or 7B vLLM) - optional for fallback mode
             config: Configuration (uses defaults if None)
         """
+        import warnings
+        warnings.warn(
+            "FlexibleHybridOrchestrator is deprecated. "
+            "Use bantz.brain.hybrid_orchestrator.HybridOrchestrator instead. "
+            "See Issue #412.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._router_orchestrator = router_orchestrator
         self._finalizer = finalizer
         self._config = config or FlexibleHybridConfig.from_env()
