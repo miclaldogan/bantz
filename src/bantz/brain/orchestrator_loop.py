@@ -1376,8 +1376,10 @@ class OrchestratorLoop:
                     "- Sen BANTZ'sın. Kullanıcı USER'dır.",
                     "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
                     "- 'Efendim' hitabını kullan.",
-                    "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
-                    "- Yeni sayı/saat/tarih uydurma; verilenleri koru.",
+                    "- Sadece kullanıcıya söyleyeceğin düz metni üret.",
+                    "- JSON üretme ({...} YASAK). Markdown üretme (**, #, ``` YASAK).",
+                    "- Yeni sayı/saat/tarih/isim uydurma; SADECE verilerdeki bilgileri kullan.",
+                    "- Kısa ve öz cevap ver (1-3 cümle).",
                     "",
                     "PLANNER_DECISION (JSON):",
                     json.dumps(planner_decision, ensure_ascii=False),
@@ -1391,7 +1393,7 @@ class OrchestratorLoop:
                     if was_truncated:
                         logger.info("[FAST_FINALIZE] Tool results truncated to fit budget")
                     prompt_lines.extend(["", "TOOL_RESULTS (JSON):", json.dumps(finalizer_results, ensure_ascii=False)])
-                prompt_lines.extend(["", f"USER: {user_input}", "ASSISTANT (SADECE TÜRKÇE):"])
+                prompt_lines.extend(["", f"USER: {user_input}", "ASSISTANT (SADECE TÜRKÇE, düz metin, yeni bilgi ekleme):"])
                 fast_prompt = "\n".join(prompt_lines)
 
                 try:
@@ -1530,14 +1532,27 @@ class OrchestratorLoop:
                             "- Sen BANTZ'sın. Kullanıcı USER'dır.",
                             "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
                             "- 'Efendim' hitabını kullan.",
-                            "- Sadece kullanıcıya söyleyeceğin metni üret; JSON/Markdown yok.",
-                            "- Kısa ve öz cevap ver.",
+                            "",
+                            "FORMAT KURALLARI (KESİN):",
+                            "- Sadece kullanıcıya söyleyeceğin düz metni üret.",
+                            "- JSON üretme. Örnek: {\"route\": ...} YASAK.",
+                            "- Markdown üretme. Örnek: **kalın**, # başlık, ```kod``` YASAK.",
+                            "- Kod bloğu üretme.",
+                            "- Liste işareti (-, *, 1.) kullanma; düz cümle kur.",
+                            "",
+                            "DOĞRULUK KURALLARI (KESİN):",
+                            "- SADECE verilen TOOL_RESULTS ve PLANNER_DECISION içindeki bilgileri kullan.",
+                            "- Yeni sayı, saat, tarih, miktar, fiyat UYDURMA. Verilerde yoksa söyleme.",
+                            "- Yeni isim, e-posta, telefon UYDURMA.",
+                            "- Emin olmadığın bilgiyi söyleme; belirsizse 'bilgi yok' de.",
+                            "",
+                            "- Kısa ve öz cevap ver (1-3 cümle).",
                             "",
                             f"DIALOG_SUMMARY:\n{dialog_summary}\n" if dialog_summary else "",
                             "PLANNER_DECISION (JSON):",
                             json.dumps(planner_decision, ensure_ascii=False),
                             "\nTOOL_RESULTS (JSON):\n" + json.dumps(finalizer_results, ensure_ascii=False) if finalizer_results else "",
-                            f"\nUSER: {user_input}\nASSISTANT (SADECE TÜRKÇE):",
+                            f"\nUSER: {user_input}\nASSISTANT (SADECE TÜRKÇE, düz metin, yeni bilgi ekleme):",
                         ]
                     ).strip()
 
