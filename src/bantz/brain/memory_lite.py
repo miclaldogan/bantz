@@ -179,10 +179,12 @@ class DialogSummaryManager:
     def _estimate_tokens(self) -> int:
         """Estimate total tokens in all summaries.
         
-        Rough approximation: 1 token ≈ 1 word (good enough for Turkish/English)
+        Issue #406: Uses unified token estimator (chars4 heuristic).
         """
+        from bantz.llm.token_utils import estimate_tokens
+
         text = "\n".join(s.to_prompt_block() for s in self.summaries)
-        return len(text.split())
+        return estimate_tokens(text)
     
     def to_prompt_block(self) -> str:
         """Generate DIALOG_SUMMARY block for orchestrator prompt.

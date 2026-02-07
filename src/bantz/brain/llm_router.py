@@ -1168,21 +1168,15 @@ class HybridJarvisLLMOrchestrator:
 
 
 def _estimate_tokens(text: str) -> int:
-    # Rough heuristic: ~4 chars per token.
-    t = str(text or "")
-    return max(0, len(t) // 4)
+    """Token estimation — delegates to unified token_utils (Issue #406)."""
+    from bantz.llm.token_utils import estimate_tokens
+    return estimate_tokens(text)
 
 
 def _trim_to_tokens(text: str, max_tokens: int) -> str:
-    t = str(text or "")
-    if max_tokens <= 0:
-        return ""
-    max_chars = int(max_tokens) * 4
-    if len(t) <= max_chars:
-        return t
-    if max_chars <= 1:
-        return "…"[:max_chars]
-    return t[: max(0, max_chars - 1)] + "…"
+    """Trim text to fit within token budget — delegates to token_utils (Issue #406)."""
+    from bantz.llm.token_utils import trim_to_tokens
+    return trim_to_tokens(text, max_tokens)
 
 
 # Legacy alias for backward compatibility
