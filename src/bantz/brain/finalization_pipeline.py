@@ -342,6 +342,36 @@ class FastFinalizer:
 # Tier Decision Helper
 # ---------------------------------------------------------------------------
 
+def is_simple_greeting(user_input: str) -> bool:
+    """Check if user input is a simple greeting that doesn't need Gemini.
+
+    Issue #409: Simple greetings (merhaba/selam/nasılsın) can use the 3B
+    router's reply directly — no need for a 300ms Gemini call.
+
+    Returns:
+        True if the input is a simple greeting pattern.
+    """
+    normalised = user_input.strip().lower().rstrip("!.?")
+    _SIMPLE_PATTERNS = {
+        "merhaba", "selam", "hey", "hi", "hello",
+        "günaydın", "iyi akşamlar", "iyi geceler",
+        "nasılsın", "naber", "ne haber", "nasilsin",
+        "hoşça kal", "görüşürüz", "bye", "hoşçakal",
+        "teşekkürler", "teşekkür ederim", "sağ ol", "eyvallah",
+        "iyi günler", "kolay gelsin",
+    }
+    if normalised in _SIMPLE_PATTERNS:
+        return True
+    # Also match very short inputs (≤3 words) that start with a greeting word
+    words = normalised.split()
+    if len(words) <= 3 and words and words[0] in {
+        "merhaba", "selam", "hey", "hi", "hello", "günaydın", "naber",
+        "teşekkürler", "hoşça", "hoşçakal",
+    }:
+        return True
+    return False
+
+
 def decide_finalization_tier(
     *,
     orchestrator_output: OrchestratorOutput,
@@ -356,9 +386,17 @@ def decide_finalization_tier(
     if not has_finalizer:
         return False, "fast", "no_finalizer"
 
-    # Smalltalk always gets quality (Issue #346)
+    # Issue #409: Split smalltalk into simple vs complex
     if orchestrator_output.route == "smalltalk":
-        return True, "quality", "smalltalk_route_always_quality"
+        if is_simple_greeting(user_input):
+            # Simple greeting → 3B reply is good enough, skip Gemini (~300ms saved)
+            logger.info(
+                "[TIER] gemini_calls_saved=1 reason=simple_greeting input=%r",
+                user_input[:60],
+            )
+            return False, "fast", "simple_greeting_skip_gemini"
+        # Complex smalltalk → still use Gemini
+        return True, "quality", "complex_smalltalk_needs_quality"
 
     # Try tiered decision
     try:
