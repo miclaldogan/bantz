@@ -114,14 +114,7 @@ def _prepare_tool_results_for_finalizer(
     if not tool_results:
         return [], False
     
-    # Rough token estimation: ~4 chars per token for JSON
-    def estimate_result_tokens(results: list[dict]) -> int:
-        try:
-            json_str = json.dumps(results, ensure_ascii=False)
-            return len(json_str) // 4
-        except Exception:
-            # Fallback: assume worst case
-            return max_tokens + 1
+    from bantz.llm.token_utils import estimate_tokens_json
     
     # Step 1: Try using raw_result for all tools (best quality)
     finalizer_results = []
@@ -134,7 +127,7 @@ def _prepare_tool_results_for_finalizer(
         }
         finalizer_results.append(finalizer_r)
     
-    tokens = estimate_result_tokens(finalizer_results)
+    tokens = estimate_tokens_json(finalizer_results)
     if tokens <= max_tokens:
         # Fits within budget, use raw results
         return finalizer_results, False
@@ -155,7 +148,7 @@ def _prepare_tool_results_for_finalizer(
         }
         finalizer_results.append(finalizer_r)
     
-    tokens = estimate_result_tokens(finalizer_results)
+    tokens = estimate_tokens_json(finalizer_results)
     if tokens <= max_tokens:
         # Summaries fit within budget
         return finalizer_results, True

@@ -252,23 +252,27 @@ def _metrics_enabled() -> bool:
 
 
 def _estimate_prompt_tokens(payload: dict) -> int:
-    """Best-effort token estimate for metrics when Gemini omits usageMetadata."""
+    """Best-effort token estimate for metrics when Gemini omits usageMetadata.
+
+    Issue #406: Uses unified token estimator for the chars→tokens conversion,
+    but still walks the Gemini payload structure to extract total chars.
+    """
+    from bantz.llm.token_utils import estimate_tokens
 
     try:
-        total_chars = 0
+        parts_text: list[str] = []
         sys_inst = payload.get("systemInstruction") or {}
         for p in (sys_inst.get("parts") or []):
             if isinstance(p, dict):
-                total_chars += len(str(p.get("text") or ""))
+                parts_text.append(str(p.get("text") or ""))
 
         for c in (payload.get("contents") or []):
             if not isinstance(c, dict):
                 continue
             for p in (c.get("parts") or []):
                 if isinstance(p, dict):
-                    total_chars += len(str(p.get("text") or ""))
+                    parts_text.append(str(p.get("text") or ""))
 
-        # Rough heuristic: ~4 chars/token.
-        return max(0, int(total_chars) // 4)
+        return estimate_tokens(" ".join(parts_text))
     except Exception:
         return -1

@@ -73,8 +73,9 @@ class FinalizerResult:
 
 
 def _estimate_tokens(text: str) -> int:
-    """Rough token estimation (~4 chars per token)."""
-    return len(text) // 4
+    """Token estimation — delegates to unified token_utils (Issue #406)."""
+    from bantz.llm.token_utils import estimate_tokens
+    return estimate_tokens(text)
 
 
 def _prepare_tool_results_for_finalizer(

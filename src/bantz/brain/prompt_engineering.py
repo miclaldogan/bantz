@@ -22,14 +22,9 @@ class PromptBuildResult:
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token estimate.
-
-    We use the same heuristic as `bantz.memory.context.ContextConfig.estimate_tokens`:
-    ~4 characters per token.
-    """
-
-    t = str(text or "")
-    return max(0, len(t) // 4)
+    """Token estimation — delegates to unified token_utils (Issue #406)."""
+    from bantz.llm.token_utils import estimate_tokens as _estimate
+    return _estimate(text)
 
 
 def _stable_ab_variant(*, seed: str, experiment: str = "default") -> PromptVariant:
