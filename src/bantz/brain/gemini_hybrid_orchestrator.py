@@ -204,6 +204,11 @@ class HybridOrchestratorConfig:
 class GeminiHybridOrchestrator:
     """Hybrid orchestrator: 3B router (local) + Gemini finalizer (cloud).
     
+    .. deprecated::
+        Use ``bantz.brain.hybrid_orchestrator.HybridOrchestrator`` instead.
+        ``GeminiHybridOrchestrator`` will be removed in a future release.
+        See Issue #412 for migration details.
+
     This implements the strategy from Issues #131, #134, #135:
     - Fast routing with local 3B model
     - Quality responses with Gemini
@@ -231,6 +236,14 @@ class GeminiHybridOrchestrator:
         gemini_client: GeminiClient,
         config: Optional[HybridOrchestratorConfig] = None,
     ):
+        import warnings
+        warnings.warn(
+            "GeminiHybridOrchestrator is deprecated. "
+            "Use bantz.brain.hybrid_orchestrator.HybridOrchestrator instead. "
+            "See Issue #412.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._router = router
         self._gemini = gemini_client
         self._config = config or HybridOrchestratorConfig()
