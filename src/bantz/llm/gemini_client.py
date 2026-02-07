@@ -19,10 +19,44 @@ from bantz.llm.base import (
 )
 
 from bantz.llm.privacy import redact_for_cloud, minimize_for_cloud
+from bantz.llm.quota_tracker import (
+    QuotaTracker,
+    QuotaExceeded,
+    CircuitBreaker,
+    CircuitOpen,
+)
 
 
 logger = logging.getLogger(__name__)
 metrics_logger = logging.getLogger("bantz.llm.metrics")
+
+# Module-level defaults (shared across instances unless overridden)
+_default_quota_tracker: Optional[QuotaTracker] = None
+_default_circuit_breaker: Optional[CircuitBreaker] = None
+
+
+def get_default_quota_tracker() -> QuotaTracker:
+    """Get or create the module-level default QuotaTracker."""
+    global _default_quota_tracker
+    if _default_quota_tracker is None:
+        _default_quota_tracker = QuotaTracker()
+    return _default_quota_tracker
+
+
+def get_default_circuit_breaker() -> CircuitBreaker:
+    """Get or create the module-level default CircuitBreaker."""
+    global _default_circuit_breaker
+    if _default_circuit_breaker is None:
+        _default_circuit_breaker = CircuitBreaker()
+    return _default_circuit_breaker
+
+
+# Retry configuration constants
+RETRY_MAX_ATTEMPTS = 3
+RETRY_BASE_DELAY = 1.0  # seconds
+RETRY_MAX_DELAY = 30.0  # seconds
+RETRY_BACKOFF_FACTOR = 2.0
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
 
 class GeminiClient(LLMClient):
@@ -46,11 +80,17 @@ class GeminiClient(LLMClient):
         model: str,
         timeout_seconds: float = 240.0,
         base_url: str = "https://generativelanguage.googleapis.com",
+        quota_tracker: Optional[QuotaTracker] = None,
+        circuit_breaker: Optional[CircuitBreaker] = None,
+        max_retries: int = RETRY_MAX_ATTEMPTS,
     ):
         self._api_key = (api_key or "").strip()
         self._model = (model or "").strip()
         self._timeout_seconds = float(timeout_seconds)
         self._base_url = base_url.rstrip("/")
+        self._quota_tracker = quota_tracker
+        self._circuit_breaker = circuit_breaker
+        self._max_retries = max_retries
 
     @property
     def model_name(self) -> str:
@@ -93,9 +133,30 @@ class GeminiClient(LLMClient):
         if not self._model:
             raise LLMInvalidResponseError("Gemini model not set")
 
+        # --- Pre-flight: circuit breaker & quota ---
+        if self._circuit_breaker is not None:
+            try:
+                self._circuit_breaker.check()
+            except CircuitOpen:
+                logger.warning("[GEMINI] Circuit breaker OPEN — skipping call")
+                raise LLMConnectionError(
+                    "Gemini circuit_open reason=circuit_open — "
+                    "Gemini geçici olarak devre dışı, yerel model kullanılıyor"
+                )
+
+        if self._quota_tracker is not None:
+            try:
+                self._quota_tracker.check()
+            except QuotaExceeded as exc:
+                logger.warning("[GEMINI] Quota exceeded: %s", exc)
+                raise LLMConnectionError(
+                    "Gemini quota_exceeded reason=quota_exceeded — "
+                    "Gemini quota aşıldı, yerel model kullanılıyor"
+                )
+
         url = f"{self._base_url}/v1beta/models/{self._model}:generateContent"
 
-        # Gemini roles are "user" and "model". We'll map system separately if present.
+        # --- Build payload ---
         system_lines: list[str] = []
         contents = []
         for m in messages:
@@ -127,116 +188,219 @@ class GeminiClient(LLMClient):
         if seed is not None:
             payload.setdefault("generationConfig", {})["seed"] = int(seed)
 
-        t0 = time.perf_counter()
         prompt_tokens_est = _estimate_prompt_tokens(payload)
-        try:
-            r = requests.post(
-                url,
-                params={"key": self._api_key},
-                headers={"Content-Type": "application/json"},
-                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                timeout=self._timeout_seconds,
-            )
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
-            # Map HTTP errors to stable reason codes.
-            if r.status_code >= 500:
-                raise LLMConnectionError(f"Gemini server_error status={r.status_code} reason=server_error")
-            if r.status_code in {401, 403}:
+        # --- Retry loop with exponential backoff ---
+        last_exception: Optional[Exception] = None
+        for attempt in range(1, self._max_retries + 1):
+            t0 = time.perf_counter()
+            try:
+                r = requests.post(
+                    url,
+                    params={"key": self._api_key},
+                    headers={"Content-Type": "application/json"},
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    timeout=self._timeout_seconds,
+                )
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+
+                # --- Parse rate-limit headers ---
+                resp_headers = getattr(r, "headers", {}) or {}
+                rate_limit_remaining = _parse_rate_limit_remaining(resp_headers)
+                retry_after_header = _parse_retry_after(resp_headers)
+
+                if rate_limit_remaining is not None and rate_limit_remaining <= 5:
+                    logger.warning(
+                        "[GEMINI] Rate limit nearly exhausted: %d remaining",
+                        rate_limit_remaining,
+                    )
+
+                # --- Retryable status codes ---
+                if r.status_code in RETRYABLE_STATUS_CODES:
+                    delay = _calculate_backoff(attempt, retry_after_header)
+                    logger.warning(
+                        "[GEMINI] Retryable error status=%d attempt=%d/%d backoff=%.1fs",
+                        r.status_code,
+                        attempt,
+                        self._max_retries,
+                        delay,
+                    )
+                    if attempt < self._max_retries:
+                        time.sleep(delay)
+                        continue
+                    # Last attempt — fall through to error handling
+
+                # --- Non-retryable errors ---
+                if r.status_code >= 500:
+                    self._record_failure()
+                    raise LLMConnectionError(
+                        f"Gemini server_error status={r.status_code} reason=server_error"
+                    )
+                if r.status_code in {401, 403}:
+                    raise LLMConnectionError(
+                        f"Gemini auth_error status={r.status_code} reason=auth_error"
+                    )
+                if r.status_code == 429:
+                    self._record_failure()
+                    raise LLMConnectionError(
+                        "Gemini rate_limited status=429 reason=rate_limited"
+                    )
+                if r.status_code == 404:
+                    raise LLMModelNotFoundError(
+                        "Gemini model_not_found status=404 reason=model_not_found"
+                    )
+                if r.status_code >= 400:
+                    raise LLMInvalidResponseError(
+                        f"Gemini invalid_request status={r.status_code} reason=invalid_request"
+                    )
+
+                # --- Success: parse response ---
+                data = r.json() or {}
+                candidates = data.get("candidates") or []
+                text_out = ""
+                finish_reason = "stop"
+                if candidates and isinstance(candidates[0], dict):
+                    cand = candidates[0]
+                    finish_reason = str(cand.get("finishReason") or "stop")
+                    content_data = cand.get("content") or {}
+                    parts = content_data.get("parts") or []
+                    if parts and isinstance(parts[0], dict):
+                        text_out = str(parts[0].get("text") or "")
+
+                usage = data.get("usageMetadata") or {}
+                prompt_tokens = int(usage.get("promptTokenCount") or -1)
+                completion_tokens = int(usage.get("candidatesTokenCount") or -1)
+                total_tokens = int(usage.get("totalTokenCount") or -1)
+
+                if prompt_tokens < 0:
+                    prompt_tokens = int(prompt_tokens_est)
+
+                # --- Record success ---
+                self._record_success(total_tokens if total_tokens > 0 else 0)
+
+                if _metrics_enabled():
+                    metrics_logger.info(
+                        "llm_call backend=%s model=%s latency_ms=%s prompt_tokens=%s "
+                        "completion_tokens=%s total_tokens=%s attempt=%s",
+                        self.backend_name,
+                        self.model_name,
+                        elapsed_ms,
+                        prompt_tokens,
+                        completion_tokens,
+                        total_tokens,
+                        attempt,
+                    )
+
+                return LLMResponse(
+                    content=str(text_out or "").strip(),
+                    model=self._model,
+                    tokens_used=total_tokens,
+                    finish_reason=finish_reason,
+                )
+
+            except requests.Timeout as e:
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                last_exception = e
+                if _metrics_enabled():
+                    metrics_logger.info(
+                        "llm_call_failed backend=%s model=%s latency_ms=%s "
+                        "reason=%s prompt_tokens=%s attempt=%s",
+                        self.backend_name,
+                        self.model_name,
+                        elapsed_ms,
+                        "timeout",
+                        int(prompt_tokens_est),
+                        attempt,
+                    )
+                # Timeout is retryable
+                if attempt < self._max_retries:
+                    delay = _calculate_backoff(attempt)
+                    logger.warning(
+                        "[GEMINI] Timeout attempt=%d/%d backoff=%.1fs",
+                        attempt,
+                        self._max_retries,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                self._record_failure()
+                raise LLMTimeoutError(
+                    f"Gemini timeout reason=timeout timeout_s={self._timeout_seconds} "
+                    f"attempts={self._max_retries}"
+                ) from e
+
+            except requests.RequestException as e:
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                last_exception = e
+                if _metrics_enabled():
+                    metrics_logger.info(
+                        "llm_call_failed backend=%s model=%s latency_ms=%s "
+                        "reason=%s prompt_tokens=%s attempt=%s",
+                        self.backend_name,
+                        self.model_name,
+                        elapsed_ms,
+                        "connection_error",
+                        int(prompt_tokens_est),
+                        attempt,
+                    )
+                # Connection errors are retryable
+                if attempt < self._max_retries:
+                    delay = _calculate_backoff(attempt)
+                    logger.warning(
+                        "[GEMINI] Connection error attempt=%d/%d backoff=%.1fs",
+                        attempt,
+                        self._max_retries,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                self._record_failure()
                 raise LLMConnectionError(
-                    f"Gemini auth_error status={r.status_code} reason=auth_error"
-                )
-            if r.status_code == 429:
-                raise LLMConnectionError("Gemini rate_limited status=429 reason=rate_limited")
-            if r.status_code == 404:
-                raise LLMModelNotFoundError("Gemini model_not_found status=404 reason=model_not_found")
-            if r.status_code >= 400:
-                # Do not include response body (avoid accidentally logging user content).
+                    f"Gemini connection_error reason=connection_error "
+                    f"attempts={self._max_retries}"
+                ) from e
+
+            except (LLMConnectionError, LLMModelNotFoundError, LLMTimeoutError, LLMInvalidResponseError):
+                raise
+
+            except Exception as e:
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                if _metrics_enabled():
+                    metrics_logger.info(
+                        "llm_call_failed backend=%s model=%s latency_ms=%s "
+                        "reason=%s prompt_tokens=%s attempt=%s",
+                        self.backend_name,
+                        self.model_name,
+                        elapsed_ms,
+                        "parse_error",
+                        int(prompt_tokens_est),
+                        attempt,
+                    )
                 raise LLMInvalidResponseError(
-                    f"Gemini invalid_request status={r.status_code} reason=invalid_request"
-                )
+                    f"Gemini parse_error reason=parse_error"
+                ) from e
 
-            data = r.json() or {}
-            candidates = data.get("candidates") or []
-            text_out = ""
-            finish_reason = "stop"
-            if candidates and isinstance(candidates[0], dict):
-                cand = candidates[0]
-                finish_reason = str(cand.get("finishReason") or "stop")
-                content = cand.get("content") or {}
-                parts = content.get("parts") or []
-                if parts and isinstance(parts[0], dict):
-                    text_out = str(parts[0].get("text") or "")
+        # Should not reach here, but safety net
+        self._record_failure()
+        raise LLMConnectionError(
+            f"Gemini retries_exhausted reason=retries_exhausted attempts={self._max_retries}"
+        )
 
-            usage = data.get("usageMetadata") or {}
-            prompt_tokens = int(usage.get("promptTokenCount") or -1)
-            completion_tokens = int(usage.get("candidatesTokenCount") or -1)
-            total_tokens = int(usage.get("totalTokenCount") or -1)
+    # -----------------------------------------------------------------------
+    # Circuit breaker / quota helpers
+    # -----------------------------------------------------------------------
 
-            if prompt_tokens < 0:
-                prompt_tokens = int(prompt_tokens_est)
+    def _record_success(self, tokens_used: int = 0) -> None:
+        """Record a successful API call to circuit breaker and quota tracker."""
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.record_success()
+        if self._quota_tracker is not None:
+            self._quota_tracker.record(tokens_used)
 
-            if _metrics_enabled():
-                metrics_logger.info(
-                    "llm_call backend=%s model=%s latency_ms=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s",
-                    self.backend_name,
-                    self.model_name,
-                    elapsed_ms,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                )
-
-            return LLMResponse(
-                content=str(text_out or "").strip(),
-                model=self._model,
-                tokens_used=total_tokens,
-                finish_reason=finish_reason,
-            )
-
-        except requests.Timeout as e:
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
-            if _metrics_enabled():
-                metrics_logger.info(
-                    "llm_call_failed backend=%s model=%s latency_ms=%s reason=%s prompt_tokens=%s",
-                    self.backend_name,
-                    self.model_name,
-                    elapsed_ms,
-                    "timeout",
-                    int(prompt_tokens_est),
-                )
-            raise LLMTimeoutError(
-                f"Gemini timeout reason=timeout timeout_s={self._timeout_seconds}"
-            ) from e
-        except requests.RequestException as e:
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
-            if _metrics_enabled():
-                metrics_logger.info(
-                    "llm_call_failed backend=%s model=%s latency_ms=%s reason=%s prompt_tokens=%s",
-                    self.backend_name,
-                    self.model_name,
-                    elapsed_ms,
-                    "connection_error",
-                    int(prompt_tokens_est),
-                )
-            raise LLMConnectionError(
-                f"Gemini connection_error reason=connection_error"
-            ) from e
-        except (LLMConnectionError, LLMModelNotFoundError, LLMTimeoutError, LLMInvalidResponseError):
-            # Preserve upstream reason codes.
-            raise
-        except Exception as e:
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
-            if _metrics_enabled():
-                metrics_logger.info(
-                    "llm_call_failed backend=%s model=%s latency_ms=%s reason=%s prompt_tokens=%s",
-                    self.backend_name,
-                    self.model_name,
-                    elapsed_ms,
-                    "parse_error",
-                    int(prompt_tokens_est),
-                )
-            raise LLMInvalidResponseError(f"Gemini parse_error reason=parse_error") from e
+    def _record_failure(self) -> None:
+        """Record a failed API call to circuit breaker."""
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.record_failure()
 
     def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
         messages = [LLMMessage(role="user", content=prompt)]
@@ -249,6 +413,49 @@ def _metrics_enabled() -> bool:
     if not raw:
         return False
     return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _calculate_backoff(
+    attempt: int,
+    retry_after_header: Optional[float] = None,
+) -> float:
+    """Calculate exponential backoff delay with jitter.
+
+    If the server provided a Retry-After header, honour it (capped).
+    Otherwise use exponential backoff: base * factor^(attempt-1).
+    """
+    if retry_after_header is not None and retry_after_header > 0:
+        return min(retry_after_header, RETRY_MAX_DELAY)
+
+    import random
+    delay = RETRY_BASE_DELAY * (RETRY_BACKOFF_FACTOR ** (attempt - 1))
+    # Add ±25 % jitter to avoid thundering herd
+    jitter = delay * 0.25 * (2 * random.random() - 1)
+    return min(delay + jitter, RETRY_MAX_DELAY)
+
+
+def _parse_rate_limit_remaining(headers: dict) -> Optional[int]:
+    """Parse X-RateLimit-Remaining from response headers."""
+    for key in ("X-RateLimit-Remaining", "x-ratelimit-remaining"):
+        val = headers.get(key)
+        if val is not None:
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
+def _parse_retry_after(headers: dict) -> Optional[float]:
+    """Parse Retry-After header (seconds) from response headers."""
+    for key in ("Retry-After", "retry-after"):
+        val = headers.get(key)
+        if val is not None:
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                pass
+    return None
 
 
 def _estimate_prompt_tokens(payload: dict) -> int:

@@ -195,11 +195,13 @@ def test_gemini_client_emits_metrics_and_reason_codes(monkeypatch: pytest.Monkey
     # Rate-limited reason code
     class _Resp429:
         status_code = 429
+        headers = {}
 
         def json(self):
             return {}
 
     monkeypatch.setattr("requests.post", lambda *_a, **_k: _Resp429())
+    monkeypatch.setattr("bantz.llm.gemini_client.time.sleep", lambda _: None)
 
     with pytest.raises(LLMConnectionError) as ei:
         c.complete_text(prompt="hello", temperature=0.0, max_tokens=5)
