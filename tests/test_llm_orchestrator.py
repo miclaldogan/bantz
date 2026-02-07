@@ -159,7 +159,7 @@ def test_scenario_1_smalltalk():
     orchestrator = JarvisLLMOrchestrator(llm=mock_llm)
     tools = ToolRegistry()
     event_bus = EventBus()
-    config = OrchestratorConfig(debug=True)
+    config = OrchestratorConfig(debug=True, enable_preroute=False)
     
     loop = OrchestratorLoop(orchestrator, tools, event_bus, config)
     
@@ -431,7 +431,7 @@ def test_multi_turn_state_persistence():
     orchestrator = JarvisLLMOrchestrator(llm=mock_llm)
     tools = ToolRegistry()
     event_bus = EventBus()
-    config = OrchestratorConfig(debug=True)
+    config = OrchestratorConfig(debug=True, enable_preroute=False)
     
     loop = OrchestratorLoop(orchestrator, tools, event_bus, config)
     state = OrchestratorState()

@@ -23,6 +23,7 @@ from bantz.brain.orchestrator_state import OrchestratorState
 from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
 from bantz.brain.memory_lite import DialogSummaryManager, CompactSummary
 from bantz.core.events import EventBus, EventType
+from bantz.routing.preroute import PreRouter, IntentCategory, LocalResponseGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -344,6 +345,7 @@ class OrchestratorConfig:
     memory_max_turns: int = 10  # Memory-lite max turns (Issue #368)
     memory_pii_filter: bool = True  # Memory-lite PII filtering (Issue #368)
     tool_timeout_seconds: float = 30.0  # Per-tool execution timeout (Issue #431)
+    enable_preroute: bool = True  # Issue #407: Rule-based pre-route bypass
     
     def __post_init__(self):
         if self.require_confirmation_for is None:
@@ -411,6 +413,10 @@ class OrchestratorLoop:
         else:
             self.safety_guard = None
         
+        # Issue #407: Pre-route rule engine — bypass LLM for obvious patterns
+        self.prerouter = PreRouter()
+        self._local_responder = LocalResponseGenerator()
+
         # Route+Intent → Mandatory Tools mapping (Issue #282)
         # Prevents hallucination when LLM returns empty tool_plan for queries
         self._mandatory_tool_map: dict[tuple[str, str], list[str]] = {
@@ -551,16 +557,21 @@ class OrchestratorLoop:
             # Phase 1: LLM Planning (route, intent, tools, confirmation)
             orchestrator_output = self._llm_planning_phase(user_input, state)
             
-            # Phase 2: Tool Execution (with confirmation firewall)
-            tool_results = self._execute_tools_phase(orchestrator_output, state)
-            
-            # Phase 3: LLM Finalization (generate final response with tool results)
-            final_output = self._llm_finalization_phase(
-                user_input,
-                orchestrator_output,
-                tool_results,
-                state,
-            )
+            # Issue #407: Full preroute bypass → skip tools + finalization
+            if orchestrator_output.raw_output.get("preroute_complete"):
+                final_output = orchestrator_output
+                tool_results = []
+            else:
+                # Phase 2: Tool Execution (with confirmation firewall)
+                tool_results = self._execute_tools_phase(orchestrator_output, state)
+                
+                # Phase 3: LLM Finalization (generate final response with tool results)
+                final_output = self._llm_finalization_phase(
+                    user_input,
+                    orchestrator_output,
+                    tool_results,
+                    state,
+                )
             
             # Phase 4: Update State (rolling summary, conversation history, trace)
             self._update_state_phase(user_input, final_output, tool_results, state)
@@ -618,16 +629,21 @@ class OrchestratorLoop:
         # Phase 1: plan
         orchestrator_output = self._llm_planning_phase(user_input, state)
 
-        # Phase 2: execute tools
-        tool_results = self._execute_tools_phase(orchestrator_output, state)
+        # Issue #407: Full preroute bypass → skip tools + finalization
+        if orchestrator_output.raw_output.get("preroute_complete"):
+            final_output = orchestrator_output
+            tool_results = []
+        else:
+            # Phase 2: execute tools
+            tool_results = self._execute_tools_phase(orchestrator_output, state)
 
-        # Phase 3: finalize
-        final_output = self._llm_finalization_phase(
-            user_input,
-            orchestrator_output,
-            tool_results,
-            state,
-        )
+            # Phase 3: finalize
+            final_output = self._llm_finalization_phase(
+                user_input,
+                orchestrator_output,
+                tool_results,
+                state,
+            )
 
         # Phase 4: update state
         self._update_state_phase(user_input, final_output, tool_results, state)
@@ -741,6 +757,105 @@ class OrchestratorLoop:
         LLM returns:
         - Orchestrator output (route, intent, tools, confirmation, reasoning)
         """
+        # Issue #407: Pre-route check — bypass LLM for obvious patterns
+        preroute_match = None
+        _preroute_hint = None
+
+        if self.config.enable_preroute:
+            preroute_match = self.prerouter.route(user_input)
+        else:
+            from bantz.routing.preroute import PreRouteMatch
+            preroute_match = PreRouteMatch.no_match()
+
+        if preroute_match.should_bypass(min_confidence=0.9):
+            intent = preroute_match.intent
+            handler_type = intent.handler_type
+
+            if handler_type == "local":
+                # Greeting, farewell, thanks, smalltalk → local reply, skip 3B + Gemini
+                reply = self._local_responder.generate(intent)
+                output = OrchestratorOutput(
+                    route="smalltalk",
+                    calendar_intent="none",
+                    slots={},
+                    confidence=preroute_match.confidence,
+                    tool_plan=[],
+                    assistant_reply=reply,
+                    raw_output={
+                        "preroute": True,
+                        "preroute_complete": True,
+                        "rule": preroute_match.rule_name,
+                        "intent": intent.value,
+                    },
+                )
+                self.event_bus.publish("preroute.bypass", {
+                    "intent": intent.value,
+                    "confidence": preroute_match.confidence,
+                    "rule": preroute_match.rule_name,
+                    "handler_type": handler_type,
+                })
+                logger.info(
+                    "[PREROUTE] Bypass LLM: intent=%s conf=%.2f rule=%s",
+                    intent.value, preroute_match.confidence, preroute_match.rule_name,
+                )
+                return output
+
+            elif handler_type == "system":
+                # Time/date/screenshot → system route with tool plan, skip 3B only
+                _sys_tool_map = {
+                    IntentCategory.TIME_QUERY: (["time.now"], "time"),
+                    IntentCategory.DATE_QUERY: (["time.now"], "time"),
+                    IntentCategory.SCREENSHOT: (["system.screenshot"], "query"),
+                }
+                if intent in _sys_tool_map:
+                    tools, cal_intent = _sys_tool_map[intent]
+                    output = OrchestratorOutput(
+                        route="system",
+                        calendar_intent=cal_intent,
+                        slots={},
+                        confidence=preroute_match.confidence,
+                        tool_plan=tools,
+                        assistant_reply="",
+                        raw_output={
+                            "preroute": True,
+                            "rule": preroute_match.rule_name,
+                            "intent": intent.value,
+                        },
+                    )
+                    self.event_bus.publish("preroute.bypass", {
+                        "intent": intent.value,
+                        "confidence": preroute_match.confidence,
+                        "rule": preroute_match.rule_name,
+                        "handler_type": handler_type,
+                    })
+                    logger.info(
+                        "[PREROUTE] Bypass LLM (system): intent=%s conf=%.2f rule=%s",
+                        intent.value, preroute_match.confidence, preroute_match.rule_name,
+                    )
+                    return output
+
+                # Unknown system tool (volume, brightness, etc.): fall through
+
+            # Calendar / other high-confidence: fall through to hint injection
+
+        # Issue #407: Prepare preroute hint for medium-confidence or calendar bypass
+        if preroute_match.matched and preroute_match.confidence >= 0.5:
+            _preroute_hint = {
+                "preroute_intent": preroute_match.intent.value,
+                "preroute_confidence": round(preroute_match.confidence, 2),
+                "preroute_rule": preroute_match.rule_name,
+            }
+            self.event_bus.publish("preroute.hint", {
+                "intent": preroute_match.intent.value,
+                "confidence": preroute_match.confidence,
+                "rule": preroute_match.rule_name,
+            })
+            if self.config.debug:
+                logger.debug(
+                    "[PREROUTE] Hint: intent=%s conf=%.2f",
+                    preroute_match.intent.value, preroute_match.confidence,
+                )
+
         # Build context for LLM
         context = state.get_context_for_llm()
         conversation_history = context.get("recent_conversation", [])
@@ -807,6 +922,12 @@ class OrchestratorLoop:
         # because get_context_for_llm limits to [-2:] for legacy compatibility
         if session_context and state.conversation_history:
             session_context["recent_conversation"] = state.conversation_history[-3:]  # Last 3 turns
+
+        # Issue #407: Merge preroute hint into session_context
+        if _preroute_hint:
+            if session_context is None:
+                session_context = {}
+            session_context["preroute_hint"] = _preroute_hint
 
         # Call orchestrator with enhanced summary + session context
         output = self.orchestrator.route(
