@@ -128,4 +128,5 @@ class OrchestratorState:
         self.trace = {}
         self.conversation_history = []
         self.turn_count = 0
+        self.session_context = None
         self.reference_table = None

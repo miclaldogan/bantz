@@ -413,6 +413,10 @@ class OrchestratorLoop:
         else:
             self.safety_guard = None
         
+        # Issue #417: Session context cache (TTL 60s) — avoid rebuild every turn
+        from bantz.brain.session_context_cache import SessionContextCache
+        self._session_ctx_cache = SessionContextCache(ttl_seconds=60.0)
+
         # Issue #407: Pre-route rule engine — bypass LLM for obvious patterns
         self.prerouter = PreRouter()
         self._local_responder = LocalResponseGenerator()
@@ -549,6 +553,10 @@ class OrchestratorLoop:
             state = OrchestratorState()
         
         start_time = time.time()
+
+        # Issue #417: Build session context once per turn (cached with TTL)
+        if not state.session_context:
+            state.session_context = self._session_ctx_cache.get_or_build()
         
         # Emit turn start event
         self.event_bus.publish("turn.start", {"user_input": user_input})
@@ -914,31 +922,20 @@ class OrchestratorLoop:
             logger.debug(f"  Recent History: {len(conversation_history)} turns")
             logger.debug(f"  Tool Results: {len(tool_results)}")
         
-        # Session context injection (Issue #191): datetime/location hints.
-        # Issue #339: Add recent conversation to session_context for multi-turn memory
-        # Issue #359: Use state.session_context if available (preserves timezone/locale)
+        # Issue #417: Use cached session context from state (built once in process_turn)
+        # Issue #359: state.session_context is always set by process_turn (or externally)
         session_context = state.session_context
-        
         if not session_context:
-            # Fallback: build fresh session context
-            try:
-                from bantz.brain.prompt_engineering import build_session_context
-                session_context = build_session_context()
-            except Exception:
-                session_context = None
+            # Fallback: build fresh if somehow missing (e.g. direct _llm_planning_phase call)
+            session_context = self._session_ctx_cache.get_or_build()
+            state.session_context = session_context
         
-        # Add recent conversation for anaphora resolution (Issue #339)
-        # This helps LLM understand references like "saat kaçta" (what time) 
-        # by looking at previous turns ("bugün için toplantı var")
-        # NOTE: Use state.conversation_history directly (not from get_context_for_llm)
-        # because get_context_for_llm limits to [-2:] for legacy compatibility
-        if session_context and state.conversation_history:
-            session_context["recent_conversation"] = state.conversation_history[-3:]  # Last 3 turns
+        # Issue #339: Add recent conversation for anaphora / multi-turn
+        if state.conversation_history:
+            session_context["recent_conversation"] = state.conversation_history[-3:]
 
         # Issue #407: Merge preroute hint into session_context
         if _preroute_hint:
-            if session_context is None:
-                session_context = {}
             session_context["preroute_hint"] = _preroute_hint
 
         # Call orchestrator with enhanced summary + session context
