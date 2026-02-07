@@ -407,7 +407,7 @@ def create_time_rule() -> PreRouteRule:
         name="time_query",
         intent=IntentCategory.TIME_QUERY,
         patterns=[
-            r"saat\s+kaç",
+            r"saat\s+kaç\b",
             r"kaç\s+saat",
             r"şu\s*an(?:ki)?\s+saat",
             r"what\s+time",
@@ -424,7 +424,7 @@ def create_date_rule() -> PreRouteRule:
         intent=IntentCategory.DATE_QUERY,
         patterns=[
             r"bugün\s+(?:hangi\s+)?gün",
-            r"bugün\s+ne(?:ydi)?",
+            r"bugün\s+ne(?:ydi)?\b",
             r"hangi\s+gün",
             r"tarih\s+ne",
             r"what\s+(?:day|date)",

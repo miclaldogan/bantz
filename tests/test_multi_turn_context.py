@@ -22,7 +22,7 @@ def orchestrator_loop():
         orchestrator=mock_orchestrator,
         tools=mock_tools,
         event_bus=mock_event_bus,
-        config=OrchestratorConfig(enable_safety_guard=False, debug=True),
+        config=OrchestratorConfig(enable_safety_guard=False, debug=True, enable_preroute=False),
     )
 
 
