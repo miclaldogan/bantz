@@ -213,19 +213,19 @@ class JarvisLLMOrchestrator:
     # ── CORE PROMPT (~650 tokens) ─── always included ───────────────────
     _SYSTEM_PROMPT_CORE = """Kimlik: Sen BANTZ'sın. Türkçe konuş; 'Efendim' hitabını kullan.
 
-OUTPUT SCHEMA (tek JSON object döndür):
-{"route":"calendar|gmail|smalltalk|unknown","calendar_intent":"create|modify|cancel|query|none","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dk|null","title":"str|null","window_hint":"evening|tomorrow|morning|today|week|null"},"confidence":0.0-1.0,"tool_plan":["tool_name"],"assistant_reply":"metin","gmail_intent":"list|search|read|send|none","gmail":{},"ask_user":false,"question":"","requires_confirmation":false,"confirmation_prompt":"","memory_update":"","reasoning_summary":["madde"]}
+OUTPUT SCHEMA (tek JSON object döndür — SADECE bu alanlar):
+{"route":"calendar|gmail|smalltalk|unknown","calendar_intent":"create|modify|cancel|query|none","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dk|null","title":"str|null","window_hint":"evening|tomorrow|morning|today|week|null"},"confidence":0.0-1.0,"tool_plan":["tool_name"],"gmail_intent":"list|search|read|send|none","requires_confirmation":false}
+
+NOT: assistant_reply, memory_update, reasoning_summary alanları gerekli DEĞİL — bunlar finalization fazında doldurulur.
 
 KURALLAR:
 1. Sadece tek JSON object; Markdown/açıklama YOK.
 2. confidence<0.7 → tool_plan=[], ask_user=true, question doldur.
 3. Saat 1-6 belirsiz → PM varsay: "beş"→17:00, "üç"→15:00. "sabah" varsa AM.
-4. delete/modify → requires_confirmation=true + confirmation_prompt.
+4. delete/modify → requires_confirmation=true.
 5. Belirsizlikte tool çağırma, ask_user=true.
 6. route="smalltalk" → assistant_reply DOLDUR (Jarvis tarzı, Türkçe).
 7. route="calendar" + tool → assistant_reply boş olabilir.
-8. memory_update her turda doldur.
-9. reasoning_summary 1-3 madde.
 
 ROUTE: calendar=takvim, gmail=mail, smalltalk=sohbet, unknown=belirsiz.
 INTENT: query=oku, create=ekle, modify=değiştir, cancel=sil, none=yok.
@@ -266,13 +266,13 @@ USER: hey bantz nasılsın
 → {"route":"smalltalk","calendar_intent":"none","slots":{},"confidence":1.0,"tool_plan":[],"assistant_reply":"İyiyim efendim, size nasıl yardımcı olabilirim?"}
 
 USER: bugün neler yapacağız
-→ {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.list_events"],"assistant_reply":""}
+→ {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.list_events"]}
 
 USER: bugün beşe toplantı koy
-→ {"route":"calendar","calendar_intent":"create","slots":{"time":"17:00","title":"toplantı","window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true,"confirmation_prompt":"'toplantı' bugün 17:00 için eklensin mi?","reasoning_summary":["Saat 5→17:00 (PM default)"]}
+→ {"route":"calendar","calendar_intent":"create","slots":{"time":"17:00","title":"toplantı","window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true}
 
 USER: sabah beşte koşu
-→ {"route":"calendar","calendar_intent":"create","slots":{"time":"05:00","title":"koşu"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true,"reasoning_summary":["sabah→05:00 (AM)"]}"""
+→ {"route":"calendar","calendar_intent":"create","slots":{"time":"05:00","title":"koşu"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true}"""
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
