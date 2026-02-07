@@ -183,6 +183,160 @@ def _prepare_tool_results_for_finalizer(
     return truncated_results, True
 
 
+def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
+    """Build a tool-aware success summary instead of generic 'Tamamlandı efendim'.
+    
+    Issue #370: When assistant_reply is empty after successful tool execution,
+    generate a meaningful summary from tool results instead of a generic message.
+    
+    Heuristics:
+    - list/query tools → count items found
+    - create tools → confirm what was created  
+    - send tools → confirm what was sent
+    - Multiple tools → summarize each
+    
+    Args:
+        tool_results: List of tool result dicts with tool name, success, raw_result
+        
+    Returns:
+        User-friendly Turkish summary of tool results
+    """
+    if not tool_results:
+        return "Tamamlandı efendim."
+
+    parts: list[str] = []
+    
+    for r in tool_results:
+        tool_name = str(r.get("tool") or "")
+        raw = r.get("raw_result")
+        success = r.get("success", False)
+        
+        if not success:
+            continue
+        
+        # Calendar query tools: count events
+        if tool_name in ("calendar.list_events", "calendar.find_free_slots"):
+            count = _count_items(raw)
+            if tool_name == "calendar.list_events":
+                if count == 0:
+                    parts.append("Takvimde etkinlik bulunamadı efendim.")
+                elif count == 1:
+                    parts.append("1 etkinlik bulundu efendim.")
+                else:
+                    parts.append(f"{count} etkinlik bulundu efendim.")
+            else:
+                if count == 0:
+                    parts.append("Uygun boş zaman dilimi bulunamadı efendim.")
+                else:
+                    parts.append(f"{count} uygun zaman dilimi bulundu efendim.")
+        
+        # Calendar create
+        elif tool_name == "calendar.create_event":
+            title = _extract_field(raw, "title", "summary")
+            if title:
+                parts.append(f"'{title}' etkinliği oluşturuldu efendim.")
+            else:
+                parts.append("Etkinlik oluşturuldu efendim.")
+        
+        # Gmail list/search
+        elif tool_name in ("gmail.list_messages", "gmail.smart_search"):
+            count = _count_items(raw)
+            if count == 0:
+                parts.append("Mesaj bulunamadı efendim.")
+            elif count == 1:
+                parts.append("1 mesaj bulundu efendim.")
+            else:
+                parts.append(f"{count} mesaj bulundu efendim.")
+        
+        # Gmail unread count
+        elif tool_name == "gmail.unread_count":
+            count = _extract_count(raw)
+            if count is not None:
+                if count == 0:
+                    parts.append("Okunmamış mesajınız yok efendim.")
+                else:
+                    parts.append(f"{count} okunmamış mesajınız var efendim.")
+            else:
+                parts.append("Okunmamış mesaj sayısı alındı efendim.")
+        
+        # Gmail send
+        elif tool_name in ("gmail.send", "gmail.send_to_contact", "gmail.send_draft"):
+            parts.append("Mail gönderildi efendim.")
+        
+        # Gmail read
+        elif tool_name == "gmail.get_message":
+            parts.append("Mesaj getirildi efendim.")
+        
+        # Gmail draft
+        elif tool_name == "gmail.create_draft":
+            parts.append("Taslak oluşturuldu efendim.")
+        
+        # Contacts
+        elif tool_name == "contacts.list":
+            count = _count_items(raw)
+            parts.append(f"{count} kişi listelendi efendim." if count > 0 else "Kayıtlı kişi bulunamadı efendim.")
+        
+        elif tool_name == "contacts.resolve":
+            parts.append("Kişi bilgisi çözümlendi efendim.")
+        
+        # Generic fallback for unknown tools
+        else:
+            tool_short = tool_name.split(".")[-1] if "." in tool_name else tool_name
+            parts.append(f"{tool_short} tamamlandı efendim.")
+    
+    if not parts:
+        # All tools either failed or unrecognized
+        if len(tool_results) > 1:
+            return f"{len(tool_results)} işlem tamamlandı efendim."
+        return "Tamamlandı efendim."
+    
+    if len(parts) == 1:
+        return parts[0]
+    
+    # Multiple tool summaries: join with newlines
+    return "\n".join(parts)
+
+
+def _count_items(raw: Any) -> int:
+    """Count items from a tool result (list, dict with items/events, or count field)."""
+    if isinstance(raw, list):
+        return len(raw)
+    if isinstance(raw, dict):
+        # Check for nested lists
+        for key in ("events", "items", "messages", "results", "data", "contacts", "slots"):
+            val = raw.get(key)
+            if isinstance(val, list):
+                return len(val)
+        # Check for count fields
+        for key in ("count", "total", "total_count"):
+            val = raw.get(key)
+            if isinstance(val, (int, float)):
+                return int(val)
+    return 0
+
+
+def _extract_count(raw: Any) -> int | None:
+    """Extract a count value from a tool result."""
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    if isinstance(raw, dict):
+        for key in ("count", "total", "unread_count", "value"):
+            val = raw.get(key)
+            if isinstance(val, (int, float)):
+                return int(val)
+    return None
+
+
+def _extract_field(raw: Any, *field_names: str) -> str | None:
+    """Extract a string field from a tool result dict."""
+    if isinstance(raw, dict):
+        for name in field_names:
+            val = raw.get(name)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return None
+
+
 @dataclass
 class OrchestratorConfig:
     """Configuration for orchestrator loop."""
@@ -1544,10 +1698,17 @@ class OrchestratorLoop:
         if orchestrator_output.assistant_reply:
             return orchestrator_output
         
-        # Generate generic success message (preserve orchestrator fields)
-        success_msg = "Tamamlandı efendim."
-        if len(tool_results) > 1:
-            success_msg = f"{len(tool_results)} işlem tamamlandı efendim."
+        # Issue #370: Try fast finalizer first for tool-aware summary
+        try:
+            fast_summary = _fast_finalize_with_planner()
+            if fast_summary:
+                from dataclasses import replace
+                return replace(orchestrator_output, assistant_reply=fast_summary)
+        except Exception:
+            pass
+        
+        # Issue #370: Generate tool-aware success message instead of generic "Tamamlandı"
+        success_msg = _build_tool_success_summary(tool_results)
         
         from dataclasses import replace
         return replace(orchestrator_output, assistant_reply=success_msg)
