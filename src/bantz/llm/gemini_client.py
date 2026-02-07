@@ -4,7 +4,7 @@ import json
 import logging
 import time
 import os
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 import requests
 
@@ -57,6 +57,26 @@ RETRY_BASE_DELAY = 1.0  # seconds
 RETRY_MAX_DELAY = 30.0  # seconds
 RETRY_BACKOFF_FACTOR = 2.0
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
+
+
+from dataclasses import dataclass
+
+
+@dataclass
+class GeminiStreamChunk:
+    """A chunk from Gemini streaming response.
+
+    Attributes:
+        content: Text content of this chunk.
+        is_first_token: True for the very first content chunk.
+        ttft_ms: Time-to-first-token in ms (set only on first chunk).
+        finish_reason: If this is the final chunk, the finish reason.
+    """
+
+    content: str
+    is_first_token: bool = False
+    ttft_ms: Optional[int] = None
+    finish_reason: Optional[str] = None
 
 
 class GeminiClient(LLMClient):
@@ -401,6 +421,249 @@ class GeminiClient(LLMClient):
         """Record a failed API call to circuit breaker."""
         if self._circuit_breaker is not None:
             self._circuit_breaker.record_failure()
+
+    # -----------------------------------------------------------------------
+    # Streaming (Issue #411)
+    # -----------------------------------------------------------------------
+
+    def chat_stream(
+        self,
+        messages: List[LLMMessage],
+        *,
+        temperature: float = 0.4,
+        max_tokens: int = 512,
+    ) -> Iterator[GeminiStreamChunk]:
+        """Stream a chat completion via Gemini ``streamGenerateContent`` API.
+
+        Yields ``GeminiStreamChunk`` objects as partial content arrives.
+        The very first chunk has ``is_first_token=True`` and ``ttft_ms`` set.
+
+        Circuit breaker and quota pre-flight checks are performed before the
+        HTTP call, same as ``chat_detailed``.
+
+        Args:
+            messages: Chat messages.
+            temperature: Sampling temperature.
+            max_tokens: Maximum output tokens.
+
+        Yields:
+            GeminiStreamChunk with incremental text and TTFT metadata.
+
+        Example::
+
+            for chunk in client.chat_stream(messages):
+                if chunk.is_first_token:
+                    print(f"[TTFT: {chunk.ttft_ms}ms]")
+                print(chunk.content, end="", flush=True)
+        """
+        if not self._api_key:
+            raise LLMConnectionError("Gemini API key missing")
+        if not self._model:
+            raise LLMInvalidResponseError("Gemini model not set")
+
+        # Pre-flight: circuit breaker & quota
+        if self._circuit_breaker is not None:
+            try:
+                self._circuit_breaker.check()
+            except CircuitOpen:
+                logger.warning("[GEMINI] Circuit breaker OPEN — skipping stream call")
+                raise LLMConnectionError(
+                    "Gemini circuit_open reason=circuit_open — "
+                    "Gemini geçici olarak devre dışı, yerel model kullanılıyor"
+                )
+
+        if self._quota_tracker is not None:
+            try:
+                self._quota_tracker.check()
+            except QuotaExceeded as exc:
+                logger.warning("[GEMINI] Quota exceeded: %s", exc)
+                raise LLMConnectionError(
+                    "Gemini quota_exceeded reason=quota_exceeded — "
+                    "Gemini quota aşıldı, yerel model kullanılıyor"
+                )
+
+        url = f"{self._base_url}/v1beta/models/{self._model}:streamGenerateContent"
+
+        # Build payload (same as chat_detailed)
+        system_lines: list[str] = []
+        contents = []
+        for m in messages:
+            role = (m.role or "").strip().lower()
+            content = str(m.content or "")
+            if role == "system":
+                system_lines.append(content)
+                continue
+            if role in {"assistant", "model"}:
+                gemini_role = "model"
+            else:
+                gemini_role = "user"
+            safe_text = minimize_for_cloud(redact_for_cloud(content))
+            contents.append({"role": gemini_role, "parts": [{"text": safe_text}]})
+
+        payload: dict = {
+            "contents": contents or [{"role": "user", "parts": [{"text": ""}]}],
+            "generationConfig": {
+                "temperature": float(temperature),
+                "maxOutputTokens": int(max_tokens),
+            },
+        }
+
+        if system_lines:
+            safe_sys = minimize_for_cloud(redact_for_cloud("\n\n".join(system_lines)))
+            payload["systemInstruction"] = {"parts": [{"text": safe_sys}]}
+
+        t0 = time.perf_counter()
+        ttft_measured = False
+        ttft_ms: Optional[int] = None
+        chunk_count = 0
+        total_text = ""
+
+        try:
+            r = requests.post(
+                url,
+                params={"key": self._api_key},
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                timeout=self._timeout_seconds,
+                stream=True,
+            )
+
+            if r.status_code != 200:
+                self._record_failure()
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                if r.status_code == 429:
+                    raise LLMConnectionError(
+                        "Gemini rate_limited status=429 reason=rate_limited"
+                    )
+                if r.status_code in {401, 403}:
+                    raise LLMConnectionError(
+                        f"Gemini auth_error status={r.status_code} reason=auth_error"
+                    )
+                if r.status_code == 404:
+                    raise LLMModelNotFoundError(
+                        "Gemini model_not_found status=404 reason=model_not_found"
+                    )
+                if r.status_code >= 500:
+                    raise LLMConnectionError(
+                        f"Gemini server_error status={r.status_code} reason=server_error"
+                    )
+                raise LLMInvalidResponseError(
+                    f"Gemini invalid_request status={r.status_code} reason=invalid_request"
+                )
+
+            # Gemini streamGenerateContent returns JSON array elements as
+            # individual JSON objects separated by newlines (NDJSON-like).
+            # We parse each chunk as it arrives.
+            buffer = ""
+            for raw_line in r.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+
+                line = raw_line.strip()
+                # Skip array delimiters
+                if line in ("[", "]", ","):
+                    continue
+                # Strip leading comma if present
+                if line.startswith(","):
+                    line = line[1:].strip()
+
+                # Accumulate lines that might be partial JSON
+                buffer += line
+                try:
+                    chunk_data = json.loads(buffer)
+                    buffer = ""
+                except json.JSONDecodeError:
+                    continue
+
+                # Extract text from chunk
+                candidates = chunk_data.get("candidates") or []
+                if not candidates or not isinstance(candidates[0], dict):
+                    continue
+
+                cand = candidates[0]
+                content_data = cand.get("content") or {}
+                parts = content_data.get("parts") or []
+                text_part = ""
+                if parts and isinstance(parts[0], dict):
+                    text_part = str(parts[0].get("text") or "")
+
+                finish_reason = cand.get("finishReason")
+
+                if text_part:
+                    chunk_count += 1
+                    total_text += text_part
+
+                    if not ttft_measured:
+                        ttft_ms = int((time.perf_counter() - t0) * 1000)
+                        ttft_measured = True
+
+                    yield GeminiStreamChunk(
+                        content=text_part,
+                        is_first_token=(chunk_count == 1),
+                        ttft_ms=ttft_ms if chunk_count == 1 else None,
+                        finish_reason=str(finish_reason) if finish_reason else None,
+                    )
+
+                elif finish_reason:
+                    yield GeminiStreamChunk(
+                        content="",
+                        is_first_token=False,
+                        ttft_ms=None,
+                        finish_reason=str(finish_reason),
+                    )
+
+            # Record success
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            self._record_success(0)  # Token count not easily available in stream
+
+            if _metrics_enabled():
+                metrics_logger.info(
+                    "llm_stream backend=%s model=%s latency_ms=%s ttft_ms=%s "
+                    "chunks=%s total_chars=%s",
+                    self.backend_name,
+                    self.model_name,
+                    elapsed_ms,
+                    ttft_ms,
+                    chunk_count,
+                    len(total_text),
+                )
+
+        except requests.Timeout as e:
+            self._record_failure()
+            raise LLMTimeoutError(
+                f"Gemini timeout reason=timeout timeout_s={self._timeout_seconds}"
+            ) from e
+        except requests.RequestException as e:
+            self._record_failure()
+            raise LLMConnectionError(
+                "Gemini connection_error reason=connection_error"
+            ) from e
+        except (LLMConnectionError, LLMModelNotFoundError, LLMTimeoutError, LLMInvalidResponseError):
+            raise
+        except Exception as e:
+            raise LLMInvalidResponseError(
+                "Gemini parse_error reason=parse_error"
+            ) from e
+
+    def chat_stream_to_text(
+        self,
+        messages: List[LLMMessage],
+        *,
+        temperature: float = 0.4,
+        max_tokens: int = 512,
+    ) -> tuple[str, Optional[int]]:
+        """Stream then collect full text. Returns (text, ttft_ms).
+
+        Convenience wrapper over ``chat_stream`` for callers that want the
+        full text but also need the TTFT metric.
+        """
+        parts: list[str] = []
+        ttft: Optional[int] = None
+        for chunk in self.chat_stream(messages, temperature=temperature, max_tokens=max_tokens):
+            parts.append(chunk.content)
+            if chunk.is_first_token:
+                ttft = chunk.ttft_ms
+        return "".join(parts).strip(), ttft
 
     def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
         messages = [LLMMessage(role="user", content=prompt)]
