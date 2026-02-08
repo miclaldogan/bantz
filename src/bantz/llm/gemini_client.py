@@ -103,13 +103,26 @@ class GeminiClient(LLMClient):
         quota_tracker: Optional[QuotaTracker] = None,
         circuit_breaker: Optional[CircuitBreaker] = None,
         max_retries: int = RETRY_MAX_ATTEMPTS,
+        use_default_gates: bool = True,
     ):
         self._api_key = (api_key or "").strip()
         self._model = (model or "").strip()
         self._timeout_seconds = float(timeout_seconds)
         self._base_url = base_url.rstrip("/")
-        self._quota_tracker = quota_tracker
-        self._circuit_breaker = circuit_breaker
+
+        # Issue #593: default gates (quota + circuit) were implemented but not wired.
+        # If the caller doesn't pass explicit trackers, use shared module-level
+        # defaults to keep the system safe/stable under quota pressure.
+        self._quota_tracker = (
+            quota_tracker
+            if quota_tracker is not None
+            else (get_default_quota_tracker() if use_default_gates else None)
+        )
+        self._circuit_breaker = (
+            circuit_breaker
+            if circuit_breaker is not None
+            else (get_default_circuit_breaker() if use_default_gates else None)
+        )
         self._max_retries = max_retries
 
     @property
