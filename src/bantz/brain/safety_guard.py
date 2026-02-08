@@ -16,6 +16,8 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 from bantz.agent.tools import Tool, ToolRegistry
@@ -148,9 +150,27 @@ class SafetyGuard:
         self,
         policy: Optional[ToolSecurityPolicy] = None,
         policy_engine: Optional[PolicyEngine] = None,
+        audit_log_path: Optional[Path] = None,
+        audit_retention_days: int = 90,
     ):
         self.policy = policy or ToolSecurityPolicy()
         self.policy_engine = policy_engine
+        self._audit_retention_days = audit_retention_days
+        self._audit_logger: Optional[Any] = None
+        self._audit_log_path = audit_log_path
+
+    def _get_audit_logger(self) -> Any:
+        """Lazily initialize the persistent audit logger (Issue #423)."""
+        if self._audit_logger is None:
+            try:
+                from bantz.security.audit import AuditLogger
+                self._audit_logger = AuditLogger(
+                    log_path=self._audit_log_path,
+                )
+            except Exception as e:
+                logger.debug("[audit] Could not initialize AuditLogger: %s", e)
+                self._audit_logger = False  # sentinel: don't retry
+        return self._audit_logger if self._audit_logger is not False else None
     
     def check_tool_allowed(self, tool_name: str) -> tuple[bool, Optional[str]]:
         """Check if tool is allowed by policy.
@@ -314,8 +334,11 @@ class SafetyGuard:
         reason: str,
         metadata: Optional[dict[str, Any]] = None,
     ) -> None:
-        """Log policy decision for audit trail.
+        """Log policy decision for audit trail (Issue #423: persistent storage).
         
+        Writes to both Python logger AND persistent AuditLogger (JSON-line file
+        with rotation and retention).
+
         Args:
             decision_type: Type of decision (allow/deny/filter/validate)
             tool_name: Tool being checked
@@ -323,15 +346,100 @@ class SafetyGuard:
             reason: Reason for decision
             metadata: Additional context
         """
-        audit_entry = {
-            "decision_type": decision_type,
-            "tool_name": tool_name,
-            "allowed": allowed,
-            "reason": reason,
-            "metadata": metadata or {},
-        }
-        
         logger.info(f"[POLICY] {decision_type}: {tool_name} - {reason}")
-        
-        # TODO: Write to audit log file if configured
-        # For now, just log to logger
+
+        # ── Issue #423: Persistent audit storage ─────────────────────────
+        audit_logger = self._get_audit_logger()
+        if audit_logger is not None:
+            try:
+                from bantz.security.audit import AuditLevel
+                audit_logger.log_action(
+                    action=f"policy.{decision_type}",
+                    actor="safety_guard",
+                    resource=tool_name,
+                    outcome="allowed" if allowed else "denied",
+                    level=AuditLevel.SECURITY if not allowed else AuditLevel.INFO,
+                    decision_type=decision_type,
+                    allowed=allowed,
+                    reason=reason,
+                    **(metadata or {}),
+                )
+            except Exception as e:
+                logger.debug("[audit] Failed to write persistent audit: %s", e)
+
+    def query_audit(
+        self,
+        *,
+        last_days: Optional[int] = None,
+        action: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        outcome: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Query persistent audit trail (Issue #423).
+
+        Args:
+            last_days: Filter to last N days (default: all)
+            action: Filter by action pattern (e.g. 'policy.deny')
+            tool_name: Filter by resource (tool name, partial match)
+            outcome: Filter by outcome ('allowed' or 'denied')
+            limit: Max results
+
+        Returns:
+            List of audit entry dicts, newest first.
+        """
+        audit_logger = self._get_audit_logger()
+        if audit_logger is None:
+            return []
+
+        try:
+            start_time = None
+            if last_days is not None:
+                start_time = datetime.now() - timedelta(days=last_days)
+
+            entries = audit_logger.query(
+                start_time=start_time,
+                action=action,
+                resource=tool_name,
+                outcome=outcome,
+                limit=limit,
+            )
+            return [e.to_dict() for e in entries]
+        except Exception as e:
+            logger.debug("[audit] Query failed: %s", e)
+            return []
+
+    def cleanup_old_audit(self, retention_days: Optional[int] = None) -> int:
+        """Remove audit entries older than retention period (Issue #423).
+
+        Args:
+            retention_days: Override default retention (default: 90 days)
+
+        Returns:
+            Number of entries removed.
+        """
+        days = retention_days if retention_days is not None else self._audit_retention_days
+        audit_logger = self._get_audit_logger()
+        if audit_logger is None:
+            return 0
+
+        try:
+            cutoff = datetime.now() - timedelta(days=days)
+            # Read all entries, keep only those after cutoff
+            all_entries = audit_logger.query()
+            kept = [e for e in all_entries if e.timestamp >= cutoff]
+            removed = len(all_entries) - len(kept)
+
+            if removed > 0:
+                # Rewrite log with only kept entries
+                import threading
+                with audit_logger._lock:
+                    with open(audit_logger.log_path, "w", encoding="utf-8") as f:
+                        for entry in kept:
+                            f.write(entry.to_json() + "\n")
+                logger.info("[audit] Cleaned up %d entries older than %d days", removed, days)
+
+            return removed
+        except Exception as e:
+            logger.debug("[audit] Cleanup failed: %s", e)
+            return 0
