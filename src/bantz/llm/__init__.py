@@ -60,7 +60,7 @@ def create_fast_client(
 
     Env:
       - BANTZ_VLLM_URL (default: http://127.0.0.1:8001)
-      - BANTZ_VLLM_MODEL (default: Qwen/Qwen2.5-3B-Instruct)
+      - BANTZ_VLLM_MODEL (default: Qwen/Qwen2.5-3B-Instruct-AWQ)
 
     Tip: set model to "auto" to pick the first /v1/models entry.
     """
@@ -68,7 +68,7 @@ def create_fast_client(
     return create_client(
         "vllm",
         base_url=(base_url or os.getenv("BANTZ_VLLM_URL") or "http://127.0.0.1:8001"),
-        model=(model or os.getenv("BANTZ_VLLM_MODEL") or "Qwen/Qwen2.5-3B-Instruct"),
+        model=(model or os.getenv("BANTZ_VLLM_MODEL") or "Qwen/Qwen2.5-3B-Instruct-AWQ"),
         timeout=timeout,
     )
 

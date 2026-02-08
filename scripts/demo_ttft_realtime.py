@@ -192,7 +192,7 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default=os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct"),
+        default=os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct-AWQ"),
         help="Model name",
     )
     parser.add_argument(

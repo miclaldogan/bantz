@@ -50,7 +50,7 @@ class ClassifierConfig:
         cache_ttl_seconds: Cache entry lifetime
     """
     
-    model: str = "Qwen/Qwen2.5-3B-Instruct"
+    model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ"
     temperature: float = 0.1  # Low for consistent classification
     max_tokens: int = 256
     timeout_seconds: float = 30.0

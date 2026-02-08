@@ -23,7 +23,7 @@ Usage:
     # Record a metric
     record_llm_metric(
         backend="vllm",
-        model="Qwen/Qwen2.5-3B-Instruct",
+        model="Qwen/Qwen2.5-3B-Instruct-AWQ",
         prompt_tokens=150,
         completion_tokens=50,
         latency_ms=245,

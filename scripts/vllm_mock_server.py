@@ -24,7 +24,7 @@ import json
 
 app = Flask(__name__)
 
-MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct"
+MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct-AWQ"
 
 
 @app.route("/v1/models", methods=["GET"])

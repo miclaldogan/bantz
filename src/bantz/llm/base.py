@@ -222,7 +222,7 @@ def create_client(
         from bantz.llm.vllm_openai_client import VLLMOpenAIClient
         return VLLMOpenAIClient(
             base_url=base_url or "http://127.0.0.1:8001",
-            model=model or "Qwen/Qwen2.5-3B-Instruct",
+            model=model or "Qwen/Qwen2.5-3B-Instruct-AWQ",
             timeout_seconds=timeout,
         )
 

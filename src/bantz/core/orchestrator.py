@@ -104,7 +104,7 @@ class OrchestratorConfig:
     
     # LLM (vLLM)
     vllm_url: str = "http://127.0.0.1:8001"
-    vllm_model: str = "Qwen/Qwen2.5-3B-Instruct"
+    vllm_model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ"
     
     # UX
     startup_sound: bool = True
@@ -131,7 +131,7 @@ class OrchestratorConfig:
             language=os.getenv("BANTZ_LANGUAGE", "tr"),
             
             vllm_url=os.getenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001"),
-            vllm_model=os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct"),
+            vllm_model=os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct-AWQ"),
         )
 
 

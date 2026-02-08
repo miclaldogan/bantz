@@ -198,7 +198,7 @@ def run(loop: OrchestratorLoop, scenarios: list[str], debug: bool) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Demo tiered quality behavior (Issue #206)")
     parser.add_argument("--router-backend", choices=["mock", "vllm"], default="mock")
-    parser.add_argument("--router-model", default="Qwen/Qwen2.5-3B-Instruct")
+    parser.add_argument("--router-model", default="Qwen/Qwen2.5-3B-Instruct-AWQ")
     parser.add_argument("--finalizer", choices=["mock", "gemini", "none"], default="mock")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no-tiered", action="store_true", help="Disable tiering (legacy always-finalizer behavior)")
