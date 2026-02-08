@@ -1171,11 +1171,23 @@ USER: sabah beşte koşu
             if not question:
                 question = assistant_reply
         
-        # Gmail extensions (Issue #317)
+        # Gmail extensions (Issue #317 + #422: rule-based fallback)
         gmail_intent = str(parsed.get("gmail_intent") or "none").strip().lower()
         gmail_obj = parsed.get("gmail") or {}
         if not isinstance(gmail_obj, dict):
             gmail_obj = {}
+
+        # ── Issue #422: Rule-based Gmail intent resolution ───────────────
+        if user_input:
+            try:
+                from bantz.brain.gmail_intent import resolve_gmail_intent
+                gmail_intent = resolve_gmail_intent(
+                    llm_intent=gmail_intent,
+                    user_text=user_input,
+                    route=route,
+                )
+            except ImportError:
+                pass  # graceful degradation
 
         return OrchestratorOutput(
             route=route,
