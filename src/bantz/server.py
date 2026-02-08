@@ -446,15 +446,20 @@ class BantzServer:
 
                 self._brain = create_runtime()
                 self._brain_state = OrchestratorState()
-                logging.getLogger(__name__).info(
-                    "🧠 Server brain enabled: router=%s, finalizer=%s",
-                    self._brain.router_model,
-                    "Gemini" if self._brain.finalizer_is_gemini else "3B",
-                )
+                # Banner is printed by create_runtime() (Issue #588)
             except Exception as e:
                 logging.getLogger(__name__).warning(
                     "Brain init failed, falling back to legacy Router: %s", e
                 )
+                _brain_enabled = False
+
+        if not _brain_enabled:
+            from bantz.brain.runtime_banner import RuntimeBanner, format_banner
+
+            legacy_banner = RuntimeBanner(active_path="legacy", mode="router")
+            banner_text = format_banner(legacy_banner)
+            print(banner_text, flush=True)
+            logging.getLogger(__name__).info("\n%s", banner_text)
 
         # Proactive inbox (FIFO) for bantz_message events
         self._inbox = InboxStore(maxlen=200)

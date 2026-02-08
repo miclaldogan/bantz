@@ -181,26 +181,8 @@ def create_runtime(
         finalizer_llm=effective_finalizer,
     )
 
-    # ── Boot log (Issue #517: visible finalizer status) ───────────
-    finalizer_name = _gemini_model if finalizer_is_gemini else _router_model
-    finalizer_type = "Gemini" if finalizer_is_gemini else "3B (local)"
-    _forced_tier = os.getenv("BANTZ_FORCE_FINALIZER_TIER", "").strip().lower()
-    tier_note = f", forced_tier={_forced_tier}" if _forced_tier else ""
-    logger.info(
-        "🧠 BANTZ Runtime: router=%s, finalizer=%s (%s), tools=%d%s",
-        _router_model,
-        finalizer_name,
-        finalizer_type,
-        len(_tools.names()),
-        tier_note,
-    )
-    if not finalizer_is_gemini:
-        logger.warning(
-            "⚠ Finalizer is 3B — set GEMINI_API_KEY for quality responses. "
-            "Override: BANTZ_FORCE_FINALIZER_TIER=quality|fast"
-        )
-
-    return BantzRuntime(
+    # ── Build runtime ──────────────────────────────────────────────
+    runtime = BantzRuntime(
         router_client=router_client,
         gemini_client=gemini_client,
         tools=_tools,
@@ -210,3 +192,19 @@ def create_runtime(
         gemini_model=_gemini_model,
         finalizer_is_gemini=finalizer_is_gemini,
     )
+
+    # ── Boot banner (Issue #588: visible diagnostics at every start) ──
+    from bantz.brain.runtime_banner import RuntimeBanner, format_banner
+
+    banner = RuntimeBanner.from_runtime(runtime)
+    banner_text = format_banner(banner)
+    print(banner_text, flush=True)
+    logger.info("\n%s", banner_text)
+
+    if not finalizer_is_gemini:
+        logger.warning(
+            "⚠ Finalizer is 3B — set GEMINI_API_KEY for quality responses. "
+            "Override: BANTZ_FORCE_FINALIZER_TIER=quality|fast"
+        )
+
+    return runtime
