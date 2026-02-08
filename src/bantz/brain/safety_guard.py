@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 from bantz.agent.tools import Tool, ToolRegistry
+from bantz.brain.arg_sanitizer import ArgSanitizer
 from bantz.policy.engine import PolicyEngine
 
 logger = logging.getLogger(__name__)
@@ -152,12 +153,14 @@ class SafetyGuard:
         policy_engine: Optional[PolicyEngine] = None,
         audit_log_path: Optional[Path] = None,
         audit_retention_days: int = 90,
+        sanitizer: Optional[ArgSanitizer] = None,
     ):
         self.policy = policy or ToolSecurityPolicy()
         self.policy_engine = policy_engine
         self._audit_retention_days = audit_retention_days
         self._audit_logger: Optional[Any] = None
         self._audit_log_path = audit_log_path
+        self._sanitizer = sanitizer or ArgSanitizer()
 
     def _get_audit_logger(self) -> Any:
         """Lazily initialize the persistent audit logger (Issue #423)."""
@@ -197,42 +200,66 @@ class SafetyGuard:
         tool: Tool,
         params: dict[str, Any],
     ) -> tuple[bool, Optional[str]]:
-        """Validate tool arguments against schema.
+        """Validate tool arguments against schema + sanitization (Issue #425).
+        
+        Two-phase validation:
+        1. Schema validation (required fields, types)
+        2. Sanitization (HTML injection, email format, length, prompt injection, shell)
+
+        If sanitization finds only warnings, the params dict is **mutated** in-place
+        with the cleaned values. If blocking issues are found, validation fails.
         
         Args:
             tool: Tool definition
-            params: Parameters to validate
+            params: Parameters to validate (mutated in-place for sanitized values)
         
         Returns:
             (valid: bool, error: Optional[str])
         """
-        if not tool.parameters:
-            return True, None
-        
-        schema = tool.parameters
-        
-        # Check required fields
-        required = schema.get("required", [])
-        for field in required:
-            if field not in params:
-                return False, f"Missing required field: {field}"
-        
-        # Check field types (basic validation)
-        properties = schema.get("properties", {})
-        for field, value in params.items():
-            if field not in properties:
-                logger.warning(f"Unknown field '{field}' in tool '{tool.name}'")
-                continue
+        # --- Phase 1: Schema validation ---
+        if tool.parameters:
+            schema = tool.parameters
             
-            field_schema = properties[field]
-            expected_type = field_schema.get("type")
+            # Check required fields
+            required = schema.get("required", [])
+            for fld in required:
+                if fld not in params:
+                    return False, f"Missing required field: {fld}"
             
-            if expected_type == "string" and not isinstance(value, str):
-                return False, f"Field '{field}' must be string, got {type(value).__name__}"
-            elif expected_type == "number" and not isinstance(value, (int, float)):
-                return False, f"Field '{field}' must be number, got {type(value).__name__}"
-            elif expected_type == "boolean" and not isinstance(value, bool):
-                return False, f"Field '{field}' must be boolean, got {type(value).__name__}"
+            # Check field types (basic validation)
+            properties = schema.get("properties", {})
+            for fld, value in params.items():
+                if fld not in properties:
+                    logger.warning(f"Unknown field '{fld}' in tool '{tool.name}'")
+                    continue
+                
+                field_schema = properties[fld]
+                expected_type = field_schema.get("type")
+                
+                if expected_type == "string" and not isinstance(value, str):
+                    return False, f"Field '{fld}' must be string, got {type(value).__name__}"
+                elif expected_type == "number" and not isinstance(value, (int, float)):
+                    return False, f"Field '{fld}' must be number, got {type(value).__name__}"
+                elif expected_type == "boolean" and not isinstance(value, bool):
+                    return False, f"Field '{fld}' must be boolean, got {type(value).__name__}"
+
+        # --- Phase 2: Sanitization (Issue #425) ---
+        tool_name = getattr(tool, "name", "") or ""
+        cleaned, issues = self._sanitizer.sanitize(tool_name, params)
+
+        # Apply cleaned values back to params (in-place mutation)
+        for key, val in cleaned.items():
+            params[key] = val
+
+        if self._sanitizer.has_blocking_issues(issues):
+            summary = self._sanitizer.blocking_summary(issues)
+            logger.warning("[SANITIZE] Blocked %s: %s", tool_name, summary)
+            return False, f"Sanitization failed: {summary}"
+
+        # Log warnings (non-blocking)
+        for issue in issues:
+            if issue.severity == "warning":
+                logger.info("[SANITIZE] %s.%s: %s", tool_name, issue.field, issue.description)
         
         return True, None
     
