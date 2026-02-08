@@ -18,9 +18,39 @@ def _local_tz():
     return datetime.now().astimezone().tzinfo
 
 
+_RELATIVE_DATE_TOKENS: dict[str, str] = {
+    "today": "today",
+    "tomorrow": "tomorrow",
+    "yesterday": "yesterday",
+    "bugün": "today",
+    "yarın": "tomorrow",
+    "dün": "yesterday",
+}
+
+
+def _date_yesterday() -> str:
+    return (datetime.now().astimezone().date() - timedelta(days=1)).isoformat()
+
+
+def _resolve_date_token(date_str: str) -> str:
+    token = (date_str or "").strip().lower()
+    mapped = _RELATIVE_DATE_TOKENS.get(token)
+    if mapped == "today":
+        return _date_today()
+    if mapped == "tomorrow":
+        return _date_tomorrow()
+    if mapped == "yesterday":
+        return _date_yesterday()
+    return date_str
+
+
 def _dt(date_str: str, hhmm: str) -> datetime:
     # date_str: YYYY-MM-DD, hhmm: HH:MM
-    y, m, d = [int(x) for x in date_str.split("-")]
+    date_str = _resolve_date_token(date_str)
+    try:
+        y, m, d = [int(x) for x in date_str.split("-")]
+    except Exception as e:
+        raise ValueError(f"invalid_date_format: {date_str!r}") from e
     hh, mm = [int(x) for x in hhmm.split(":")]
     return datetime(y, m, d, hh, mm, tzinfo=_local_tz())
 
@@ -41,19 +71,25 @@ def _window_from_hint(*, window_hint: Optional[str], date: Optional[str]) -> Opt
     today = _date_today()
 
     if hint == "today":
-        d = date or today
+        d = _resolve_date_token(date) if date else today
         start = _dt(d, "00:00")
         end = _dt(d, "23:59")
         return TimeWindow(time_min=start.isoformat(), time_max=end.isoformat())
 
     if hint == "tomorrow":
-        d = date or _date_tomorrow()
+        d = _resolve_date_token(date) if date else _date_tomorrow()
+        start = _dt(d, "00:00")
+        end = _dt(d, "23:59")
+        return TimeWindow(time_min=start.isoformat(), time_max=end.isoformat())
+
+    if hint == "yesterday":
+        d = _resolve_date_token(date) if date else _date_yesterday()
         start = _dt(d, "00:00")
         end = _dt(d, "23:59")
         return TimeWindow(time_min=start.isoformat(), time_max=end.isoformat())
 
     if hint == "evening":
-        d = date or today
+        d = _resolve_date_token(date) if date else today
         start = _dt(d, "17:00")
         end = _dt(d, "23:59")
         return TimeWindow(time_min=start.isoformat(), time_max=end.isoformat())
@@ -61,7 +97,7 @@ def _window_from_hint(*, window_hint: Optional[str], date: Optional[str]) -> Opt
     if hint == "morning":
         # If it's already afternoon, interpret as next morning.
         now = datetime.now().astimezone()
-        d = date
+        d = _resolve_date_token(date) if date else None
         if not d:
             d = today if now.time() < dtime(12, 0) else _date_tomorrow()
         start = _dt(d, "07:00")
@@ -91,6 +127,9 @@ def calendar_list_events_tool(
     - Else if `date` is present, lists that day.
     - Else lists upcoming events (Calendar default behavior).
     """
+
+    if date:
+        date = _resolve_date_token(date)
 
     win = _window_from_hint(window_hint=window_hint, date=date)
     if win is None and date:
@@ -136,6 +175,9 @@ def calendar_find_free_slots_tool(
     """
 
     dur = int(duration) if duration is not None else 30
+
+    if date:
+        date = _resolve_date_token(date)
 
     win = _window_from_hint(window_hint=window_hint, date=date)
     if win is None and date:
@@ -184,8 +226,12 @@ def calendar_create_event_tool(
     if not d:
         if (window_hint or "").strip().lower() == "tomorrow":
             d = _date_tomorrow()
+        elif (window_hint or "").strip().lower() == "yesterday":
+            d = _date_yesterday()
         else:
             d = _date_today()
+    else:
+        d = _resolve_date_token(d)
 
     start_dt = _dt(d, hhmm)
     dur = int(duration) if duration is not None else 60
