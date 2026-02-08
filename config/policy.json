@@ -78,5 +78,107 @@
     "clipboard_set": "confirm",
     "clipboard_get": "allow",
     "unknown": "deny"
-  }
+  },
+
+  "tool_levels": {
+    "__comment": "Single source of truth for tool risk levels (Issue #424). Values: safe | moderate | destructive",
+
+    "web.search":               "safe",
+    "web.open":                 "safe",
+
+    "calendar.list_events":     "safe",
+    "calendar.find_event":      "safe",
+    "calendar.get_event":       "safe",
+    "calendar.create_event":    "moderate",
+    "calendar.update_event":    "moderate",
+    "calendar.delete_event":    "destructive",
+
+    "gmail.list_messages":      "safe",
+    "gmail.unread_count":       "safe",
+    "gmail.get_message":        "safe",
+    "gmail.download_attachment":"moderate",
+    "gmail.query_from_nl":      "safe",
+    "gmail.smart_search":       "safe",
+    "gmail.search_template_upsert": "safe",
+    "gmail.search_template_get":"safe",
+    "gmail.search_template_list":"safe",
+    "gmail.search_template_delete":"safe",
+    "gmail.list_labels":        "safe",
+    "gmail.add_label":          "safe",
+    "gmail.remove_label":       "safe",
+    "gmail.mark_read":          "safe",
+    "gmail.mark_unread":        "safe",
+    "gmail.archive":            "moderate",
+    "gmail.batch_modify":       "moderate",
+    "gmail.send":               "moderate",
+    "gmail.send_to_contact":    "moderate",
+    "gmail.create_draft":       "safe",
+    "gmail.list_drafts":        "safe",
+    "gmail.update_draft":       "safe",
+    "gmail.delete_draft":       "safe",
+    "gmail.send_draft":         "moderate",
+    "gmail.generate_reply":     "moderate",
+
+    "contacts.upsert":          "safe",
+    "contacts.resolve":         "safe",
+    "contacts.list":            "safe",
+    "contacts.delete":          "safe",
+
+    "time.now":                 "safe",
+    "time.date":                "safe",
+    "weather.current":          "safe",
+    "weather.forecast":         "safe",
+    "system.status":            "safe",
+
+    "file.read":                "safe",
+    "file.list":                "safe",
+    "file.write":               "moderate",
+    "file.delete":              "destructive",
+    "file.move":                "destructive",
+
+    "vision.analyze":           "safe",
+    "vision.ocr":               "safe",
+    "vision.screenshot":        "safe",
+
+    "notification.send":        "moderate",
+    "clipboard.set":            "moderate",
+    "clipboard.get":            "moderate",
+
+    "browser.open":             "moderate",
+    "browser.navigate":         "moderate",
+    "browser.submit_form":      "destructive",
+    "browser.click_button":     "destructive",
+
+    "app.open":                 "moderate",
+    "app.focus":                "moderate",
+    "app.close":                "destructive",
+    "app.kill":                 "destructive",
+
+    "email.send":               "moderate",
+    "email.delete":             "destructive",
+    "notes.create":             "moderate",
+
+    "payment.submit":           "destructive",
+    "payment.confirm":          "destructive",
+
+    "system.shutdown":          "destructive",
+    "system.restart":           "destructive",
+    "system.execute_command":   "destructive",
+    "system.sudo":              "destructive",
+
+    "database.delete":          "destructive",
+    "database.update":          "destructive"
+  },
+
+  "always_confirm_tools": [
+    "calendar.create_event",
+    "calendar.update_event",
+    "gmail.send",
+    "gmail.send_draft",
+    "gmail.send_to_contact",
+    "gmail.download_attachment",
+    "gmail.generate_reply"
+  ],
+
+  "undefined_tool_policy": "deny"
 }
