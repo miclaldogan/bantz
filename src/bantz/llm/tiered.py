@@ -40,6 +40,13 @@ def _env_flag(name: str, default: bool = False) -> bool:
         return bool(default)
     return raw in {"1", "true", "yes", "y", "on", "enable", "enabled"}
 
+def _env_raw(name: str, legacy: str | None = None) -> str:
+    raw = str(os.getenv(name, "")).strip()
+    if raw:
+        return raw
+    if legacy:
+        return str(os.getenv(legacy, "")).strip()
+    return ""
 
 def _env_int(name: str, default: int) -> int:
     raw = str(os.getenv(name, "")).strip()
@@ -288,12 +295,18 @@ def decide_tier(
     """Decide whether to escalate to the quality model.
 
     Behavior is env-configurable:
-    - BANTZ_TIERED_MODE=1 enables auto decisions (otherwise always fast unless forced)
-    - BANTZ_LLM_TIER=fast|quality|auto forces tier
+    - BANTZ_TIER_MODE=1 enables auto decisions (otherwise always fast unless forced)
+      (legacy: BANTZ_TIERED_MODE)
+    - BANTZ_TIER_FORCE=fast|quality|auto forces tier
+      (legacy: BANTZ_LLM_TIER)
     """
-    debug = _env_flag("BANTZ_TIERED_DEBUG", default=False)
-    metrics = _env_flag("BANTZ_TIERED_METRICS", default=False) or _env_flag(
-        "BANTZ_LLM_METRICS", default=False
+    debug = _env_flag("BANTZ_TIER_DEBUG", default=False) or _env_flag(
+        "BANTZ_TIERED_DEBUG", default=False
+    )
+    metrics = (
+        _env_flag("BANTZ_TIER_METRICS", default=False)
+        or _env_flag("BANTZ_TIERED_METRICS", default=False)
+        or _env_flag("BANTZ_LLM_METRICS", default=False)
     )
 
     def emit(d: TierDecision) -> None:
@@ -309,7 +322,7 @@ def decide_tier(
             d.risk,
         )
 
-    forced = str(os.getenv("BANTZ_LLM_TIER", "")).strip().lower()
+    forced = _env_raw("BANTZ_TIER_FORCE", "BANTZ_LLM_TIER").strip().lower()
     if forced in {"fast", "3b", "small"}:
         d = TierDecision(False, "forced_fast", 0, 0, 0)
         if debug:
@@ -323,7 +336,10 @@ def decide_tier(
         emit(d)
         return d
 
-    if not _env_flag("BANTZ_TIERED_MODE", default=False):
+    if not (
+        _env_flag("BANTZ_TIER_MODE", default=False)
+        or _env_flag("BANTZ_TIERED_MODE", default=False)
+    ):
         # Tiering disabled: default to fast.
         d = TierDecision(False, "tiering_disabled", 0, 0, 0)
         if debug:
@@ -331,6 +347,26 @@ def decide_tier(
         emit(d)
         return d
 
+    # Canonical tiering engine: quality_gating (Issue #598)
+    from bantz.brain.quality_gating import evaluate_quality_gating, GatingDecision
+
+    result = evaluate_quality_gating(
+        text,
+        tool_names=list(tool_names) if tool_names is not None else None,
+        requires_confirmation=requires_confirmation,
+        route=route,
+    )
+
+    use_quality = result.decision == GatingDecision.USE_QUALITY
+    d = TierDecision(
+        use_quality,
+        str(result.reason),
+        int(result.score.complexity),
+        int(result.score.writing),
+        int(result.score.risk),
+    )
+    emit(d)
+    return d
     complexity = score_complexity(text)
     writing = score_writing_need(text)
     risk = score_risk(text, tool_names=tool_names, requires_confirmation=requires_confirmation)

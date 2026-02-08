@@ -381,8 +381,9 @@ def decide_finalization_tier(
     """Decide whether to use quality (cloud) or fast (local) finalizer.
 
     Env overrides:
-        BANTZ_FORCE_FINALIZER_TIER=quality  → always use Gemini
-        BANTZ_FORCE_FINALIZER_TIER=fast     → always skip Gemini
+        BANTZ_TIER_FORCE_FINALIZER=quality  → always use Gemini
+        BANTZ_TIER_FORCE_FINALIZER=fast     → always skip Gemini
+        (legacy: BANTZ_FORCE_FINALIZER_TIER)
 
     Returns:
         ``(use_quality, tier_name, tier_reason)``
@@ -391,12 +392,15 @@ def decide_finalization_tier(
         return False, "fast", "no_finalizer"
 
     # Issue #517: env override for forcing finalizer tier
-    forced = os.getenv("BANTZ_FORCE_FINALIZER_TIER", "").strip().lower()
+    forced = (
+        os.getenv("BANTZ_TIER_FORCE_FINALIZER", "")
+        or os.getenv("BANTZ_FORCE_FINALIZER_TIER", "")
+    ).strip().lower()
     if forced in ("quality", "gemini"):
-        logger.info("[TIER] forced=quality via BANTZ_FORCE_FINALIZER_TIER")
+        logger.info("[TIER] forced=quality via tier env override")
         return True, "quality", "forced_quality"
     if forced in ("fast", "3b", "skip"):
-        logger.info("[TIER] forced=fast via BANTZ_FORCE_FINALIZER_TIER")
+        logger.info("[TIER] forced=fast via tier env override")
         return False, "fast", "forced_fast"
 
     # Issue #409: Split smalltalk into simple vs complex

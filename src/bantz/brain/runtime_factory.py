@@ -204,7 +204,7 @@ def create_runtime(
     if not finalizer_is_gemini:
         logger.warning(
             "⚠ Finalizer is 3B — set GEMINI_API_KEY for quality responses. "
-            "Override: BANTZ_FORCE_FINALIZER_TIER=quality|fast"
+            "Override: BANTZ_TIER_FORCE_FINALIZER=quality|fast (legacy: BANTZ_FORCE_FINALIZER_TIER)"
         )
 
     return runtime

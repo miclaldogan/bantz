@@ -99,7 +99,10 @@ class RuntimeBanner:
                 router_url = str(client.base_url)
 
         # Forced tier override
-        forced_tier = os.getenv("BANTZ_FORCE_FINALIZER_TIER", "").strip().lower()
+        forced_tier = (
+            os.getenv("BANTZ_TIER_FORCE_FINALIZER", "")
+            or os.getenv("BANTZ_FORCE_FINALIZER_TIER", "")
+        ).strip().lower()
 
         return cls(
             mode="orchestrator",
