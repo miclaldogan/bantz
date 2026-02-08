@@ -1,6 +1,7 @@
 """Unified Brain Loop — single entry point for all brain backends.
 
 Issue #403: Brain Consolidation EPIC — Phase 1 (Foundation).
+Issue #443: Enhanced with auto-mode, deprecation warnings, diagnostics.
 
 This module provides a unified interface over both:
 - **BrainLoop** (Jarvis mode — deterministic calendar UX, voice menus)
@@ -21,15 +22,15 @@ Usage::
     )
     result = brain.process("bugün takvimde ne var?")
 
-    # Jarvis mode (deterministic calendar UX)
+    # Auto mode (Issue #443) — detects best backend per-turn
     brain = create_brain(
-        mode="jarvis",
+        mode="auto",
         llm=my_llm,
         tools=my_tools,
         event_bus=bus,
-        session_context=ctx,
     )
-    result = brain.process("yarın 15:00'te toplantı ekle")
+    result = brain.process("yarın 15:00'te toplantı ekle")  # → jarvis
+    result = brain.process("merhaba nasılsın")              # → orchestrator
 
     # Access the underlying backend when needed
     if brain.mode == "orchestrator":
@@ -39,9 +40,10 @@ Usage::
 from __future__ import annotations
 
 import logging
+import time
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol
+from typing import Any, Callable, Dict, List, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,33 @@ __all__ = [
     "UnifiedResult",
     "UnifiedConfig",
     "create_brain",
+    "deprecated_direct_backend",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Deprecation helper (Issue #443)
+# ---------------------------------------------------------------------------
+
+def deprecated_direct_backend(backend_name: str) -> None:
+    """Emit a deprecation warning when using BrainLoop/OrchestratorLoop directly.
+
+    Call this at the start of code that directly instantiates a backend
+    instead of using create_brain().
+
+    Example::
+
+        deprecated_direct_backend("BrainLoop")
+        # → DeprecationWarning: Direct use of BrainLoop is deprecated.
+        #   Use create_brain(mode='jarvis') instead.
+    """
+    mode_hint = "jarvis" if "brain" in backend_name.lower() else "orchestrator"
+    warnings.warn(
+        f"Direct use of {backend_name} is deprecated. "
+        f"Use create_brain(mode='{mode_hint}') instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +123,11 @@ class UnifiedResult:
     backend: str = ""
     state: Any = None
 
+    @property
+    def is_error(self) -> bool:
+        """Return *True* if this result represents an error."""
+        return self.kind == "fail"
+
 
 # ---------------------------------------------------------------------------
 # Unified config
@@ -106,14 +139,15 @@ class UnifiedConfig:
     """Configuration for :class:`UnifiedBrain`.
 
     Attributes:
-        mode: ``"orchestrator"`` (default, LLM-first) or ``"jarvis"``
-              (deterministic calendar UX).
+        mode: ``"orchestrator"`` (default, LLM-first), ``"jarvis"``
+              (deterministic calendar UX), or ``"auto"`` (per-turn detection).
         max_steps: Maximum LLM reasoning steps per turn.
         debug: Enable verbose logging.
         enable_safety_guard: Enable tool safety checks (OrchestratorLoop).
         memory_max_tokens: Token budget for memory-lite summaries.
         memory_max_turns: Max turns kept in memory-lite.
         require_confirmation_for: Tool names that require explicit confirmation.
+        auto_jarvis_patterns: Patterns that trigger jarvis mode in auto detection.
     """
 
     mode: str = "orchestrator"
@@ -123,6 +157,7 @@ class UnifiedConfig:
     memory_max_tokens: int = 1000
     memory_max_turns: int = 10
     require_confirmation_for: Optional[list[str]] = None
+    auto_jarvis_patterns: Optional[list[str]] = None  # Issue #443
 
 
 # ---------------------------------------------------------------------------
@@ -191,8 +226,8 @@ class UnifiedBrain:
         config: Optional[UnifiedConfig] = None,
         session_context: Optional[dict[str, Any]] = None,
     ) -> None:
-        if mode not in ("orchestrator", "jarvis"):
-            raise ValueError(f"Unknown mode: {mode!r}. Use 'orchestrator' or 'jarvis'.")
+        if mode not in ("orchestrator", "jarvis", "auto"):
+            raise ValueError(f"Unknown mode: {mode!r}. Use 'orchestrator', 'jarvis', or 'auto'.")
 
         self.mode = mode
         self._config = config or UnifiedConfig(mode=mode)
@@ -213,6 +248,20 @@ class UnifiedBrain:
             raise ValueError("Jarvis mode requires a BrainLoop instance.")
         if mode == "orchestrator" and orchestrator_loop is None:
             raise ValueError("Orchestrator mode requires an OrchestratorLoop instance.")
+        if mode == "auto" and brain_loop is None and orchestrator_loop is None:
+            raise ValueError("Auto mode requires at least one backend instance.")
+
+        # Diagnostics (Issue #443)
+        self._turn_count = 0
+        self._total_latency = 0.0
+        self._backend_usage: Dict[str, int] = {"brain_loop": 0, "orchestrator": 0}
+        self._error_count = 0
+
+        # Auto-mode patterns (Issue #443)
+        self._jarvis_patterns = self._config.auto_jarvis_patterns or [
+            "takvim", "etkinlik", "toplantı", "randevu",
+            "hatırlat", "alarm", "saat kaç",
+        ]
 
         logger.info(
             "[UnifiedBrain] Initialized in %s mode (config=%s)",
@@ -259,25 +308,93 @@ class UnifiedBrain:
                 backend=self.mode,
             )
 
-        if self.mode == "jarvis":
-            return self._process_jarvis(
-                user_input,
-                session_context=session_context,
-                policy=policy,
-                state=state,
+        self._turn_count += 1
+        t0 = time.time()
+
+        try:
+            effective_mode = self._resolve_mode(user_input)
+
+            if effective_mode == "jarvis":
+                result = self._process_jarvis(
+                    user_input,
+                    session_context=session_context,
+                    policy=policy,
+                    state=state,
+                )
+            else:
+                result = self._process_orchestrator(
+                    user_input,
+                    session_context=session_context,
+                    state=state,
+                )
+
+            self._backend_usage[result.backend] = (
+                self._backend_usage.get(result.backend, 0) + 1
             )
-        else:
-            return self._process_orchestrator(
-                user_input,
-                session_context=session_context,
-                state=state,
+            return result
+
+        except Exception as exc:
+            self._error_count += 1
+            logger.error("[UnifiedBrain] Error processing turn: %s", exc)
+            return UnifiedResult(
+                kind="fail",
+                text=str(exc),
+                backend=self.mode,
             )
+        finally:
+            self._total_latency += time.time() - t0
 
     def reset(self) -> None:
         """Reset internal state (start a fresh conversation)."""
         self._orchestrator_state = None
         self._jarvis_state = {}
         logger.debug("[UnifiedBrain] State reset")
+
+    # ------------------------------------------------------------------
+    # Auto-mode detection (Issue #443)
+    # ------------------------------------------------------------------
+
+    def _resolve_mode(self, user_input: str) -> str:
+        """Resolve effective mode for this turn.
+
+        In ``"auto"`` mode, checks the input against jarvis patterns.
+        Falls back to ``"orchestrator"`` if no match.
+        """
+        if self.mode != "auto":
+            return self.mode
+
+        text_lower = user_input.lower()
+        for pattern in self._jarvis_patterns:
+            if pattern in text_lower:
+                if self._brain_loop is not None:
+                    return "jarvis"
+                break  # pattern matched but no brain_loop → fallback
+
+        if self._orchestrator_loop is not None:
+            return "orchestrator"
+        return "jarvis"  # last resort if only brain_loop available
+
+    # ------------------------------------------------------------------
+    # Diagnostics (Issue #443)
+    # ------------------------------------------------------------------
+
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """Return turn-level diagnostics for monitoring."""
+        avg_latency = (
+            self._total_latency / self._turn_count
+            if self._turn_count > 0
+            else 0.0
+        )
+        return {
+            "mode": self.mode,
+            "turn_count": self._turn_count,
+            "avg_latency_ms": round(avg_latency * 1000, 1),
+            "total_latency_ms": round(self._total_latency * 1000, 1),
+            "backend_usage": dict(self._backend_usage),
+            "error_count": self._error_count,
+            "has_brain_loop": self._brain_loop is not None,
+            "has_orchestrator_loop": self._orchestrator_loop is not None,
+        }
 
     # ------------------------------------------------------------------
     # Properties
@@ -469,8 +586,9 @@ def create_brain(
     Parameters
     ----------
     mode:
-        ``"orchestrator"`` (default, LLM-first) or ``"jarvis"``
-        (deterministic calendar UX).
+        ``"orchestrator"`` (default, LLM-first), ``"jarvis"``
+        (deterministic calendar UX), or ``"auto"`` (per-turn detection,
+        Issue #443).
     llm:
         LLM client — must support ``complete_json`` (Jarvis) and/or
         ``complete_text`` (Orchestrator).
@@ -505,48 +623,62 @@ def create_brain(
     brain_loop = None
     orchestrator_loop = None
 
-    if mode == "jarvis":
-        from bantz.brain.brain_loop import BrainLoop, BrainLoopConfig
+    # In auto mode, create both backends (Issue #443)
+    need_jarvis = mode in ("jarvis", "auto")
+    need_orch = mode in ("orchestrator", "auto")
 
-        bl_config = BrainLoopConfig(
-            max_steps=cfg.max_steps,
-            debug=cfg.debug,
-        )
-        brain_loop = BrainLoop(
-            llm=llm,
-            tools=tools,
-            event_bus=event_bus,
-            config=bl_config,
-            router=router,
-            memory_manager=memory_manager,
-        )
+    if need_jarvis:
+        try:
+            from bantz.brain.brain_loop import BrainLoop, BrainLoopConfig
 
-    elif mode == "orchestrator":
-        from bantz.brain.llm_router import JarvisLLMOrchestrator
-        from bantz.brain.orchestrator_loop import OrchestratorConfig, OrchestratorLoop
+            bl_config = BrainLoopConfig(
+                max_steps=cfg.max_steps,
+                debug=cfg.debug,
+            )
+            brain_loop = BrainLoop(
+                llm=llm,
+                tools=tools,
+                event_bus=event_bus,
+                config=bl_config,
+                router=router,
+                memory_manager=memory_manager,
+            )
+        except Exception as e:
+            if mode == "jarvis":
+                raise
+            logger.warning("[create_brain] BrainLoop init failed (auto mode): %s", e)
 
-        orchestrator = JarvisLLMOrchestrator(
-            llm_client=llm,
-            system_prompt=router_system_prompt,
-        )
+    if need_orch:
+        try:
+            from bantz.brain.llm_router import JarvisLLMOrchestrator
+            from bantz.brain.orchestrator_loop import OrchestratorConfig, OrchestratorLoop
 
-        orch_config = OrchestratorConfig(
-            max_steps=cfg.max_steps,
-            debug=cfg.debug,
-            enable_safety_guard=cfg.enable_safety_guard,
-            memory_max_tokens=cfg.memory_max_tokens,
-            memory_max_turns=cfg.memory_max_turns,
-            require_confirmation_for=cfg.require_confirmation_for,
-        )
+            orchestrator = JarvisLLMOrchestrator(
+                llm_client=llm,
+                system_prompt=router_system_prompt,
+            )
 
-        orchestrator_loop = OrchestratorLoop(
-            orchestrator=orchestrator,
-            tools=tools,
-            event_bus=event_bus,
-            config=orch_config,
-            finalizer_llm=finalizer_llm,
-            audit_logger=audit_logger,
-        )
+            orch_config = OrchestratorConfig(
+                max_steps=cfg.max_steps,
+                debug=cfg.debug,
+                enable_safety_guard=cfg.enable_safety_guard,
+                memory_max_tokens=cfg.memory_max_tokens,
+                memory_max_turns=cfg.memory_max_turns,
+                require_confirmation_for=cfg.require_confirmation_for,
+            )
+
+            orchestrator_loop = OrchestratorLoop(
+                orchestrator=orchestrator,
+                tools=tools,
+                event_bus=event_bus,
+                config=orch_config,
+                finalizer_llm=finalizer_llm,
+                audit_logger=audit_logger,
+            )
+        except Exception as e:
+            if mode == "orchestrator":
+                raise
+            logger.warning("[create_brain] OrchestratorLoop init failed (auto mode): %s", e)
 
     return UnifiedBrain(
         mode=mode,
