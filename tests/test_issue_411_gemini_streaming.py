@@ -41,7 +41,7 @@ from bantz.llm.base import (
 
 
 def _make_client(**kwargs) -> GeminiClient:
-    defaults = dict(api_key="test-key", model="gemini-1.5-flash", timeout_seconds=5.0)
+    defaults = dict(api_key="test-key", model="gemini-2.0-flash", timeout_seconds=5.0)
     defaults.update(kwargs)
     return GeminiClient(**defaults)
 

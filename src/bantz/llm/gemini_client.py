@@ -86,7 +86,7 @@ class GeminiClient(LLMClient):
 
     Env (recommended to set via create_quality_client):
       - GEMINI_API_KEY / GOOGLE_API_KEY / BANTZ_GEMINI_API_KEY
-      - model: e.g. gemini-1.5-flash
+      - model: e.g. gemini-2.0-flash
 
     Notes:
       - This client assumes *cloud mode* is already allowed by the caller.

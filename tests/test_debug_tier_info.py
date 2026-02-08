@@ -146,13 +146,13 @@ class TestTierDecision:
             reason="quality requested",
             confidence=0.95,
             quality_result=QualityResult.PASS,
-            metadata={"model": "gemini-1.5-flash"},
+            metadata={"model": "gemini-2.0-flash"},
         )
         assert decision.duration_ms == 150.5
         assert decision.reason == "quality requested"
         assert decision.confidence == 0.95
         assert decision.quality_result == QualityResult.PASS
-        assert decision.metadata["model"] == "gemini-1.5-flash"
+        assert decision.metadata["model"] == "gemini-2.0-flash"
     
     def test_to_dict(self) -> None:
         """Test to_dict conversion."""

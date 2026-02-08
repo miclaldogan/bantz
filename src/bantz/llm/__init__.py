@@ -120,7 +120,7 @@ def create_quality_client(
                 "QUALITY_MODEL_NAME",
                 "BANTZ_QUALITY_MODEL",
                 "BANTZ_GEMINI_MODEL",
-                default="gemini-1.5-flash",
+                default="gemini-2.0-flash",
             )
         )
 

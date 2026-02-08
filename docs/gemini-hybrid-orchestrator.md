@@ -70,7 +70,7 @@ config = HybridOrchestratorConfig(
     router_max_tokens=512,
     
     # Gemini settings
-    gemini_model="gemini-1.5-flash",  # or "gemini-1.5-pro"
+    gemini_model="gemini-2.0-flash",  # or "gemini-1.5-pro"
     gemini_temperature=0.4,  # Balanced
     gemini_max_tokens=512,
     
@@ -232,7 +232,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KE
 
 ### High Latency
 
-- Use `gemini-1.5-flash` (faster than Pro)
+- Use `gemini-2.0-flash` (faster than Pro)
 - Reduce `gemini_max_tokens` (512 → 256)
 - Set `enable_gemini_finalization=False` for router-only mode
 

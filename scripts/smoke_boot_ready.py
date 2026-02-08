@@ -128,7 +128,7 @@ def check_gemini_key() -> CheckResult:
         val = os.getenv(key_name, "").strip()
         if val:
             masked = val[:4] + "..." + val[-4:] if len(val) > 8 else "****"
-            model = os.getenv("BANTZ_GEMINI_MODEL", "gemini-1.5-flash")
+            model = os.getenv("BANTZ_GEMINI_MODEL", "gemini-2.0-flash")
             return _ok(
                 "gemini_key",
                 f"Finalizer: {model} ✓ (Gemini via {key_name}={masked})",

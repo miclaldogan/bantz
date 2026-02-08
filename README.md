@@ -100,7 +100,7 @@ orchestrator = create_gemini_hybrid_orchestrator(
 - Default finalizer is **Gemini** (3B router + Gemini finalizer)
 - Override with env vars if you prefer local 7B:
     - `BANTZ_FINALIZER_TYPE=gemini|vllm_7b`
-    - `BANTZ_FINALIZER_MODEL=gemini-1.5-flash|Qwen/Qwen2.5-7B-Instruct`
+    - `BANTZ_FINALIZER_MODEL=gemini-2.0-flash|Qwen/Qwen2.5-7B-Instruct`
 ```
 
 ### Architecture Benefits

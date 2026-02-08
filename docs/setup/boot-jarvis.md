@@ -143,8 +143,8 @@ Gemini olmadan da çalışabilirsiniz — sadece yerel model kullanılır.
 GEMINI_API_KEY=AIzaSy...your-key-here
 BANTZ_CLOUD_ENABLED=true
 
-# Model seçimi (varsayılan: gemini-1.5-flash)
-BANTZ_GEMINI_MODEL=gemini-1.5-flash
+# Model seçimi (varsayılan: gemini-2.0-flash)
+BANTZ_GEMINI_MODEL=gemini-2.0-flash
 ```
 
 ### Doğrulama
@@ -385,7 +385,7 @@ BANTZ_VLLM_MODEL=Qwen/Qwen2.5-3B-Instruct-AWQ
 # === Gemini (opsiyonel) ===
 GEMINI_API_KEY=
 BANTZ_CLOUD_ENABLED=false
-BANTZ_GEMINI_MODEL=gemini-1.5-flash
+BANTZ_GEMINI_MODEL=gemini-2.0-flash
 
 # === Ses ===
 BANTZ_MIC_DEVICE=1

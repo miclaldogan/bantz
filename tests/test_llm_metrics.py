@@ -97,7 +97,7 @@ def sample_entries() -> list[MetricEntry]:
         MetricEntry(
             ts="2024-01-15T10:02:00+00:00",
             backend="gemini",
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             prompt_tokens=200,
             completion_tokens=150,
             total_tokens=350,
@@ -123,7 +123,7 @@ def sample_entries() -> list[MetricEntry]:
         MetricEntry(
             ts="2024-01-15T10:04:00+00:00",
             backend="gemini",
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             prompt_tokens=180,
             completion_tokens=0,
             total_tokens=0,
@@ -226,7 +226,7 @@ class TestMetricEntry:
         entry = MetricEntry(
             ts="2024-01-15T10:00:00+00:00",
             backend="gemini",
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             prompt_tokens=200,
             completion_tokens=100,
             total_tokens=300,
@@ -241,7 +241,7 @@ class TestMetricEntry:
         data = json.loads(json_str)
         
         assert data["backend"] == "gemini"
-        assert data["model"] == "gemini-1.5-flash"
+        assert data["model"] == "gemini-2.0-flash"
         assert data["total_tokens"] == 300
     
     def test_json_roundtrip(self):
@@ -426,7 +426,7 @@ class TestRecordFunctions:
         }):
             result = record_llm_success(
                 backend="gemini",
-                model="gemini-1.5-flash",
+                model="gemini-2.0-flash",
                 prompt_tokens=200,
                 completion_tokens=100,
                 latency_ms=500,
@@ -606,7 +606,7 @@ class TestFileIO:
             f.write(json.dumps({
                 "ts": "2024-01-15T10:01:00+00:00",
                 "backend": "gemini",
-                "model": "gemini-1.5-flash",
+                "model": "gemini-2.0-flash",
                 "prompt_tokens": 200,
                 "completion_tokens": 100,
                 "total_tokens": 300,
@@ -1203,7 +1203,7 @@ class TestIntegration:
             # 3. Finalizer call (quality tier)
             record_llm_success(
                 backend="gemini",
-                model="gemini-1.5-flash",
+                model="gemini-2.0-flash",
                 prompt_tokens=300,
                 completion_tokens=150,
                 latency_ms=850,

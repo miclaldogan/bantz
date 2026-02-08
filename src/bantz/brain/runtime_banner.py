@@ -8,7 +8,7 @@ Boot banner::
     │  🧠 BANTZ Brain v2.0                │
     │  Mode:      orchestrator             │
     │  Router:    Qwen2.5-3B @ vLLM:8001  │
-    │  Finalizer: gemini-1.5-flash ✓      │
+    │  Finalizer: gemini-2.0-flash ✓      │
     │  Memory:    lite (10 turns, 1000tok) │
     │  Prompt:    tiered (CORE+DETAIL)     │
     │  Context:   2048 tokens              │
