@@ -805,7 +805,7 @@ class TerminalJarvis:
         # and the user types a confirmation token, run the prior action.
         # Issue #283: Accept natural language confirmations like "evet ekle dostum"
         if self.state.has_pending_confirmation():
-            pending = self.state.pending_confirmation or {}
+            pending = self.state.peek_pending_confirmation() or {}
             prompt = str(pending.get("prompt") or "").strip()
             
             if _is_confirmation_yes(text):
@@ -859,7 +859,7 @@ class TerminalJarvis:
         # If a confirmation is now pending, remember the initiating input.
         if self.state.has_pending_confirmation():
             self._pending_action_user_input = text
-            pending = self.state.pending_confirmation or {}
+            pending = self.state.peek_pending_confirmation() or {}
             prompt = str(pending.get("prompt") or "").strip()
             return prompt or (output.confirmation_prompt or "Efendim, onay verir misiniz?")
 
