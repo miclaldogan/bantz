@@ -561,7 +561,7 @@ USER: sabah beşte koşu
             return self._fallback_output(user_input, error=last_err or "parse_failed")
 
         # Validate and extract
-        return self._extract_output(parsed, raw_text=raw_text)
+        return self._extract_output(parsed, raw_text=raw_text, user_input=user_input)
 
     def _build_prompt(
         self,
@@ -924,7 +924,7 @@ USER: sabah beşte koşu
         # Final attempt: re-raise the original error
         return extract_first_json_object(text, strict=False)
 
-    def _extract_output(self, parsed: dict[str, Any], raw_text: str) -> OrchestratorOutput:
+    def _extract_output(self, parsed: dict[str, Any], raw_text: str, user_input: str = "") -> OrchestratorOutput:
         """Extract OrchestratorOutput from parsed JSON (Issue #228: enhanced validation)."""
         from bantz.brain.json_protocol import apply_orchestrator_defaults
         
@@ -946,6 +946,17 @@ USER: sabah beşte koşu
         slots = normalized.get("slots") or {}
         if not isinstance(slots, dict):
             slots = {}
+
+        # ── Issue #419: Rule-based Turkish time post-processing ──────────
+        if route == "calendar" and user_input:
+            try:
+                from bantz.brain.turkish_clock import post_process_slot_time
+                slot_time = slots.get("time")
+                corrected = post_process_slot_time(slot_time, user_input)
+                if corrected and corrected != slot_time:
+                    slots = {**slots, "time": corrected}
+            except ImportError:
+                pass  # graceful degradation
 
         confidence = float(normalized.get("confidence") or 0.0)
         confidence = max(0.0, min(1.0, confidence))
