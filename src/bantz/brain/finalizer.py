@@ -1,8 +1,7 @@
 """Unified Finalizer Strategy (Issue #356).
 
-This module provides a shared finalizer implementation for both BrainLoop
-and OrchestratorLoop, eliminating code duplication and ensuring consistent
-quality across different brain implementations.
+This module provides the shared finalizer implementation for OrchestratorLoop,
+ensuring consistent quality in response generation.
 
 Key Features:
 - Unified prompt building with tool results support
