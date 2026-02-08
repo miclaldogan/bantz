@@ -63,11 +63,17 @@ class VLLMStatus(Enum):
 
 # ── Config ────────────────────────────────────────────────────────────
 
+def _default_vllm_url() -> str:
+    """Read vLLM URL from env, matching runtime_factory / vllm_openai_client."""
+    import os
+    return os.getenv("BANTZ_VLLM_URL", "http://localhost:8001").rstrip("/")
+
+
 @dataclass
 class WatchdogConfig:
     """Configuration for the vLLM watchdog."""
 
-    vllm_url: str = "http://localhost:8000"
+    vllm_url: str = field(default_factory=_default_vllm_url)
     check_interval: int = 30          # seconds between checks
     consecutive_failures_to_restart: int = 3
     max_restarts_per_hour: int = 3

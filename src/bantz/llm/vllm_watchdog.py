@@ -12,7 +12,7 @@ Usage::
     from bantz.llm.vllm_watchdog import VLLMWatchdog, WatchdogConfig
 
     config = WatchdogConfig(
-        vllm_url="http://localhost:8000",
+        vllm_url="http://localhost:8001",
         check_interval=10.0,
         max_restarts=3,
     )
@@ -48,10 +48,16 @@ class VLLMStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+def _default_vllm_url() -> str:
+    """Read vLLM URL from env, matching runtime_factory / vllm_openai_client."""
+    import os
+    return os.getenv("BANTZ_VLLM_URL", "http://localhost:8001").rstrip("/")
+
+
 @dataclass
 class WatchdogConfig:
     """Configuration for the vLLM watchdog."""
-    vllm_url: str = "http://localhost:8000"
+    vllm_url: str = field(default_factory=_default_vllm_url)
     health_endpoint: str = "/health"
     check_interval: float = 10.0       # seconds between checks
     failure_threshold: int = 3          # consecutive failures before restart
