@@ -33,18 +33,14 @@ def is_vllm_server_available(url: str = "http://127.0.0.1:8001") -> bool:
 
 @pytest.fixture
 def vllm_url(vllm_mock_server_url: str) -> str:
-    """vLLM server URL (or mock server URL)."""
-    # Prefer explicit env if provided.
+    """vLLM server URL — uses the conftest mock server for deterministic tests.
+
+    To test against a real vLLM endpoint, set ``BANTZ_VLLM_URL``.
+    """
     env_url = (os.getenv("BANTZ_VLLM_URL") or "").strip()
     if env_url and is_vllm_server_available(env_url):
         return env_url.rstrip("/")
 
-    # Default scripts: 3B on 8001, 7B on 8002.
-    for candidate in ("http://127.0.0.1:8001", "http://127.0.0.1:8002"):
-        if is_vllm_server_available(candidate):
-            return candidate
-
-    # Otherwise, start and use a lightweight in-test mock server.
     return vllm_mock_server_url.rstrip("/")
 
 

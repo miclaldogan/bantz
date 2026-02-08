@@ -150,25 +150,22 @@ class TestPipelineFinalizerModel:
 
 class TestOrchestratorLoopFinalizerWarning:
 
-    def test_warns_when_no_finalizer(self):
-        """OrchestratorLoop should warn when created without finalizer_llm."""
+    def test_warns_when_no_finalizer(self, caplog):
+        """OrchestratorLoop should log an info message when finalizer_llm is None."""
+        import logging
         from bantz.brain.orchestrator_loop import OrchestratorLoop
 
         mock_orchestrator = MagicMock()
         mock_tools = MagicMock()
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with caplog.at_level(logging.INFO, logger="bantz.brain.orchestrator_loop"):
             loop = OrchestratorLoop(
                 orchestrator=mock_orchestrator,
                 tools=mock_tools,
                 finalizer_llm=None,
             )
-            # Should have at least the finalizer warning (and deprecation warning)
-            finalizer_warnings = [
-                x for x in w if "finalizer_llm" in str(x.message)
-            ]
-            assert len(finalizer_warnings) >= 1
+        # Should have at least the finalizer log message
+        assert any("finalizer_llm" in msg for msg in caplog.messages)
 
     def test_no_warning_with_finalizer(self):
         """OrchestratorLoop should NOT warn when finalizer_llm is provided."""

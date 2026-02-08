@@ -49,6 +49,7 @@ from bantz.plugins.registry import (
 
 class TestPlugin(BantzPlugin):
     """A test plugin implementation."""
+    __test__ = False  # Prevent pytest from trying to collect this as a test class
     
     @property
     def metadata(self) -> PluginMetadata:

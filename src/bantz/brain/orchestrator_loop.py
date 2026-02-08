@@ -388,15 +388,12 @@ class OrchestratorLoop:
         self.finalizer_llm = finalizer_llm
         self.audit_logger = audit_logger  # For tool execution auditing (Issue #160)
 
-        # Issue #517: Finalizer wiring invariant — warn if no finalizer
+        # Issue #517: Finalizer wiring invariant — log if no finalizer
         if finalizer_llm is None:
-            import warnings as _fw
-            _fw.warn(
+            logger.info(
                 "OrchestratorLoop created without finalizer_llm. "
                 "Finalization will use deterministic defaults only (no natural language). "
-                "Pass a GeminiClient or LLM client as finalizer_llm for quality responses.",
-                UserWarning,
-                stacklevel=2,
+                "Pass a GeminiClient or LLM client as finalizer_llm for quality responses."
             )
         else:
             _fm = getattr(finalizer_llm, "model_name", None) or getattr(finalizer_llm, "model", None) or type(finalizer_llm).__name__

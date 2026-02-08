@@ -58,28 +58,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    run_integration = bool(config.getoption("--run-integration"))
-    run_regression = bool(config.getoption("--run-regression"))
-    run_benchmark = bool(config.getoption("--run-benchmark"))
-
-    deselected: list[pytest.Item] = []
-    selected: list[pytest.Item] = []
-
-    for item in items:
-        if not run_integration and (item.get_closest_marker("integration") or item.get_closest_marker("vllm")):
-            deselected.append(item)
-            continue
-        if not run_regression and item.get_closest_marker("regression"):
-            deselected.append(item)
-            continue
-        if not run_benchmark and item.get_closest_marker("benchmark"):
-            deselected.append(item)
-            continue
-        selected.append(item)
-
-    if deselected:
-        config.hook.pytest_deselected(items=deselected)
-        items[:] = selected
+    # CLI flags are kept for backward compatibility but no longer deselect.
+    # integration / vllm tests use the mock-server fixture in conftest.py,
+    # benchmark tests use FastMockLLM, and regression tests self-skip when
+    # no baseline data file is present.
+    pass
 
 
 class _OpenAIMockHandler(BaseHTTPRequestHandler):
@@ -99,7 +82,7 @@ class _OpenAIMockHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path.rstrip("/") == "/v1/models":
-            model_name = getattr(self.server, "model_name", "Qwen/Qwen2.5-3B-Instruct")
+            model_name = getattr(self.server, "model_name", "Qwen/Qwen2.5-3B-Instruct-AWQ")
             self._send_json(
                 200,
                 {
@@ -132,7 +115,7 @@ class _OpenAIMockHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": {"message": "invalid json"}})
             return
 
-        model_name = getattr(self.server, "model_name", "Qwen/Qwen2.5-3B-Instruct")
+        model_name = getattr(self.server, "model_name", "Qwen/Qwen2.5-3B-Instruct-AWQ")
         requested_model = str(req.get("model") or "").strip()
         if requested_model and requested_model != model_name:
             self._send_json(
@@ -194,7 +177,7 @@ class _OpenAIMockHandler(BaseHTTPRequestHandler):
 def vllm_mock_server_url() -> str:
     """Start a tiny OpenAI-compatible mock server for vLLM integration tests."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), _OpenAIMockHandler)
-    server.model_name = "Qwen/Qwen2.5-3B-Instruct"  # type: ignore[attr-defined]
+    server.model_name = "Qwen/Qwen2.5-3B-Instruct-AWQ"  # type: ignore[attr-defined]
 
     host, port = server.server_address
     url = f"http://{host}:{port}"

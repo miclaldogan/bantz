@@ -232,6 +232,8 @@ class ToolTimeoutManager:
 
         # Circuit breaker check
         if not breaker.is_available:
+            # Close the un-awaited coroutine to prevent RuntimeWarning.
+            coro.close()
             return ToolExecutionResult(
                 tool_name=tool_name,
                 success=False,
