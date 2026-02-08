@@ -495,3 +495,160 @@ def build_confirmation_prompt(
     )
     
     return preview.to_turkish()
+
+
+# ---------------------------------------------------------------------------
+# Issue #426: Deterministic confirmation prompt (by tool_name)
+# ---------------------------------------------------------------------------
+
+# Mapping tool_name → (action_type, target)
+_TOOL_ACTION_MAP: dict[str, tuple[str, str]] = {
+    "calendar.create_event": ("create", "calendar"),
+    "calendar.update_event": ("update", "calendar"),
+    "calendar.delete_event": ("delete", "calendar"),
+    "gmail.send": ("send", "gmail"),
+    "gmail.send_to_contact": ("send", "gmail"),
+    "gmail.send_draft": ("send", "gmail"),
+    "gmail.create_draft": ("create", "gmail"),
+    "gmail.generate_reply": ("send", "gmail"),
+    "gmail.download_attachment": ("create", "generic"),
+    "gmail.archive": ("update", "gmail"),
+    "gmail.batch_modify": ("update", "gmail"),
+    "file.delete": ("delete", "generic"),
+    "file.move": ("update", "generic"),
+    "app.close": ("delete", "generic"),
+    "system.execute_command": ("create", "generic"),
+    "system.shutdown": ("delete", "generic"),
+    "payment.submit": ("create", "generic"),
+    "email.delete": ("delete", "gmail"),
+    "database.delete": ("delete", "generic"),
+}
+
+# Generic fallback templates (by tool_name) for tools not covered by ConfirmationPreview
+_GENERIC_TOOL_TEMPLATES: dict[str, str] = {
+    "gmail.send_draft": "Taslak gönderilsin mi?",
+    "gmail.download_attachment": "E-postadaki ek indirilsin mi?",
+    "gmail.archive": "E-posta arşivlensin mi?",
+    "gmail.batch_modify": "Birden fazla e-posta için etiket değişikliği yapılsın mı?",
+    "gmail.generate_reply": "E-postaya yanıt taslağı oluşturulsun mu?",
+    "file.delete": "'{path}' dosyası silinsin mi? Bu işlem geri alınamaz.",
+    "file.move": "Dosya taşınsın mı?",
+    "app.close": "Uygulama kapatılsın mı?",
+    "system.execute_command": "Komut çalıştırılsın mı?",
+    "system.shutdown": "Sistem kapatılsın mı? Kaydedilmemiş işler kaybolacak.",
+    "payment.submit": "Ödeme yapılsın mı? Bu işlem geri alınamaz.",
+    "database.delete": "Veritabanından silme yapılsın mı? Bu işlem geri alınamaz.",
+}
+
+
+def deterministic_confirmation_prompt(
+    tool_name: str,
+    slots: dict[str, Any],
+) -> str:
+    """Build a deterministic confirmation prompt from tool_name + slots only.
+
+    Issue #426: This is the PREFERRED way to generate confirmation prompts.
+    It NEVER uses LLM-generated text — only slot data and predefined templates.
+
+    Args:
+        tool_name: The tool requiring confirmation.
+        slots: Slot dict from the orchestrator output.
+
+    Returns:
+        A Turkish confirmation prompt string.
+    """
+    slots = slots or {}
+
+    # Resolve action_type and target from tool_name
+    mapping = _TOOL_ACTION_MAP.get(tool_name)
+
+    if mapping:
+        action_type, target = mapping
+    else:
+        # Unknown tool: use generic
+        return f"{tool_name} çalıştırılsın mı? (evet/hayır)"
+
+    # For calendar and gmail tools with well-known slot shapes, delegate to
+    # the ConfirmationPreview builder.
+    if target in ("calendar", "gmail"):
+        title = slots.get("title") or slots.get("subject") or slots.get("summary", "")
+
+        # Gmail send: use 'to' or 'name'
+        if tool_name == "gmail.send_to_contact":
+            title = title or slots.get("name", "")
+        # Gmail with no useful title: use generic template
+        if target == "gmail" and not title and tool_name in _GENERIC_TOOL_TEMPLATES:
+            return _safe_format(_GENERIC_TOOL_TEMPLATES[tool_name], slots)
+
+        preview = ConfirmationPreview(
+            action_type=action_type,
+            target=target,
+            title=title or "İşlem",
+            time=slots.get("time"),
+            date=slots.get("date"),
+            duration=slots.get("duration"),
+            recipient=slots.get("to") or slots.get("recipient") or slots.get("name"),
+            extra=slots,
+        )
+        return preview.to_turkish()
+
+    # Generic tools: use template if available
+    if tool_name in _GENERIC_TOOL_TEMPLATES:
+        return _safe_format(_GENERIC_TOOL_TEMPLATES[tool_name], slots)
+
+    return f"{tool_name} çalıştırılsın mı? (evet/hayır)"
+
+
+def _safe_format(template: str, slots: dict[str, Any]) -> str:
+    """Format template with slot values, ignoring missing keys."""
+    try:
+        safe_kwargs = {k: str(v) for k, v in slots.items() if v is not None}
+        return template.format(**safe_kwargs)
+    except (KeyError, ValueError, IndexError):
+        # Strip unresolved placeholders
+        return re.sub(r"'\{[^}]+\}'", "?", template)
+
+
+# ---------------------------------------------------------------------------
+# No-new-facts guard (Issue #426)
+# ---------------------------------------------------------------------------
+
+def no_new_facts(prompt: str, slots: dict[str, Any]) -> bool:
+    """Validate that a prompt does not introduce facts absent from slots.
+
+    Heuristic: every *quoted* value in the prompt must be traceable to a
+    slot value. This prevents LLM hallucinated times/dates/names from
+    sneaking into confirmation messages.
+
+    Args:
+        prompt: The confirmation prompt to validate.
+        slots: The slot dict that was used to build the prompt.
+
+    Returns:
+        True if the prompt is safe (all quoted facts are in slots),
+        False if the prompt contains information not traceable to slots.
+    """
+    if not slots:
+        return True  # nothing to verify against
+
+    # Collect all slot value strings (flattened, lowercased)
+    slot_values: set[str] = set()
+    for v in slots.values():
+        if v is None:
+            continue
+        sv = str(v).strip().lower()
+        if sv:
+            slot_values.add(sv)
+
+    # Extract quoted strings from prompt
+    quoted = re.findall(r"'([^']+)'", prompt)
+    for q in quoted:
+        q_lower = q.strip().lower()
+        if not q_lower:
+            continue
+        # Check if quoted value appears in any slot value (or vice versa)
+        if not any(q_lower in sv or sv in q_lower for sv in slot_values):
+            return False
+
+    return True
+
