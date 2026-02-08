@@ -23,7 +23,7 @@ Requirements:
     pip install openai
     
 vLLM server must be running:
-    python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-3B-Instruct --port 8001
+    python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-3B-Instruct-AWQ --port 8001
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ class VLLMOpenAIClient(LLMClient):
     
     Attributes:
         base_url: vLLM server URL (e.g., http://localhost:8001)
-        model: Model name (e.g., Qwen/Qwen2.5-3B-Instruct)
+        model: Model name (e.g., Qwen/Qwen2.5-3B-Instruct-AWQ)
         timeout_seconds: Request timeout
         track_ttft: Enable TTFT tracking (default: True)
         ttft_phase: Phase name for TTFT tracking ("router" | "finalizer")
@@ -79,7 +79,7 @@ class VLLMOpenAIClient(LLMClient):
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:8001",
-        model: str = "Qwen/Qwen2.5-3B-Instruct",
+        model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ",
         timeout_seconds: float = 120.0,
         track_ttft: bool = True,
         ttft_phase: str = "router",

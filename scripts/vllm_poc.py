@@ -6,7 +6,7 @@ Issue #132: vLLM PoC — Tek modelle OpenAI-compatible server ayağa kaldır
 Usage:
     # Terminal 1: Start vLLM server
     python -m vllm.entrypoints.openai.api_server \\
-        --model Qwen/Qwen2.5-3B-Instruct \\
+        --model Qwen/Qwen2.5-3B-Instruct-AWQ \\
         --port 8000 \\
         --max-model-len 4096
     
@@ -21,7 +21,7 @@ from typing import Any
 
 
 BASE_URL = "http://127.0.0.1:8001"
-MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct"
+MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct-AWQ"
 
 
 def check_server() -> bool:
@@ -175,7 +175,7 @@ def main():
         print("\n❌ vLLM server is not running!")
         print("\nStart server with:")
         print("  python -m vllm.entrypoints.openai.api_server \\")
-        print("      --model Qwen/Qwen2.5-3B-Instruct \\")
+        print("      --model Qwen/Qwen2.5-3B-Instruct-AWQ \\")
         print("      --port 8000 \\")
         print("      --max-model-len 4096")
         return 1

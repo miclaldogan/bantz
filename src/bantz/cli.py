@@ -426,7 +426,7 @@ Kullanım örnekleri:
     parser.add_argument("--voice-warmup", action="store_true", help="ASR modelini önceden hazırla/indir (voice başlamaz)")
     parser.add_argument("--piper-model", default="", help="Piper .onnx model yolu (zorunlu: --voice)")
     parser.add_argument("--vllm-url", default="http://127.0.0.1:8001", help="vLLM (OpenAI-compatible) base URL")
-    parser.add_argument("--vllm-model", default="Qwen/Qwen2.5-3B-Instruct", help="vLLM model adı")
+    parser.add_argument("--vllm-model", default="Qwen/Qwen2.5-3B-Instruct-AWQ", help="vLLM model adı")
     parser.add_argument(
         "--vllm-quality-url",
         default="http://127.0.0.1:8002",

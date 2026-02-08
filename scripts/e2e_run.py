@@ -31,7 +31,7 @@ Usage:
 
 Environment:
     BANTZ_VLLM_URL (default: http://localhost:8001)
-    BANTZ_VLLM_MODEL (default: Qwen/Qwen2.5-3B-Instruct)
+    BANTZ_VLLM_MODEL (default: Qwen/Qwen2.5-3B-Instruct-AWQ)
     GEMINI_API_KEY / GOOGLE_API_KEY (for cloud scenarios)
 
 Output:
@@ -69,7 +69,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 DEFAULT_VLLM_URL = "http://localhost:8001"
-DEFAULT_VLLM_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_VLLM_MODEL = "Qwen/Qwen2.5-3B-Instruct-AWQ"
 DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
 
 

@@ -57,7 +57,7 @@ class CommandRewriter:
     
     def __init__(
         self,
-        model: str = "Qwen/Qwen2.5-3B-Instruct",
+        model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ",
         base_url: str = "http://127.0.0.1:8001",
         timeout: float = 10.0,
         enabled: bool = True,
@@ -203,7 +203,7 @@ _rewriter: Optional[CommandRewriter] = None
 
 def get_rewriter(
     enabled: bool = True,
-    model: str = "Qwen/Qwen2.5-3B-Instruct",
+    model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ",
     base_url: str = "http://127.0.0.1:8001",
 ) -> CommandRewriter:
     """Get or create the global command rewriter."""

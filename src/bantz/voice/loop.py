@@ -13,7 +13,7 @@ class VoiceLoopConfig:
     session: str = "default"
     piper_model_path: str = ""
     vllm_url: str = "http://127.0.0.1:8001"
-    vllm_model: str = "Qwen/Qwen2.5-3B-Instruct"
+    vllm_model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ"
     whisper_model: str = "base"
     # Default to Turkish - English words like "instagram" still work fine
     language: Optional[str] = "tr"

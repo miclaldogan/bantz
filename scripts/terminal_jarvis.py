@@ -12,7 +12,7 @@ Run:
 
 Env:
   BANTZ_VLLM_URL (default http://localhost:8001)
-  BANTZ_VLLM_MODEL (default Qwen/Qwen2.5-3B-Instruct)
+  BANTZ_VLLM_MODEL (default Qwen/Qwen2.5-3B-Instruct-AWQ)
   GEMINI_API_KEY / GOOGLE_API_KEY / BANTZ_GEMINI_API_KEY (optional but recommended)
   BANTZ_GEMINI_MODEL (default gemini-1.5-flash)
 
@@ -460,7 +460,7 @@ class TerminalJarvis:
         self._gemini_last_check_at: float = 0.0
 
         vllm_url = os.getenv("BANTZ_VLLM_URL", "http://localhost:8001")
-        router_model = os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct")
+        router_model = os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct-AWQ")
         gemini_model = os.getenv("BANTZ_GEMINI_MODEL", "gemini-1.5-flash")
         gemini_key = _env_get_any("GEMINI_API_KEY", "GOOGLE_API_KEY", "BANTZ_GEMINI_API_KEY")
 

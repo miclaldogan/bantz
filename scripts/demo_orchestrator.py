@@ -297,7 +297,7 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Debug mode (verbose output)")
     parser.add_argument(
         "--model",
-        default="Qwen/Qwen2.5-3B-Instruct",
+        default="Qwen/Qwen2.5-3B-Instruct-AWQ",
         help="Model name (for vLLM)",
     )
     

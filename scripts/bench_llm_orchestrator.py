@@ -896,7 +896,7 @@ def run_benchmark(
     scenarios: str = "all",
     verbose: bool = False,
     vllm_base_url: str = "http://127.0.0.1:8001",
-    vllm_model: str = "Qwen/Qwen2.5-3B-Instruct",
+    vllm_model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ",
     vllm_final_base_url: str = "",
     vllm_final_model: str = "",
     prompt_profile: str = "bench",
@@ -915,7 +915,7 @@ def run_benchmark(
         """Pick a model ID that actually exists on the vLLM server.
 
         This is important for quantized repos like *-AWQ / *-GPTQ which have
-        different model IDs than the default "Qwen/Qwen2.5-3B-Instruct".
+        different model IDs than the default "Qwen/Qwen2.5-3B-Instruct-AWQ".
         """
         try:
             resp = requests.get(f"{base_url}/v1/models", timeout=2)
@@ -1088,7 +1088,7 @@ def run_qualitative_tests(backend: str) -> None:
 
     # Create LLM client
     base_url = "http://127.0.0.1:8001"
-    preferred_model = "Qwen/Qwen2.5-3B-Instruct"
+    preferred_model = "Qwen/Qwen2.5-3B-Instruct-AWQ"
     resolved_model = resolve_vllm_model_id(base_url, preferred_model)
     if resolved_model != preferred_model:
         print(f"ℹ️ vLLM model override: '{preferred_model}' → '{resolved_model}'")
@@ -1154,7 +1154,7 @@ def main():
     parser.add_argument("--output-md", type=Path, help="Save markdown report")
     parser.add_argument("--qualitative", action="store_true", help="Run qualitative conversation tests (Issue #153)")
     parser.add_argument("--vllm-base-url", default="http://127.0.0.1:8001", help="vLLM OpenAI-compatible server base URL")
-    parser.add_argument("--vllm-model", default="Qwen/Qwen2.5-3B-Instruct", help="Preferred vLLM model id (auto-falls back to server model)")
+    parser.add_argument("--vllm-model", default="Qwen/Qwen2.5-3B-Instruct-AWQ", help="Preferred vLLM model id (auto-falls back to server model)")
     parser.add_argument("--vllm-final-base-url", default="", help="Optional vLLM base URL for hybrid finalizer (8B reply model server)")
     parser.add_argument("--vllm-final-model", default="", help="Optional vLLM model id for hybrid finalizer (8B reply model)")
     parser.add_argument(
