@@ -176,6 +176,24 @@ def add_days_keep_time(iso_dt: str, days: int) -> str:
     return (dt + timedelta(days=int(days))).isoformat()
 
 
+def parse_hhmm_with_turkish(text: str) -> Optional[str]:
+    """Parse time from text: try numeric HH:MM first, then Turkish words.
+
+    Combines parse_hhmm (numeric) with parse_hhmm_turkish (word-based).
+    Turkish word parser applies PM default for hours 1-6 (Issue #419).
+    """
+    # Numeric first: "14:30", "09.00"
+    result = parse_hhmm(text)
+    if result:
+        return result
+    # Turkish word-based: "beşe", "saat beş", "altıda"
+    try:
+        from bantz.brain.turkish_clock import parse_hhmm_turkish
+        return parse_hhmm_turkish(text)
+    except ImportError:
+        return None
+
+
 def build_intent(user_text: str) -> CalendarIntent:
     """Deterministic calendar intent builder (minimal v1).
 
@@ -187,7 +205,7 @@ def build_intent(user_text: str) -> CalendarIntent:
     t = text.lower()
 
     day_hint = parse_day_hint(text)
-    hhmm = parse_hhmm(text)
+    hhmm = parse_hhmm_with_turkish(text)  # Issue #419: Turkish word fallback
     dur = parse_duration_minutes(text)
     offset = parse_offset_minutes(text)
     ref_idx = parse_hash_ref_index(text)
