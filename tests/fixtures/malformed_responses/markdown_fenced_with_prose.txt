@@ -1,0 +1,7 @@
+Tabii efendim! İşte sonuç:
+
+```json
+{"route": "calendar", "calendar_intent": "query", "confidence": 0.85, "tool_plan": ["calendar.list_events"], "assistant_reply": "Bugünkü etkinlikleri listeliyorum.", "slots": {"date": "bugün"}}
+```
+
+Başka bir şey var mı efendim?

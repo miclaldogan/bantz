@@ -1,0 +1,3 @@
+```json
+{"route": "calendar", "calendar_intent": "create", "confidence": 0.9, "tool_plan": ["calendar.create_event"], "assistant_reply": "Toplantıyı oluşturuyorum.", "slots": {"date": "2025-01-15", "time": "14:00"}}
+```

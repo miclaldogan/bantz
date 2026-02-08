@@ -1,0 +1,3 @@
+```
+{"route": "calendar", "calendar_intent": "create", "confidence": 0.9, "tool_plan": ["calendar.create_event"], "assistant_reply": "Oluşturuyorum.", "slots": {"time": "17:00", "participants": {"name": "Ahmet", "email": "ahmet@test.com"}}}
+```

@@ -1,0 +1,1 @@
+{"route": "calendar", "calendar_intent": "create", "confidence": 0.92, "tool_plan": ["calendar.create_event"], "assistant_reply": "Toplantınızı oluşturuyorum efendim.", "slots": {"title": "Proje toplantısı", "time": "15:00"}} Umarım yardımcı olmuştur efendim!
