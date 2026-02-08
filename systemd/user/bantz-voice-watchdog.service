@@ -1,0 +1,28 @@
+[Unit]
+Description=Bantz Voice Watchdog (audio hang detection + restart)
+Wants=bantz-voice.service
+After=bantz-voice.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Desktop/Bantz
+
+# Use repo bash script for watchdog logic
+ExecStart=%h/Desktop/Bantz/scripts/watchdog_voice.sh
+
+# Configuration via environment
+Environment=MAX_AGE=30
+Environment=COOLDOWN=60
+Environment=CHECK_INTERVAL=10
+Environment=MAX_BACKOFF=600
+
+Restart=always
+RestartSec=10
+
+# journald captures all output
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bantz-voice-watchdog
+
+[Install]
+WantedBy=default.target
