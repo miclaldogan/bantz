@@ -1075,9 +1075,12 @@ class OrchestratorLoop:
                     "confirmation_prompt": prompt,
                 }]
 
-        # If no confirmation is pending, pre-scan tool_plan and queue all
-        # confirmations in order, then return a pending confirmation placeholder.
-        if not state.has_pending_confirmation():
+        # If no confirmation is pending AND we're not executing a just-confirmed tool,
+        # pre-scan tool_plan and queue all confirmations in order,
+        # then return a pending confirmation placeholder.
+        # Issue #591: Skip pre-scan when confirmed_override_tool is set —
+        # otherwise the just-confirmed tool gets re-queued immediately.
+        if not state.has_pending_confirmation() and not confirmed_override_tool:
             try:
                 from bantz.tools.metadata import (
                     get_tool_risk,
