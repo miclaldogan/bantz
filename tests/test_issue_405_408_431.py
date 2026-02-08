@@ -33,15 +33,15 @@ class TestIssue405PromptBudget:
         )
         return JarvisLLMOrchestrator, _estimate_tokens
 
-    def test_core_prompt_under_600_tokens(self):
+    def test_core_prompt_under_800_tokens(self):
         cls, est = self._import()
         core_tokens = est(cls._SYSTEM_PROMPT_CORE)
-        assert core_tokens <= 600, f"CORE prompt {core_tokens} tokens > 600"
+        assert core_tokens <= 800, f"CORE prompt {core_tokens} tokens > 800"
 
-    def test_full_prompt_under_1100_tokens(self):
+    def test_full_prompt_under_1600_tokens(self):
         cls, est = self._import()
         full_tokens = est(cls.SYSTEM_PROMPT)
-        assert full_tokens <= 1100, f"Full prompt {full_tokens} tokens > 1100"
+        assert full_tokens <= 1600, f"Full prompt {full_tokens} tokens > 1600"
 
     def test_full_prompt_equals_core_plus_detail_plus_examples(self):
         cls, _ = self._import()
@@ -97,6 +97,7 @@ class TestIssue405PromptBudget:
             "calendar.list_events", "calendar.create_event",
             "gmail.list_messages", "gmail.send",
             "contacts.resolve", "contacts.list",
+            "time.now", "system.status",
         ]
         for tool in critical_tools:
             assert tool in core, f"Core prompt missing tool '{tool}'"

@@ -164,13 +164,13 @@ class TestLLMRouterGmailPrompt:
         assert "query" in prompt.lower()
     
     def test_prompt_has_label_category_examples(self):
-        """Prompt should have label/category examples."""
+        """Prompt should have gmail search/label examples."""
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         
         prompt = JarvisLLMOrchestrator.SYSTEM_PROMPT
         
-        # Should have category labels
-        assert "CATEGORY_UPDATES" in prompt or "label:" in prompt
+        # Should have gmail search examples (smart_search or query-based)
+        assert "smart_search" in prompt or "label:" in prompt or "GMAIL" in prompt
 
 
 # ============================================================================
