@@ -11,7 +11,7 @@ ulaşabilirsiniz.
 | Bileşen          | Minimum                          | Önerilen                          |
 |------------------|----------------------------------|-----------------------------------|
 | **İşletim Sistemi** | Ubuntu 22.04+ / Linux (systemd) | Ubuntu 24.04 LTS                 |
-| **Python**        | 3.10+                            | 3.12                              |
+| **Python**        | 3.11+                            | 3.12                              |
 | **GPU**           | —                                | NVIDIA RTX 4060+ (vLLM için)     |
 | **RAM**           | 8 GB                             | 16 GB+                            |
 | **Disk**          | 20 GB boş                        | 50 GB+                            |
