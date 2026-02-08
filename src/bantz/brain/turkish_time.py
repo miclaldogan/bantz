@@ -352,7 +352,13 @@ def _parse_specific_day(
     now: datetime, 
     tz: tzinfo,
 ) -> Optional[dict[str, Any]]:
-    """Parse specific day names like 'pazartesi', 'salı', etc."""
+    """Parse specific day names like 'pazartesi', 'salı', etc.
+
+    Issue #602: Context-aware direction —
+      - 'geçen/önceki/son' → look backward (past occurrence)
+      - 'bu/gelecek/önümüzdeki' → look forward (future occurrence)
+      - Ambiguous → default forward (most natural expectation)
+    """
     
     # Turkish day names to weekday number (0=Monday)
     # Sorted by length descending to match longer names first (cumartesi before cuma)
@@ -367,15 +373,29 @@ def _parse_specific_day(
     ]
     
     today = now.date()
+
+    # Determine direction from context keywords
+    look_backward = any(kw in text for kw in ["geçen ", "önceki ", "son "])
+    look_forward = any(kw in text for kw in ["bu ", "gelecek ", "önümüzdeki "])
     
     for day_name, weekday in day_names:
         if day_name in text:
-            # Calculate days until that weekday
-            days_ahead = weekday - today.weekday()
-            if days_ahead <= 0:  # Target day already passed this week
-                days_ahead += 7
-            
-            target_date = today + timedelta(days=days_ahead)
+            if look_backward:
+                # Past occurrence: how many days ago was that weekday?
+                days_back = (today.weekday() - weekday) % 7
+                if days_back == 0:
+                    days_back = 7  # "geçen pazartesi" on Monday = last Monday
+                target_date = today - timedelta(days=days_back)
+            else:
+                # Future occurrence (default): how many days until that weekday?
+                days_ahead = (weekday - today.weekday()) % 7
+                if days_ahead == 0:
+                    # Same day — "bu salı" on Tuesday = today; but bare "salı" = next week
+                    if look_forward:
+                        days_ahead = 0  # "bu salı" = today
+                    else:
+                        days_ahead = 7  # bare "salı" = next week
+                target_date = today + timedelta(days=days_ahead)
             
             # Check for period qualifier
             if "sabah" in text:
