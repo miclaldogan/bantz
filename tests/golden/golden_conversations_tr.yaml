@@ -1,0 +1,292 @@
+# Golden Conversations — Türkçe Regresyon Test Senaryoları (Issue #528)
+#
+# Her senaryo: input → expected route/intent/slots/tool_plan + constraints
+# Mock LLM ile deterministic test — yeni senaryo eklemek sadece bu dosyaya
+# bir blok eklemek demek.
+#
+# Format:
+#   id:          Benzersiz senaryo ID
+#   description: Kısa açıklama
+#   input:       Kullanıcı girişi (Türkçe)
+#   mock_response: Mock LLM'in döneceği JSON (deterministic)
+#   expected:    Beklenen çıktı alanları
+#   constraints: Kalite kontrolleri
+
+scenarios:
+  # ── Temel Akışlar ──────────────────────────────────────────
+
+  - id: selamlasma
+    description: Basit selamlama → samimi Türkçe cevap
+    input: "merhaba"
+    mock_response:
+      route: smalltalk
+      calendar_intent: none
+      confidence: 0.95
+      tool_plan: []
+      assistant_reply: "Merhaba! Sana nasıl yardımcı olabilirim?"
+      slots: {}
+      ask_user: false
+      requires_confirmation: false
+    expected:
+      route: smalltalk
+      calendar_intent: none
+      confidence_gte: 0.7
+      tool_plan: []
+    constraints:
+      no_english: true
+      no_chinese: true
+
+  - id: saat_sorma
+    description: Saat sorma → system route + time tool
+    input: "saat kaç"
+    mock_response:
+      route: system
+      calendar_intent: none
+      confidence: 0.92
+      tool_plan:
+        - "time.now"
+      assistant_reply: "Saati kontrol ediyorum."
+      slots: {}
+      ask_user: false
+      requires_confirmation: false
+    expected:
+      route: system
+      calendar_intent: none
+      confidence_gte: 0.7
+      tool_plan:
+        - "time.now"
+    constraints:
+      no_english: true
+      no_chinese: true
+
+  - id: takvim_sorgu
+    description: Bugün planım var mı → calendar route + list_events
+    input: "bugün planım var mı"
+    mock_response:
+      route: calendar
+      calendar_intent: query
+      confidence: 0.91
+      tool_plan:
+        - "calendar.list_events"
+      assistant_reply: "Bugünkü etkinliklere bakıyorum."
+      slots:
+        window_hint: today
+      ask_user: false
+      requires_confirmation: false
+    expected:
+      route: calendar
+      calendar_intent: query
+      confidence_gte: 0.7
+      tool_plan:
+        - "calendar.list_events"
+      slots:
+        window_hint: today
+    constraints:
+      no_english: true
+      no_chinese: true
+
+  - id: takvim_olusturma
+    description: Yarın üçe toplantı koy → calendar create + confirmation
+    input: "yarın üçe toplantı koy"
+    mock_response:
+      route: calendar
+      calendar_intent: create
+      confidence: 0.88
+      tool_plan:
+        - "calendar.create_event"
+      assistant_reply: "Yarın saat 15:00 için toplantı oluşturuyorum."
+      slots:
+        time: "15:00"
+        date_hint: tomorrow
+        title: toplantı
+      ask_user: false
+      requires_confirmation: true
+      confirmation_prompt: "Yarın 15:00'te 'toplantı' oluşturulsun mu?"
+    expected:
+      route: calendar
+      calendar_intent: create
+      confidence_gte: 0.7
+      tool_plan:
+        - "calendar.create_event"
+      requires_confirmation: true
+    constraints:
+      no_english: true
+      no_chinese: true
+
+  - id: mail_okuma
+    description: Son maili oku → gmail route + get_message
+    input: "son maili oku"
+    mock_response:
+      route: gmail
+      calendar_intent: none
+      gmail_intent: read
+      confidence: 0.87
+      tool_plan:
+        - "gmail.get_message"
+      assistant_reply: "Son mailine bakıyorum."
+      slots:
+        query: latest
+      ask_user: false
+      requires_confirmation: false
+    expected:
+      route: gmail
+      gmail_intent: read
+      confidence_gte: 0.7
+      tool_plan:
+        - "gmail.get_message"
+    constraints:
+      no_english: true
+      no_chinese: true
+
+  # ── Türkçe Edge Case'ler ───────────────────────────────────
+
+  - id: saat_belirsizligi_pm
+    description: 'beşe toplantı → 17:00 (PM default, sabah değil)'
+    input: "beşe toplantı koy"
+    mock_response:
+      route: calendar
+      calendar_intent: create
+      confidence: 0.85
+      tool_plan:
+        - "calendar.create_event"
+      assistant_reply: "Saat 17:00 için toplantı oluşturuyorum."
+      slots:
+        time: "17:00"
+        title: toplantı
+      ask_user: false
+      requires_confirmation: true
+      confirmation_prompt: "Bugün 17:00'de 'toplantı' oluşturulsun mu?"
+    expected:
+      route: calendar
+      calendar_intent: create
+      confidence_gte: 0.7
+      slots:
+        time: "17:00"
+      requires_confirmation: true
+    constraints:
+      no_english: true
+      no_chinese: true
+
+  - id: sabah_explicit
+    description: 'sabah beşte koşu → 05:00 (explicit sabah)'
+    input: "sabah beşte koşu yaz"
+    mock_response:
+      route: calendar
+      calendar_intent: create
+      confidence: 0.86
+      tool_plan:
+        - "calendar.create_event"
+      assistant_reply: "Sabah 05:00 için koşu oluşturuyorum."
+      slots:
+        time: "05:00"
+        title: koşu
+      ask_user: false
+      requires_confirmation: true
+      confirmation_prompt: "Sabah 05:00'te 'koşu' oluşturulsun mu?"
+    expected:
+      route: calendar
+      calendar_intent: create
+      confidence_gte: 0.7
+      slots:
+        time: "05:00"
+    constraints:
+      no_english: true
+      no_chinese: true
+
+  - id: anaphora_iki_turn
+    description: 'Turn1: yarın planım? → Turn2: ilkini iptal et'
+    turns:
+      - input: "yarın planım ne"
+        mock_response:
+          route: calendar
+          calendar_intent: query
+          confidence: 0.90
+          tool_plan:
+            - "calendar.list_events"
+          assistant_reply: "Yarınki etkinliklere bakıyorum."
+          slots:
+            window_hint: tomorrow
+          ask_user: false
+          requires_confirmation: false
+        expected:
+          route: calendar
+          calendar_intent: query
+
+      - input: "ilkini iptal et"
+        mock_response:
+          route: calendar
+          calendar_intent: cancel
+          confidence: 0.83
+          tool_plan:
+            - "calendar.delete_event"
+          assistant_reply: "İlk etkinliği iptal ediyorum."
+          slots:
+            event_ref: first
+          ask_user: false
+          requires_confirmation: true
+          confirmation_prompt: "İlk etkinlik iptal edilsin mi?"
+        expected:
+          route: calendar
+          calendar_intent: cancel
+          requires_confirmation: true
+
+  # ── Kalite Kontrolleri ─────────────────────────────────────
+
+  - id: dil_kontrolu
+    description: Cevaplarda İngilizce/Çince karakter olmamalı
+    input: "nasılsın"
+    mock_response:
+      route: smalltalk
+      calendar_intent: none
+      confidence: 0.93
+      tool_plan: []
+      assistant_reply: "Çok iyiyim, teşekkür ederim! Sen nasılsın?"
+      slots: {}
+      ask_user: false
+      requires_confirmation: false
+    expected:
+      route: smalltalk
+    constraints:
+      no_english: true
+      no_chinese: true
+
+  - id: json_parse_repair
+    description: Router output valid JSON (repair dahil)
+    input: "bugün hava nasıl"
+    mock_response:
+      route: smalltalk
+      calendar_intent: none
+      confidence: 0.80
+      tool_plan: []
+      assistant_reply: "Hava durumu bilgisi için bir araç yok, ama pencereden bakabilirsin!"
+      slots: {}
+      ask_user: false
+      requires_confirmation: false
+    expected:
+      route: smalltalk
+      confidence_gte: 0.5
+    constraints:
+      no_english: true
+      no_chinese: true
+
+  - id: confidence_threshold
+    description: Düşük confidence → tool çağrılmasın, soru sorulsun
+    input: "şeyi yap"
+    mock_response:
+      route: unknown
+      calendar_intent: none
+      confidence: 0.3
+      tool_plan: []
+      assistant_reply: ""
+      slots: {}
+      ask_user: true
+      question: "Ne yapmamı istediğini biraz daha açıklar mısın?"
+      requires_confirmation: false
+    expected:
+      route: unknown
+      confidence_lte: 0.7
+      tool_plan: []
+      ask_user: true
+    constraints:
+      no_english: true
+      no_chinese: true
