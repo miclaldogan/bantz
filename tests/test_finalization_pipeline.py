@@ -512,6 +512,28 @@ class TestFinalizationPipeline:
         result = pipeline.run(ctx)
         assert "toplantı" in result.assistant_reply
 
+    def test_fast_path_runs_without_tools_when_reply_empty(self, mock_planner_llm):
+        """Issue #600: Tool-less fast-tier turns should still get fast polish when reply is empty."""
+        fast = FastFinalizer(planner_llm=mock_planner_llm)
+        pipeline = FinalizationPipeline(fast=fast)
+        ctx = _make_ctx(
+            use_quality=False,
+            tier_name="fast",
+            tier_reason="tool_less_fast",
+            tool_results=[],
+            orchestrator_output=_make_output(
+                route="smalltalk",
+                calendar_intent="none",
+                tool_plan=[],
+                assistant_reply="",
+                ask_user=False,
+            ),
+        )
+
+        result = pipeline.run(ctx)
+        mock_planner_llm.complete_text.assert_called_once()
+        assert result.assistant_reply
+
     def test_default_fallback_no_tools(self):
         """No tools, no finalizer → return original output."""
         pipeline = FinalizationPipeline()

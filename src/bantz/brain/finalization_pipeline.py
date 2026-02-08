@@ -535,7 +535,14 @@ class FinalizationPipeline:
                 response_tier_reason=ctx.tier_reason or "fast_ok",
                 finalizer_used=False,
             )
-            if ctx.tool_results and not output.ask_user:
+            should_fast_finalize = (
+                (not output.ask_user)
+                and (
+                    bool(ctx.tool_results)
+                    or not (output.assistant_reply or "").strip()
+                )
+            )
+            if should_fast_finalize:
                 text = self._fast.finalize(ctx)
                 if text:
                     return replace(output, assistant_reply=text, finalizer_model=_fast_model or "fast")
