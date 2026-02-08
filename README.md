@@ -1,371 +1,497 @@
-# Bantz
+<p align="center">
+  <img src="docs/bantz.png" alt="Bantz" width="400" />
+</p>
 
-Bantz is a local-first assistant for Linux (CLI + voice + optional browser extension).
+<h1 align="center">Bantz</h1>
 
-- **LLM backend:** vLLM (OpenAI-compatible API) for local speed, with optional Gemini for quality writing
-- **Google integrations:** OAuth2 (Calendar is implemented; Gmail token flow supported)
+<p align="center">
+  <strong>Local-first AI assistant for Linux — CLI, voice, and browser.</strong>
+</p>
 
-## Quickstart (vLLM)
+<p align="center">
+  <a href="#quickstart"><img src="https://img.shields.io/badge/-Quickstart-blue?style=for-the-badge" alt="Quickstart" /></a>
+  <a href="#architecture"><img src="https://img.shields.io/badge/-Architecture-purple?style=for-the-badge" alt="Architecture" /></a>
+  <a href="#voice-mode"><img src="https://img.shields.io/badge/-Voice-green?style=for-the-badge" alt="Voice" /></a>
+  <a href="#google-integrations"><img src="https://img.shields.io/badge/-Google-red?style=for-the-badge" alt="Google" /></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/-Contributing-orange?style=for-the-badge" alt="Contributing" /></a>
+</p>
 
-### 1) Install
+<p align="center">
+  <img src="https://img.shields.io/badge/python-≥3.10-3776AB?logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/LLM-Qwen2.5--3B--AWQ-FF6F00" alt="LLM" />
+  <img src="https://img.shields.io/badge/inference-vLLM-blueviolet" alt="vLLM" />
+  <img src="https://img.shields.io/badge/finalizer-Gemini%202.0%20Flash-4285F4?logo=google&logoColor=white" alt="Gemini" />
+  <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License" />
+</p>
+
+---
+
+Bantz is a privacy-focused, local-first AI assistant that runs entirely on your machine. It routes requests through a fast 3B parameter model via [vLLM](https://github.com/vllm-project/vllm), executes tools (calendar, email, browser, system), and optionally polishes responses with Gemini for quality writing — all with sub-500ms time-to-first-token.
+
+## Table of Contents
+
+- [Highlights](#highlights)
+- [Quickstart](#quickstart)
+- [Architecture](#architecture)
+- [Voice Mode](#voice-mode)
+- [Google Integrations](#google-integrations)
+- [Browser Extension](#browser-extension)
+- [Configuration](#configuration)
+- [Testing](#testing)
+- [Benchmarks](#benchmarks)
+- [Project Structure](#project-structure)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Highlights
+
+| Feature | Description |
+|:--------|:------------|
+| 🧠 **Brain Pipeline** | Plan → Execute → Finalize loop with tool orchestration and JSON repair |
+| ⚡ **Sub-500ms TTFT** | 3B router at ~40ms, streaming responses, real-time latency monitoring |
+| 🎙️ **Voice Control** | Push-to-talk with Faster Whisper ASR, wake-word detection, Piper TTS |
+| 📅 **Google Calendar** | Create, query, modify, cancel events via OAuth2 — Turkish natural language |
+| 📧 **Gmail** | Read, search, and draft emails with quality finalization |
+| 🌐 **Browser Extension** | Chromium extension for web interaction and page context |
+| 🔒 **Privacy First** | Everything local by default; cloud (Gemini) is opt-in |
+| 🛡️ **Confirmation Firewall** | Destructive operations require explicit user approval |
+| 🔧 **Extensible Tools** | Plug-in architecture — calendar, email, web search, system info, and more |
+| 📊 **Observability** | Structured JSON logging, repair metrics, TTFT percentiles |
+
+---
+
+## Quickstart
+
+### Prerequisites
+
+- Linux (Ubuntu 20.04+ recommended)
+- Python ≥ 3.10
+- NVIDIA GPU with ≥ 6 GB VRAM (for local vLLM inference)
+
+### 1. Clone & Install
 
 ```bash
+git clone https://github.com/miclaldogan/bantz.git
+cd bantz
 python -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e ".[llm]"
 ```
 
-### 2) Start vLLM
-
-Recommended helper scripts:
+### 2. Start vLLM
 
 ```bash
-./scripts/vllm/start_3b.sh   # port 8001 (fast)
+# Recommended: 3B AWQ model on port 8001
+./scripts/vllm/start_3b.sh
 ```
 
-For high-quality writing (mail drafts, long summaries), enable Gemini (cloud):
+<details>
+<summary>Or via Docker</summary>
 
 ```bash
-# Prefer .env to avoid leaking keys into shell history.
-# See: docs/secrets-hygiene.md
-cat > .env <<'EOF'
-BANTZ_CLOUD_MODE=cloud
-QUALITY_PROVIDER=gemini
-GEMINI_API_KEY=PASTE_YOUR_KEY_HERE
-EOF
+docker compose up -d
+curl http://127.0.0.1:8001/v1/models
 ```
 
-### 3) Point Bantz to vLLM
+</details>
+
+### 3. Configure
+
+```bash
+cp config/bantz-env.example ~/.config/bantz/env
+```
+
+Minimum required variables:
 
 ```bash
 export BANTZ_VLLM_URL="http://127.0.0.1:8001"
 export BANTZ_VLLM_MODEL="Qwen/Qwen2.5-3B-Instruct-AWQ"
 ```
 
-### 4) Run
+### 4. Run
 
 ```bash
-bantz --once "instagram aç"
-# or
+# Single command
+bantz --once "yarın saat 3'te toplantı kur"
+
+# Interactive daemon
 bantz --serve
-```
 
-Voice mode (PTT):
-
-```bash
+# Voice mode (push-to-talk)
 bantz --voice --piper-model /path/to/tr.onnx --asr-allow-download
 ```
 
-More details: docs/setup/vllm.md
+<details>
+<summary>💡 Enable Gemini for quality writing (optional)</summary>
 
-## Project docs
-
-- docs/acceptance-tests.md
-- docs/jarvis-roadmap-v2.md
-- docs/gemini-hybrid-orchestrator.md (Issue #134, #135 - Gemini Hybrid)
-- docs/setup/vllm.md
-- docs/setup/google-oauth.md
-- docs/setup/memory.md
-- docs/setup/docker-vllm.md
-- docs/setup/google-vision.md
-
-## Hybrid Orchestrator Architecture (Issues #134, #135)
-
-Bantz supports flexible hybrid LLM architectures for optimal quality/latency balance:
-
-### Option 1: Gemini Hybrid (Issue #134, #135)
-**3B Router + Gemini Finalizer**
-- Phase 1: Local 3B router (fast planning ~40ms)
-- Phase 2: Tool execution
-- Phase 3: Gemini finalizer (quality responses)
-- **Use case**: Best quality, cloud dependency acceptable
-
-```python
-import os
-
-from bantz.brain.gemini_hybrid_orchestrator import create_gemini_hybrid_orchestrator
-from bantz.llm.vllm_openai_client import VLLMOpenAIClient
-
-router = VLLMOpenAIClient(
-    base_url="http://localhost:8001",
-    model="Qwen/Qwen2.5-3B-Instruct"
-)
-orchestrator = create_gemini_hybrid_orchestrator(
-    router_client=router,
-    gemini_api_key=os.getenv("GEMINI_API_KEY", "")
-)
-
-**Flexible Hybrid defaults (Issue #363):**
-- Default finalizer is **Gemini** (3B router + Gemini finalizer)
-- Override with env vars if you prefer local 7B:
-    - `BANTZ_FINALIZER_TYPE=gemini|vllm_7b`
-    - `BANTZ_FINALIZER_MODEL=gemini-2.0-flash|Qwen/Qwen2.5-7B-Instruct`
-```
-
-### Architecture Benefits
-- **Low latency**: 3B router for fast planning (~40ms)
-- **High quality**: Gemini for natural responses
-- **Resilience**: Falls back to 3B if cloud is disabled/unavailable
-- **Flexible**: Run fully local or hybrid (3B+Gemini)
-- **Target TTFT**: <500ms total (planning 40ms + execution + finalize 100ms)
-
-## TTFT Monitoring & Optimization (Issue #158)
-
-### Real-Time TTFT Tracking
-
-Bantz provides comprehensive Time-To-First-Token (TTFT) monitoring for exceptional UX:
+For polished email drafts, long summaries, and better Turkish prose — add a Gemini API key:
 
 ```bash
-# Interactive demo with real-time TTFT display
-python scripts/demo_ttft_realtime.py --mode interactive
-
-# Demo mode with predefined prompts
-python scripts/demo_ttft_realtime.py --mode demo
-
-# Benchmark TTFT performance
-python scripts/bench_ttft_monitoring.py --num-tests 30
+# Add to ~/.config/bantz/env (never paste keys in shell history)
+BANTZ_CLOUD_ENABLED=true
+GEMINI_API_KEY=your_key_here
+BANTZ_GEMINI_MODEL=gemini-2.0-flash
 ```
 
-### Features
-- **Streaming support**: Token-by-token output with real-time TTFT measurement
-- **Statistical tracking**: p50, p95, p99 percentiles
-- **Threshold enforcement**: Router p95 < 300ms, Finalizer p95 < 500ms
-- **Alert system**: Automatic warnings on threshold violations
-- **Color-coded UI**: Green (<300ms), Yellow (300-500ms), Red (>500ms)
-- **Export reports**: JSON output with full statistics
+See [docs/secrets-hygiene.md](docs/secrets-hygiene.md) for best practices.
 
-### Example
+</details>
 
-```python
-from bantz.llm.vllm_openai_client import VLLMOpenAIClient
-from bantz.llm.ttft_monitor import TTFTMonitor
+---
 
-# Create client with TTFT tracking
-client = VLLMOpenAIClient(
-    base_url="http://localhost:8001",
-    track_ttft=True,
-    ttft_phase="router",
-)
+## Architecture
 
-# Stream with TTFT measurement
-for chunk in client.chat_stream(messages):
-    if chunk.is_first_token:
-        print(f"[THINKING] (TTFT: {chunk.ttft_ms}ms)")
-    print(chunk.content, end='', flush=True)
-
-# Get statistics
-monitor = TTFTMonitor.get_instance()
-stats = monitor.get_statistics("router")
-print(f"Router p95: {stats.p95_ms}ms")
+```
+┌────────────────────────────────────────────────────────────────┐
+│                          BANTZ                                 │
+│                                                                │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                 │
+│  │  Voice    │    │  CLI     │    │  Browser │                 │
+│  │  Loop     │    │  Client  │    │Extension │                 │
+│  └────┬─────┘    └────┬─────┘    └────┬─────┘                 │
+│       │               │               │                        │
+│       └───────────────┼───────────────┘                        │
+│                       ▼                                        │
+│              ┌────────────────┐                                │
+│              │  BantzServer   │  Unix socket daemon             │
+│              └───────┬────────┘                                │
+│                      ▼                                         │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                   Brain Pipeline                        │   │
+│  │                                                         │   │
+│  │  ┌───────────┐   ┌──────────────┐   ┌──────────────┐   │   │
+│  │  │ PreRouter  │──▶│  LLM Router  │──▶│  Tool        │   │   │
+│  │  │ (intent)   │   │  (3B, ~40ms) │   │  Executor    │   │   │
+│  │  └───────────┘   └──────────────┘   └──────┬───────┘   │   │
+│  │                                             │           │   │
+│  │                                             ▼           │   │
+│  │                                     ┌──────────────┐    │   │
+│  │                                     │  Finalizer   │    │   │
+│  │                                     │  (tiered)    │    │   │
+│  │                                     └──────────────┘    │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ Calendar │  │  Gmail   │  │  Web     │  │  System  │      │
+│  │  Tools   │  │  Tools   │  │  Tools   │  │  Tools   │      │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘      │
+└────────────────────────────────────────────────────────────────┘
+         │                                       │
+         ▼                                       ▼
+   ┌───────────┐                          ┌───────────┐
+   │   vLLM    │  Qwen2.5-3B-AWQ         │  Gemini   │  2.0 Flash
+   │  (local)  │  port 8001              │  (cloud)  │  (optional)
+   └───────────┘                          └───────────┘
 ```
 
-### Performance Targets
-- **Router (3B)**: p95 < 300ms (typical: ~40-50ms ✅)
-- **Finalizer (Gemini)**: p95 varies by network/model
-- **Total latency**: <500ms for "Jarvis feel" UX
+### Pipeline Flow
 
-## JSON Schema Validation (Issue #156)
+1. **Input** arrives from CLI, voice, or browser extension
+2. **BantzServer** routes through the brain pipeline (default) or legacy router (`BANTZ_USE_LEGACY=1`)
+3. **PreRouter** classifies intent (smalltalk → fast path, tool-needed → planner)
+4. **LLM Router** (Qwen 3B via vLLM) generates a structured JSON plan: route, tools, slots
+5. **JSON Repair** fixes common 3B mistakes — wrong enums, string-instead-of-list, markdown wrapping
+6. **Tool Executor** runs the planned tools (calendar, email, web, system)
+7. **Tiered Finalizer** decides quality vs. fast response:
+   - **Quality tier** → Gemini 2.0 Flash (polished Turkish prose)
+   - **Fast tier** → local 3B (sub-200ms, good enough for simple replies)
+   - **Draft tier** → deterministic template (no LLM call)
 
-Bantz uses strict Pydantic schemas for LLM output validation:
+### Key Design Decisions
 
-### Key Features
-- **Enum enforcement**: route ∈ {calendar, smalltalk, unknown}
-- **Type safety**: tool_plan must be list[str] (not string)
-- **Turkish validation**: confirmation_prompt must be Turkish
-- **Auto-repair**: 99%+ enum conformance with repair layer
-- **Statistics**: Track repair rates (<5% target)
+- **Brain is the default path** — all entry points (CLI, voice, browser) flow through the unified brain pipeline
+- **Tiered finalization** — complexity, writing need, and risk scores determine whether to use cloud or local
+- **Confirmation firewall** — destructive tools (delete, shutdown) require explicit user approval regardless of LLM output
+- **JSON repair at every layer** — deterministic repair for enums/types, LLM-based repair for structural failures
 
-### Example
+---
 
-```python
-from bantz.router.schemas import validate_router_output
-from bantz.llm.json_repair import validate_and_repair_json
+## Voice Mode
 
-# LLM output with mistakes
-raw = '{"route": "create_meeting", "tool_plan": "create_event", ...}'
-
-# Automatic repair + validation
-schema, error = validate_and_repair_json(raw)
-assert schema.route == "calendar"  # Repaired: create_meeting → calendar
-assert schema.tool_plan == ["create_event"]  # Repaired: string → list
-```
-
-### Files
-- `src/bantz/router/schemas.py`: Strict Pydantic schemas
-- `src/bantz/llm/json_repair.py`: JSON repair layer with stats
-- `src/bantz/router/prompts.py`: Enhanced Turkish prompts with examples
-- `tests/test_json_validation.py`: 41 comprehensive tests
-
-### Acceptance Criteria
-- ✅ 100% JSON parse success (with repair layer)
-- ✅ 99%+ enum conformance (route & intent)
-- ✅ <5% repair rate (most outputs already correct)
-- ✅ Turkish confirmation prompts enforced
-
-## Confirmation Firewall (Issue #160)
-
-### Security Layer for Destructive Operations
-
-Bantz implements a **confirmation firewall** that prevents accidental execution of dangerous operations:
-
-#### Key Features
-- **Risk Classification**: All tools classified as SAFE/MODERATE/DESTRUCTIVE
-- **LLM Cannot Override**: Even if LLM forgets, DESTRUCTIVE tools require confirmation
-- **Audit Logging**: Complete trail of all tool executions with risk levels
-- **User Control**: Destructive operations need explicit user approval
-
-#### Risk Levels
-
-**🟢 SAFE** (Read-only, no side effects)
-```
-web.search, calendar.list_events, file.read, vision.screenshot
-```
-
-**🟡 MODERATE** (Reversible state changes)
-```
-calendar.create_event, notification.send, browser.open, email.send
-```
-
-**🔴 DESTRUCTIVE** (Requires confirmation)
-```
-calendar.delete_event, file.delete, payment.submit, system.shutdown
-```
-
-#### Example: Firewall in Action
-
-```python
-from bantz.tools.metadata import requires_confirmation, is_destructive
-
-# LLM output with missing confirmation
-llm_output = {
-    "tool_plan": ["calendar.delete_event"],
-    "requires_confirmation": False,  # ❌ LLM forgot!
-}
-
-# Firewall overrides
-if is_destructive("calendar.delete_event"):
-    needs_confirmation = True  # ✅ Enforced by firewall
-    prompt = "Delete calendar event 'evt123'? This cannot be undone."
-```
-
-#### Audit Trail
-
-All tool executions logged to `artifacts/logs/bantz.log.jsonl`:
-
-```jsonl
-{
-  "event_type": "tool_execution",
-  "tool_name": "calendar.delete_event",
-  "risk_level": "destructive",
-  "success": true,
-  "confirmed": true,
-  "params": {"event_id": "evt123"}
-}
-```
-
-**Full docs:** [docs/confirmation-firewall.md](docs/confirmation-firewall.md)
-
-**Tests:** 25 comprehensive tests in `tests/test_confirmation_firewall.py`
-
-## Benchmark Suite (Issue #161)
-
-### Comprehensive Performance & Quality Testing
-
-Bantz includes a full benchmark suite for comparing LLM modes and tracking regression:
-
-#### Test Scenarios
-- **50+ real-world test cases** across 3 domains:
-  - Calendar (30 cases): create/query/modify/cancel events, Turkish prompts
-  - Chat (10 cases): smalltalk, memory, context tracking
-  - Browser (10 cases): search, navigation, multi-step flows
-
-#### Benchmark Modes
-- **3B-only**: Single Qwen 2.5 3B for all tasks (fast, lower quality)
-- **Hybrid**: 3B router + Gemini finalizer (recommended quality)
-- **Both**: Compare both modes side-by-side
-
-#### Metrics Tracked
-- **Accuracy**: Route, intent, tools correctness
-- **Performance**: TTFT (Time to First Token) p50/p95/p99, total latency
-- **Token usage**: Input/output counts, avg per test case
-
-#### Run Benchmarks
+Bantz supports full voice interaction with push-to-talk:
 
 ```bash
-# Run both modes and compare
-python scripts/bench_hybrid_vs_3b_only.py --mode both
-
-# 3B-only mode
-python scripts/bench_hybrid_vs_3b_only.py --mode 3b_only
-
-# Hybrid mode (3B router + Gemini finalizer)
-python scripts/bench_hybrid_vs_3b_only.py --mode hybrid --use-gemini
-
-# Generate markdown report
-python scripts/generate_benchmark_report.py
-cat artifacts/results/BENCHMARK_REPORT.md
+pip install -e ".[voice]"
+bantz --voice --piper-model /path/to/tr.onnx --asr-allow-download
 ```
 
-#### CI Regression Tests
+| Component | Engine | Details |
+|:----------|:-------|:--------|
+| ASR | [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) | Local, Turkish-optimized |
+| TTS | [Piper](https://github.com/rhasspy/piper) | Local, ONNX models |
+| Wake Word | Vosk / OpenWakeWord | Configurable via `BANTZ_WAKE_ENGINE` |
+| Autocorrect | RapidFuzz | Fixes common ASR transcription errors |
+| VAD | Energy + Silero | Voice activity detection for clean segmentation |
+
+<details>
+<summary>Voice environment variables</summary>
 
 ```bash
-# Run regression tests (requires benchmark results)
-pytest tests/test_benchmark_regression.py -v
-
-# Only regression tests
-pytest -m regression
+BANTZ_WAKE_WORDS=hey bantz,bantz,jarvis
+BANTZ_WAKE_ENGINE=vosk
+BANTZ_WAKE_SENSITIVITY=0.5
+BANTZ_ACTIVE_LISTEN_TTL_S=90
+BANTZ_SILENCE_TO_WAKE_S=30
 ```
 
-**Thresholds:**
-- TTFT p95 < 400ms (router)
-- JSON validity > 95%
-- Overall accuracy > 85%
-- Route accuracy > 90%
+</details>
 
-**Files:**
-- `tests/scenarios/*.json`: Test case definitions
-- `scripts/bench_hybrid_vs_3b_only.py`: Benchmark runner
-- `scripts/generate_benchmark_report.py`: Report generator
-- `tests/test_benchmark_regression.py`: CI regression tests
+---
 
-## Google OAuth (Calendar/Gmail)
+## Google Integrations
 
-### 1) Install Calendar deps
+### Calendar
 
 ```bash
 pip install -e ".[calendar]"
+
+# Setup OAuth
+bantz google auth calendar --write
+
+# Use naturally
+bantz --once "yarın saat 5'te toplantı kur"
+bantz --once "bugün neler var?"
+bantz --once "cuma günkü toplantıyı iptal et"
 ```
 
-### 2) Put your OAuth client secret
-
-Default path:
-
-- `~/.config/bantz/google/client_secret.json`
-
-(Or set `BANTZ_GOOGLE_CLIENT_SECRET`.)
-
-### 3) Mint tokens via CLI
+### Gmail
 
 ```bash
-bantz google env
-
-# Calendar token
-bantz google auth calendar --write
-bantz google calendar list --max-results 10
-
-# Gmail token (optional)
-export BANTZ_GOOGLE_GMAIL_TOKEN_PATH="$HOME/.config/bantz/google/gmail_token.json"
+# Authenticate
 bantz google auth gmail --scope readonly
+
+# Use naturally
+bantz --once "okunmamış maillerimi göster"
+bantz --once "Ahmet'e nazik bir mail yaz"
 ```
 
-More details: docs/setup/google-oauth.md
+<details>
+<summary>OAuth setup details</summary>
 
-## Notes
+1. Place your Google Cloud OAuth client secret at:
+   ```
+   ~/.config/bantz/google/client_secret.json
+   ```
+   Or set `BANTZ_GOOGLE_CLIENT_SECRET` to a custom path.
 
-- If you already have a vLLM server elsewhere, override with `BANTZ_VLLM_URL` or `bantz --vllm-url ...`.
-- This repo intentionally has **no Ollama support**.
+2. Mint tokens via CLI:
+   ```bash
+   bantz google env                          # show config paths
+   bantz google auth calendar --write        # calendar read+write
+   bantz google auth gmail --scope readonly  # gmail read-only
+   ```
+
+Full guide: [docs/setup/google-oauth.md](docs/setup/google-oauth.md)
+
+</details>
+
+---
+
+## Browser Extension
+
+A Chromium-based extension that connects Bantz to your browser:
+
+```bash
+pip install -e ".[browser]"
+```
+
+- Page context extraction for better answers
+- Tab management and navigation
+- Web search integration
+
+See [bantz-extension/](bantz-extension/) for the extension source.
+
+---
+
+## Configuration
+
+All configuration is via environment variables. Copy the example and customize:
+
+```bash
+cp config/bantz-env.example ~/.config/bantz/env
+```
+
+### Core Variables
+
+| Variable | Default | Description |
+|:---------|:--------|:------------|
+| `BANTZ_VLLM_URL` | `http://localhost:8001` | vLLM endpoint |
+| `BANTZ_VLLM_MODEL` | `Qwen/Qwen2.5-3B-Instruct-AWQ` | Router model |
+| `BANTZ_GEMINI_MODEL` | `gemini-2.0-flash` | Finalizer model (when cloud enabled) |
+| `BANTZ_CLOUD_ENABLED` | `false` | Enable Gemini cloud finalization |
+| `GEMINI_API_KEY` | — | Gemini API key (required if cloud enabled) |
+| `BANTZ_USE_LEGACY` | — | Set to `1` to bypass brain and use legacy router |
+
+### Tiered Finalization
+
+| Variable | Default | Description |
+|:---------|:--------|:------------|
+| `BANTZ_TIERED_MODE` | `1` | Enable tiered quality/fast finalization |
+| `BANTZ_FORCE_FINALIZER_TIER` | — | Force `quality` or `fast` tier (debug/testing) |
+| `BANTZ_QOS_QUALITY_TIMEOUT_S` | `90` | Timeout for quality (Gemini) calls |
+| `BANTZ_QOS_FAST_TIMEOUT_S` | `20` | Timeout for fast (3B) calls |
+
+### Privacy & Security
+
+| Variable | Default | Description |
+|:---------|:--------|:------------|
+| `BANTZ_REDACT_PII` | `true` | Redact personally identifiable information |
+| `BANTZ_METRICS_ENABLED` | `true` | Enable structured metrics logging |
+| `BANTZ_LATENCY_BUDGET_MS` | `3000` | Max acceptable end-to-end latency |
+
+<details>
+<summary>All optional dependency groups</summary>
+
+```bash
+pip install -e ".[llm]"        # vLLM + torch + transformers
+pip install -e ".[calendar]"   # Google Calendar
+pip install -e ".[voice]"      # ASR + TTS + wake word
+pip install -e ".[browser]"    # WebSocket browser bridge
+pip install -e ".[vision]"     # Screenshot + OCR + PDF
+pip install -e ".[system]"     # D-Bus + system tray
+pip install -e ".[ui]"         # PyQt5 overlay UI
+pip install -e ".[security]"   # Cryptography
+pip install -e ".[dev]"        # pytest + dev tools
+pip install -e ".[all]"        # Everything
+```
+
+</details>
+
+---
+
+## Testing
+
+Bantz has a comprehensive test suite:
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run all unit tests
+pytest tests/ -v
+
+# Run specific test categories
+pytest tests/test_json_repair_golden.py -v     # JSON repair golden tests
+pytest tests/test_tiered_*.py -v               # Tiered scoring tests
+pytest tests/test_issue_520_banner.py -v       # Runtime banner tests
+
+# Integration tests (requires running vLLM)
+pytest tests/ -v --run-integration
+
+# Regression tests (requires benchmark results)
+pytest tests/ -v -m regression
+```
+
+### Test Coverage Highlights
+
+| Area | Tests | What's covered |
+|:-----|:------|:---------------|
+| JSON Repair | 58 golden tests | Markdown fencing, truncated output, wrong types/enums, Turkish unicode |
+| Tiered Scoring | Complexity, writing, risk | Turkish query scoring with read/write disambiguation |
+| Orchestrator | Multi-turn, tool execution | Error recovery, context carry, fallback paths |
+| Confirmation Firewall | Risk classification | Destructive operation blocking |
+| Gemini Client | Rate limiting, circuit breaker | Streaming, quota management |
+| Router Schemas | Pydantic validation | Enum repair, type coercion |
+
+---
+
+## Benchmarks
+
+```bash
+# Run performance benchmarks
+python scripts/bench_ttft_monitoring.py --num-tests 30
+
+# Compare 3B-only vs hybrid mode
+python scripts/bench_hybrid_vs_3b_only.py --mode both
+
+# Generate report
+python scripts/generate_benchmark_report.py
+```
+
+### Performance Targets
+
+| Metric | Target | Typical |
+|:-------|:-------|:--------|
+| Router TTFT (3B) | p95 < 300ms | ~40–50ms ✅ |
+| Finalizer TTFT (Gemini) | p95 < 500ms | Varies by network |
+| JSON validity | > 95% | ~99% with repair ✅ |
+| Route accuracy | > 90% | ~95% ✅ |
+| End-to-end latency | < 3000ms | ~500–1500ms ✅ |
+
+---
+
+## Project Structure
+
+```
+bantz/
+├── src/bantz/                 # Main package (378 modules)
+│   ├── brain/                 # Brain pipeline: orchestrator, finalization, JSON repair
+│   ├── llm/                   # LLM clients: vLLM, Gemini, tiered scoring
+│   ├── router/                # Intent router: schemas, prompts, handlers
+│   ├── tools/                 # Tool registry: calendar, gmail, web, system
+│   ├── voice/                 # Voice loop: ASR, TTS, wake word, VAD
+│   ├── server.py              # Unix socket daemon (brain default)
+│   └── ...                    # 30+ subsystem modules
+├── tests/                     # 7,500+ tests across 277 test files
+│   ├── fixtures/              # Mock responses, golden traces
+│   └── scenarios/             # Benchmark test cases (50+ scenarios)
+├── scripts/                   # CLI tools, benchmarks, demos
+├── config/                    # Environment templates, model settings
+├── bantz-extension/           # Chromium browser extension
+├── docker/                    # vLLM Docker deployment
+├── docs/                      # Architecture docs, setup guides
+├── pyproject.toml             # Package config (hatchling)
+└── docker-compose.yml         # One-command vLLM deployment
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|:---------|:------------|
+| [docs/setup/vllm.md](docs/setup/vllm.md) | vLLM installation and configuration |
+| [docs/setup/google-oauth.md](docs/setup/google-oauth.md) | Google Calendar & Gmail OAuth setup |
+| [docs/setup/boot-jarvis.md](docs/setup/boot-jarvis.md) | Systemd service and boot configuration |
+| [docs/setup/docker-vllm.md](docs/setup/docker-vllm.md) | Docker-based vLLM deployment |
+| [docs/setup/memory.md](docs/setup/memory.md) | Conversation memory configuration |
+| [docs/setup/google-vision.md](docs/setup/google-vision.md) | Vision and OCR setup |
+| [docs/gemini-hybrid-orchestrator.md](docs/gemini-hybrid-orchestrator.md) | Hybrid architecture deep-dive |
+| [docs/confirmation-firewall.md](docs/confirmation-firewall.md) | Security firewall documentation |
+| [docs/voice-pipeline-e2e.md](docs/voice-pipeline-e2e.md) | Voice pipeline end-to-end flow |
+| [docs/acceptance-tests.md](docs/acceptance-tests.md) | Acceptance test criteria |
+| [docs/secrets-hygiene.md](docs/secrets-hygiene.md) | API key and secrets best practices |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
+| [SECURITY.md](SECURITY.md) | Security policy |
+
+---
+
+## Contributing
+
+We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a PR.
+
+```bash
+# Development setup
+git clone https://github.com/miclaldogan/bantz.git
+cd bantz
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[all]"
+
+# Run tests
+pytest tests/ -v
+
+# Create a feature branch
+git checkout -b feature/your-feature dev
+```
+
+---
 
 ## License
 
-See LICENSE (proprietary).
+Proprietary. Copyright © 2024–2026 Mıcıl Aldoğan. All Rights Reserved.
+
+See [LICENSE](LICENSE) for details.
