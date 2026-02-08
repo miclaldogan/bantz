@@ -49,6 +49,24 @@ __all__ = [
     "StepTiming",
 ]
 
+# ── Lazy metrics import (avoid circular / missing dep) ────────────
+_turn_metrics_writer: Any = None
+
+
+def _get_metrics_writer() -> Any:
+    """Lazy singleton for TurnMetricsWriter."""
+    global _turn_metrics_writer
+    if _turn_metrics_writer is None:
+        try:
+            from bantz.metrics.turn_metrics import TurnMetricsWriter
+
+            _turn_metrics_writer = TurnMetricsWriter()
+            logger.debug("TurnMetricsWriter initialised (enabled=%s)", _turn_metrics_writer.enabled)
+        except Exception as exc:
+            logger.debug("TurnMetricsWriter unavailable: %s", exc)
+            _turn_metrics_writer = False  # sentinel: don't retry
+    return _turn_metrics_writer if _turn_metrics_writer is not False else None
+
 
 # ─────────────────────────────────────────────────────────────────
 # Data classes
@@ -224,6 +242,50 @@ class VoicePipeline:
             )
         return self._runtime
 
+    # ── Metrics helper ──────────────────────────────────────────
+    @staticmethod
+    def _emit_turn_metrics(result: "PipelineResult") -> None:
+        """Build a TurnMetrics record from *result* and write to JSONL.
+
+        This is a best-effort operation: failures are logged at DEBUG
+        and never propagate to the caller.
+        """
+        writer = _get_metrics_writer()
+        if writer is None:
+            return
+
+        try:
+            from bantz.metrics.turn_metrics import TurnMetrics
+
+            # Extract per-phase ms from timings list
+            phase_map: dict[str, float] = {}
+            for t in result.timings:
+                phase_map[t.name] = t.elapsed_ms
+
+            m = TurnMetrics(
+                user_input=result.transcription,
+                route=result.route,
+                intent=result.intent,
+                tool=result.tool_plan[0] if result.tool_plan else None,
+                finalizer_tier=result.finalizer_tier,
+                success=result.success,
+                asr_ms=phase_map.get("asr"),
+                router_ms=phase_map.get("brain") or phase_map.get("router"),
+                tool_ms=phase_map.get("tool"),
+                finalize_ms=phase_map.get("finalize") or phase_map.get("finalizer"),
+                tts_ms=phase_map.get("tts"),
+                total_ms=result.total_ms,
+                error=result.error,
+            )
+
+            # Check budgets and populate violations
+            m.check_budgets()
+            m.log_debug()
+            writer.write(m)
+
+        except Exception as exc:
+            logger.debug("Failed to emit turn metrics: %s", exc)
+
     # ── Narration helper ────────────────────────────────────────
     def _narrate(self, tool_names: list[str]) -> Optional[str]:
         """Pick and play a narration for the first tool that has one."""
@@ -346,6 +408,9 @@ class VoicePipeline:
                 result.timing_summary(),
             )
 
+        # Emit turn metrics (best-effort)
+        self._emit_turn_metrics(result)
+
         return result
 
     # ── Full: audio → spoken reply ──────────────────────────────
@@ -446,6 +511,9 @@ class VoicePipeline:
                 result.reply[:80] if result.reply else "(empty)",
                 result.timing_summary(),
             )
+
+        # Emit turn metrics (best-effort)
+        self._emit_turn_metrics(result)
 
         return result
 
