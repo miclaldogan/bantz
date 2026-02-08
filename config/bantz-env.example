@@ -8,7 +8,7 @@ BANTZ_VLLM_MODEL=Qwen/Qwen2.5-3B-Instruct-AWQ
 # === Gemini (optional) ===
 # GEMINI_API_KEY=
 BANTZ_CLOUD_ENABLED=false
-BANTZ_GEMINI_MODEL=gemini-1.5-flash
+BANTZ_GEMINI_MODEL=gemini-2.0-flash
 
 # === Audio ===
 # BANTZ_MIC_DEVICE=default

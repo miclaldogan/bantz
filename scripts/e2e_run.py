@@ -70,7 +70,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_VLLM_URL = "http://localhost:8001"
 DEFAULT_VLLM_MODEL = "Qwen/Qwen2.5-3B-Instruct-AWQ"
-DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
 
 
 # ============================================================================

@@ -183,7 +183,7 @@ def test_gemini_client_emits_metrics_and_reason_codes(monkeypatch: pytest.Monkey
 
     caplog.set_level("INFO", logger="bantz.llm.metrics")
 
-    c = GeminiClient(api_key="x", model="gemini-1.5-flash")
+    c = GeminiClient(api_key="x", model="gemini-2.0-flash")
     out = c.complete_text(prompt="hello", temperature=0.0, max_tokens=5)
     assert out == "ok"
 

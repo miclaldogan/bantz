@@ -68,7 +68,7 @@ class TestCreateRuntime:
         "BANTZ_VLLM_URL": "http://localhost:8001",
         "BANTZ_VLLM_MODEL": "test-model",
         "GEMINI_API_KEY": "test-key",
-        "BANTZ_GEMINI_MODEL": "gemini-1.5-flash",
+        "BANTZ_GEMINI_MODEL": "gemini-2.0-flash",
     }, clear=False)
     @patch("bantz.llm.vllm_openai_client.VLLMOpenAIClient")
     @patch("bantz.brain.orchestrator_loop.OrchestratorLoop")
@@ -85,7 +85,7 @@ class TestCreateRuntime:
         assert runtime is not None
         assert runtime.gemini_client is not None
         assert runtime.finalizer_is_gemini is True
-        assert runtime.gemini_model == "gemini-1.5-flash"
+        assert runtime.gemini_model == "gemini-2.0-flash"
 
     @patch("bantz.llm.vllm_openai_client.VLLMOpenAIClient")
     @patch("bantz.brain.orchestrator_loop.OrchestratorLoop")

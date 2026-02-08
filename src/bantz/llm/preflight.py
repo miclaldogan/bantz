@@ -179,7 +179,7 @@ def check_gemini_preflight() -> BackendStatus:
         logger.debug("[warmup] Gemini skipped (no key or cloud disabled)")
         return BackendStatus(status="skipped")
 
-    model = os.getenv("BANTZ_GEMINI_MODEL", "gemini-1.5-flash")
+    model = os.getenv("BANTZ_GEMINI_MODEL", "gemini-2.0-flash")
     logger.debug("[warmup] checking Gemini preflight for %s", model)
 
     try:

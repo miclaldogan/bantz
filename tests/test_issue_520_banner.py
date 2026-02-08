@@ -36,7 +36,7 @@ class TestRuntimeBanner:
 
         class FakeRuntime:
             router_model = "Qwen/Qwen2.5-3B-Instruct"
-            gemini_model = "gemini-1.5-flash"
+            gemini_model = "gemini-2.0-flash"
             finalizer_is_gemini = True
             loop = FakeLoop()
             tools = None
@@ -44,7 +44,7 @@ class TestRuntimeBanner:
 
         banner = RuntimeBanner.from_runtime(FakeRuntime())
         assert banner.finalizer_type == "Gemini"
-        assert banner.finalizer_model == "gemini-1.5-flash"
+        assert banner.finalizer_model == "gemini-2.0-flash"
         assert banner.finalizer_ok is True
         assert banner.memory_turns == 8
         assert banner.memory_tokens == 800
@@ -74,7 +74,7 @@ class TestFormatBanner:
         from bantz.brain.runtime_banner import RuntimeBanner, format_banner
         b = RuntimeBanner(
             router_model="Qwen/Qwen2.5-3B-Instruct",
-            finalizer_model="gemini-1.5-flash",
+            finalizer_model="gemini-2.0-flash",
             finalizer_ok=True,
         )
         text = format_banner(b)
@@ -87,7 +87,7 @@ class TestFormatBanner:
         b = RuntimeBanner(
             mode="orchestrator",
             router_model="Qwen/Qwen2.5-3B-Instruct",
-            finalizer_model="gemini-1.5-flash",
+            finalizer_model="gemini-2.0-flash",
             finalizer_type="Gemini",
             finalizer_ok=True,
             memory_turns=10,
@@ -97,7 +97,7 @@ class TestFormatBanner:
         text = format_banner(b)
         assert "orchestrator" in text
         assert "Qwen2.5-3B-Instruct" in text
-        assert "gemini-1.5-flash" in text
+        assert "gemini-2.0-flash" in text
         assert "10 turns" in text
         assert "1000tok" in text
         assert "5 registered" in text

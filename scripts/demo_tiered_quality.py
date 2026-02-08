@@ -235,7 +235,7 @@ def main() -> int:
             print("ERROR: GEMINI_API_KEY not set")
             print("Set one of: GEMINI_API_KEY / GOOGLE_API_KEY / BANTZ_GEMINI_API_KEY")
             return 2
-        model = os.environ.get("BANTZ_GEMINI_MODEL", "gemini-1.5-flash")
+        model = os.environ.get("BANTZ_GEMINI_MODEL", "gemini-2.0-flash")
         finalizer_llm = GeminiClient(api_key=api_key, model=model)
         print(f"Finalizer: Gemini ({model})")
 

@@ -40,7 +40,7 @@ def _make_output(**overrides) -> OrchestratorOutput:
 class _FakeLLM:
     """Minimal LLM mock with model_name and complete_text."""
 
-    def __init__(self, model_name: str = "gemini-1.5-flash", reply: str = "Test reply"):
+    def __init__(self, model_name: str = "gemini-2.0-flash", reply: str = "Test reply"):
         self.model_name = model_name
         self._reply = reply
 
@@ -62,8 +62,8 @@ class TestOrchestratorOutputFinalizerModel:
     def test_finalizer_model_can_be_set(self):
         """finalizer_model should be settable via replace."""
         output = _make_output()
-        updated = replace(output, finalizer_model="gemini-1.5-flash")
-        assert updated.finalizer_model == "gemini-1.5-flash"
+        updated = replace(output, finalizer_model="gemini-2.0-flash")
+        assert updated.finalizer_model == "gemini-2.0-flash"
 
     def test_finalizer_model_in_dataclass_fields(self):
         """finalizer_model should be a proper dataclass field."""
@@ -107,7 +107,7 @@ class TestPipelineFinalizerModel:
         )
         from bantz.brain.orchestrator_state import OrchestratorState
 
-        gemini = _FakeLLM(model_name="gemini-1.5-flash", reply="İşte takvim sonuçları efendim")
+        gemini = _FakeLLM(model_name="gemini-2.0-flash", reply="İşte takvim sonuçları efendim")
         guard = NoNewFactsGuard(finalizer_llm=gemini)
         quality = QualityFinalizer(finalizer_llm=gemini, guard=guard)
 
@@ -123,7 +123,7 @@ class TestPipelineFinalizerModel:
 
         pipeline = FinalizationPipeline(quality=quality)
         result = pipeline.run(ctx)
-        assert result.finalizer_model == "gemini-1.5-flash"
+        assert result.finalizer_model == "gemini-2.0-flash"
 
     def test_no_tools_stamps_model(self):
         """No tool results should stamp finalizer_model."""

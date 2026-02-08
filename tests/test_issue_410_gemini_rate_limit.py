@@ -334,7 +334,7 @@ def _make_client(
     """Create a GeminiClient for testing."""
     return GeminiClient(
         api_key="test-key",
-        model="gemini-1.5-flash",
+        model="gemini-2.0-flash",
         timeout_seconds=5.0,
         quota_tracker=quota_tracker,
         circuit_breaker=circuit_breaker,

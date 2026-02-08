@@ -14,7 +14,7 @@ Create a local `.env` file that is **not committed** (add to `.gitignore`):
 BANTZ_CLOUD_MODE=cloud
 QUALITY_PROVIDER=gemini
 GEMINI_API_KEY=...your key...
-BANTZ_GEMINI_MODEL=gemini-1.5-flash
+BANTZ_GEMINI_MODEL=gemini-2.0-flash
 ```
 
 Load it with one of:

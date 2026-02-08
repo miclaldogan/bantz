@@ -234,7 +234,7 @@ def create_client(
         api_key = (base_url or "").strip()
         return GeminiClient(
             api_key=api_key,
-            model=model or "gemini-1.5-flash",
+            model=model or "gemini-2.0-flash",
             timeout_seconds=timeout,
         )
     

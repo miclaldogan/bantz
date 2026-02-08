@@ -124,7 +124,7 @@ def create_runtime(
     # ── Resolve parameters from env ─────────────────────────────────
     _vllm_url = vllm_url or os.getenv("BANTZ_VLLM_URL", "http://localhost:8001")
     _router_model = router_model or os.getenv("BANTZ_VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct-AWQ")
-    _gemini_model = gemini_model or os.getenv("BANTZ_GEMINI_MODEL", "gemini-1.5-flash")
+    _gemini_model = gemini_model or os.getenv("BANTZ_GEMINI_MODEL", "gemini-2.0-flash")
     _gemini_key = gemini_key or _env_get_any(
         "GEMINI_API_KEY", "GOOGLE_API_KEY", "BANTZ_GEMINI_API_KEY"
     )
