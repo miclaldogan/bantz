@@ -86,6 +86,10 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
     - SPACE basılı tut: kaydet
     - SPACE bırak: transcribe -> daemon'a gönder -> TTS konuş
 
+    Architecture (Issue #570):
+      Voice → ASR → autocorrect → send_to_server() → brain (default since #567)
+      LLM fallback only triggers if server returns empty/error.
+
     Eğer global key hook çalışmazsa (Wayland/X kısıtları), Enter tabanlı fallback var.
     """
 
@@ -425,7 +429,8 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
             print("🤖 Seni yanlış duymuş olabilirim. Tekrar söyler misin?")
             return
 
-        # 2) Eğer daemon cevap veremediyse LLM fallback
+        # 2) LLM fallback: only if server/brain couldn't answer (Issue #570).
+        #    Primary path is send_to_server → brain pipeline (#567).
         if cfg.enable_llm_fallback and (not reply or not ok):
             try:
                 nonlocal llm_fast, llm_quality
