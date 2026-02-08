@@ -188,6 +188,88 @@ class TestToolRouteFinalizerUsage:
         assert result.assistant_reply == "Gemini ile finalize edildi efendim."
 
 
+class TestToolNameAliasingGuards:
+    def test_gmail_create_draft_is_not_remapped_to_send(self, orchestrator_loop, mock_tools):
+        from bantz.agent.tools import Tool
+        from bantz.brain.orchestrator_loop import OrchestratorOutput
+        from bantz.brain.orchestrator_state import OrchestratorState
+
+        called = []
+
+        def get_tool(name: str):
+            called.append(name)
+            if name != "gmail.create_draft":
+                return None
+            return Tool(
+                name=name,
+                description="",
+                parameters={},
+                function=lambda **_kwargs: {"ok": True, "draft_id": "d1"},
+            )
+
+        mock_tools.get = Mock(side_effect=get_tool)
+        orchestrator_loop.tools = mock_tools
+
+        out = OrchestratorOutput(
+            route="gmail",
+            calendar_intent="none",
+            gmail_intent="none",
+            gmail={},
+            slots={},
+            confidence=0.9,
+            tool_plan=["gmail.create_draft"],
+            assistant_reply="",
+            ask_user=False,
+            question="",
+            requires_confirmation=False,
+        )
+
+        state = OrchestratorState()
+        results = orchestrator_loop._execute_tools_phase(out, state)
+        assert called and called[0] == "gmail.create_draft"
+        assert results and results[0]["tool"] == "gmail.create_draft"
+
+    def test_contacts_resolve_is_not_remapped_to_gmail_list(self, orchestrator_loop, mock_tools):
+        from bantz.agent.tools import Tool
+        from bantz.brain.orchestrator_loop import OrchestratorOutput
+        from bantz.brain.orchestrator_state import OrchestratorState
+
+        called = []
+
+        def get_tool(name: str):
+            called.append(name)
+            if name != "contacts.resolve":
+                return None
+            return Tool(
+                name=name,
+                description="",
+                parameters={},
+                function=lambda **_kwargs: {"ok": True, "email": "a@b.com"},
+            )
+
+        mock_tools.get = Mock(side_effect=get_tool)
+        orchestrator_loop.tools = mock_tools
+
+        out = OrchestratorOutput(
+            route="gmail",
+            calendar_intent="none",
+            gmail_intent="send",
+            gmail={},
+            slots={},
+            confidence=0.9,
+            tool_plan=["contacts.resolve"],
+            assistant_reply="",
+            ask_user=False,
+            question="",
+            requires_confirmation=False,
+        )
+
+        state = OrchestratorState()
+        results = orchestrator_loop._execute_tools_phase(out, state)
+        assert called and called[0] == "contacts.resolve"
+        assert results and results[0]["tool"] == "contacts.resolve"
+
+
 # =============================================================================
 # Issue #365: Gmail params filtering
 # =============================================================================
