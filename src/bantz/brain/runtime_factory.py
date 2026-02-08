@@ -139,13 +139,24 @@ def create_runtime(
     finalizer_is_gemini = False
     if _gemini_key:
         try:
-            from bantz.llm.gemini_client import GeminiClient
+            from bantz.llm.gemini_client import (
+                GeminiClient,
+                get_default_quota_tracker,
+                get_default_circuit_breaker,
+            )
 
             gemini_client = GeminiClient(
-                api_key=_gemini_key, model=_gemini_model, timeout_seconds=30.0
+                api_key=_gemini_key,
+                model=_gemini_model,
+                timeout_seconds=30.0,
+                quota_tracker=get_default_quota_tracker(),
+                circuit_breaker=get_default_circuit_breaker(),
             )
             finalizer_is_gemini = True
-            logger.info("Finalizer: %s ✓ (Gemini)", _gemini_model)
+            logger.info(
+                "Finalizer: %s ✓ (Gemini, quota_tracker=active, circuit_breaker=active)",
+                _gemini_model,
+            )
         except Exception as e:
             logger.warning("Gemini client init failed: %s — using 3B fallback", e)
     else:
