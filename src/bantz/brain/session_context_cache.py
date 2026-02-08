@@ -107,8 +107,15 @@ def _build_context(*, location: Optional[str] = None) -> dict[str, Any]:
     Kept as a standalone function so tests can mock it easily.
     """
     now = datetime.now().astimezone()
+
+    # Issue #591: Human-readable date info for the 3B LLM.
+    # The router needs this to translate "çarşamba" → after:2026/02/04.
+    _TR_DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
     ctx: dict[str, Any] = {
         "current_datetime": now.isoformat(timespec="seconds"),
+        "today_date": now.strftime("%Y-%m-%d"),
+        "today_day_tr": _TR_DAYS[now.weekday()],
+        "today_formatted": now.strftime("%d %B %Y"),
     }
 
     loc = (

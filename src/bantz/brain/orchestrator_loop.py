@@ -605,6 +605,9 @@ class OrchestratorLoop:
         
         start_time = time.time()
 
+        # Issue #591: Store current user input on state for downstream use
+        state.current_user_input = user_input
+
         # Issue #417: Build session context once per turn (cached with TTL)
         if not state.session_context:
             state.session_context = self._session_ctx_cache.get_or_build()
@@ -684,6 +687,9 @@ class OrchestratorLoop:
         """
         if state is None:
             state = OrchestratorState()
+
+        # Issue #591: Store current user input on state for downstream use
+        state.current_user_input = user_input
 
         # Phase 1: plan
         orchestrator_output = self._llm_planning_phase(user_input, state)
@@ -1293,7 +1299,7 @@ class OrchestratorLoop:
                     params = dict(output.slots)
                     params.update(args)
                 else:
-                    params = self._build_tool_params(tool_name, output.slots, output)
+                    params = self._build_tool_params(tool_name, output.slots, output, user_input=state.current_user_input)
 
                 # Drop nulls (LLM JSON often includes explicit nulls for optional slots).
                 # Prevents spurious schema/type failures.
@@ -1436,6 +1442,7 @@ class OrchestratorLoop:
         tool_name: str,
         slots: dict[str, Any],
         output: Optional["OrchestratorOutput"] = None,
+        user_input: str = "",
     ) -> dict[str, Any]:
         """Build tool parameters from orchestrator slots.
         
@@ -1504,13 +1511,80 @@ class OrchestratorLoop:
                 # Alias: title → subject
                 if "title" in params and "subject" not in params:
                     params["subject"] = params.pop("title")
-        
+
+            # Issue #591: Auto-inject date range for Turkish day names.
+            # The 3B router can't reliably convert "çarşamba" → "after:2026/02/04".
+            # If the user mentioned a day name and the query is empty / missing dates,
+            # we compute the correct date range and inject it.
+            if tool_name in ("gmail.list_messages", "gmail.smart_search"):
+                params = self._maybe_inject_date_query(params, output, user_input)
+
         else:
             # Calendar/system tools: use slots directly (already flat)
             params = dict(slots)
         
         return params
     
+    def _maybe_inject_date_query(
+        self,
+        params: dict[str, Any],
+        output: "OrchestratorOutput",
+        user_input: str = "",
+    ) -> dict[str, Any]:
+        """Auto-inject Gmail date range when user mentions a Turkish day name.
+
+        Issue #591: The 3B router can't reliably convert 'çarşamba' → 'after:2026/02/04'.
+        This post-processor detects Turkish day names in the original user input
+        and injects the correct date range.
+        """
+        from datetime import datetime, timedelta
+
+        # Only inject if query doesn't already contain date filtering
+        existing_q = str(params.get("query") or params.get("natural_query") or "")
+        if "after:" in existing_q or "before:" in existing_q:
+            return params
+
+        # Turkish day name → weekday index (Monday=0)
+        _TR_DAY_MAP: dict[str, int] = {
+            "pazartesi": 0, "salı": 1, "çarşamba": 2, "perşembe": 3,
+            "cuma": 4, "cumartesi": 5, "pazar": 6,
+        }
+
+        # Use the original user input
+        raw_input = user_input.lower() if user_input else ""
+
+        target_weekday: int | None = None
+        for day_name, weekday_idx in _TR_DAY_MAP.items():
+            if day_name in raw_input:
+                target_weekday = weekday_idx
+                break
+
+        if target_weekday is None:
+            return params
+
+        # Compute the most recent occurrence of that day (past, including today)
+        today = datetime.now().astimezone()
+        days_diff = (today.weekday() - target_weekday) % 7
+        if days_diff == 0:
+            target_date = today
+        else:
+            target_date = today - timedelta(days=days_diff)
+
+        after_str = target_date.strftime("%Y/%m/%d")
+        before_str = (target_date + timedelta(days=1)).strftime("%Y/%m/%d")
+        date_filter = f"after:{after_str} before:{before_str}"
+
+        if existing_q:
+            params["query"] = f"{existing_q} {date_filter}"
+        else:
+            params["query"] = date_filter
+
+        logger.info(
+            "[DATE_INJECT] Injected Gmail date filter for '%s': %s",
+            raw_input.strip()[:50], date_filter,
+        )
+        return params
+
     def _llm_finalization_phase(
         self,
         user_input: str,

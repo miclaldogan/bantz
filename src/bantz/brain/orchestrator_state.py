@@ -48,6 +48,9 @@ class OrchestratorState:
 
     # Issue #416: Last reference table for anaphora resolution
     reference_table: Optional[ReferenceTable] = field(default=None)
+
+    # Issue #591: Current user input (set at start of each turn for downstream use)
+    current_user_input: str = ""
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue)."""

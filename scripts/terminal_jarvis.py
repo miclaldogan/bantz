@@ -168,7 +168,14 @@ def _is_confirmation_yes(text: str) -> bool:
     
     # Exact match for common confirmations
     # Issue #316: Added 'ekle', 'yap', 'koy', 'kaydet' as action confirmations
-    yes_tokens = {"evet", "e", "ok", "tamam", "onay", "onaylıyorum", "kabul", "yes", "y", "olur", "peki", "ekle", "yap", "koy", "kaydet"}
+    # Issue #591: Added Turkish typo variants (eve, evt, eevt, etc.)
+    yes_tokens = {
+        "evet", "e", "ok", "tamam", "onay", "onaylıyorum", "kabul",
+        "yes", "y", "olur", "peki", "ekle", "yap", "koy", "kaydet",
+        # Common typos
+        "eve", "evt", "eevt", "eveet", "vet", "evett",
+        "tmm", "tmam", "taam", "tamm", "tm",
+    }
     if t in yes_tokens:
         return True
     
@@ -203,7 +210,15 @@ def _is_confirmation_no(text: str) -> bool:
         return False
     
     # Note: Include ASCII variants for Turkish uppercase issues (HAYIR.lower() = hayir)
-    no_tokens = {"hayır", "hayir", "h", "no", "n", "iptal", "vazgeç", "vazgec", "reddet", "istemiyorum", "olmaz", "yok"}
+    # Issue #591: Added common Turkish typo variants (hayr, hayı, hay, hayi, hyır, etc.)
+    no_tokens = {
+        "hayır", "hayir", "h", "no", "n", "iptal", "vazgeç", "vazgec",
+        "reddet", "istemiyorum", "olmaz", "yok",
+        # Common typos — missing char or swapped
+        "hayr", "hayı", "hay", "hayi", "hyır", "hyir", "hyr",
+        "hayri", "hayrı", "ayır", "hir",
+        "iptl", "ipta", "vazgc",
+    }
 
     # Exact match BEFORE normalization (Issue #588: "reddet" has double-d)
     if t in no_tokens:
@@ -222,7 +237,7 @@ def _is_confirmation_no(text: str) -> bool:
         return True
     
     # Startswith patterns
-    no_prefixes = ("hayır", "hayir", "iptal", "vazgeç", "vazgec", "no ", "reddet", "istemiyorum", "olmaz", "yok ")
+    no_prefixes = ("hayır", "hayir", "hayr", "hayı", "hay ", "iptal", "vazgeç", "vazgec", "no ", "reddet", "istemiyorum", "olmaz", "yok ")
     if t.startswith(no_prefixes):
         return True
     
