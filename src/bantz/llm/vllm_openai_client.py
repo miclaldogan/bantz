@@ -112,8 +112,14 @@ class VLLMOpenAIClient(LLMClient):
             return None
 
         try:
+            # base_url may already contain /v1 suffix
+            url = str(self.base_url).rstrip("/")
+            if url.endswith("/v1"):
+                models_url = f"{url}/models"
+            else:
+                models_url = f"{url}/v1/models"
             r = requests.get(
-                f"{self.base_url}/v1/models",
+                models_url,
                 timeout=float(timeout_seconds),
             )
             if r.status_code != 200:
@@ -154,8 +160,12 @@ class VLLMOpenAIClient(LLMClient):
                     "openai kütüphanesi yüklü değil. Kurulum: pip install openai"
                 ) from e
             
+            # base_url may already contain /v1 suffix
+            url = self.base_url
+            if not url.endswith("/v1"):
+                url = f"{url}/v1"
             self._client = OpenAI(
-                base_url=f"{self.base_url}/v1",
+                base_url=url,
                 api_key="EMPTY",  # vLLM doesn't require API key for local usage
                 timeout=self.timeout_seconds,
             )
@@ -170,10 +180,13 @@ class VLLMOpenAIClient(LLMClient):
             return False
         
         try:
-            r = requests.get(
-                f"{self.base_url}/v1/models",
-                timeout=float(timeout_seconds),
-            )
+            # base_url may already end with /v1 (e.g. http://localhost:8001/v1)
+            url = str(self.base_url).rstrip("/")
+            if url.endswith("/v1"):
+                health_url = f"{url}/models"
+            else:
+                health_url = f"{url}/v1/models"
+            r = requests.get(health_url, timeout=float(timeout_seconds))
             return r.status_code == 200
         except Exception:
             return False

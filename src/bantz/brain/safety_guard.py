@@ -54,6 +54,9 @@ ROUTE_INDEPENDENT_SAFE_TOOLS = {
     "gmail.list_messages",   # Read-only email listing
     "gmail.get_message",     # Read-only email reading
     "gmail.unread_count",    # Read-only unread count
+    "gmail.smart_search",    # Read-only email search
+    "web.search",            # Read-only web search
+    "web.open",              # Read-only web open
 }
 
 
