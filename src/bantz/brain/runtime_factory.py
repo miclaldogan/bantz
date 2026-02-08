@@ -163,20 +163,8 @@ def create_runtime(
     # ── Tool registry ───────────────────────────────────────────────
     _tools = tools
     if _tools is None:
-        try:
-            # Import the canonical tool builder from terminal_jarvis
-            # (will be moved to a shared module in future PRs)
-            import importlib
-            mod = importlib.import_module("terminal_jarvis")
-            if hasattr(mod, "_build_registry"):
-                _tools = mod._build_registry()
-        except Exception:
-            pass
-
-    if _tools is None:
-        from bantz.agent.tools import ToolRegistry
-        _tools = ToolRegistry()
-        logger.warning("No tools registered — using empty ToolRegistry")
+        from bantz.agent.registry import build_default_registry
+        _tools = build_default_registry()
 
     # ── Orchestrator ────────────────────────────────────────────────
     orchestrator = JarvisLLMOrchestrator(llm_client=router_client)
