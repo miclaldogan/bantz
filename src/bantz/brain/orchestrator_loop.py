@@ -691,6 +691,73 @@ class OrchestratorLoop:
         # Issue #591: Store current user input on state for downstream use
         state.current_user_input = user_input
 
+        # ── Issue #591: Confirmation fast-path ──────────────────────────
+        # If user provided a confirmation token AND there's a pending
+        # confirmation, handle it BEFORE the normal 4-phase cycle.
+        # Previously, confirmation was checked AFTER Phase 1-4, causing:
+        #   1. Phase 2 always BLOCKED (confirmed_tool not yet set)
+        #   2. Phase 3 generated false-positive "done" responses
+        #   3. Second Phase 2 used re-planned slots (possibly wrong/missing)
+        # Now: pre-accept → use STORED slots → execute → finalize → return.
+        if confirmation_token is not None and state.has_pending_confirmation():
+            pending = state.peek_pending_confirmation() or {}
+            pending_tool = str(pending.get("tool") or "").strip()
+            pending_slots = pending.get("slots") or {}
+
+            if self.safety_guard and pending_tool:
+                accepted, _reason = self.safety_guard.check_confirmation_token(
+                    pending_tool,
+                    confirmation_token,
+                )
+            else:
+                accepted = str(confirmation_token).strip().lower() in {
+                    "yes", "y", "evet", "e", "1", "ok", "tamam",
+                }
+
+            if accepted and pending_tool:
+                # Pre-set confirmed_tool so _execute_tools_phase can pop & execute
+                state.confirmed_tool = pending_tool
+
+                # Build a synthetic OrchestratorOutput using stored slots + tool
+                from bantz.brain.llm_router import OrchestratorOutput
+
+                synth_output = OrchestratorOutput(
+                    route=str(pending.get("route") or "calendar"),
+                    calendar_intent=str(pending.get("calendar_intent") or "create"),
+                    confidence=0.95,
+                    tool_plan=[pending_tool],
+                    assistant_reply="",
+                    slots=dict(pending_slots),
+                    requires_confirmation=False,   # Already confirmed
+                )
+
+                # Execute the confirmed tool with ORIGINAL stored slots
+                tool_results = self._execute_tools_phase(synth_output, state)
+
+                # Finalize
+                final_output = self._llm_finalization_phase(
+                    user_input, synth_output, tool_results, state,
+                )
+                self._update_state_phase(user_input, final_output, tool_results, state)
+
+                # Build trace and return (skip the normal 4-phase cycle)
+                return self._build_trace_dict(final_output, tool_results)
+
+            else:
+                # User rejected: clear pending confirmations
+                state.clear_pending_confirmation()
+                from bantz.brain.llm_router import OrchestratorOutput
+
+                reject_output = OrchestratorOutput(
+                    route="smalltalk",
+                    calendar_intent="none",
+                    slots={},
+                    confidence=1.0,
+                    tool_plan=[],
+                    assistant_reply="Anlaşıldı efendim, iptal ettim.",
+                )
+                return self._build_trace_dict(reject_output, [])
+
         # Phase 1: plan
         orchestrator_output = self._llm_planning_phase(user_input, state)
 
@@ -713,39 +780,19 @@ class OrchestratorLoop:
         # Phase 4: update state
         self._update_state_phase(user_input, final_output, tool_results, state)
 
-        # Optional: if confirmation was requested and user provided a token,
-        # attempt to execute the pending tool immediately.
-        if confirmation_token is not None and state.has_pending_confirmation():
-            pending = state.peek_pending_confirmation() or {}
-            pending_tool = str(pending.get("tool") or "").strip()
-
-            if self.safety_guard and pending_tool:
-                accepted, _reason = self.safety_guard.check_confirmation_token(
-                    pending_tool,
-                    confirmation_token,
-                )
-            else:
-                # Best-effort: accept only obvious "yes" tokens.
-                accepted = str(confirmation_token).strip().lower() in {"yes", "y", "evet", "e", "1", "ok", "tamam"}
-
-            if accepted:
-                # Mark the pending tool as confirmed for this execution pass.
-                state.confirmed_tool = pending_tool or None
-                # Second execution pass: execute only the confirmed tool.
-                tool_results_2 = self._execute_tools_phase(orchestrator_output, state)
-                final_output = self._llm_finalization_phase(
-                    user_input,
-                    orchestrator_output,
-                    tool_results_2,
-                    state,
-                )
-                self._update_state_phase(user_input, final_output, tool_results_2, state)
-                tool_results = tool_results_2
-            else:
-                # User rejected/unclear: clear all pending confirmations and return.
-                state.clear_pending_confirmation()
-
         # Build a trace dict in the format expected by regression tests.
+        return self._build_trace_dict(final_output, tool_results)
+
+    def _build_trace_dict(
+        self,
+        final_output: "OrchestratorOutput",
+        tool_results: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build trace dict from final output + tool results.
+
+        Extracted so both the normal 4-phase path and the confirmation
+        fast-path can share the same trace format.
+        """
         tools_attempted = len(tool_results)
         tools_executed = sum(1 for r in tool_results if r.get("success") is True)
         tools_success_names = [
@@ -1160,6 +1207,8 @@ class OrchestratorLoop:
                             "prompt": prompt,
                             "slots": output.slots,
                             "risk_level": risk.value,
+                            "route": output.route,
+                            "calendar_intent": output.calendar_intent,
                         })
 
                         # Audit confirmation request
@@ -1522,7 +1571,26 @@ class OrchestratorLoop:
         else:
             # Calendar/system tools: use slots directly (already flat)
             params = dict(slots)
-        
+
+        # Issue #591: web.search needs 'query' from user_input since the LLM
+        # doesn't put it in slots (slots have date/time/window_hint only).
+        if tool_name == "web.search" and "query" not in params:
+            # Use the user's original text as search query
+            if user_input:
+                params["query"] = user_input
+            # Drop calendar-only slot keys that web.search doesn't understand
+            for k in list(params):
+                if k in ("date", "time", "duration", "title", "window_hint"):
+                    del params[k]
+
+        # Issue #591: gmail.smart_search requires 'natural_query' but router
+        # sometimes puts it in 'query'. Alias query→natural_query.
+        if tool_name == "gmail.smart_search":
+            if "natural_query" not in params and "query" in params:
+                params["natural_query"] = params.pop("query")
+            if "natural_query" not in params and user_input:
+                params["natural_query"] = user_input
+
         return params
     
     def _maybe_inject_date_query(

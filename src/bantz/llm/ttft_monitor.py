@@ -146,8 +146,8 @@ class TTFTMonitor:
         
         # Default thresholds (Issue #158 requirements)
         self._thresholds = {
-            "router": 300,      # 3B router p95 < 300ms
-            "finalizer": 500,   # 7B finalizer p95 < 500ms
+            "router": 800,      # Issue #591: raised from 300→800ms to reduce UX noise
+            "finalizer": 1000,  # Issue #591: raised from 500→1000ms for Gemini Flash
         }
         
         self._enabled = True
