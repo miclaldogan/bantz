@@ -187,6 +187,25 @@ hardware:
     chat_p95_ms: 300
 
 # =============================================================================
+# Voice Pipeline Latency Budget (Issue #427)
+# =============================================================================
+# Per-phase budget for ASR → Router → Tool → Finalizer → TTS pipeline.
+# Used by src/bantz/core/latency_budget.py
+voice_pipeline:
+  latency_budget:
+    asr_max_ms: 500        # Whisper ASR timeout; fallback → partial result
+    router_max_ms: 100     # 3B router; fallback → pre-route cache
+    tool_max_ms: 1000      # Calendar/Gmail API; fallback → async + feedback phrase
+    finalizer_max_ms: 500  # Gemini quality pass; fallback → skip, use 3B
+    tts_max_ms: 300        # Piper TTS; fallback → pre-cached common phrases
+    end_to_end_max_ms: 2000  # Total pipeline target
+
+  # Feedback phrases injected when a phase blocks
+  feedback_phrases:
+    tool: "Bir bakayım efendim..."
+    finalizer: "Hemen söylüyorum..."
+
+# =============================================================================
 # Benchmarking Configuration
 # =============================================================================
 benchmark:
