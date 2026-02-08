@@ -1,0 +1,1 @@
+{"route": "calendar", "calendar_intent": "create", "confidence": 0.88, "tool_plan": ["calendar.create_event"], "assistant_reply": "İlçe müdürlüğüne göndereceğim. Şükrü Bey'in öğleden sonraki toplantısı için uygun.", "slots": {"title": "Şükrü Bey görüşme", "date": "çarşamba"}}

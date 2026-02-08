@@ -1,0 +1,2 @@
+{"route": "calendar", "calendar_intent": "query", "confidence": 0.8, "tool_plan": ["calendar.list_events"], "assistant_reply": "Etkinlikleri listeliyorum.", "slots": {"date": "bugün"}}
+{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.5, "tool_plan": [], "assistant_reply": "Merhaba!", "slots": {}}

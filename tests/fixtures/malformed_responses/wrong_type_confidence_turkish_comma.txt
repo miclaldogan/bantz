@@ -1,0 +1,1 @@
+{"route": "calendar", "calendar_intent": "create", "confidence": "0,85", "tool_plan": ["calendar.create_event"], "assistant_reply": "Oluşturuyorum.", "slots": {}}

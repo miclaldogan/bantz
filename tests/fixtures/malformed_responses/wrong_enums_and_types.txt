@@ -1,0 +1,1 @@
+{"route": "create_meeting", "calendar_intent": "schedule", "confidence": 0.7, "tool_plan": "calendar.create_event", "assistant_reply": "Toplantı oluşturuyorum.", "slots": {}}
