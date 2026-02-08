@@ -319,7 +319,19 @@ KURALLAR:
 ROUTE: calendar=takvim, gmail=mail, system=sistem(saat/cpu), smalltalk=sohbet, unknown=belirsiz.
 INTENT: query=oku, create=ekle, modify=değiştir, cancel=sil, none=yok.
 
-TOOLS: calendar.list_events, calendar.find_free_slots, calendar.create_event, gmail.list_messages, gmail.unread_count, gmail.get_message, gmail.smart_search, gmail.send, gmail.create_draft, gmail.list_drafts, gmail.update_draft, gmail.generate_reply, gmail.send_draft, gmail.delete_draft, gmail.download_attachment, gmail.query_from_nl, gmail.search_template_upsert, gmail.search_template_get, gmail.search_template_list, gmail.search_template_delete, gmail.list_labels, gmail.add_label, gmail.remove_label, gmail.mark_read, gmail.mark_unread, gmail.archive, gmail.batch_modify, gmail.send_to_contact, contacts.upsert, contacts.resolve, contacts.list, contacts.delete, time.now, system.status
+TOOLS: calendar.list_events, calendar.find_free_slots, calendar.create_event, gmail.list_messages, gmail.unread_count, gmail.get_message, gmail.smart_search, gmail.send, time.now, system.status, web.search, web.open
+NOT: Yukarıdaki 12 tool dışında başka tool KULLANMA. gmail.list_drafts, gmail.query_from_nl gibi tool'lar YOKTUR.
+
+TOOL PARAMETRELERİ:
+- calendar.list_events: slots içinde date, window_hint, max_results, query
+- calendar.find_free_slots: slots içinde date, duration(dk), window_hint, suggestions
+- calendar.create_event: slots içinde title, date, time(HH:MM), duration(dk), window_hint → requires_confirmation=true
+- gmail.list_messages: gmail içinde query("from:x subject:y"), category, label, max_results, unread_only
+- gmail.unread_count: parametre yok
+- gmail.get_message: gmail içinde message_id
+- gmail.smart_search: gmail içinde natural_query(ZORUNLU), max_results, unread_only
+- gmail.send: gmail içinde to(ZORUNLU), subject(ZORUNLU), body(ZORUNLU) → requires_confirmation=true
+- time.now / system.status / web.search / web.open: parametre yok veya slots
 
 SAAT: 1-6 arası="sabah" yoksa PM (bir→13, iki→14, üç→15, dört→16, beş→17, altı→18). 7-12 arası context'e bak; belirsizse sor. "bu akşam"→evening, "yarın"→tomorrow, "bugün"→today, "bu hafta"→week."""
 
@@ -366,6 +378,12 @@ USER: hey bantz nasılsın
 
 USER: bugün neler yapacağız
 → {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.list_events"]}
+
+USER: yarın işimiz var mı
+→ {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"tomorrow"},"confidence":0.9,"tool_plan":["calendar.list_events"]}
+
+USER: yarın müsait saatlerim ne
+→ {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"tomorrow"},"confidence":0.9,"tool_plan":["calendar.find_free_slots"]}
 
 USER: bugün beşe toplantı koy
 → {"route":"calendar","calendar_intent":"create","slots":{"time":"17:00","title":"toplantı","window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true}

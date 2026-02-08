@@ -90,14 +90,15 @@ class TestIssue405PromptBudget:
             assert keyword in core, f"Core prompt missing '{keyword}'"
 
     def test_core_has_all_tool_names(self):
-        """Core prompt must list all tool names (without descriptions)."""
+        """Core prompt must list all registered tool names (Issue #591: only 12 registered tools)."""
         cls, _ = self._import()
         core = cls._SYSTEM_PROMPT_CORE
         critical_tools = [
-            "calendar.list_events", "calendar.create_event",
-            "gmail.list_messages", "gmail.send",
-            "contacts.resolve", "contacts.list",
+            "calendar.list_events", "calendar.find_free_slots", "calendar.create_event",
+            "gmail.list_messages", "gmail.unread_count", "gmail.get_message",
+            "gmail.smart_search", "gmail.send",
             "time.now", "system.status",
+            "web.search", "web.open",
         ]
         for tool in critical_tools:
             assert tool in core, f"Core prompt missing tool '{tool}'"

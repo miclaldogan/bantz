@@ -453,6 +453,53 @@ class OrchestratorLoop:
             "read": ["gmail.get_message"],
             "send": ["gmail.send"],
         }
+
+        # Issue #591: Tool-name aliases — map common LLM hallucinations
+        # to their registered equivalents so execution doesn't silently fail.
+        self._tool_aliases: dict[str, str] = {
+            "gmail.query_from_nl": "gmail.smart_search",
+            "gmail.list_drafts": "gmail.list_messages",
+            "gmail.create_draft": "gmail.send",
+            "gmail.update_draft": "gmail.send",
+            "gmail.send_draft": "gmail.send",
+            "gmail.delete_draft": "gmail.list_messages",
+            "gmail.generate_reply": "gmail.send",
+            "gmail.download_attachment": "gmail.get_message",
+            "gmail.send_to_contact": "gmail.send",
+            "gmail.search_template_upsert": "gmail.smart_search",
+            "gmail.search_template_get": "gmail.smart_search",
+            "gmail.search_template_list": "gmail.list_messages",
+            "gmail.search_template_delete": "gmail.list_messages",
+            "gmail.list_labels": "gmail.list_messages",
+            "gmail.add_label": "gmail.list_messages",
+            "gmail.remove_label": "gmail.list_messages",
+            "gmail.mark_read": "gmail.get_message",
+            "gmail.mark_unread": "gmail.get_message",
+            "gmail.archive": "gmail.list_messages",
+            "gmail.batch_modify": "gmail.list_messages",
+            "contacts.upsert": "gmail.list_messages",
+            "contacts.resolve": "gmail.list_messages",
+            "contacts.list": "gmail.list_messages",
+            "contacts.delete": "gmail.list_messages",
+        }
+    
+    def _normalize_tool_name(self, tool_name: str) -> str:
+        """Normalize hallucinated tool names to registered equivalents.
+        
+        Issue #591: The 3B router sometimes emits tool names that exist in
+        its training data but are not in the runtime registry. This maps
+        them to the closest registered tool.
+        """
+        if self.tools.get(tool_name) is not None:
+            return tool_name
+        alias = self._tool_aliases.get(tool_name)
+        if alias:
+            logger.info(
+                "[TOOL_ALIAS] Remapped hallucinated tool '%s' → '%s'",
+                tool_name, alias,
+            )
+            return alias
+        return tool_name
     
     def _force_tool_plan(self, output: OrchestratorOutput) -> OrchestratorOutput:
         """Force mandatory tools based on route+intent (Issue #282).
@@ -1046,6 +1093,10 @@ class OrchestratorLoop:
                     )
         
         tool_results = []
+
+        # Issue #591: Normalize hallucinated tool names to registered equivalents
+        # BEFORE confirmation checks and execution, so remapped names are used throughout.
+        filtered_tool_plan = [self._normalize_tool_name(t) for t in filtered_tool_plan]
 
         # Issue #351: Confirmation queue support (multiple destructive tools)
         # If a confirmation is already pending, block all tools unless the

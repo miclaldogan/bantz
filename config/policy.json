@@ -87,6 +87,7 @@
     "web.open":                 "safe",
 
     "calendar.list_events":     "safe",
+    "calendar.find_free_slots": "safe",
     "calendar.find_event":      "safe",
     "calendar.get_event":       "safe",
     "calendar.create_event":    "moderate",
