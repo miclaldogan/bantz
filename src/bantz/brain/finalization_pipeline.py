@@ -589,6 +589,9 @@ class FinalizationPipeline:
         output = ctx.orchestrator_output
 
         if not ctx.tool_results:
+            guarded = _apply_tool_first_guard_if_needed(ctx)
+            if guarded is not None:
+                return guarded
             return replace(output, finalizer_model="none(no_tools)")
 
         # Check for failures
@@ -612,6 +615,60 @@ class FinalizationPipeline:
             assistant_reply=_build_tool_success_summary(ctx.tool_results),
             finalizer_model="none(default_summary)",
         )
+
+
+def _apply_tool_first_guard_if_needed(ctx: FinalizationContext) -> Optional[OrchestratorOutput]:
+    """Prevent tool-dependent hallucinations when no tools were run.
+
+    If the router decided a tool-dependent route+intent (calendar/gmail) but we
+    have no tool results (and the turn isn't waiting on ask_user/confirmation),
+    we replace any speculative assistant reply with a deterministic message.
+    """
+    output = ctx.orchestrator_output
+    if ctx.tool_results:
+        return None
+
+    if output.ask_user or output.requires_confirmation:
+        return None
+
+    route = (output.route or "").strip().lower()
+    calendar_intent = (output.calendar_intent or "").strip().lower()
+    gmail_intent = (getattr(output, "gmail_intent", "") or "").strip().lower()
+
+    needs_guard = False
+    if route == "calendar":
+        needs_guard = calendar_intent in {"query", "create", "modify", "cancel"}
+    elif route == "gmail":
+        needs_guard = gmail_intent in {"list", "search", "read", "send"}
+
+    if not needs_guard:
+        return None
+
+    ctx.state.update_trace(
+        finalizer_guard="tool_first",
+        finalizer_guard_triggered=True,
+        finalizer_guard_route=route,
+        finalizer_guard_intent=(gmail_intent if route == "gmail" else calendar_intent),
+    )
+
+    msg = _tool_first_guard_message(route=route)
+    return replace(output, assistant_reply=msg, finalizer_model="none(tool_first_guard)")
+
+
+def _tool_first_guard_message(*, route: str) -> str:
+    if route == "gmail":
+        return (
+            "Efendim, bunu yanıtlamak için Gmail’inize bakmam gerekiyor. "
+            "Gmail aracını çalıştırmadan e-posta listesi/sonuç uyduramam. "
+            "İsterseniz şimdi kontrol edip sonuçları getireyim."
+        )
+    if route == "calendar":
+        return (
+            "Efendim, bunu yanıtlamak için takviminize bakmam gerekiyor. "
+            "Takvim aracını çalıştırmadan etkinlik/boşluk bilgisi uyduramam. "
+            "İsterseniz şimdi kontrol edip net sonucu söyleyeyim."
+        )
+    return "Efendim, bunu yanıtlamak için ilgili aracı çalıştırmam gerekiyor."
 
 
 # ---------------------------------------------------------------------------
