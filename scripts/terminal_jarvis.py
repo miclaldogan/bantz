@@ -265,6 +265,7 @@ class TerminalJarvis:
         self._gemini_ready = threading.Event()
         self._standby = False
         self._pending_action_user_input: Optional[str] = None
+        self._pending_ask_user_input: Optional[str] = None  # Issue #591: store original input when ask_user fires
         self._trace_enabled: bool = False
 
         self._warm_started_at = time.monotonic()
@@ -816,6 +817,19 @@ class TerminalJarvis:
             if not text:
                 return "Buyurun efendim."
 
+        # Issue #591: Handle "evet" after an ask_user clarification question.
+        # When the router asked a clarification and user confirms with "evet",
+        # re-submit the original input so the router sees the full intent again
+        # (rather than just the bare "evet").
+        if (
+            not self.state.has_pending_confirmation()
+            and self._pending_ask_user_input
+            and _is_confirmation_yes(text)
+        ):
+            original = self._pending_ask_user_input
+            self._pending_ask_user_input = None
+            text = original  # Fall through to normal orchestration with original input
+
         # Pending confirmation handling: if a tool is waiting for confirmation,
         # and the user types a confirmation token, run the prior action.
         # Issue #283: Accept natural language confirmations like "evet ekle dostum"
@@ -870,6 +884,13 @@ class TerminalJarvis:
                 compact = "; ".join([str(x) for x in rs if x])
                 if compact:
                     print(f"[trace] REASON: {compact}")
+
+        # Issue #591: If the router is asking the user a clarification question,
+        # store the original input so "evet" can re-trigger the same intent.
+        if getattr(output, "ask_user", False) and not self.state.has_pending_confirmation():
+            self._pending_ask_user_input = text
+        else:
+            self._pending_ask_user_input = None
 
         # If a confirmation is now pending, remember the initiating input.
         if self.state.has_pending_confirmation():

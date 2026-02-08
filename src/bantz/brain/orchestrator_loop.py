@@ -1350,6 +1350,21 @@ class OrchestratorLoop:
                 else:
                     params = self._build_tool_params(tool_name, output.slots, output, user_input=state.current_user_input)
 
+                # Issue #591: Apply critical field aliases regardless of path.
+                # _build_tool_params handles this for the else-branch, but the
+                # tool_plan_with_args branch above skips it.
+                if tool_name == "gmail.smart_search":
+                    if "natural_query" not in params and "query" in params:
+                        params["natural_query"] = params.pop("query")
+                    if "natural_query" not in params and state.current_user_input:
+                        params["natural_query"] = state.current_user_input
+                if tool_name == "web.search" and "query" not in params:
+                    if state.current_user_input:
+                        params["query"] = state.current_user_input
+                    for k in list(params):
+                        if k in ("date", "time", "duration", "title", "window_hint"):
+                            del params[k]
+
                 # Drop nulls (LLM JSON often includes explicit nulls for optional slots).
                 # Prevents spurious schema/type failures.
                 if isinstance(params, dict):

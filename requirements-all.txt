@@ -1,6 +1,7 @@
 autoawq>=0.2.6
 cryptography>=42.0.0
 dbus-next>=0.2.3
+ddgs>=7.0.0
 faster-whisper>=1.0.0
 google-api-python-client>=2.0.0
 google-auth-oauthlib>=1.0.0

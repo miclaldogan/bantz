@@ -32,17 +32,6 @@ def web_search(query: str, count: int = 5) -> dict[str, Any]:
             "count": int
         }
     """
-    try:
-        import requests
-    except ImportError:
-        return {
-            "ok": False,
-            "error": "requests library not installed",
-            "results": [],
-            "query": query,
-            "count": 0,
-        }
-    
     query = str(query or "").strip()
     if not query:
         return {
@@ -54,28 +43,58 @@ def web_search(query: str, count: int = 5) -> dict[str, Any]:
         }
     
     count = max(1, min(int(count or 5), 20))  # Limit 1-20
-    
+
+    # --- Strategy 1: ddgs library (reliable, official API) ---
     try:
-        # Use DuckDuckGo HTML (no API key needed)
-        url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        html = response.text
-        results = _parse_duckduckgo_html(html, max_results=count)
-        
+        from ddgs import DDGS
+        ddgs = DDGS()
+        raw = list(ddgs.text(query, max_results=count))
+        results = [
+            {
+                "title": str(r.get("title", ""))[:200],
+                "url": str(r.get("href", "")),
+                "snippet": str(r.get("body", ""))[:300],
+            }
+            for r in raw
+            if r.get("title") and r.get("href")
+        ]
         return {
             "ok": True,
             "results": results,
             "query": query,
             "count": len(results),
         }
-    
+    except ImportError:
+        logger.debug("ddgs library not available, falling back to HTML scraping")
+    except Exception as e:
+        logger.warning(f"ddgs search failed ({e}), falling back to HTML scraping")
+
+    # --- Strategy 2: Legacy HTML scraping (fallback) ---
+    try:
+        import requests
+    except ImportError:
+        return {
+            "ok": False,
+            "error": "Neither ddgs nor requests library installed",
+            "results": [],
+            "query": query,
+            "count": 0,
+        }
+
+    try:
+        url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        results = _parse_duckduckgo_html(response.text, max_results=count)
+        return {
+            "ok": True,
+            "results": results,
+            "query": query,
+            "count": len(results),
+        }
     except Exception as e:
         logger.error(f"web_search error: {e}")
         return {
