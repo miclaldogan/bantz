@@ -128,12 +128,12 @@ def repair_route_enum(route: str) -> str:
         route: Raw route string from LLM
         
     Returns:
-        Repaired route (calendar|smalltalk|unknown)
+        Repaired route (calendar|gmail|smalltalk|system|unknown)
     """
     route_lower = route.lower().strip()
     
-    # Already valid?
-    if route_lower in ["calendar", "smalltalk", "unknown"]:
+    # Already valid? (Issue #421: expanded valid set to match llm_router)
+    if route_lower in {"calendar", "gmail", "smalltalk", "system", "unknown"}:
         return route_lower
     
     # Try mapping
