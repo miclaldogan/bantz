@@ -20,10 +20,95 @@ import json
 import logging
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Issue #421: JSON Repair Tracking
+# ---------------------------------------------------------------------------
+
+class RepairTracker:
+    """Thread-safe tracker for JSON repair events and confidence penalty.
+
+    Counts total requests, repair events (first-pass OK vs. required repair),
+    and exposes a ``repairs_per_100`` metric for dashboards.
+    """
+
+    CONFIDENCE_PENALTY: float = 0.7  # multiply confidence when repair is applied
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._total_requests: int = 0
+        self._repair_count: int = 0
+        self._route_corrections: int = 0
+        self._intent_corrections: int = 0
+
+    # ---- recording ----------------------------------------------------------
+    def record_request(self, *, repaired: bool = False) -> None:
+        with self._lock:
+            self._total_requests += 1
+            if repaired:
+                self._repair_count += 1
+
+    def record_route_correction(self) -> None:
+        with self._lock:
+            self._route_corrections += 1
+
+    def record_intent_correction(self) -> None:
+        with self._lock:
+            self._intent_corrections += 1
+
+    # ---- metrics ------------------------------------------------------------
+    @property
+    def total_requests(self) -> int:
+        return self._total_requests
+
+    @property
+    def repair_count(self) -> int:
+        return self._repair_count
+
+    @property
+    def repairs_per_100(self) -> float:
+        """Repair rate per 100 requests."""
+        if self._total_requests == 0:
+            return 0.0
+        return (self._repair_count / self._total_requests) * 100.0
+
+    def summary(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "total_requests": self._total_requests,
+                "repair_count": self._repair_count,
+                "repairs_per_100": round(self.repairs_per_100, 2),
+                "route_corrections": self._route_corrections,
+                "intent_corrections": self._intent_corrections,
+            }
+
+    def reset(self) -> None:
+        with self._lock:
+            self._total_requests = 0
+            self._repair_count = 0
+            self._route_corrections = 0
+            self._intent_corrections = 0
+
+
+# Global singleton – importable for dashboards / telemetry
+_repair_tracker = RepairTracker()
+
+
+def get_repair_tracker() -> RepairTracker:
+    """Return the global RepairTracker instance."""
+    return _repair_tracker
+
+
+# Valid enums (single source of truth for this module)
+VALID_ROUTES = frozenset({"calendar", "gmail", "smalltalk", "system", "unknown"})
+VALID_CALENDAR_INTENTS = frozenset({"create", "modify", "cancel", "query", "none"})
+VALID_GMAIL_INTENTS = frozenset({"list", "search", "read", "send", "none"})
 
 
 # ---------------------------------------------------------------------------
@@ -524,14 +609,16 @@ USER: sabah beşte koşu
         # Parse JSON (with repair attempts)
         last_err: Optional[str] = None
         parsed: Optional[dict[str, Any]] = None
+        was_repaired: bool = False
 
         for attempt in range(max(1, self._max_attempts)):
             try:
-                parsed = self._parse_json(raw_text)
+                parsed, was_repaired = self._parse_json(raw_text)
                 last_err = None
                 break
             except Exception as e:
                 last_err = str(e)
+                was_repaired = True  # LLM re-prompt = heavy repair
                 logger.warning(f"Router JSON parse failed: {e}")
 
                 # Attempt repair by asking the model to re-emit strict JSON.
@@ -557,11 +644,16 @@ USER: sabah beşte koşu
                     raw_text = self._llm.complete_text(prompt=repair_prompt)
 
         if parsed is None:
+            # Issue #421: track repair failure
+            _repair_tracker.record_request(repaired=was_repaired)
             # Fallback: unknown route with low confidence
             return self._fallback_output(user_input, error=last_err or "parse_failed")
 
+        # Issue #421: track request (repaired or clean)
+        _repair_tracker.record_request(repaired=was_repaired)
+
         # Validate and extract
-        return self._extract_output(parsed, raw_text=raw_text, user_input=user_input)
+        return self._extract_output(parsed, raw_text=raw_text, user_input=user_input, repaired=was_repaired)
 
     def _build_prompt(
         self,
@@ -866,11 +958,16 @@ USER: sabah beşte koşu
             # Best-effort only
             pass
 
-    def _parse_json(self, raw_text: str) -> dict[str, Any]:
-        """Parse JSON from LLM output (Issue #228: enhanced validation).
+    def _parse_json(self, raw_text: str) -> tuple[dict[str, Any], bool]:
+        """Parse JSON from LLM output (Issue #228 + #421: enhanced validation).
 
         Uses the shared JSON protocol extractor for balanced-brace parsing.
         Applies repair attempts and fallback defaults for robustness.
+
+        Returns:
+            Tuple of (parsed_dict, was_repaired).
+            ``was_repaired`` is True when the first-pass extraction failed
+            and a repair pass was needed to obtain valid JSON.
         """
 
         from bantz.brain.json_protocol import (
@@ -893,7 +990,7 @@ USER: sabah beşte koşu
                     "errors": errors,
                     "phase": "first_parse",
                 })
-            return parsed
+            return parsed, False
         except Exception as e:
             logger.debug("[router_json] first_parse_failed: %s", str(e)[:100])
             self._publish_json_event("parse_failed", {
@@ -913,7 +1010,12 @@ USER: sabah beşte koşu
                         "errors": errors,
                         "phase": "repair_parse",
                     })
-                return parsed
+                # Issue #421: mark as repaired
+                self._publish_json_event("json_repaired", {
+                    "phase": "repair_parse",
+                    "validation_errors": errors if errors else [],
+                })
+                return parsed, True
         except Exception as e:
             logger.debug("[router_json] repair_parse_failed: %s", str(e)[:100])
             self._publish_json_event("parse_failed", {
@@ -922,26 +1024,65 @@ USER: sabah beşte koşu
             })
         
         # Final attempt: re-raise the original error
-        return extract_first_json_object(text, strict=False)
+        return extract_first_json_object(text, strict=False), True
 
-    def _extract_output(self, parsed: dict[str, Any], raw_text: str, user_input: str = "") -> OrchestratorOutput:
-        """Extract OrchestratorOutput from parsed JSON (Issue #228: enhanced validation)."""
+    def _extract_output(
+        self,
+        parsed: dict[str, Any],
+        raw_text: str,
+        user_input: str = "",
+        repaired: bool = False,
+    ) -> OrchestratorOutput:
+        """Extract OrchestratorOutput from parsed JSON (Issue #228 + #421).
+
+        Args:
+            parsed: Parsed JSON dict from _parse_json.
+            raw_text: Original raw LLM text (for fallback).
+            user_input: Original user text (for Turkish time post-processing).
+            repaired: True if _parse_json had to repair the JSON. When True
+                      confidence is penalised by ``RepairTracker.CONFIDENCE_PENALTY``
+                      and route/intent corrections are tracked.
+        """
         from bantz.brain.json_protocol import apply_orchestrator_defaults
-        
+
+        # ── Issue #421: Detect route/intent before normalization ─────────
+        pre_route = str(parsed.get("route") or "unknown").strip().lower()
+        pre_intent = str(parsed.get("calendar_intent") or "none").strip().lower()
+
         # Apply defaults for missing/invalid fields
         normalized = apply_orchestrator_defaults(parsed)
-        
-        route = str(normalized.get("route") or "unknown").strip().lower()
-        if route not in {"calendar", "gmail", "smalltalk", "system", "unknown"}:
-            route = "unknown"
 
-        calendar_intent = str(normalized.get("calendar_intent") or "none").strip().lower()
+        # ── Issue #421: Post-repair route validation ─────────────────────
+        route = str(normalized.get("route") or "unknown").strip().lower()
+        if route not in VALID_ROUTES:
+            route = "unknown"
+        # Track if the route was corrected by apply_orchestrator_defaults or us
+        if pre_route not in VALID_ROUTES and pre_route != route:
+            logger.info("[repair_validation] invalid route '%s' → '%s'", pre_route, route)
+            _repair_tracker.record_route_correction()
+            self._publish_json_event("route_corrected", {
+                "original": pre_route,
+                "corrected": route,
+                "repaired": repaired,
+            })
+
+        # ── Issue #421: Post-repair intent validation ────────────────────
+        raw_intent = str(normalized.get("calendar_intent") or "none").strip().lower()
         # Allow both high-level intents (create/modify/cancel/query) and tool-like intents
         # used by regression tests (list_events/create_event/update_event/delete_event).
-        if not calendar_intent:
+        if not raw_intent:
             calendar_intent = "none"
-        elif not re.match(r"^[a-z0-9_]+$", calendar_intent):
+        elif not re.match(r"^[a-z0-9_]+$", raw_intent):
+            logger.info("[repair_validation] invalid intent '%s' → 'none'", raw_intent)
+            _repair_tracker.record_intent_correction()
+            self._publish_json_event("intent_corrected", {
+                "original": raw_intent,
+                "corrected": "none",
+                "repaired": repaired,
+            })
             calendar_intent = "none"
+        else:
+            calendar_intent = raw_intent
 
         slots = normalized.get("slots") or {}
         if not isinstance(slots, dict):
@@ -960,6 +1101,23 @@ USER: sabah beşte koşu
 
         confidence = float(normalized.get("confidence") or 0.0)
         confidence = max(0.0, min(1.0, confidence))
+
+        # ── Issue #421: Confidence penalty when JSON was repaired ─────────
+        if repaired:
+            original_confidence = confidence
+            confidence *= RepairTracker.CONFIDENCE_PENALTY
+            confidence = max(0.0, min(1.0, confidence))
+            logger.info(
+                "[repair_validation] confidence penalty applied: %.2f → %.2f (×%.2f)",
+                original_confidence,
+                confidence,
+                RepairTracker.CONFIDENCE_PENALTY,
+            )
+            self._publish_json_event("confidence_penalized", {
+                "original": original_confidence,
+                "penalized": round(confidence, 4),
+                "penalty_factor": RepairTracker.CONFIDENCE_PENALTY,
+            })
 
         raw_tool_plan = normalized.get("tool_plan") or []
         tool_plan: list[str] = []
