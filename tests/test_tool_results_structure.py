@@ -279,6 +279,9 @@ def test_finalizer_uses_raw_result(mock_orchestrator, mock_tools):
 
 def test_dict_result_preserves_structure(mock_orchestrator):
     """Tool returning a dict should preserve structure."""
+    from bantz.tools.metadata import register_tool_risk, ToolRisk, TOOL_REGISTRY
+    register_tool_risk("user.get_profile", ToolRisk.SAFE)
+
     registry = ToolRegistry()
     
     def get_user_profile():
@@ -333,9 +336,15 @@ def test_dict_result_preserves_structure(mock_orchestrator):
     assert "name" in result["result_summary"]
     assert "John Doe" in result["result_summary"]
 
+    # Cleanup: remove test tool from global registry
+    TOOL_REGISTRY.pop("user.get_profile", None)
+
 
 def test_failed_tool_preserves_error(mock_orchestrator):
     """Failed tool should preserve error message."""
+    from bantz.tools.metadata import register_tool_risk, ToolRisk, TOOL_REGISTRY
+    register_tool_risk("db.query", ToolRisk.SAFE)
+
     registry = ToolRegistry()
     
     def failing_tool():
@@ -375,3 +384,6 @@ def test_failed_tool_preserves_error(mock_orchestrator):
     assert result["success"] is False
     assert "error" in result
     assert "Database connection failed" in result["error"]
+
+    # Cleanup: remove test tool from global registry
+    TOOL_REGISTRY.pop("db.query", None)

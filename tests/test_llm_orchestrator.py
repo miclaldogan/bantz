@@ -490,8 +490,8 @@ def test_confirmation_firewall():
     # Assertions
     assert output.requires_confirmation is True
     assert output.confirmation_prompt != ""
-    assert state.has_pending_confirmation()  # Confirmation is pending
-    assert state.pending_confirmation["tool"] == "calendar.create_event"
+    assert state.has_pending_confirmation()
+    assert state.pending_confirmations[0]["tool"] == "calendar.create_event"
     
     # Tool should NOT have been executed yet
     # (In real scenario, user would confirm, then tool executes on next turn)

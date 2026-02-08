@@ -156,6 +156,9 @@ class TestIssue431ToolTimeout:
         from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
         from bantz.agent.tools import ToolRegistry, Tool
         from bantz.core.events import EventBus
+        from bantz.tools.metadata import register_tool_risk, ToolRisk
+
+        register_tool_risk("slow_tool", ToolRisk.SAFE)
 
         # Slow tool: sleeps 5 seconds
         def slow_tool(**kwargs):
@@ -199,6 +202,10 @@ class TestIssue431ToolTimeout:
         assert trace["tools_executed"] == 0
         assert trace["tools_attempted"] == 1
 
+        # Cleanup
+        from bantz.tools.metadata import TOOL_REGISTRY
+        TOOL_REGISTRY.pop("slow_tool", None)
+
     def test_fast_tool_succeeds_within_timeout(self):
         """A tool that returns quickly should succeed normally."""
         import warnings
@@ -206,6 +213,9 @@ class TestIssue431ToolTimeout:
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         from bantz.agent.tools import ToolRegistry, Tool
         from bantz.core.events import EventBus
+        from bantz.tools.metadata import register_tool_risk, ToolRisk
+
+        register_tool_risk("fast_tool", ToolRisk.SAFE)
 
         def fast_tool(**kwargs):
             return {"ok": True, "data": "hello"}
@@ -243,6 +253,10 @@ class TestIssue431ToolTimeout:
         trace = loop.run_full_cycle("test")
         assert trace["tools_executed"] == 1
 
+        # Cleanup
+        from bantz.tools.metadata import TOOL_REGISTRY
+        TOOL_REGISTRY.pop("fast_tool", None)
+
     def test_timeout_event_published(self):
         """Verify tool.timeout event is published on timeout."""
         import warnings
@@ -250,6 +264,9 @@ class TestIssue431ToolTimeout:
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         from bantz.agent.tools import ToolRegistry, Tool
         from bantz.core.events import EventBus
+        from bantz.tools.metadata import register_tool_risk, ToolRisk
+
+        register_tool_risk("slow_tool", ToolRisk.SAFE)
 
         def slow_tool(**kwargs):
             time.sleep(5)
@@ -293,3 +310,7 @@ class TestIssue431ToolTimeout:
         assert len(events_captured) == 1
         assert events_captured[0]["tool"] == "slow_tool"
         assert events_captured[0]["timeout_seconds"] == 0.5
+
+        # Cleanup
+        from bantz.tools.metadata import TOOL_REGISTRY
+        TOOL_REGISTRY.pop("slow_tool", None)

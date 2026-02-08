@@ -463,6 +463,8 @@ bantz/
 | [docs/gemini-hybrid-orchestrator.md](docs/gemini-hybrid-orchestrator.md) | Hybrid architecture deep-dive |
 | [docs/confirmation-firewall.md](docs/confirmation-firewall.md) | Security firewall documentation |
 | [docs/voice-pipeline-e2e.md](docs/voice-pipeline-e2e.md) | Voice pipeline end-to-end flow |
+| [docs/jarvis-roadmap-v2.md](docs/jarvis-roadmap-v2.md) | V2 roadmap and future plans |
+| [docs/acceptance-tests.md](docs/acceptance-tests.md) | Acceptance test plan and criteria |
 | [docs/acceptance-tests.md](docs/acceptance-tests.md) | Acceptance test criteria |
 | [docs/secrets-hygiene.md](docs/secrets-hygiene.md) | API key and secrets best practices |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |

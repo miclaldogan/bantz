@@ -202,12 +202,17 @@ def _is_confirmation_no(text: str) -> bool:
     if not t:
         return False
     
+    # Note: Include ASCII variants for Turkish uppercase issues (HAYIR.lower() = hayir)
+    no_tokens = {"hayır", "hayir", "h", "no", "n", "iptal", "vazgeç", "vazgec", "reddet", "istemiyorum", "olmaz", "yok"}
+
+    # Exact match BEFORE normalization (Issue #588: "reddet" has double-d)
+    if t in no_tokens:
+        return True
+    
     # Normalize elongated characters: haaaayırrr → hayır, yoook → yok
     t = _normalize_elongated(t)
     
-    # Exact match for common rejections
-    # Note: Include ASCII variants for Turkish uppercase issues (HAYIR.lower() = hayir)
-    no_tokens = {"hayır", "hayir", "h", "no", "n", "iptal", "vazgeç", "vazgec", "reddet", "istemiyorum", "olmaz", "yok"}
+    # Exact match after normalization
     if t in no_tokens:
         return True
     

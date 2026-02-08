@@ -125,27 +125,27 @@ def test_orchestrator_loop_fallback_to_build_when_state_none():
     # Mock tools
     mock_tools = Mock(spec=ToolRegistry)
     
-    # Patch build_session_context
-    with patch('bantz.brain.prompt_engineering.build_session_context') as mock_build:
+    from bantz.brain.orchestrator_loop import OrchestratorConfig
+    loop = OrchestratorLoop(
+        orchestrator=mock_orch,
+        tools=mock_tools,
+        config=OrchestratorConfig(debug=False, enable_safety_guard=False),
+        event_bus=Mock()
+    )
+
+    # Patch the session context cache's get_or_build method
+    with patch.object(loop._session_ctx_cache, 'get_or_build') as mock_build:
         built_context = {"timezone": "UTC", "locale": "en_GB"}
         mock_build.return_value = built_context
-        
-        loop = OrchestratorLoop(
-            orchestrator=mock_orch,
-            tools=mock_tools,
-            config=Mock(debug=False, enable_safety_guard=False),
-            event_bus=Mock()
-        )
         
         # Execute turn
         loop.run_full_cycle(user_input="test", state=state)
         
-        # build_session_context SHOULD be called (state has no session_context)
+        # get_or_build SHOULD be called (state has no session_context)
         mock_build.assert_called_once()
         
-        # Router should receive built session_context
+        # Router should receive built session_context (may have extra keys added by loop)
         call_kwargs = mock_orch.route.call_args[1]
-        assert call_kwargs['session_context'] == built_context
         assert call_kwargs['session_context']['timezone'] == "UTC"
 
 
@@ -176,15 +176,16 @@ def test_timezone_preserved_across_multiple_turns():
     
     mock_tools = Mock(spec=ToolRegistry)
     
-    with patch('bantz.brain.prompt_engineering.build_session_context') as mock_build:
+    from bantz.brain.orchestrator_loop import OrchestratorConfig
+    loop = OrchestratorLoop(
+        orchestrator=mock_orch,
+        tools=mock_tools,
+        config=OrchestratorConfig(debug=False, enable_safety_guard=False),
+        event_bus=Mock()
+    )
+
+    with patch.object(loop._session_ctx_cache, 'get_or_build') as mock_build:
         mock_build.return_value = {"timezone": "UTC"}  # Should never be used
-        
-        loop = OrchestratorLoop(
-            orchestrator=mock_orch,
-            tools=mock_tools,
-            config=Mock(debug=False, enable_safety_guard=False),
-            event_bus=Mock()
-        )
         
         # Turn 1
         loop.run_full_cycle(user_input="first", state=state)

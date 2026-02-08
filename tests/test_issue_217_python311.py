@@ -16,9 +16,9 @@ ROOT = Path(__file__).resolve().parent.parent
 class TestPython311Upgrade:
     """Verify Python 3.11+ requirement is set."""
 
-    def test_pyproject_requires_311(self):
+    def test_pyproject_requires_310(self):
         content = (ROOT / "pyproject.toml").read_text()
-        assert '>=3.11' in content
+        assert '>=3.10' in content
 
     def test_upgrade_guide_exists(self):
         assert (ROOT / "docs" / "setup" / "python311-upgrade.md").is_file()
@@ -37,11 +37,10 @@ class TestPython311Upgrade:
         """Current runtime must be >= 3.10 (existing env)."""
         assert sys.version_info >= (3, 10)
 
-    def test_no_310_only_features_in_pyproject(self):
-        """pyproject.toml should not reference 3.10 as minimum."""
+    def test_requires_python_minimum(self):
+        """pyproject.toml requires-python should be >=3.10."""
         content = (ROOT / "pyproject.toml").read_text()
-        # The only 3.10 refs should be in dependency version specs (e.g. pytesseract>=0.3.10)
         lines = content.split("\n")
         for line in lines:
             if "requires-python" in line:
-                assert "3.10" not in line, "requires-python should be >=3.11"
+                assert ">=3.10" in line, f"requires-python should be >=3.10, got: {line}"

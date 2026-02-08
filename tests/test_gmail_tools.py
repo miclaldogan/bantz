@@ -124,7 +124,7 @@ def test_gmail_list_messages_unread_only_query():
 
     out = gmail_list_messages(max_results=1, unread_only=True, service=service)
     assert out["ok"] is True
-    assert out["query"] == "is:unread"
+    assert out["query"] == "in:inbox is:unread"
 
     _, kwargs = service.users.return_value.messages.return_value.list.call_args
     assert kwargs["labelIds"] == ["INBOX", "UNREAD"]

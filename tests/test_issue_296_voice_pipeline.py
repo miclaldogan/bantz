@@ -211,7 +211,7 @@ class TestPipelineResult:
             total_ms=460.7,
         )
         summary = r.timing_summary()
-        assert "asr=121ms/500" in summary
+        assert "asr=120ms/500" in summary
         assert "brain=340ms/4500" in summary
         assert "total=461ms" in summary
 

@@ -265,7 +265,7 @@ class TestRouterJsonParsing:
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         
         router = JarvisLLMOrchestrator(llm=mock_llm)
-        result = router._parse_json('{"route": "calendar", "calendar_intent": "query", "confidence": 0.8, "tool_plan": [], "assistant_reply": ""}')
+        result, _repaired = router._parse_json('{"route": "calendar", "calendar_intent": "query", "confidence": 0.8, "tool_plan": [], "assistant_reply": ""}')
         
         assert result["route"] == "calendar"
         assert result["confidence"] == 0.8
@@ -276,7 +276,7 @@ class TestRouterJsonParsing:
         
         router = JarvisLLMOrchestrator(llm=mock_llm)
         text = '```json\n{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.9, "tool_plan": [], "assistant_reply": "Hi"}\n```'
-        result = router._parse_json(text)
+        result, _repaired = router._parse_json(text)
         
         assert result["route"] == "smalltalk"
 
@@ -286,7 +286,7 @@ class TestRouterJsonParsing:
         
         router = JarvisLLMOrchestrator(llm=mock_llm)
         text = 'Here is my response:\n{"route": "gmail", "calendar_intent": "none", "confidence": 0.7, "tool_plan": [], "assistant_reply": ""}'
-        result = router._parse_json(text)
+        result, _repaired = router._parse_json(text)
         
         assert result["route"] == "gmail"
 
