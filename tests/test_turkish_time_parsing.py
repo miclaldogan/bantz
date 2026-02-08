@@ -249,6 +249,51 @@ class TestParseSpecificDay:
         assert result is not None
         assert "pazar_evening" in result["hint"]
 
+    def test_gecen_carsamba_looks_backward(self, now: datetime) -> None:
+        """Issue #602: 'geçen çarşamba' should look to the past.
+
+        now = Monday Jan 15 → geçen çarşamba = Jan 10.
+        """
+        result = parse_time_window_tr("geçen çarşamba", now=now, tz=TZ_ISTANBUL)
+        assert result is not None
+        assert "2024-01-10" in result["start"]
+
+    def test_bu_cuma_looks_forward(self, now: datetime) -> None:
+        """Issue #602: 'bu cuma' should find this Friday.
+
+        now = Monday Jan 15 → bu cuma = Jan 19.
+        """
+        result = parse_time_window_tr("bu cuma", now=now, tz=TZ_ISTANBUL)
+        assert result is not None
+        assert "2024-01-19" in result["start"]
+
+    def test_bu_same_day_is_today(self, now: datetime) -> None:
+        """Issue #602: 'bu pazartesi' on Monday should be today.
+
+        now = Monday Jan 15 → bu pazartesi = Jan 15.
+        """
+        result = parse_time_window_tr("bu pazartesi", now=now, tz=TZ_ISTANBUL)
+        assert result is not None
+        assert "2024-01-15" in result["start"]
+
+    def test_onceki_sali(self, now: datetime) -> None:
+        """Issue #602: 'önceki salı' should look to last Tuesday.
+
+        now = Monday Jan 15 → önceki salı = Jan 9.
+        """
+        result = parse_time_window_tr("önceki salı", now=now, tz=TZ_ISTANBUL)
+        assert result is not None
+        assert "2024-01-09" in result["start"]
+
+    def test_onumuzdeki_persembe(self, now: datetime) -> None:
+        """Issue #602: 'önümüzdeki perşembe' should look forward.
+
+        now = Monday Jan 15 → önümüzdeki perşembe = Jan 18.
+        """
+        result = parse_time_window_tr("önümüzdeki perşembe", now=now, tz=TZ_ISTANBUL)
+        assert result is not None
+        assert "2024-01-18" in result["start"]
+
 
 class TestParseRelativePeriod:
     """Tests for relative time expressions."""
