@@ -42,6 +42,9 @@ class IntentCategory(Enum):
     CALENDAR_CREATE = "calendar_create"
     CALENDAR_DELETE = "calendar_delete"
     CALENDAR_UPDATE = "calendar_update"
+
+    # Email - hint only (do not bypass router)
+    EMAIL_SEND = "email_send"
     
     # System - bypass router, use system handler
     VOLUME_CONTROL = "volume_control"
@@ -92,6 +95,7 @@ class IntentCategory(Enum):
             IntentCategory.CALENDAR_CREATE: "calendar",
             IntentCategory.CALENDAR_DELETE: "calendar",
             IntentCategory.CALENDAR_UPDATE: "calendar",
+            IntentCategory.EMAIL_SEND: "router",
             IntentCategory.VOLUME_CONTROL: "system",
             IntentCategory.BRIGHTNESS: "system",
             IntentCategory.APP_LAUNCH: "system",
@@ -480,6 +484,26 @@ def create_calendar_delete_rule() -> PreRouteRule:
     )
 
 
+def create_email_send_rule() -> PreRouteRule:
+    """Create email send detection rule.
+
+    This rule is intentionally "hint-only" (IntentCategory.EMAIL_SEND is not
+    bypassable) because email sending requires slot extraction, safety checks,
+    and confirmation via the orchestrator.
+    """
+    return PatternRule(
+        name="email_send",
+        intent=IntentCategory.EMAIL_SEND,
+        patterns=[
+            r"\b(mail|e-?posta)\b\s*(gönder|at|yaz|yolla|ilet)\b",
+            r"\b(mail|e-?posta)\b.*\b(gönder|at|yaz|yolla|ilet)\b",
+            r"\b\S+@\S+\.\S+\b.*\b(mail|e-?posta)\b",
+            r"\b(mail|e-?posta)\b.*\b\S+@\S+\.\S+\b",
+        ],
+        confidence=0.97,
+    )
+
+
 def create_volume_rule() -> PreRouteRule:
     """Create volume control detection rule."""
     return PatternRule(
@@ -580,6 +604,7 @@ class PreRouter:
             create_calendar_list_rule(),
             create_calendar_create_rule(),
             create_calendar_delete_rule(),
+            create_email_send_rule(),
             create_volume_rule(),
             create_screenshot_rule(),
             create_smalltalk_rule(),
