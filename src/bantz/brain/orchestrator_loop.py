@@ -421,6 +421,20 @@ class OrchestratorLoop:
             pii_filter_enabled=self.config.memory_pii_filter,
         )
 
+        # Issue #599: Memory injection trace/audit (best-effort, non-fatal)
+        try:
+            from bantz.brain.memory_trace import MemoryBudgetConfig, MemoryTracer
+
+            self._memory_tracer = MemoryTracer(
+                MemoryBudgetConfig(
+                    max_tokens=int(self.config.memory_max_tokens),
+                    max_turns=int(self.config.memory_max_turns),
+                    pii_filter=bool(self.config.memory_pii_filter),
+                )
+            )
+        except Exception:
+            self._memory_tracer = None
+
         # Initialize safety guard (Issue #140)
         if self.config.enable_safety_guard:
             self.safety_guard = SafetyGuard(
@@ -968,9 +982,55 @@ class OrchestratorLoop:
         context = state.get_context_for_llm()
         conversation_history = context.get("recent_conversation", [])
         tool_results = context.get("last_tool_results", [])
+
+        if getattr(self, "_memory_tracer", None) is not None:
+            try:
+                self._memory_tracer.begin_turn(int(state.turn_count) + 1)
+            except Exception:
+                pass
         
         # Use memory-lite summary instead of rolling_summary from state (Issue #141)
         dialog_summary = self.memory.to_prompt_block()
+
+        # Issue #599: PII redaction + rough token budget enforcement for injected memory block
+        turns_count = len(self.memory) if hasattr(self.memory, "__len__") else 0
+        if self.config.memory_pii_filter:
+            try:
+                from bantz.privacy.redaction import redact_pii
+
+                dialog_summary = redact_pii(dialog_summary or "")
+            except Exception:
+                pass
+
+        def _estimate_tokens(s: str) -> int:
+            return max(0, len(s or "") // 4)
+
+        try:
+            budget_tokens = int(getattr(getattr(self, "_memory_tracer", None), "budget", None).max_tokens)  # type: ignore[union-attr]
+        except Exception:
+            budget_tokens = int(self.config.memory_max_tokens)
+
+        budget_tokens = max(1, int(budget_tokens))
+        original_tokens = _estimate_tokens(dialog_summary or "")
+        if dialog_summary and original_tokens > budget_tokens:
+            budget_chars = budget_tokens * 4
+            trimmed = (dialog_summary or "")[-budget_chars:]
+            nl = trimmed.find("\n")
+            if nl > 0 and nl < 80:
+                trimmed = trimmed[nl + 1 :]
+            after_tokens = _estimate_tokens(trimmed)
+            if getattr(self, "_memory_tracer", None) is not None:
+                try:
+                    self._memory_tracer.record_trim(original_tokens, after_tokens, reason="token_budget")
+                except Exception:
+                    pass
+            dialog_summary = trimmed
+
+        if getattr(self, "_memory_tracer", None) is not None:
+            try:
+                self._memory_tracer.record_injection(dialog_summary or "", turns_count, token_estimator=_estimate_tokens)
+            except Exception:
+                pass
         
         # Issue #339: Include conversation history and tool results in context
         # Build enhanced context block
@@ -985,6 +1045,14 @@ class OrchestratorLoop:
             for turn in conversation_history[-2:]:
                 user_text = str(turn.get("user", ""))[:100]
                 asst_text = str(turn.get("assistant", ""))[:150]
+                if self.config.memory_pii_filter:
+                    try:
+                        from bantz.privacy.redaction import redact_pii
+
+                        user_text = redact_pii(user_text)
+                        asst_text = redact_pii(asst_text)
+                    except Exception:
+                        pass
                 conv_lines.append(f"  U: {user_text}")
                 conv_lines.append(f"  A: {asst_text}")
             context_parts.append("\n".join(conv_lines))
@@ -996,6 +1064,13 @@ class OrchestratorLoop:
                 tool_name = str(tr.get("tool", ""))
                 # Issue #353: Use result_summary instead of truncated result
                 result_str = str(tr.get("result_summary", ""))[:200]
+                if self.config.memory_pii_filter:
+                    try:
+                        from bantz.privacy.redaction import redact_pii
+
+                        result_str = redact_pii(result_str)
+                    except Exception:
+                        pass
                 success = tr.get("success", True)
                 status = "ok" if success else "fail"
                 result_lines.append(f"  {tool_name} ({status}): {result_str}")
@@ -1014,6 +1089,33 @@ class OrchestratorLoop:
                 state.reference_table = ref_table
         
         enhanced_summary = "\n\n".join(context_parts) if context_parts else None
+
+        # Issue #599: Publish memory injection diagnostics and store in trace
+        if getattr(self, "_memory_tracer", None) is not None:
+            try:
+                rec = self._memory_tracer.end_turn()
+            except Exception:
+                rec = None
+            if rec is not None:
+                try:
+                    state.trace.setdefault("memory_trace", []).append(rec.to_trace_line())
+                except Exception:
+                    pass
+                try:
+                    self.event_bus.publish(
+                        "memory.injected",
+                        {
+                            "turn_number": rec.turn_number,
+                            "memory_injected": rec.memory_injected,
+                            "memory_tokens": rec.memory_tokens,
+                            "memory_turns_count": rec.memory_turns_count,
+                            "was_trimmed": rec.was_trimmed,
+                            "trim_reason": rec.trim_reason,
+                            "memory_preview": (dialog_summary or "")[:200],
+                        },
+                    )
+                except Exception:
+                    pass
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Planning Phase:")
