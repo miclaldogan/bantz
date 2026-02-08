@@ -250,6 +250,7 @@ class TerminalJarvis:
         self._gemini_ready = threading.Event()
         self._standby = False
         self._pending_action_user_input: Optional[str] = None
+        self._pending_ask_user_input: Optional[str] = None
         self._trace_enabled: bool = False
 
         self._warm_started_at = time.monotonic()
@@ -801,11 +802,18 @@ class TerminalJarvis:
             if not text:
                 return "Buyurun efendim."
 
+        # Clarification follow-up (ask_user=True): treat the next user message as
+        # the missing info and combine with the original request.
+        # This must not interfere with confirmation flow.
+        if self._pending_ask_user_input and not self.state.has_pending_confirmation():
+            text = f"{self._pending_ask_user_input} — {text}"
+            self._pending_ask_user_input = None
+
         # Pending confirmation handling: if a tool is waiting for confirmation,
         # and the user types a confirmation token, run the prior action.
         # Issue #283: Accept natural language confirmations like "evet ekle dostum"
         if self.state.has_pending_confirmation():
-            pending = self.state.pending_confirmation or {}
+            pending = self.state.peek_pending_confirmation() or {}
             prompt = str(pending.get("prompt") or "").strip()
             
             if _is_confirmation_yes(text):
@@ -849,6 +857,15 @@ class TerminalJarvis:
         # Normal LLM-first orchestration
         output, self.state = self.loop.process_turn(text, self.state)
 
+        # Router asked for clarification: return the explicit question and
+        # remember the initiating request for the next turn.
+        if getattr(output, "ask_user", False):
+            self._pending_ask_user_input = text
+            q = str(getattr(output, "question", "") or "").strip()
+            if q:
+                return q
+            return (output.assistant_reply or "").strip() or "Efendim, biraz daha detay verir misiniz?"
+
         if self._trace_enabled and getattr(output, "reasoning_summary", None):
             rs = output.reasoning_summary
             if isinstance(rs, list) and rs:
@@ -859,7 +876,7 @@ class TerminalJarvis:
         # If a confirmation is now pending, remember the initiating input.
         if self.state.has_pending_confirmation():
             self._pending_action_user_input = text
-            pending = self.state.pending_confirmation or {}
+            pending = self.state.peek_pending_confirmation() or {}
             prompt = str(pending.get("prompt") or "").strip()
             return prompt or (output.confirmation_prompt or "Efendim, onay verir misiniz?")
 
