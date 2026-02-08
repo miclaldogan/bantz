@@ -477,6 +477,13 @@ class TerminalJarvis:
         self.gemini_client: Optional[GeminiClient] = None
         if gemini_key:
             self.gemini_client = GeminiClient(api_key=gemini_key, model=gemini_model, timeout_seconds=30.0)
+            logger.info("Finalizer: %s ✓ (Gemini)", gemini_model)
+        else:
+            logger.warning(
+                "⚠ GEMINI_API_KEY not set — finalization will use 3B router (%s). "
+                "Quality may be degraded. Set GEMINI_API_KEY for natural responses.",
+                router_model,
+            )
 
         self.tools = _build_registry()
 
@@ -485,9 +492,11 @@ class TerminalJarvis:
 
         orchestrator = JarvisLLMOrchestrator(llm_client=self.router_client)
 
-        # If Gemini isn't configured, still provide a finalizer so tool results
-        # get turned into a natural-language answer (local-only).
+        # Issue #517: Finalizer wiring invariant.
+        # Gemini is strongly preferred for finalization (natural language quality).
+        # If not available, fall back to 3B router with a warning.
         effective_finalizer = self.gemini_client or self.router_client
+        self._finalizer_is_gemini = self.gemini_client is not None
         self.loop = OrchestratorLoop(
             orchestrator,
             self.tools,

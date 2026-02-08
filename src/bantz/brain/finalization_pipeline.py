@@ -469,20 +469,34 @@ class FinalizationPipeline:
                 "tool_count": len(ctx.tool_results),
             })
 
+        # Issue #517: Determine finalizer model name for trace
+        _quality_model = ""
+        if self._quality is not None:
+            _qlm = getattr(self._quality, "_llm", None)
+            _quality_model = str(
+                getattr(_qlm, "model_name", None) or getattr(_qlm, "model", None) or ""
+            )
+        _fast_model = ""
+        if self._fast is not None:
+            _flm = getattr(self._fast, "_planner", None) or getattr(self._fast, "_llm", None)
+            _fast_model = str(
+                getattr(_flm, "model_name", None) or getattr(_flm, "model", None) or ""
+            )
+
         # --- Early exit: ask_user with no reply -----------------------------
         if output.ask_user and output.question and not output.assistant_reply:
-            return replace(output, assistant_reply=output.question)
+            return replace(output, assistant_reply=output.question, finalizer_model="none(ask_user)")
 
         # --- Early exit: hard tool failures ---------------------------------
         error_reply = _check_hard_failures(ctx.tool_results)
         if error_reply is not None:
-            return replace(output, assistant_reply=error_reply)
+            return replace(output, assistant_reply=error_reply, finalizer_model="none(error)")
 
         # --- Quality finalizer path -----------------------------------------
         if ctx.use_quality and self._quality is not None:
             text = self._try_quality(ctx)
             if text:
-                return replace(output, assistant_reply=text)
+                return replace(output, assistant_reply=text, finalizer_model=_quality_model or "quality")
 
             # Quality failed / guard rejected → fall back to fast
             if self._fast is not None:
@@ -495,7 +509,7 @@ class FinalizationPipeline:
                         finalizer_used=False,
                         finalizer_fallback="planner",
                     )
-                    return replace(output, assistant_reply=text)
+                    return replace(output, assistant_reply=text, finalizer_model=_fast_model or "fast(fallback)")
 
         # --- Fast-only path (tiered decision chose "fast") ------------------
         if not ctx.use_quality and self._fast is not None:
@@ -507,7 +521,7 @@ class FinalizationPipeline:
             if ctx.tool_results and not output.ask_user:
                 text = self._fast.finalize(ctx)
                 if text:
-                    return replace(output, assistant_reply=text)
+                    return replace(output, assistant_reply=text, finalizer_model=_fast_model or "fast")
 
         # --- Default fallback -----------------------------------------------
         return self._default_fallback(ctx)
@@ -562,7 +576,7 @@ class FinalizationPipeline:
         output = ctx.orchestrator_output
 
         if not ctx.tool_results:
-            return output
+            return replace(output, finalizer_model="none(no_tools)")
 
         # Check for failures
         failed = [r for r in ctx.tool_results if not r.get("success", False)]
@@ -572,17 +586,18 @@ class FinalizationPipeline:
                 error_msg += (
                     f"- {r.get('tool', '?')}: {r.get('error', 'Unknown error')}\n"
                 )
-            return replace(output, assistant_reply=error_msg.strip())
+            return replace(output, assistant_reply=error_msg.strip(), finalizer_model="none(error)")
 
         # Tools succeeded — use existing reply or generate summary
         if output.assistant_reply:
-            return output
+            return replace(output, finalizer_model="none(existing_reply)")
 
         from bantz.brain.orchestrator_loop import _build_tool_success_summary
 
         return replace(
             output,
             assistant_reply=_build_tool_success_summary(ctx.tool_results),
+            finalizer_model="none(default_summary)",
         )
 
 
