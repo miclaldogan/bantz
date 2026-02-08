@@ -223,6 +223,20 @@ class VoicePipeline:
         self.config = config or VoicePipelineConfig()
         self._runtime = runtime  # lazy: created on first call if None
         self._narration_config: Any = None
+        self._heartbeat: Any = None  # lazy: Heartbeat instance
+
+    # ── Heartbeat ───────────────────────────────────────────────
+    def _tick_heartbeat(self) -> None:
+        """Tick the voice heartbeat (best-effort, Issue #301)."""
+        try:
+            if self._heartbeat is None:
+                from bantz.voice.heartbeat import Heartbeat
+
+                self._heartbeat = Heartbeat()
+                logger.debug("Heartbeat initialised: %s", self._heartbeat.path)
+            self._heartbeat.tick()
+        except Exception as exc:
+            logger.debug("Heartbeat tick skipped: %s", exc)
 
     # ── Lazy runtime ────────────────────────────────────────────
     def _get_runtime(self) -> Any:
@@ -336,6 +350,9 @@ class VoicePipeline:
         This is the main entry point for headless/test usage.
         """
         from bantz.brain.orchestrator_state import OrchestratorState
+
+        # Heartbeat tick — proves voice loop is alive (Issue #301)
+        self._tick_heartbeat()
 
         result = PipelineResult(
             transcription=user_input,
