@@ -689,10 +689,20 @@ def _tool_first_guard_message(*, route: str) -> str:
 def _safe_complete(
     llm: LLMCompletionProtocol, prompt: str, **kwargs: Any
 ) -> Optional[str]:
-    """Call ``complete_text`` with a TypeError fallback for simple mocks."""
+    """Call ``complete_text`` with a TypeError fallback for simple mocks.
+
+    Issue #601: When TypeError is caught (e.g. mock or API signature mismatch),
+    we now log a warning so that dropped kwargs (temperature, max_tokens) are
+    visible in production logs instead of being silently swallowed.
+    """
     try:
         text = llm.complete_text(prompt=prompt, **kwargs)
-    except TypeError:
+    except TypeError as e:
+        logger.warning(
+            "[FINALIZER] LLM client TypeError — kwargs dropped %s: %s",
+            list(kwargs.keys()),
+            e,
+        )
         text = llm.complete_text(prompt=prompt)
     return str(text or "").strip() or None
 
