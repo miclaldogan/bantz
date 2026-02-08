@@ -680,6 +680,54 @@ class TestGeminiFullIntegration:
 
 
 # ======================================================================
+# Issue #593: Default gates wired
+# ======================================================================
+
+
+class TestGeminiDefaultGates:
+    """Ensure default quota/circuit gates are used when not passed explicitly."""
+
+    def test_default_quota_tracker_blocks_call(self, monkeypatch):
+        class _FailingQuota:
+            def check(self) -> None:
+                raise QuotaExceeded("Daily call limit exceeded", daily_remaining=0)
+
+        # Default quota tracker should be constructed/used.
+        monkeypatch.setattr(
+            "bantz.llm.gemini_client.get_default_quota_tracker",
+            lambda: _FailingQuota(),
+        )
+
+        with patch("bantz.llm.gemini_client.requests.post") as mock_post:
+            client = _make_client(quota_tracker=None, circuit_breaker=None)
+            with pytest.raises(LLMConnectionError, match="quota_exceeded"):
+                client.chat_detailed([LLMMessage(role="user", content="test")])
+            assert mock_post.call_count == 0
+
+    def test_default_circuit_breaker_blocks_call(self, monkeypatch):
+        class _FailingCircuit:
+            def check(self) -> None:
+                raise CircuitOpen("Circuit breaker OPEN — Gemini temporarily disabled")
+
+            def record_success(self) -> None:
+                return None
+
+            def record_failure(self) -> None:
+                return None
+
+        monkeypatch.setattr(
+            "bantz.llm.gemini_client.get_default_circuit_breaker",
+            lambda: _FailingCircuit(),
+        )
+
+        with patch("bantz.llm.gemini_client.requests.post") as mock_post:
+            client = _make_client(quota_tracker=None, circuit_breaker=None)
+            with pytest.raises(LLMConnectionError, match="circuit_open"):
+                client.chat_detailed([LLMMessage(role="user", content="test")])
+            assert mock_post.call_count == 0
+
+
+# ======================================================================
 # Edge Cases
 # ======================================================================
 
