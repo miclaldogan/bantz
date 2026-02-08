@@ -250,6 +250,7 @@ class OrchestratorOutput:
     
     # Debug/trace
     raw_output: dict[str, Any] = field(default_factory=dict)  # Full LLM response for debugging
+    finalizer_model: str = ""  # Issue #517: which model generated assistant_reply
 
 
 # Legacy alias for backward compatibility

@@ -397,6 +397,20 @@ class OrchestratorLoop:
         self.config = config or OrchestratorConfig()
         self.finalizer_llm = finalizer_llm
         self.audit_logger = audit_logger  # For tool execution auditing (Issue #160)
+
+        # Issue #517: Finalizer wiring invariant — warn if no finalizer
+        if finalizer_llm is None:
+            import warnings as _fw
+            _fw.warn(
+                "OrchestratorLoop created without finalizer_llm. "
+                "Finalization will use deterministic defaults only (no natural language). "
+                "Pass a GeminiClient or LLM client as finalizer_llm for quality responses.",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            _fm = getattr(finalizer_llm, "model_name", None) or getattr(finalizer_llm, "model", None) or type(finalizer_llm).__name__
+            logger.info("OrchestratorLoop finalizer: %s", _fm)
         
         # Initialize memory-lite (Issue #141)
         self.memory = DialogSummaryManager(
@@ -1542,6 +1556,9 @@ class OrchestratorLoop:
         finalizer_model = getattr(self.finalizer_llm, "model_name", None) if self.finalizer_llm is not None else None
         finalizer_backend = getattr(self.finalizer_llm, "backend_name", None) if self.finalizer_llm is not None else None
 
+        # Issue #517: Also capture which finalizer strategy was actually used
+        finalizer_strategy = getattr(output, "finalizer_model", "") or ""
+
         state.update_trace(
             route_source="llm",  # Everything comes from LLM now
             route=output.route,
@@ -1559,6 +1576,7 @@ class OrchestratorLoop:
             planner_backend=planner_backend,
             finalizer_model=finalizer_model,
             finalizer_backend=finalizer_backend,
+            finalizer_strategy=finalizer_strategy,
         )
         
         if self.config.debug:
