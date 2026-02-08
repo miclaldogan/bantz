@@ -85,6 +85,57 @@ class TestGmailListMessagesQuery:
             assert call_kwargs.get("unread_only") is True
 
 
+class TestGmailRelativeDateWindow:
+    def test_today_injects_after_filter(self):
+        from datetime import datetime, timezone
+        from bantz.tools.gmail_tools import gmail_list_messages_tool
+
+        with patch("bantz.tools.gmail_tools._now_local") as mock_now, patch(
+            "bantz.tools.gmail_tools.gmail_list_messages"
+        ) as mock_list:
+            mock_now.return_value = datetime(2026, 2, 9, 12, 0, tzinfo=timezone.utc)
+            mock_list.return_value = {"ok": True, "messages": []}
+
+            gmail_list_messages_tool(date_window="today")
+
+            call_kwargs = mock_list.call_args.kwargs
+            assert "after:2026/02/09" in (call_kwargs.get("query") or "")
+
+    def test_yesterday_injects_after_before_filter(self):
+        from datetime import datetime, timezone
+        from bantz.tools.gmail_tools import gmail_list_messages_tool
+
+        with patch("bantz.tools.gmail_tools._now_local") as mock_now, patch(
+            "bantz.tools.gmail_tools.gmail_list_messages"
+        ) as mock_list:
+            mock_now.return_value = datetime(2026, 2, 9, 9, 0, tzinfo=timezone.utc)
+            mock_list.return_value = {"ok": True, "messages": []}
+
+            gmail_list_messages_tool(date_window="yesterday")
+
+            call_kwargs = mock_list.call_args.kwargs
+            q = call_kwargs.get("query") or ""
+            assert "after:2026/02/08" in q
+            assert "before:2026/02/09" in q
+
+    def test_does_not_override_existing_after_filter(self):
+        from datetime import datetime, timezone
+        from bantz.tools.gmail_tools import gmail_list_messages_tool
+
+        with patch("bantz.tools.gmail_tools._now_local") as mock_now, patch(
+            "bantz.tools.gmail_tools.gmail_list_messages"
+        ) as mock_list:
+            mock_now.return_value = datetime(2026, 2, 9, 9, 0, tzinfo=timezone.utc)
+            mock_list.return_value = {"ok": True, "messages": []}
+
+            gmail_list_messages_tool(query="after:2026/02/01 from:amazon", date_window="today")
+
+            call_kwargs = mock_list.call_args.kwargs
+            q = call_kwargs.get("query") or ""
+            assert "after:2026/02/01" in q
+            assert "after:2026/02/09" not in q
+
+
 # ============================================================================
 # Test gmail.py gmail_list_messages with query
 # ============================================================================
