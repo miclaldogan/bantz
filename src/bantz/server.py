@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import socket
 import sys
@@ -431,6 +432,28 @@ class BantzServer:
         self._running = False
         self._browser_initialized = False
 
+        # Issue #516: Optional brain-based handler (LLM-first path).
+        # Set BANTZ_USE_BRAIN=1 to use the canonical brain factory
+        # instead of the legacy Router for text commands.
+        self._brain = None
+        self._brain_state = None
+        if os.getenv("BANTZ_USE_BRAIN", "").strip().lower() in ("1", "true", "yes"):
+            try:
+                from bantz.brain.runtime_factory import create_runtime
+                from bantz.brain.orchestrator_state import OrchestratorState
+
+                self._brain = create_runtime()
+                self._brain_state = OrchestratorState()
+                logging.getLogger(__name__).info(
+                    "🧠 Server brain enabled: router=%s, finalizer=%s",
+                    self._brain.router_model,
+                    "Gemini" if self._brain.finalizer_is_gemini else "3B",
+                )
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "Brain init failed, falling back to Router: %s", e
+                )
+
         # Proactive inbox (FIFO) for bantz_message events
         self._inbox = InboxStore(maxlen=200)
 
@@ -546,7 +569,26 @@ class BantzServer:
         if overlay._client and overlay._client.connected:
             overlay.thinking_sync("Anlıyorum...")
 
-        # Route command
+        # Issue #516: Brain-based handler (LLM-first) when enabled
+        if self._brain is not None and not parsed.intent.startswith("browser_"):
+            try:
+                output, self._brain_state = self._brain.process_turn(
+                    command, self._brain_state
+                )
+                reply = str(getattr(output, "assistant_reply", "") or "").strip()
+                if not reply and getattr(output, "ask_user", False):
+                    reply = str(getattr(output, "question", "") or "").strip()
+                return {
+                    "ok": True,
+                    "text": reply or "Anlayamadım efendim.",
+                    "brain": True,
+                    "route": getattr(output, "route", "unknown"),
+                }
+            except Exception as e:
+                logging.getLogger(__name__).warning("Brain handler failed: %s", e)
+                # Fall through to legacy Router
+
+        # Route command (legacy Router path)
         router = self._get_router()
         result = router.handle(text=command, ctx=self.ctx)
 
