@@ -432,12 +432,14 @@ class BantzServer:
         self._running = False
         self._browser_initialized = False
 
-        # Issue #516: Optional brain-based handler (LLM-first path).
-        # Set BANTZ_USE_BRAIN=1 to use the canonical brain factory
-        # instead of the legacy Router for text commands.
+        # Issue #567: Brain is now DEFAULT (was opt-in via BANTZ_USE_BRAIN=1).
+        # Legacy Router is the fallback only when brain is disabled
+        # or when BANTZ_USE_LEGACY=1 is explicitly set.
         self._brain = None
         self._brain_state = None
-        if os.getenv("BANTZ_USE_BRAIN", "").strip().lower() in ("1", "true", "yes"):
+        _use_legacy = os.getenv("BANTZ_USE_LEGACY", "").strip().lower() in ("1", "true", "yes")
+        _brain_enabled = not _use_legacy  # brain on by default unless legacy forced
+        if _brain_enabled:
             try:
                 from bantz.brain.runtime_factory import create_runtime
                 from bantz.brain.orchestrator_state import OrchestratorState
@@ -451,7 +453,7 @@ class BantzServer:
                 )
             except Exception as e:
                 logging.getLogger(__name__).warning(
-                    "Brain init failed, falling back to Router: %s", e
+                    "Brain init failed, falling back to legacy Router: %s", e
                 )
 
         # Proactive inbox (FIFO) for bantz_message events
@@ -569,7 +571,8 @@ class BantzServer:
         if overlay._client and overlay._client.connected:
             overlay.thinking_sync("Anlıyorum...")
 
-        # Issue #516: Brain-based handler (LLM-first) when enabled
+        # Issue #567: Brain is the default handler for non-browser commands.
+        # Legacy Router is only used when brain is unavailable or for browser_* intents.
         if self._brain is not None and not parsed.intent.startswith("browser_"):
             try:
                 output, self._brain_state = self._brain.process_turn(
