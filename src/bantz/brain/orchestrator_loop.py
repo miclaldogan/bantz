@@ -391,9 +391,14 @@ class OrchestratorLoop:
         self.audit_logger = audit_logger  # For tool execution auditing (Issue #160)
         self.fsm_bridge = fsm_bridge  # Issue #596: ConversationFSM integration (optional)
 
+        # Issue #597: Cache FinalizationPipeline (avoid per-turn object allocation)
+        self._finalization_pipeline: Any = None
+        self._finalization_pipeline_key: tuple[int, int, int] | None = None
+
         # Issue #517: Finalizer wiring invariant — warn if no finalizer
         if finalizer_llm is None:
             import warnings as _fw
+
             _fw.warn(
                 "OrchestratorLoop created without finalizer_llm. "
                 "Finalization will use deterministic defaults only (no natural language). "
@@ -402,16 +407,20 @@ class OrchestratorLoop:
                 stacklevel=2,
             )
         else:
-            _fm = getattr(finalizer_llm, "model_name", None) or getattr(finalizer_llm, "model", None) or type(finalizer_llm).__name__
+            _fm = (
+                getattr(finalizer_llm, "model_name", None)
+                or getattr(finalizer_llm, "model", None)
+                or type(finalizer_llm).__name__
+            )
             logger.info("OrchestratorLoop finalizer: %s", _fm)
-        
+
         # Initialize memory-lite (Issue #141)
         self.memory = DialogSummaryManager(
             max_tokens=self.config.memory_max_tokens,
             max_turns=self.config.memory_max_turns,
             pii_filter_enabled=self.config.memory_pii_filter,
         )
-        
+
         # Initialize safety guard (Issue #140)
         if self.config.enable_safety_guard:
             self.safety_guard = SafetyGuard(
@@ -419,9 +428,10 @@ class OrchestratorLoop:
             )
         else:
             self.safety_guard = None
-        
+
         # Issue #417: Session context cache (TTL 60s) — avoid rebuild every turn
         from bantz.brain.session_context_cache import SessionContextCache
+
         self._session_ctx_cache = SessionContextCache(ttl_seconds=60.0)
 
         # Issue #407: Pre-route rule engine — bypass LLM for obvious patterns
@@ -447,7 +457,7 @@ class OrchestratorLoop:
             ("system", "status"): ["system.status"],
             ("system", "query"): ["time.now"],  # Default for system queries
         }
-        
+
         # Gmail intent mapping (gmail_intent → mandatory tools)
         # Issue #317: Extended Gmail label/category support
         self._gmail_intent_map: dict[str, list[str]] = {
@@ -456,6 +466,22 @@ class OrchestratorLoop:
             "read": ["gmail.get_message"],
             "send": ["gmail.send"],
         }
+
+    def _get_finalization_pipeline(self) -> Any:
+        from bantz.brain.finalization_pipeline import create_pipeline
+
+        planner_llm = getattr(self.orchestrator, "_llm", None)
+        if planner_llm is not None and not hasattr(planner_llm, "complete_text"):
+            planner_llm = None
+        key = (id(self.finalizer_llm), id(planner_llm), id(self.event_bus))
+        if self._finalization_pipeline is None or self._finalization_pipeline_key != key:
+            self._finalization_pipeline = create_pipeline(
+                finalizer_llm=self.finalizer_llm,
+                planner_llm=planner_llm,
+                event_bus=self.event_bus,
+            )
+            self._finalization_pipeline_key = key
+        return self._finalization_pipeline
     
     def _force_tool_plan(self, output: OrchestratorOutput) -> OrchestratorOutput:
         """Force mandatory tools based on route+intent (Issue #282).
@@ -1800,12 +1826,7 @@ class OrchestratorLoop:
         """
         from bantz.brain.finalization_pipeline import (
             build_finalization_context,
-            create_pipeline,
         )
-
-        planner_llm = getattr(self.orchestrator, "_llm", None)
-        if planner_llm is not None and not hasattr(planner_llm, "complete_text"):
-            planner_llm = None
 
         ctx = build_finalization_context(
             user_input=user_input,
@@ -1816,11 +1837,7 @@ class OrchestratorLoop:
             finalizer_llm=self.finalizer_llm,
         )
 
-        pipeline = create_pipeline(
-            finalizer_llm=self.finalizer_llm,
-            planner_llm=planner_llm,
-            event_bus=self.event_bus,
-        )
+        pipeline = self._get_finalization_pipeline()
 
         return pipeline.run(ctx)
     
