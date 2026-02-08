@@ -2,7 +2,7 @@
 
 This module provides deterministic formatting for Jarvis persona responses.
 Key principles:
-- "Efendim" max 1x per response (not in every line)
+- "Efendim" max 1x per response (not in every line) — Issue #429
 - Empathy before menu (one human sentence)
 - Natural, conversational menu labels
 - Variation bank with deterministic selection (hash-based, not random)
@@ -15,7 +15,113 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
+
+
+# ─────────────────────────────────────────────────────────────────
+# Efendim Frequency Control — Issue #429
+# ─────────────────────────────────────────────────────────────────
+
+# Case-insensitive pattern matching "efendim" as a standalone word
+_EFENDIM_RE = re.compile(r"\befendim\b", re.IGNORECASE)
+
+# Positions where the single allowed "efendim" is preferred (priority order)
+_EFENDIM_PREFERRED_POS = ("start", "end")  # beginning of response or end
+
+
+class EfendimPosition(str, Enum):
+    """Where the single allowed 'efendim' should appear."""
+    START = "start"
+    END = "end"
+    FIRST_FOUND = "first_found"
+
+
+@dataclass(frozen=True)
+class EfendimConfig:
+    """Configuration for efendim frequency control."""
+    max_per_turn: int = 1
+    preferred_position: EfendimPosition = EfendimPosition.START
+
+
+def limit_efendim(
+    text: str,
+    max_count: int = 1,
+    preferred_position: EfendimPosition = EfendimPosition.START,
+) -> str:
+    """
+    Post-process LLM response to limit 'efendim' occurrences.
+
+    Rules:
+    - At most *max_count* occurrences per response (default 1).
+    - The retained instance is at *preferred_position*
+      (``START`` keeps first, ``END`` keeps last).
+    - Extra occurrences are stripped with a leading/trailing comma+space cleanup.
+
+    Examples::
+
+        >>> limit_efendim("Merhaba efendim, nasılsınız efendim?")
+        'Merhaba efendim, nasılsınız?'
+        >>> limit_efendim("Efendim etkinlik oluşturuldu efendim.", preferred_position=EfendimPosition.END)
+        'Etkinlik oluşturuldu efendim.'
+    """
+    if not text:
+        return text
+
+    matches = list(_EFENDIM_RE.finditer(text))
+    if len(matches) <= max_count:
+        return text
+
+    # Decide which occurrences to keep
+    if preferred_position == EfendimPosition.END:
+        keep_indices = {m.start() for m in matches[-max_count:]}
+    else:  # START or FIRST_FOUND
+        keep_indices = {m.start() for m in matches[:max_count]}
+
+    # Build result by removing non-kept occurrences
+    result = text
+    # Process from end to start to preserve indices
+    for match in reversed(matches):
+        if match.start() not in keep_indices:
+            before = result[: match.start()]
+            after = result[match.end():]
+
+            # Clean up surrounding punctuation/space:
+            #   ", efendim," → ","   "efendim, " → ""   " efendim." → "."
+            # Remove trailing comma+space or leading comma+space around the gap
+            before = before.rstrip()
+            if before.endswith(","):
+                # "Merhaba efendim," → remove trailing comma, after starts with space
+                pass  # keep comma, strip leading space from after
+            after = after.lstrip()
+            if after.startswith(","):
+                after = after[1:].lstrip()
+
+            # Re-join
+            if before and after:
+                # Ensure single space between parts
+                if before[-1] in ".!?":
+                    result = before + " " + after
+                else:
+                    result = before + " " + after
+            elif before:
+                result = before
+            else:
+                # efendim was at start
+                result = after.capitalize() if after else ""
+
+    # Final cleanup: double spaces, space before punctuation
+    result = re.sub(r"\s+", " ", result).strip()
+    result = re.sub(r"\s+([,.!?])", r"\1", result)
+    return result
+
+
+def count_efendim(text: str) -> int:
+    """Count occurrences of 'efendim' in text."""
+    if not text:
+        return 0
+    return len(_EFENDIM_RE.findall(text))
 
 
 def _pick_variant(variants: list[str], seed: str) -> str:
