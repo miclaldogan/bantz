@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from bantz.google.gmail import (
@@ -17,6 +18,45 @@ from bantz.google.gmail_labels import (
 )
 
 
+def _now_local() -> datetime:
+    return datetime.now().astimezone()
+
+
+_RELATIVE_WINDOWS: dict[str, str] = {
+    "today": "today",
+    "bugün": "today",
+    "yesterday": "yesterday",
+    "dün": "yesterday",
+    "this_week": "this_week",
+    "bu hafta": "this_week",
+    "week": "this_week",
+}
+
+
+def _contains_date_filter(query: str) -> bool:
+    q = (query or "").lower()
+    return any(x in q for x in ("after:", "before:", "newer_than:"))
+
+
+def _date_filter_for_window(window: str) -> str:
+    now = _now_local()
+    w = _RELATIVE_WINDOWS.get((window or "").strip().lower(), "")
+
+    if w == "today":
+        return f"after:{now.strftime('%Y/%m/%d')}"
+
+    if w == "yesterday":
+        today = now.date()
+        yday = today - timedelta(days=1)
+        return f"after:{yday.strftime('%Y/%m/%d')} before:{today.strftime('%Y/%m/%d')}"
+
+    if w == "this_week":
+        week_start = now.date() - timedelta(days=now.date().weekday())
+        return f"after:{week_start.strftime('%Y/%m/%d')}"
+
+    return ""
+
+
 def gmail_unread_count_tool(**_: Any) -> dict[str, Any]:
     """Read-only: return unread count."""
     try:
@@ -30,6 +70,7 @@ def gmail_list_messages_tool(
     max_results: int = 5,
     unread_only: bool = False,
     query: str = "",
+    date_window: Optional[str] = None,
     category: Optional[str] = None,
     label: Optional[str] = None,
     **_: Any,
@@ -67,6 +108,12 @@ def gmail_list_messages_tool(
                 if label_match.detected and label_match.label:
                     final_query = label_match.label.query_filter
                     detected_label = label_match.label
+
+        # Deterministic relative-date filtering (Issue #605)
+        if date_window and not _contains_date_filter(final_query):
+            df = _date_filter_for_window(date_window)
+            if df:
+                final_query = f"{final_query} {df}".strip() if final_query else df
         
         result = gmail_list_messages(
             max_results=int(max_results),
@@ -162,6 +209,7 @@ def gmail_smart_search_tool(
     natural_query: str,
     max_results: int = 5,
     unread_only: bool = False,
+    date_window: Optional[str] = None,
     **_: Any,
 ) -> dict[str, Any]:
     """Search Gmail using natural language with Turkish label detection.
@@ -187,6 +235,12 @@ def gmail_smart_search_tool(
             natural_query,
             include_unread_only=bool(unread_only),
         )
+
+        # Deterministic relative-date filtering (Issue #605)
+        if date_window and not _contains_date_filter(query):
+            df = _date_filter_for_window(date_window)
+            if df:
+                query = f"{query} {df}".strip()
         
         result = gmail_list_messages(
             max_results=int(max_results),
