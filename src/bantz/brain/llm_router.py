@@ -1,7 +1,7 @@
 """LLM Orchestrator: Single entry point for all user inputs (LLM-first architecture).
 
 Provides:
-- Route classification (calendar | gmail | smalltalk | unknown)
+- Route classification (calendar | gmail | system | smalltalk | unknown)
 - Intent extraction (create | modify | cancel | query)
 - Slot extraction (date, time, duration, title, window_hint)
 - Confidence scoring
@@ -226,7 +226,7 @@ class OrchestratorOutput:
     """
 
     # Core routing (from original RouterOutput)
-    route: str  # calendar | gmail | smalltalk | unknown
+    route: str  # calendar | gmail | system | smalltalk | unknown
     calendar_intent: str  # create | modify | cancel | query | none
     slots: dict[str, Any]  # {date?, time?, duration?, title?, window_hint?}
     confidence: float  # 0.0-1.0
@@ -295,11 +295,11 @@ class JarvisLLMOrchestrator:
     #   EXAMPLES      ≤ 700 tokens  (stripped before DETAIL)
     # -----------------------------------------------------------------------
 
-    # ── CORE PROMPT (~650 tokens) ─── always included ───────────────────
-    _SYSTEM_PROMPT_CORE = """Kimlik: Sen BANTZ'sın. Türkçe konuş; 'Efendim' hitabını kullan.
+    # ── CORE PROMPT (~700 tokens) ─── always included ───────────────────
+    _SYSTEM_PROMPT_CORE = """Kimlik: Sen BANTZ'sın. SADECE TÜRKÇE konuş; 'Efendim' hitabını kullan. Asla başka dil karıştırma!
 
-OUTPUT SCHEMA (tek JSON object döndür — SADECE bu alanlar):
-{"route":"calendar|gmail|smalltalk|unknown","calendar_intent":"create|modify|cancel|query|none","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dk|null","title":"str|null","window_hint":"evening|tomorrow|morning|today|week|null"},"confidence":0.0-1.0,"tool_plan":["tool_name"],"gmail_intent":"list|search|read|send|none","requires_confirmation":false}
+OUTPUT SCHEMA (tek JSON object döndür):
+{"route":"calendar|gmail|system|smalltalk|unknown","calendar_intent":"create|modify|cancel|query|none","gmail_intent":"list|search|read|send|none","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dk|null","title":"str|null","window_hint":"evening|tomorrow|morning|today|week|null"},"gmail":{"to":"email|null","subject":"str|null","body":"str|null","label":"str|null","category":"str|null","natural_query":"str|null","search_term":"str|null"},"confidence":0.0-1.0,"tool_plan":["tool_name"],"ask_user":false,"question":"","requires_confirmation":false}
 
 NOT: assistant_reply, memory_update, reasoning_summary alanları gerekli DEĞİL — bunlar finalization fazında doldurulur.
 
@@ -307,26 +307,39 @@ KURALLAR:
 1. Sadece tek JSON object; Markdown/açıklama YOK.
 2. confidence<0.7 → tool_plan=[], ask_user=true, question doldur.
 3. Saat 1-6 belirsiz → PM varsay: "beş"→17:00, "üç"→15:00. "sabah" varsa AM.
-4. delete/modify → requires_confirmation=true.
+4. delete/modify/send → requires_confirmation=true.
 5. Belirsizlikte tool çağırma, ask_user=true.
 6. route="smalltalk" → assistant_reply DOLDUR (Jarvis tarzı, Türkçe).
 7. route="calendar" + tool → assistant_reply boş olabilir.
+8. Asla saat/tarih/numara uydurma. Uydurma link/web sitesi KESİNLİKLE YASAK.
+9. Mail gönderme: email adresi yoksa → ask_user=true, question="Kime göndermek istiyorsunuz efendim?"
+10. CONTEXT: RECENT_CONVERSATION/LAST_TOOL_RESULTS varsa önceki turları dikkate al. Belirsiz referanslar (o, bu, önceki) → context'ten anla.
 
-ROUTE: calendar=takvim, gmail=mail, smalltalk=sohbet, unknown=belirsiz.
+ROUTE: calendar=takvim, gmail=mail, system=sistem(saat/cpu), smalltalk=sohbet, unknown=belirsiz.
 INTENT: query=oku, create=ekle, modify=değiştir, cancel=sil, none=yok.
 
-TOOLS: calendar.list_events, calendar.find_free_slots, calendar.create_event, gmail.list_messages, gmail.unread_count, gmail.get_message, gmail.smart_search, gmail.send, gmail.create_draft, gmail.list_drafts, gmail.update_draft, gmail.generate_reply, gmail.send_draft, gmail.delete_draft, gmail.download_attachment, gmail.query_from_nl, gmail.search_template_upsert, gmail.search_template_get, gmail.search_template_list, gmail.search_template_delete, gmail.list_labels, gmail.add_label, gmail.remove_label, gmail.mark_read, gmail.mark_unread, gmail.archive, gmail.batch_modify, gmail.send_to_contact, contacts.upsert, contacts.resolve, contacts.list, contacts.delete
+TOOLS: calendar.list_events, calendar.find_free_slots, calendar.create_event, gmail.list_messages, gmail.unread_count, gmail.get_message, gmail.smart_search, gmail.send, gmail.create_draft, gmail.list_drafts, gmail.update_draft, gmail.generate_reply, gmail.send_draft, gmail.delete_draft, gmail.download_attachment, gmail.query_from_nl, gmail.search_template_upsert, gmail.search_template_get, gmail.search_template_list, gmail.search_template_delete, gmail.list_labels, gmail.add_label, gmail.remove_label, gmail.mark_read, gmail.mark_unread, gmail.archive, gmail.batch_modify, gmail.send_to_contact, contacts.upsert, contacts.resolve, contacts.list, contacts.delete, time.now, system.status
 
 SAAT: 1-6 arası="sabah" yoksa PM (bir→13, iki→14, üç→15, dört→16, beş→17, altı→18). 7-12 arası context'e bak; belirsizse sor. "bu akşam"→evening, "yarın"→tomorrow, "bugün"→today, "bu hafta"→week."""
 
-    # ── DETAIL BLOCK (~350 tokens) ─── stripped when budget < ~1050 ──────
+    # ── DETAIL BLOCK (~400 tokens) ─── stripped when budget < ~1050 ──────
     _SYSTEM_PROMPT_DETAIL = """
 GMAIL ARAMA: gmail.list_messages "query" parametresi alır:
 - "linkedin maili" → query="from:linkedin OR subject:LinkedIn"
 - "amazon siparişi" → query="from:amazon subject:order"
 - "dün gelen" → query="after:YYYY/MM/DD"
-- "güncellemeler" → query="label:CATEGORY_UPDATES"
-- "promosyon" → query="label:CATEGORY_PROMOTIONS"
+
+GMAIL SMART_SEARCH (Türkçe doğal dil):
+- "yıldızlı maillerim" → gmail.smart_search, natural_query="yıldızlı"
+- "sosyal mailleri" → gmail.smart_search, natural_query="sosyal"
+- "promosyonlar" → gmail.smart_search, natural_query="promosyonlar"
+- "güncellemeler" → gmail.smart_search, natural_query="güncellemeler"
+- "önemli mailler" → gmail.smart_search, natural_query="önemli"
+- "gelen kutusu" → gmail.list_messages, label="gelen kutusu"
+
+SYSTEM ROUTE:
+- "saat kaç"/"tarih ne" → route="system", tool_plan=["time.now"]
+- "cpu"/"ram"/"sistem durumu" → route="system", tool_plan=["system.status"]
 
 TÜRKÇE SAAT ÖRNEKLERİ:
 - "saat beşe toplantı" → time="17:00" (PM default)
@@ -344,7 +357,7 @@ SAAT FORMATLARI:
 - "altıya/altıda"→18:00 veya 06:00
 - 7-12 arası: context'e bak. Belirsiz→ask_user=true"""
 
-    # ── EXAMPLES BLOCK (~500 tokens) ─── stripped first ─────────────────
+    # ── EXAMPLES BLOCK (~550 tokens) ─── stripped first ─────────────────
     _SYSTEM_PROMPT_EXAMPLES = """
 ÖRNEKLER:
 USER: hey bantz nasılsın
@@ -357,7 +370,19 @@ USER: bugün beşe toplantı koy
 → {"route":"calendar","calendar_intent":"create","slots":{"time":"17:00","title":"toplantı","window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true}
 
 USER: sabah beşte koşu
-→ {"route":"calendar","calendar_intent":"create","slots":{"time":"05:00","title":"koşu"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true}"""
+→ {"route":"calendar","calendar_intent":"create","slots":{"time":"05:00","title":"koşu"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true}
+
+USER: saat kaç
+→ {"route":"system","calendar_intent":"none","slots":{},"confidence":0.95,"tool_plan":["time.now"]}
+
+USER: yıldızlı maillerimi göster
+→ {"route":"gmail","gmail_intent":"search","gmail":{"natural_query":"yıldızlı"},"confidence":0.95,"tool_plan":["gmail.smart_search"]}
+
+USER: test@gmail.com adresine merhaba mesajı gönder
+→ {"route":"gmail","gmail_intent":"send","gmail":{"to":"test@gmail.com","subject":"Merhaba","body":"Merhaba"},"confidence":0.9,"tool_plan":["gmail.send"],"requires_confirmation":true}
+
+USER: merhaba mesajı gönder
+→ {"route":"gmail","gmail_intent":"send","gmail":{"subject":"Merhaba","body":"Merhaba"},"confidence":0.5,"tool_plan":[],"ask_user":true,"question":"Kime göndermek istiyorsunuz efendim?"}"""
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
@@ -926,8 +951,8 @@ USER: sabah beşte koşu
             return sp
 
         # Tier 2: Strip detail block — gmail search examples + time format table
-        # (saves ~350 tokens).  Detail block starts at known headers.
-        for header in ("GMAIL ARAMA", "TÜRKÇE SAAT ÖRNEKLERİ", "SAAT FORMATLARI"):
+        # (saves ~400 tokens).  Detail block starts at known headers.
+        for header in ("GMAIL ARAMA", "GMAIL SMART_SEARCH", "SYSTEM ROUTE", "TÜRKÇE SAAT ÖRNEKLERİ", "SAAT FORMATLARI"):
             if header in sp and _estimate_tokens(sp) > token_budget:
                 sp = sp.split(header, 1)[0].rstrip()
 
