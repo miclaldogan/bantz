@@ -169,6 +169,25 @@ def _validate_tool_plan(value: Any) -> FieldValidation:
     if not isinstance(value, list):
         fv.valid = False
         fv.error = f"not a list: {type(value).__name__}"
+        return fv
+
+    # Issue #360: tool_plan may contain dict items like
+    # {"name": "gmail.send", "args": {...}}. Treat these as valid.
+    for item in value:
+        if isinstance(item, str):
+            continue
+        if isinstance(item, dict):
+            name = item.get("name") or item.get("tool") or item.get("tool_name")
+            if str(name or "").strip():
+                continue
+            fv.valid = False
+            fv.error = "dict item missing tool name"
+            return fv
+        # Unknown item type
+        fv.valid = False
+        fv.error = f"invalid item type: {type(item).__name__}"
+        return fv
+
     return fv
 
 
@@ -285,9 +304,27 @@ def _repair_confidence(value: Any) -> float:
         return 0.0
 
 
-def _repair_tool_plan(value: Any) -> List[str]:
+def _repair_tool_plan(value: Any) -> List[Any]:
     if isinstance(value, list):
-        return [str(x) for x in value if x]
+        repaired: list[Any] = []
+        for item in value:
+            if not item:
+                continue
+            if isinstance(item, str):
+                repaired.append(item)
+                continue
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("tool") or item.get("tool_name")
+                name = str(name or "").strip()
+                if not name:
+                    continue
+                args = item.get("args", {})
+                if not isinstance(args, dict):
+                    args = {}
+                repaired.append({"name": name, "args": args})
+                continue
+            repaired.append(str(item))
+        return repaired  # type: ignore[return-value]
     if isinstance(value, str):
         # "calendar.list_events" → ["calendar.list_events"]
         return [s.strip() for s in value.split(",") if s.strip()]
