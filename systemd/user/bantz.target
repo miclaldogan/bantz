@@ -1,0 +1,7 @@
+[Unit]
+Description=BANTZ Full Stack (Core + Voice + Watchdogs)
+Documentation=https://github.com/miclaldogan/bantz
+Wants=bantz-core.service bantz-voice.service bantz-voice-watchdog.service bantz-vllm-watchdog.service
+
+[Install]
+WantedBy=default.target

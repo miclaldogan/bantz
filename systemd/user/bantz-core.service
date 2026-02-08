@@ -1,0 +1,20 @@
+[Unit]
+Description=BANTZ Core Orchestrator
+Documentation=https://github.com/miclaldogan/bantz
+After=network.target graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/Desktop/Bantz/.venv/bin/python -m bantz.daemon
+WorkingDirectory=%h/Desktop/Bantz
+EnvironmentFile=-%h/.config/bantz/env
+Environment=PYTHONPATH=%h/Desktop/Bantz/src
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=default.target

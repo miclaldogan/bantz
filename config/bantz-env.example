@@ -1,0 +1,35 @@
+# BANTZ Environment File
+# Copy to ~/.config/bantz/env and customize
+
+# === LLM ===
+BANTZ_VLLM_URL=http://localhost:8001
+BANTZ_VLLM_MODEL=Qwen/Qwen2.5-3B-Instruct-AWQ
+
+# === Gemini (optional) ===
+# GEMINI_API_KEY=
+BANTZ_CLOUD_ENABLED=false
+BANTZ_GEMINI_MODEL=gemini-1.5-flash
+
+# === Audio ===
+# BANTZ_MIC_DEVICE=default
+# BANTZ_SPEAKER_DEVICE=default
+
+# === Privacy ===
+BANTZ_REDACT_PII=true
+
+# === Voice ===
+BANTZ_ACTIVE_LISTEN_TTL_S=90
+BANTZ_SILENCE_TO_WAKE_S=30
+
+# === Wake Word ===
+BANTZ_WAKE_WORDS=hey bantz,bantz,jarvis
+BANTZ_WAKE_ENGINE=vosk
+BANTZ_WAKE_SENSITIVITY=0.5
+
+# === Morning Briefing ===
+BANTZ_MORNING_BRIEFING=false
+BANTZ_BRIEFING_HOUR=08
+
+# === Metrics ===
+BANTZ_METRICS_ENABLED=true
+BANTZ_LATENCY_BUDGET_MS=3000
