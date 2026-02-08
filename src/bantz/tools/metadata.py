@@ -297,53 +297,23 @@ def requires_confirmation(tool_name: str, llm_requested: bool = False) -> bool:
 
 
 def get_confirmation_prompt(tool_name: str, params: dict) -> str:
-    """Generate confirmation prompt for destructive tool.
-    
+    """Generate deterministic confirmation prompt for a tool (Issue #426).
+
+    Delegates to ``confirmation_ux.deterministic_confirmation_prompt`` which
+    builds prompts exclusively from slot data — never from LLM output.
+
     Args:
         tool_name: Name of the tool
-        params: Tool parameters
-    
+        params: Tool parameters (slots)
+
     Returns:
-        User-friendly confirmation prompt
-    
-    Examples:
-        >>> get_confirmation_prompt("calendar.delete_event", {"event_id": "abc123"})
-        "Delete calendar event 'abc123'? This cannot be undone."
+        User-friendly Turkish confirmation prompt
     """
-    # Tool-specific confirmation prompts (Türkçe)
-    prompts = {
-        "calendar.create_event": "'{title}' etkinliği {time} için eklensin mi?",
-        "calendar.update_event": "'{title}' etkinliği güncellensin mi?",
-        "calendar.delete_event": "'{title}' etkinliği silinsin mi? Bu işlem geri alınamaz.",
-        "file.delete": "'{path}' dosyası silinsin mi? Bu işlem geri alınamaz.",
-        "file.move": "Dosya '{source}' → '{destination}' taşınsın mı?",
-        "browser.submit_form": "'{url}' adresinde form gönderilsin mi?",
-        "payment.submit": "{amount} tutarında {recipient} alıcısına ödeme yapılsın mı? Bu işlem geri alınamaz.",
-        "system.shutdown": "Sistem kapatılsın mı? Kaydedilmemiş işler kaybolacak.",
-        "system.execute_command": "'{command}' komutu çalıştırılsın mı?",
-        "app.close": "'{app_name}' uygulaması kapatılsın mı?",
-        "email.delete": "'{subject}' konulu e-posta silinsin mi?",
-        "database.delete": "Veritabanından silme yapılsın mı? Bu işlem geri alınamaz.",
-        "gmail.send": "'{to}' adresine '{subject}' konulu e-posta gönderilsin mi?",
-        "gmail.send_draft": "'{draft_id}' numaralı taslak gönderilsin mi?",
-        "gmail.send_to_contact": "'{name}' kişisine '{subject}' konulu e-posta gönderilsin mi?",
-        "gmail.download_attachment": "'{message_id}' e-postasındaki ek '{save_path}' konumuna indirilsin mi?",
-        "gmail.archive": "'{message_id}' e-postası arşivlensin mi?",
-        "gmail.batch_modify": "Birden fazla e-posta için etiket değişikliği yapılsın mı?",
-        "gmail.generate_reply": "'{message_id}' e-postasına yanıt taslağı oluşturulsun mu?",
-    }
-    
-    # Get template or use generic
-    template = prompts.get(tool_name, f"{tool_name} çalıştırılsın mı? (evet/hayır)")
-    
-    # Format with parameters (safely handle missing params)
     try:
-        return template.format(**params)
-    except (KeyError, ValueError):
-        # Fallback: Türkçe mesaj ile parametreleri göster
-        params_str = ", ".join(f"{k}={v}" for k, v in params.items()) if params else ""
-        if params_str:
-            return f"{tool_name} ({params_str}) çalıştırılsın mı? (evet/hayır)"
+        from bantz.brain.confirmation_ux import deterministic_confirmation_prompt
+        return deterministic_confirmation_prompt(tool_name, params)
+    except Exception:
+        # Ultimate fallback if confirmation_ux is not available
         return f"{tool_name} çalıştırılsın mı? (evet/hayır)"
 
 
