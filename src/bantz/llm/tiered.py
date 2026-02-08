@@ -124,7 +124,8 @@ def score_complexity(text: str) -> int:
     elif n >= 120:
         score += 1
 
-    # Multi-step / planning cues
+    # Issue #573: merged into a single keyword group to prevent double-counting.
+    # "roadmap", "adım adım" etc. were in two lists, each adding +2 → false escalation.
     if _contains_any(
         t,
         [
@@ -146,20 +147,13 @@ def score_complexity(text: str) -> int:
     ):
         score += 2
 
-    # Strong signal: explicit roadmap / step-by-step plan requests.
-    if _contains_any(
-        t,
-        [
-            "roadmap",
-            "3 adım",
-            "4 adım",
-            "5 adım",
-            "adım adım",
-            "gün gün",
-            "haftalık plan",
-        ],
-    ):
-        score += 2
+    # Strong signal BONUS: explicit N-step or weekly plan (only if not already matched above)
+    strong_signals = [
+        "3 adım", "4 adım", "5 adım",
+        "haftalık plan",
+    ]
+    if _contains_any(t, strong_signals):
+        score += 1  # bonus, not a full +2
 
     # Explicit "long" request
     if _contains_any(t, ["uzun", "kapsamlı", "çok detay", "tam rapor", "tümünü"]):
@@ -176,49 +170,74 @@ def score_writing_need(text: str) -> int:
 
     score = 0
 
-    if _contains_any(
-        t,
-        [
-            "mail",
-            "e-posta",
-            "email",
-            "hocaya",
-            "hoca",
-            "okula",
-            "öğretmen",
-            "resmi",
-            "yarı resmi",
-            "taslak",
-            "dilekçe",
-            "metin",
-            "yaz",
-            "düzenle",
-            "revize",
-            "ton",
-            "hitap",
-            "kibar",
-            "nazik",
-            "ikna",
-            "özetle",
-            "özet çıkar",
-            "uzun özet",
-            "haber",
-            "araştır",
-            "kaynak",
-            "blog",
-            "linkedin",
-            "cv",
-            "cover letter",
-            "pdf",
-            "doküman",
-            "döküman",
-            "yönerge",
-            "rubrik",
-            "ödev",
-            "classroom",
-        ],
-    ):
+    # Issue #573: Split write-intent keywords (high score) from read-intent.
+    # "mail listele" is read-only → shouldn't escalate to quality.
+    write_keywords = [
+        "hocaya",
+        "hoca",
+        "okula",
+        "öğretmen",
+        "resmi",
+        "yarı resmi",
+        "taslak",
+        "dilekçe",
+        "metin",
+        "yaz",
+        "düzenle",
+        "revize",
+        "ton",
+        "hitap",
+        "kibar",
+        "nazik",
+        "ikna",
+        "uzun özet",
+        "blog",
+        "linkedin",
+        "cv",
+        "cover letter",
+        "doküman",
+        "döküman",
+        "yönerge",
+        "rubrik",
+        "ödev",
+    ]
+
+    # Read/info keywords: need quality only in combination with write verbs.
+    read_keywords = [
+        "mail",
+        "e-posta",
+        "email",
+        "özetle",
+        "özet çıkar",
+        "haber",
+        "araştır",
+        "kaynak",
+        "pdf",
+        "classroom",
+    ]
+
+    # Read-only dampeners: if these appear alongside read_keywords, it's read intent.
+    read_only_verbs = [
+        "listele",
+        "göster",
+        "oku",
+        "kontrol",
+        "bak",
+        "kaç tane",
+        "sayısı",
+        "var mı",
+        "unread",
+        "okunmamış",
+    ]
+
+    if _contains_any(t, write_keywords):
         score += 4
+    elif _contains_any(t, read_keywords):
+        # Only escalate if there's a write signal, not just read/list.
+        if _contains_any(t, read_only_verbs):
+            score += 1  # reading mail/news is fast-tier
+        else:
+            score += 3  # ambiguous context, moderate escalation
 
     # If the user is asking for a short ack/info, keep it low.
     if _contains_any(t, ["kısaca", "tek cümle", "özetle ama kısa", "tl;dr"]):
