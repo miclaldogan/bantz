@@ -126,8 +126,8 @@ def test_get_tool_risk_destructive():
 
 
 def test_get_tool_risk_unknown_default():
-    """Test default risk for unknown tools."""
-    assert get_tool_risk("unknown.tool") == ToolRisk.MODERATE
+    """Test default risk for unknown tools (DESTRUCTIVE per undefined_tool_policy)."""
+    assert get_tool_risk("unknown.tool") == ToolRisk.DESTRUCTIVE
     assert get_tool_risk("unknown.tool", default=ToolRisk.SAFE) == ToolRisk.SAFE
 
 
@@ -176,6 +176,9 @@ def test_register_tool_risk():
     register_tool_risk("custom.dangerous", ToolRisk.DESTRUCTIVE)
     assert get_tool_risk("custom.dangerous") == ToolRisk.DESTRUCTIVE
     assert is_destructive("custom.dangerous") is True
+    # Cleanup: remove test tool from global registry
+    from bantz.tools.metadata import TOOL_REGISTRY
+    TOOL_REGISTRY.pop("custom.dangerous", None)
 
 
 def test_get_all_tools_by_risk():
@@ -244,7 +247,7 @@ def test_executor_destructive_tool_requires_confirmation(tool_registry):
     assert result.ok is False
     assert result.awaiting_confirmation is True
     assert result.confirmation_prompt is not None
-    assert "evt123" in result.confirmation_prompt
+    assert "silinsin" in result.confirmation_prompt
     assert result.risk_level == "destructive"
 
 

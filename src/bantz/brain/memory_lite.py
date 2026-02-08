@@ -116,7 +116,8 @@ class PIIFilter:
         ),
         # License plate: 2-digit city code + up to 3 letters + up to 4 digits
         # e.g. 34 ABC 123, 06 A 1234, 01 AB 123
-        "plaka": r'\b(?:0[1-9]|[1-7]\d|8[01])\s?[A-Z]{1,3}\s?\d{1,4}\b',
+        # Negative lookbehind: exclude ISO 8601 timestamps like 2026-02-01T10:00:00
+        "plaka": r'(?<![-/])\b(?:0[1-9]|[1-7]\d|8[01])\s?[A-Z]{1,3}\s?\d{1,4}\b',
     }
     
     @classmethod

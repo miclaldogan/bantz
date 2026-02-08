@@ -259,6 +259,9 @@ def test_create_time_based_event_not_affected(monkeypatch: pytest.MonkeyPatch) -
 
 def test_list_events_parses_all_day_events(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that list_events correctly parses all-day events."""
+    from bantz.google.calendar_cache import reset_calendar_cache
+    reset_calendar_cache()
+
     mock_service = MagicMock()
     mock_resp = {
         "items": [

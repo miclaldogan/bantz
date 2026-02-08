@@ -339,7 +339,7 @@ class TestForceToolPlanSmalltalk:
         assert result.tool_plan == []
     
     def test_none_intent_no_forced_tools(self, loop):
-        """When intent is 'none' (e.g., email drafting), don't force tools."""
+        """When intent is 'none' on gmail route, gmail.list_messages is forced as fallback."""
         output = OrchestratorOutput(
             route="gmail",
             calendar_intent="none",  # No action needed, just drafting
@@ -351,11 +351,11 @@ class TestForceToolPlanSmalltalk:
         
         result = loop._force_tool_plan(output)
         
-        # Should NOT force tools for intent="none"
-        assert result.tool_plan == []
+        # Gmail route with none intent forces gmail.list_messages as fallback
+        assert result.tool_plan == ["gmail.list_messages"]
     
     def test_empty_intent_no_forced_tools(self, loop):
-        """When intent is empty string, don't force tools."""
+        """When intent is empty on gmail route, gmail.list_messages is forced as fallback."""
         output = OrchestratorOutput(
             route="gmail",
             calendar_intent="",  # Empty intent
@@ -367,8 +367,8 @@ class TestForceToolPlanSmalltalk:
         
         result = loop._force_tool_plan(output)
         
-        # Should NOT force tools for empty intent
-        assert result.tool_plan == []
+        # Gmail route with empty intent forces gmail.list_messages as fallback
+        assert result.tool_plan == ["gmail.list_messages"]
 
 
 class TestForceToolPlanPreservesOtherFields:

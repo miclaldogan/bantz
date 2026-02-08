@@ -95,12 +95,23 @@ def _tools() -> ToolRegistry:
     def list_events(**_kwargs: Any) -> dict[str, Any]:
         return {"items": [], "count": 0}
 
+    def list_messages(**_kwargs: Any) -> dict[str, Any]:
+        return {"messages": [], "count": 0}
+
     reg.register(
         Tool(
             name="calendar.list_events",
             description="demo",
             parameters={"type": "object", "properties": {}, "required": []},
             function=list_events,
+        )
+    )
+    reg.register(
+        Tool(
+            name="gmail.list_messages",
+            description="List gmail messages",
+            parameters={"type": "object", "properties": {}, "required": []},
+            function=list_messages,
         )
     )
     return reg
