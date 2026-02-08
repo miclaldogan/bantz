@@ -23,6 +23,7 @@ Turn trace (debug mode)::
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -46,6 +47,7 @@ class RuntimeBanner:
     """Structured brain configuration for boot banner."""
 
     mode: str = "orchestrator"
+    active_path: str = "brain"  # "brain" or "legacy"
     router_model: str = ""
     router_url: str = "http://localhost:8001"
     finalizer_model: str = ""
@@ -56,6 +58,7 @@ class RuntimeBanner:
     prompt_strategy: str = "tiered (CORE+DETAIL)"
     context_window: int = 2048
     tools_registered: int = 0
+    forced_tier: str = ""  # e.g. "quality" or "fast"
     debug: bool = False
 
     @classmethod
@@ -95,8 +98,12 @@ class RuntimeBanner:
             if hasattr(client, "base_url"):
                 router_url = str(client.base_url)
 
+        # Forced tier override
+        forced_tier = os.getenv("BANTZ_FORCE_FINALIZER_TIER", "").strip().lower()
+
         return cls(
             mode="orchestrator",
+            active_path="brain",
             router_model=runtime.router_model,
             router_url=router_url,
             finalizer_model=finalizer_model,
@@ -105,6 +112,7 @@ class RuntimeBanner:
             memory_turns=memory_turns,
             memory_tokens=memory_tokens,
             tools_registered=tools_count,
+            forced_tier=forced_tier,
             debug=debug,
         )
 
@@ -113,19 +121,22 @@ def format_banner(b: RuntimeBanner) -> str:
     """Format a pretty box banner for terminal output."""
     ok_mark = "✓" if b.finalizer_ok else "✗"
     router_short = b.router_model.split("/")[-1] if "/" in b.router_model else b.router_model
-    # Extract port from URL
-    port = b.router_url.split(":")[-1].rstrip("/") if ":" in b.router_url else "8001"
+    path_label = "brain (default)" if b.active_path == "brain" else "legacy"
 
     lines = [
         f"  🧠 BANTZ Brain v2.0",
+        f"  Path:      {path_label}",
         f"  Mode:      {b.mode}",
-        f"  Router:    {router_short} @ vLLM:{port}",
+        f"  Router:    {router_short}",
+        f"  vLLM:      {b.router_url}",
         f"  Finalizer: {b.finalizer_model} {ok_mark} ({b.finalizer_type})",
         f"  Memory:    lite ({b.memory_turns} turns, {b.memory_tokens}tok)",
         f"  Prompt:    {b.prompt_strategy}",
         f"  Context:   {b.context_window} tokens",
         f"  Tools:     {b.tools_registered} registered",
     ]
+    if b.forced_tier:
+        lines.append(f"  Tier:      {b.forced_tier} (forced)")
     if b.debug:
         lines.append(f"  Debug:     ON")
 
