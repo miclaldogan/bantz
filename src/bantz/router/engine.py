@@ -2126,6 +2126,16 @@ class Router:
     # Dispatch single action
     # ─────────────────────────────────────────────────────────────────
     def _dispatch(self, *, intent: str, slots: dict, ctx: ConversationContext, in_queue: bool) -> RouterResult:
+        # ── Issue #420: Try modular handler registry first ────────────
+        from bantz.router.handler_registry import get_handler
+        from bantz.router.handlers import ensure_registered
+        ensure_registered()
+
+        handler = get_handler(intent)
+        if handler is not None:
+            return handler(intent=intent, slots=slots, ctx=ctx, router=self, in_queue=in_queue)
+
+        # ── Fallback: intents not yet extracted (news, page_*, etc.) ──
         follow_up = "" if in_queue else " Başka ne yapayım?"
         search_follow = "" if in_queue else " Ne arayayım?"
 
