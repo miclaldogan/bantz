@@ -1,0 +1,19 @@
+[Unit]
+Description=Bantz Resume Handler (post-suspend recovery)
+After=suspend.target hibernate.target hybrid-sleep.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Desktop/Bantz
+Environment=PATH=%h/Desktop/Bantz/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=%h/Desktop/Bantz/.venv/bin/python scripts/bantz_resume.py --timeout 30
+
+# Log output
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bantz-resume
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target
