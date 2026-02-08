@@ -380,8 +380,8 @@ class TestDecideFinalizationTier:
         assert tier == "quality"
         assert "complex_smalltalk" in reason
 
-    def test_tiering_disabled_defaults_to_quality(self):
-        """When tiering is disabled, defaults to quality."""
+    def test_tiering_disabled_defaults_to_fast(self):
+        """Issue #595: When tiering is disabled, default to fast to avoid cloud spend."""
 
         class FakeTierDecision:
             use_quality = True
@@ -399,8 +399,9 @@ class TestDecideFinalizationTier:
                 user_input="takvim etkinlikleri",
                 has_finalizer=True,
             )
-        assert use_q is True
-        assert tier == "quality"
+        assert use_q is False
+        assert tier == "fast"
+        assert reason == "tiering_disabled_default_fast"
 
     def test_tiering_returns_fast(self):
         """When tiering decides fast tier."""
@@ -424,8 +425,8 @@ class TestDecideFinalizationTier:
         assert not use_q
         assert tier == "fast"
 
-    def test_tiering_error_defaults_quality(self):
-        """If tiered module fails, defaults to quality."""
+    def test_tiering_error_defaults_fast(self):
+        """Issue #595: If tiered module fails, default to fast."""
         with patch(
             "bantz.llm.tiered.decide_tier",
             side_effect=RuntimeError("oops"),
@@ -435,8 +436,8 @@ class TestDecideFinalizationTier:
                 user_input="takvim",
                 has_finalizer=True,
             )
-        assert use_q is True
-        assert tier == "quality"
+        assert use_q is False
+        assert tier == "fast"
         assert "error" in reason
 
 

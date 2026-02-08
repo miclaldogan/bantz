@@ -423,7 +423,7 @@ def decide_finalization_tier(
         )
 
         if decision.reason == "tiering_disabled":
-            return True, "quality", "tiering_disabled_default_quality"
+            return False, "fast", "tiering_disabled_default_fast"
 
         use_q = bool(decision.use_quality)
         tier = "quality" if use_q else "fast"
@@ -442,7 +442,7 @@ def decide_finalization_tier(
 
         return use_q, tier, str(decision.reason)
     except Exception:
-        return True, "quality", "tiering_error_default_quality"
+        return False, "fast", "tiering_error_default_fast"
 
 
 # ---------------------------------------------------------------------------
