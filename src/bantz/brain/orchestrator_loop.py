@@ -583,6 +583,9 @@ class OrchestratorLoop:
             else:
                 # Phase 2: Tool Execution (with confirmation firewall)
                 tool_results = self._execute_tools_phase(orchestrator_output, state)
+
+                # Phase 2.5: Verify tool results (Issue #591 / #523)
+                tool_results = self._verify_results_phase(tool_results, state)
                 
                 # Phase 3: LLM Finalization (generate final response with tool results)
                 final_output = self._llm_finalization_phase(
@@ -656,6 +659,9 @@ class OrchestratorLoop:
             # Phase 2: execute tools
             tool_results = self._execute_tools_phase(orchestrator_output, state)
 
+            # Phase 2.5: verify
+            tool_results = self._verify_results_phase(tool_results, state)
+
             # Phase 3: finalize
             final_output = self._llm_finalization_phase(
                 user_input,
@@ -687,6 +693,7 @@ class OrchestratorLoop:
                 state.confirmed_tool = pending_tool or None
                 # Second execution pass: execute only the confirmed tool.
                 tool_results_2 = self._execute_tools_phase(orchestrator_output, state)
+                tool_results_2 = self._verify_results_phase(tool_results_2, state)
                 final_output = self._llm_finalization_phase(
                     user_input,
                     orchestrator_output,
@@ -1144,6 +1151,112 @@ class OrchestratorLoop:
             )
 
         return corrected
+
+    def _verify_results_phase(
+        self,
+        tool_results: list[dict[str, Any]],
+        state: OrchestratorState,
+    ) -> list[dict[str, Any]]:
+        """Phase 2.5: Verify tool results (Plan→Act→Verify loop).
+
+        This runs lightweight validation on tool results and performs a
+        best-effort single retry for non-destructive tools.
+        """
+        if not tool_results:
+            return tool_results
+
+        try:
+            from bantz.brain.verify_results import VerifyConfig, verify_tool_results
+        except Exception:
+            # If the verify module isn't available for any reason, proceed.
+            return tool_results
+
+        def _retry_fn(tool_name: str, original: dict[str, Any]) -> dict[str, Any]:
+            try:
+                from bantz.tools.metadata import is_destructive, get_tool_risk
+
+                if is_destructive(tool_name):
+                    return original
+
+                tool = self.tools.get(tool_name)
+                if tool is None or tool.function is None:
+                    return original
+
+                params = original.get("params")
+                if not isinstance(params, dict):
+                    params = {}
+
+                timeout = self.config.tool_timeout_seconds
+
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(tool.function, **params)
+                        result = future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    return {
+                        **original,
+                        "success": False,
+                        "error": f"Tool '{tool_name}' timed out after {timeout:.0f}s",
+                        "raw_result": None,
+                        "result_summary": f"timeout after {timeout:.0f}s",
+                    }
+
+                tool_returned_ok = True
+                tool_error: Optional[str] = None
+                if isinstance(result, dict) and result.get("ok") is False:
+                    tool_returned_ok = False
+                    err_val = result.get("error")
+                    tool_error = str(err_val) if err_val is not None else "tool_returned_ok_false"
+
+                risk_level = None
+                try:
+                    risk_level = get_tool_risk(tool_name).value
+                except Exception:
+                    risk_level = original.get("risk_level")
+
+                return {
+                    "tool": tool_name,
+                    "success": bool(tool_returned_ok),
+                    "raw_result": result,
+                    "result_summary": _summarize_tool_result(result, max_items=5, max_chars=500),
+                    "error": tool_error,
+                    "risk_level": risk_level,
+                    "params": params,
+                }
+            except Exception:
+                return original
+
+        vr = verify_tool_results(
+            tool_results,
+            config=VerifyConfig(),
+            retry_fn=_retry_fn,
+        )
+
+        # Trace + event for observability
+        try:
+            if isinstance(getattr(state, "trace", None), dict):
+                state.trace["verify"] = {
+                    "verified": vr.verified,
+                    "tools_ok": vr.tools_ok,
+                    "tools_retry": vr.tools_retry,
+                    "tools_fail": vr.tools_fail,
+                    "elapsed_ms": vr.elapsed_ms,
+                }
+        except Exception:
+            pass
+
+        try:
+            self.event_bus.publish("tool.verify", {
+                "verified": vr.verified,
+                "tools_ok": vr.tools_ok,
+                "tools_retry": vr.tools_retry,
+                "tools_fail": vr.tools_fail,
+                "elapsed_ms": vr.elapsed_ms,
+            })
+        except Exception:
+            pass
+
+        return vr.verified_results
     
     def _execute_tools_phase(
         self,
@@ -1464,6 +1577,7 @@ class OrchestratorLoop:
                     "result_summary": result_summary,  # ✅ Smart summary for display
                     "error": tool_error,
                     "risk_level": risk.value,
+                    "params": params,
                 })
 
                 # Add to state

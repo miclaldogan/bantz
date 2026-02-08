@@ -498,3 +498,50 @@ class TestToolNotFoundHandling:
         assert result["success"] is False
         # Unknown tools are blocked by confirmation firewall (DESTRUCTIVE by policy)
         assert result.get("pending_confirmation") is True or "kullanılamıyor" in result.get("error", "").lower()
+
+
+class TestVerifyResultsIntegration:
+    def test_verify_phase_runs_between_execute_and_finalize(self, orchestrator_loop, monkeypatch):
+        from bantz.brain.orchestrator_state import OrchestratorState
+        from bantz.brain.llm_router import OrchestratorOutput
+
+        state = OrchestratorState()
+
+        planned = OrchestratorOutput(
+            route="calendar",
+            calendar_intent="query",
+            slots={},
+            confidence=0.9,
+            tool_plan=["calendar.list_events"],
+            assistant_reply="",
+            ask_user=False,
+            question="",
+            requires_confirmation=False,
+        )
+
+        tool_results = [{"tool": "calendar.list_events", "success": True, "raw_result": [{"id": 1}], "result_summary": "1"}]
+        verified_results = [{"tool": "calendar.list_events", "success": True, "raw_result": [{"id": 2}], "result_summary": "1", "_retried": True}]
+
+        monkeypatch.setattr(orchestrator_loop, "_llm_planning_phase", lambda _u, _s: planned)
+        monkeypatch.setattr(orchestrator_loop, "_execute_tools_phase", lambda _o, _s: tool_results)
+
+        from bantz.brain.verify_results import VerifyResult
+
+        def fake_verify_tool_results(results, *, config=None, retry_fn=None):
+            assert results == tool_results
+            return VerifyResult(verified=True, tools_ok=1, tools_retry=0, tools_fail=0, verified_results=verified_results)
+
+        monkeypatch.setattr("bantz.brain.orchestrator_loop.verify_tool_results", None, raising=False)
+        monkeypatch.setattr("bantz.brain.verify_results.verify_tool_results", fake_verify_tool_results)
+
+        seen = {}
+
+        def fake_finalize(user_input, orchestrator_output, tool_results, state):
+            seen["tool_results"] = tool_results
+            return planned
+
+        monkeypatch.setattr(orchestrator_loop, "_llm_finalization_phase", fake_finalize)
+        monkeypatch.setattr(orchestrator_loop, "_update_state_phase", lambda *_args, **_kwargs: None)
+
+        orchestrator_loop.process_turn("Takvimimde ne var?", state)
+        assert seen["tool_results"] == verified_results
