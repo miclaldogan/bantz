@@ -381,16 +381,6 @@ class OrchestratorLoop:
         finalizer_llm: Optional[Any] = None,
         audit_logger: Optional[Any] = None,
     ):
-        # Issue #403: deprecation notice — prefer unified_loop.create_brain()
-        import warnings as _w
-        _w.warn(
-            "OrchestratorLoop is deprecated and will be removed in a future release. "
-            "Use bantz.brain.create_brain(mode='orchestrator', ...) instead. "
-            "See Issue #403 for migration details.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
         self.orchestrator = orchestrator
         self.tools = tools
         self.event_bus = event_bus or EventBus()
