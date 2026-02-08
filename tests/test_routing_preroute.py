@@ -37,6 +37,7 @@ from bantz.routing.preroute import (
     create_calendar_list_rule,
     create_calendar_create_rule,
     create_calendar_delete_rule,
+    create_email_send_rule,
     create_volume_rule,
     create_screenshot_rule,
     create_smalltalk_rule,
@@ -110,6 +111,12 @@ class TestIntentCategory:
     def test_unknown_handler_type(self) -> None:
         """Test UNKNOWN handler type."""
         assert IntentCategory.UNKNOWN.handler_type == "router"
+
+    def test_email_send_not_bypassable(self) -> None:
+        assert IntentCategory.EMAIL_SEND.can_bypass_router is False
+
+    def test_email_send_handler_type(self) -> None:
+        assert IntentCategory.EMAIL_SEND.handler_type == "router"
 
 
 # =============================================================================

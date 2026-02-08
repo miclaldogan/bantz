@@ -121,6 +121,13 @@ class TestPreRouterMatching:
         assert result.matched
         assert result.intent == IntentCategory.CALENDAR_LIST
 
+    def test_email_send_detected(self):
+        router = PreRouter()
+        result = router.route("Ali'ye mail at selam de")
+        assert result.matched
+        assert result.intent == IntentCategory.EMAIL_SEND
+        assert result.confidence >= 0.5
+
     def test_calendar_create_detected(self):
         router = PreRouter()
         result = router.route("Yeni toplantı ekle")
@@ -436,6 +443,75 @@ class TestPrerouteHintInjection:
             "confidence": pytest.approx(0.9, abs=0.1),
             "rule": "calendar_list",
         })
+
+    def test_email_send_injects_hint(self, loop, mock_orchestrator):
+        state = OrchestratorState()
+        loop._llm_planning_phase("Ali'ye mail at selam de", state)
+
+        mock_orchestrator.route.assert_called_once()
+        call_kwargs = mock_orchestrator.route.call_args
+        session_ctx = call_kwargs.kwargs.get("session_context") or {}
+        assert "preroute_hint" in session_ctx
+        assert session_ctx["preroute_hint"]["preroute_intent"] == "email_send"
+
+
+class TestEmailSendPostRouteCorrection:
+    def test_misrouted_smalltalk_is_corrected_to_gmail_send_to_contact(self, loop, mock_orchestrator):
+        state = OrchestratorState()
+
+        # Simulate a misroute from the LLM.
+        mock_orchestrator.route.return_value = _make_llm_output(
+            route="smalltalk",
+            calendar_intent="none",
+            confidence=0.2,
+            tool_plan=[],
+            gmail_intent="none",
+            gmail={},
+            assistant_reply="Merhaba efendim!",
+        )
+
+        output = loop._llm_planning_phase("Ali'ye mail at selam de", state)
+        assert output.route == "gmail"
+        assert output.gmail_intent == "send"
+        assert "gmail.send_to_contact" in output.tool_plan
+        assert output.ask_user is False
+        assert (output.gmail or {}).get("name")
+
+    def test_email_address_uses_gmail_send(self, loop, mock_orchestrator):
+        state = OrchestratorState()
+        mock_orchestrator.route.return_value = _make_llm_output(
+            route="unknown",
+            calendar_intent="none",
+            confidence=0.2,
+            tool_plan=[],
+            gmail_intent="none",
+            gmail={},
+            assistant_reply="",
+        )
+
+        output = loop._llm_planning_phase("mail at test@example.com selam", state)
+        assert output.route == "gmail"
+        assert output.gmail_intent == "send"
+        assert "gmail.send" in output.tool_plan
+        assert (output.gmail or {}).get("to") == "test@example.com"
+
+    def test_missing_body_asks_user(self, loop, mock_orchestrator):
+        state = OrchestratorState()
+        mock_orchestrator.route.return_value = _make_llm_output(
+            route="smalltalk",
+            calendar_intent="none",
+            confidence=0.2,
+            tool_plan=[],
+            gmail_intent="none",
+            gmail={"to": "test@example.com"},
+            assistant_reply="",
+        )
+
+        output = loop._llm_planning_phase("mail at test@example.com", state)
+        assert output.route == "gmail"
+        assert output.gmail_intent == "send"
+        assert output.ask_user is True
+        assert "ne yaz" in (output.question or "").lower()
 
 
 # ==========================================================================

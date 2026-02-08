@@ -13,6 +13,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -473,7 +474,13 @@ class OrchestratorLoop:
         """
         # Issue #347: Skip if confidence is too low - router wants clarification
         # Confidence threshold: 0.7 (same as router's default threshold)
-        if output.confidence < 0.7:
+        #
+        # Issue #607: Gmail send intents should not get stuck tool-less just
+        # because confidence is low.
+        gmail_intent = (getattr(output, "gmail_intent", None) or "").strip().lower()
+        if output.confidence < 0.7 and not (
+            output.route == "gmail" and gmail_intent == "send" and not output.ask_user
+        ):
             return output
         
         # Skip if tool_plan already populated
@@ -948,6 +955,10 @@ class OrchestratorLoop:
             dialog_summary=enhanced_summary,
             session_context=session_context,
         )
+
+        # Issue #607: Post-route correction for email sending.
+        # The 3B router can misroute send-intents to smalltalk/unknown.
+        output = self._post_route_correction_email_send(user_input, output)
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Decision:")
@@ -989,8 +1000,150 @@ class OrchestratorLoop:
         
         # Issue #282: Force mandatory tools if LLM returned empty tool_plan
         output = self._force_tool_plan(output)
-        
+
         return output
+
+    @staticmethod
+    def _looks_like_email_send_intent(text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        # Strong-ish patterns to avoid triggering on "mail oku" / "mailleri ara".
+        return bool(
+            re.search(r"\b(mail|e-?posta)\b\s*(gönder|at|yaz|yolla|ilet)\b", t)
+            or re.search(r"\b(mail|e-?posta)\b.*\b(gönder|at|yaz|yolla|ilet)\b", t)
+        )
+
+    @staticmethod
+    def _extract_first_email(text: str) -> str | None:
+        m = re.search(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", text or "")
+        return str(m.group(0)).strip() if m else None
+
+    @staticmethod
+    def _extract_recipient_name(text: str) -> str | None:
+        # Heuristic: "Ali'ye mail ..." or "Ahmet Bey'e eposta ..."
+        t = text or ""
+        m = re.search(
+            r"\b([A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]+(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]+)*)\s*'?\s*(?:ye|ya)\s+(?:bir\s+)?(?:mail|e-?posta)\b",
+            t,
+            flags=re.IGNORECASE,
+        )
+        if not m:
+            return None
+        name = str(m.group(1) or "").strip()
+        return name or None
+
+    @staticmethod
+    def _extract_message_body_hint(text: str) -> str | None:
+        # Heuristic: everything after "mail at/gönder/yaz".
+        t = (text or "").strip()
+        m = re.search(
+            r"\b(?:mail|e-?posta)\b\s*(?:gönder|at|yaz|yolla|ilet)\b\s*(.+)$",
+            t,
+            flags=re.IGNORECASE,
+        )
+        if not m:
+            return None
+        body = str(m.group(1) or "").strip()
+
+        # Common phrasing: "mail at test@example.com" (recipient only, no body).
+        # If the captured remainder is just an email (or starts with one), strip it.
+        email_in_body = re.search(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", body)
+        if email_in_body and email_in_body.start() == 0:
+            body = body[email_in_body.end():].strip(" \t\n\r,;:-")
+
+        return body or None
+
+    def _post_route_correction_email_send(
+        self,
+        user_input: str,
+        output: OrchestratorOutput,
+    ) -> OrchestratorOutput:
+        """Correct obvious email-send intents that the router misclassifies."""
+        if not self._looks_like_email_send_intent(user_input):
+            return output
+
+        from dataclasses import replace
+
+        # Build/augment gmail fields from output + heuristics.
+        gmail_obj = dict(getattr(output, "gmail", None) or {})
+        slots = dict(getattr(output, "slots", None) or {})
+
+        # Ensure defaults so tool param building doesn't miss required keys.
+        gmail_obj.setdefault("subject", "")
+
+        if not gmail_obj.get("to"):
+            email = self._extract_first_email(user_input)
+            if email:
+                gmail_obj["to"] = email
+            else:
+                name = self._extract_recipient_name(user_input)
+                if name:
+                    gmail_obj["to"] = name
+
+        if not gmail_obj.get("body"):
+            body_hint = self._extract_message_body_hint(user_input)
+            if body_hint:
+                gmail_obj["body"] = body_hint
+
+        # Decide whether we can proceed or need clarification.
+        to_val = str(gmail_obj.get("to") or "").strip()
+        body_val = str(gmail_obj.get("body") or "").strip()
+
+        ask_user = bool(getattr(output, "ask_user", False))
+        question = str(getattr(output, "question", "") or "")
+        tool_plan: list[str] = list(getattr(output, "tool_plan", None) or [])
+
+        if not to_val:
+            ask_user = True
+            question = "Kime göndermek istiyorsunuz efendim? (e-posta adresi veya kayıtlı kişi adı)"
+            tool_plan = []
+        elif not body_val:
+            ask_user = True
+            question = "Mailde ne yazmamı istersiniz efendim?"
+            tool_plan = []
+        else:
+            # Prefer send_to_contact when recipient isn't an email address.
+            if "@" in to_val:
+                tool_plan = tool_plan or ["gmail.send"]
+            else:
+                gmail_obj.setdefault("name", to_val)
+                tool_plan = tool_plan or ["gmail.send_to_contact"]
+
+        # Mirror key fields into slots for deterministic confirmation prompts.
+        if "to" not in slots and to_val:
+            slots["to"] = to_val
+        if "subject" not in slots and gmail_obj.get("subject") is not None:
+            slots["subject"] = str(gmail_obj.get("subject") or "")
+        if "name" not in slots and gmail_obj.get("name"):
+            slots["name"] = str(gmail_obj.get("name") or "")
+
+        corrected = replace(
+            output,
+            route="gmail",
+            calendar_intent="none",
+            gmail_intent="send",
+            gmail=gmail_obj,
+            slots=slots,
+            ask_user=ask_user,
+            question=question,
+            tool_plan=tool_plan,
+        )
+
+        if self.config.debug and (
+            corrected.route != output.route
+            or corrected.gmail_intent != getattr(output, "gmail_intent", "none")
+        ):
+            logger.debug(
+                "[POST_ROUTE_CORRECTION] email_send: route=%s->%s gmail_intent=%s tool_plan=%s ask_user=%s",
+                output.route,
+                corrected.route,
+                corrected.gmail_intent,
+                corrected.tool_plan,
+                corrected.ask_user,
+            )
+
+        return corrected
     
     def _execute_tools_phase(
         self,
@@ -1402,6 +1555,7 @@ class OrchestratorLoop:
         if tool_name.startswith("gmail."):
             gmail_valid_params = {
                 "to",
+                "name",
                 "subject",
                 "body",
                 "cc",
@@ -1450,6 +1604,11 @@ class OrchestratorLoop:
                 # Alias: title → subject
                 if "title" in params and "subject" not in params:
                     params["subject"] = params.pop("title")
+
+            # Minimal aliasing for gmail.send_to_contact
+            if tool_name == "gmail.send_to_contact":
+                if "name" not in params and "to" in params:
+                    params["name"] = params.get("to")
         
         else:
             # Calendar/system tools: use slots directly (already flat)
