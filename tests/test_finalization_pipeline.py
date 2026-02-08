@@ -514,10 +514,53 @@ class TestFinalizationPipeline:
     def test_default_fallback_no_tools(self):
         """No tools, no finalizer → return original output."""
         pipeline = FinalizationPipeline()
-        output = _make_output(assistant_reply="Orijinal cevap")
+        output = _make_output(route="smalltalk", calendar_intent="none", tool_plan=[], assistant_reply="Orijinal cevap")
         ctx = _make_ctx(orchestrator_output=output, tool_results=[], use_quality=False)
         result = pipeline.run(ctx)
         assert result.assistant_reply == "Orijinal cevap"
+
+    def test_tool_first_guard_calendar_query_no_tools_overrides_reply(self):
+        pipeline = FinalizationPipeline()
+        output = _make_output(
+            route="calendar",
+            calendar_intent="query",
+            tool_plan=[],
+            assistant_reply="Efendim bugün 3 toplantınız var.",
+        )
+        ctx = _make_ctx(orchestrator_output=output, tool_results=[], use_quality=False)
+        result = pipeline.run(ctx)
+        assert "takvim" in result.assistant_reply.lower()
+        assert result.finalizer_model == "none(tool_first_guard)"
+
+    def test_tool_first_guard_gmail_list_no_tools_overrides_reply(self):
+        pipeline = FinalizationPipeline()
+        output = _make_output(
+            route="gmail",
+            calendar_intent="none",
+            tool_plan=[],
+            assistant_reply="Efendim bugün 10 mail geldi.",
+            gmail_intent="list",
+        )
+        ctx = _make_ctx(orchestrator_output=output, tool_results=[], use_quality=False)
+        result = pipeline.run(ctx)
+        assert "gmail" in result.assistant_reply.lower()
+        assert result.finalizer_model == "none(tool_first_guard)"
+
+    def test_tool_first_guard_skips_when_requires_confirmation(self):
+        pipeline = FinalizationPipeline()
+        output = _make_output(
+            route="gmail",
+            calendar_intent="none",
+            tool_plan=["gmail.send"],
+            assistant_reply="Efendim, göndereyim mi?",
+            gmail_intent="send",
+            requires_confirmation=True,
+            confirmation_prompt="Göndereyim mi efendim?",
+        )
+        ctx = _make_ctx(orchestrator_output=output, tool_results=[], use_quality=False)
+        result = pipeline.run(ctx)
+        assert result.assistant_reply == "Efendim, göndereyim mi?"
+        assert result.finalizer_model == "none(no_tools)"
 
     def test_default_fallback_failed_tools(self):
         """Default fallback with failed tools."""
