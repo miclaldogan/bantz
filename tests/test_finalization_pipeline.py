@@ -167,6 +167,18 @@ class TestSafeComplete:
         result = _safe_complete(llm, "hi")
         assert result == "ok"
 
+    def test_type_error_logs_warning(self, caplog):
+        """Issue #601: TypeError catch must log dropped kwargs."""
+        llm = Mock()
+        llm.complete_text = Mock(side_effect=[TypeError("unexpected kwarg"), "ok"])
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="bantz.brain.finalization_pipeline"):
+            result = _safe_complete(llm, "hi", temperature=0.2, max_tokens=512)
+        assert result == "ok"
+        assert any("kwargs dropped" in r.message for r in caplog.records)
+        assert any("temperature" in r.message for r in caplog.records)
+
 
 # =============================================================================
 # NoNewFactsGuard
