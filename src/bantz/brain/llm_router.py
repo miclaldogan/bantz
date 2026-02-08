@@ -1003,6 +1003,9 @@ USER: merhaba mesajı gönder
             apply_orchestrator_defaults,
         )
 
+        # Issue #594: schema-level repair/validation (field-by-field)
+        from bantz.brain.router_validation import repair_router_output
+
         text = str(raw_text or "")
         
         # First attempt: direct extraction
@@ -1016,6 +1019,25 @@ USER: merhaba mesajı gönder
                     "errors": errors,
                     "phase": "first_parse",
                 })
+
+            # Apply strict schema repair (does not require a re-prompt)
+            try:
+                repaired_schema, report = repair_router_output(parsed)
+                if report.needed_repair:
+                    self._publish_json_event(
+                        "schema_repaired",
+                        {
+                            "phase": "first_parse",
+                            "fields_missing": report.fields_missing,
+                            "fields_invalid": report.fields_invalid,
+                            "fields_repaired": report.fields_repaired,
+                            "valid_after": report.is_valid_after,
+                        },
+                    )
+                parsed = repaired_schema
+            except Exception as e:
+                logger.debug("[router_json] schema_repair_failed: %s", str(e)[:120])
+
             return parsed, False
         except Exception as e:
             logger.debug("[router_json] first_parse_failed: %s", str(e)[:100])
@@ -1041,6 +1063,25 @@ USER: merhaba mesajı gönder
                     "phase": "repair_parse",
                     "validation_errors": errors if errors else [],
                 })
+
+                # Issue #594: apply strict schema repair after JSON repair
+                try:
+                    repaired_schema, report = repair_router_output(parsed)
+                    if report.needed_repair:
+                        self._publish_json_event(
+                            "schema_repaired",
+                            {
+                                "phase": "repair_parse",
+                                "fields_missing": report.fields_missing,
+                                "fields_invalid": report.fields_invalid,
+                                "fields_repaired": report.fields_repaired,
+                                "valid_after": report.is_valid_after,
+                            },
+                        )
+                    parsed = repaired_schema
+                except Exception as e:
+                    logger.debug("[router_json] schema_repair_failed: %s", str(e)[:120])
+
                 return parsed, True
         except Exception as e:
             logger.debug("[router_json] repair_parse_failed: %s", str(e)[:100])
