@@ -380,11 +380,24 @@ def decide_finalization_tier(
 ) -> tuple[bool, str, str]:
     """Decide whether to use quality (cloud) or fast (local) finalizer.
 
+    Env overrides:
+        BANTZ_FORCE_FINALIZER_TIER=quality  → always use Gemini
+        BANTZ_FORCE_FINALIZER_TIER=fast     → always skip Gemini
+
     Returns:
         ``(use_quality, tier_name, tier_reason)``
     """
     if not has_finalizer:
         return False, "fast", "no_finalizer"
+
+    # Issue #517: env override for forcing finalizer tier
+    forced = os.getenv("BANTZ_FORCE_FINALIZER_TIER", "").strip().lower()
+    if forced in ("quality", "gemini"):
+        logger.info("[TIER] forced=quality via BANTZ_FORCE_FINALIZER_TIER")
+        return True, "quality", "forced_quality"
+    if forced in ("fast", "3b", "skip"):
+        logger.info("[TIER] forced=fast via BANTZ_FORCE_FINALIZER_TIER")
+        return False, "fast", "forced_fast"
 
     # Issue #409: Split smalltalk into simple vs complex
     if orchestrator_output.route == "smalltalk":

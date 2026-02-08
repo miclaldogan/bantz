@@ -181,15 +181,24 @@ def create_runtime(
         finalizer_llm=effective_finalizer,
     )
 
-    # ── Boot log ────────────────────────────────────────────────────
+    # ── Boot log (Issue #517: visible finalizer status) ───────────
     finalizer_name = _gemini_model if finalizer_is_gemini else _router_model
     finalizer_type = "Gemini" if finalizer_is_gemini else "3B (local)"
+    _forced_tier = os.getenv("BANTZ_FORCE_FINALIZER_TIER", "").strip().lower()
+    tier_note = f", forced_tier={_forced_tier}" if _forced_tier else ""
     logger.info(
-        "🧠 BANTZ Runtime initialized: router=%s, finalizer=%s (%s)",
+        "🧠 BANTZ Runtime: router=%s, finalizer=%s (%s), tools=%d%s",
         _router_model,
         finalizer_name,
         finalizer_type,
+        len(_tools.names()),
+        tier_note,
     )
+    if not finalizer_is_gemini:
+        logger.warning(
+            "⚠ Finalizer is 3B — set GEMINI_API_KEY for quality responses. "
+            "Override: BANTZ_FORCE_FINALIZER_TIER=quality|fast"
+        )
 
     return BantzRuntime(
         router_client=router_client,
