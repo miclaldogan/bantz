@@ -33,11 +33,8 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from bantz.agent.tools import Tool, ToolRegistry
-from bantz.brain.llm_router import JarvisLLMOrchestrator
-from bantz.brain.orchestrator_loop import OrchestratorLoop, OrchestratorConfig
 from bantz.brain.orchestrator_state import OrchestratorState
 from bantz.core.events import EventBus
-from bantz.llm.gemini_client import GeminiClient
 from bantz.llm.vllm_openai_client import VLLMOpenAIClient
 from bantz.security.env_loader import load_env
 from bantz.tools.registry import register_web_tools
@@ -467,43 +464,28 @@ class TerminalJarvis:
         gemini_model = os.getenv("BANTZ_GEMINI_MODEL", "gemini-1.5-flash")
         gemini_key = _env_get_any("GEMINI_API_KEY", "GOOGLE_API_KEY", "BANTZ_GEMINI_API_KEY")
 
-        self.vllm_url = vllm_url
-        self.router_model = router_model
-        self.gemini_model = gemini_model
-        self.gemini_configured = bool(gemini_key)
+        # Issue #516: Use canonical runtime factory — single source of truth
+        from bantz.brain.runtime_factory import create_runtime
 
-        self.router_client = VLLMOpenAIClient(base_url=vllm_url, model=router_model, timeout_seconds=30.0)
-
-        self.gemini_client: Optional[GeminiClient] = None
-        if gemini_key:
-            self.gemini_client = GeminiClient(api_key=gemini_key, model=gemini_model, timeout_seconds=30.0)
-            logger.info("Finalizer: %s ✓ (Gemini)", gemini_model)
-        else:
-            logger.warning(
-                "⚠ GEMINI_API_KEY not set — finalization will use 3B router (%s). "
-                "Quality may be degraded. Set GEMINI_API_KEY for natural responses.",
-                router_model,
-            )
-
-        self.tools = _build_registry()
-
-        self.event_bus = EventBus(history_size=200)
-        self.event_bus.subscribe_all(self._on_event)
-
-        orchestrator = JarvisLLMOrchestrator(llm_client=self.router_client)
-
-        # Issue #517: Finalizer wiring invariant.
-        # Gemini is strongly preferred for finalization (natural language quality).
-        # If not available, fall back to 3B router with a warning.
-        effective_finalizer = self.gemini_client or self.router_client
-        self._finalizer_is_gemini = self.gemini_client is not None
-        self.loop = OrchestratorLoop(
-            orchestrator,
-            self.tools,
-            event_bus=self.event_bus,
-            config=OrchestratorConfig(debug=False),
-            finalizer_llm=effective_finalizer,
+        self._runtime = create_runtime(
+            vllm_url=vllm_url,
+            router_model=router_model,
+            gemini_key=gemini_key,
+            gemini_model=gemini_model,
+            tools=_build_registry(),
         )
+
+        self.vllm_url = vllm_url
+        self.router_model = self._runtime.router_model
+        self.gemini_model = self._runtime.gemini_model
+        self.gemini_configured = self._runtime.finalizer_is_gemini
+        self.router_client = self._runtime.router_client
+        self.gemini_client = self._runtime.gemini_client
+        self.tools = self._runtime.tools
+        self.event_bus = self._runtime.event_bus
+        self.event_bus.subscribe_all(self._on_event)
+        self.loop = self._runtime.loop
+        self._finalizer_is_gemini = self._runtime.finalizer_is_gemini
         self.state = OrchestratorState()
 
     def _on_event(self, event) -> None:
