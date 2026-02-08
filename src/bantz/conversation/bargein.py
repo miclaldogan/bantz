@@ -1,22 +1,107 @@
 """
-Barge-in Handler for V2-6 (Issue #38).
+Barge-in Handler for V2-6 (Issue #38, Issue #428).
 
 Handles user interruption during TTS playback:
 - Stops TTS when user speaks
 - Transitions FSM to LISTENING
 - Configurable thresholds for interrupt detection
+- CancellationToken for in-flight tool execution (Issue #428)
+- Turn-ID isolation to prevent cross-turn result leakage (Issue #428)
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# CancellationToken (Issue #428)
+# =============================================================================
+
+
+class CancellationToken:
+    """
+    Cooperative cancellation token for long-running tool executions.
+
+    Usage::
+
+        token = CancellationToken()
+        # Start a tool
+        if token.is_cancelled:
+            return  # exit early
+        # ... do work ...
+        token.cancel()  # trigger from barge-in
+    """
+
+    def __init__(self) -> None:
+        self._cancelled = False
+        self._event = asyncio.Event()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self) -> None:
+        """Signal cancellation."""
+        self._cancelled = True
+        self._event.set()
+
+    def reset(self) -> None:
+        """Reset to non-cancelled state."""
+        self._cancelled = False
+        self._event.clear()
+
+    async def wait(self, timeout: float | None = None) -> bool:
+        """Wait until cancelled. Returns True if cancelled, False on timeout."""
+        try:
+            await asyncio.wait_for(self._event.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+
+# =============================================================================
+# Turn Context (Issue #428)
+# =============================================================================
+
+
+@dataclass
+class TurnContext:
+    """
+    Associates a unique turn_id with each user utterance.
+
+    Tool results tagged with the originating turn_id so that barge-in
+    can discard stale results from previous turns.
+    """
+
+    turn_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    cancellation_token: CancellationToken = field(default_factory=CancellationToken)
+    _tool_results: list[dict[str, Any]] = field(default_factory=list)
+
+    def add_tool_result(self, result: dict[str, Any]) -> None:
+        """Attach a tool result to this turn."""
+        result["_turn_id"] = self.turn_id
+        self._tool_results.append(result)
+
+    @property
+    def tool_results(self) -> list[dict[str, Any]]:
+        return list(self._tool_results)
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self.cancellation_token.is_cancelled
+
+    def cancel(self) -> None:
+        """Cancel all in-flight work for this turn."""
+        self.cancellation_token.cancel()
 
 
 # =============================================================================
@@ -135,6 +220,9 @@ class BargeInHandler:
         self._min_speech_duration_ms = min_speech_duration_ms
         self._event_bus = event_bus
         
+        # Active turn tracking (Issue #428)
+        self._active_turn: Optional[TurnContext] = None
+        
         # Event history
         self._events: list[BargeInEvent] = []
         self._max_events = 50
@@ -142,6 +230,7 @@ class BargeInHandler:
         # Statistics
         self._total_interrupts = 0
         self._ignored_interrupts = 0
+        self._cancelled_turns = 0
     
     def should_interrupt(
         self,
@@ -172,6 +261,9 @@ class BargeInHandler:
         """
         Handle a barge-in event.
         
+        When accepted, cancels the active turn's tool executions (Issue #428)
+        and logs the cancellation.
+        
         Args:
             event: The barge-in event
             
@@ -193,6 +285,16 @@ class BargeInHandler:
             self._record_event(event)
             logger.debug("Barge-in ignored: TTS not playing")
             return BargeInAction.IGNORE
+        
+        # ── Issue #428: Cancel active turn's tool executions ──
+        if self._active_turn and not self._active_turn.is_cancelled:
+            old_turn_id = self._active_turn.turn_id
+            self._active_turn.cancel()
+            self._cancelled_turns += 1
+            logger.info(
+                "Barge-in: cancelled active turn %s tool executions",
+                old_turn_id,
+            )
         
         # Stop TTS
         if self._tts:
@@ -242,6 +344,38 @@ class BargeInHandler:
             except Exception as e:
                 logger.error(f"Error emitting barge-in event: {e}")
     
+    # ── Turn management (Issue #428) ────────────────────────────
+
+    def start_turn(self) -> TurnContext:
+        """
+        Create a new TurnContext for the current utterance.
+
+        If a previous turn is still active, it is cancelled first.
+        """
+        if self._active_turn and not self._active_turn.is_cancelled:
+            self._active_turn.cancel()
+            self._cancelled_turns += 1
+        self._active_turn = TurnContext()
+        logger.debug("Started new turn %s", self._active_turn.turn_id)
+        return self._active_turn
+
+    @property
+    def active_turn(self) -> Optional[TurnContext]:
+        return self._active_turn
+
+    def finish_turn(self) -> None:
+        """Mark the current turn as complete (not cancelled)."""
+        self._active_turn = None
+
+    def is_turn_valid(self, turn_id: str) -> bool:
+        """Check if *turn_id* matches the active (non-cancelled) turn."""
+        if self._active_turn is None:
+            return False
+        return (
+            self._active_turn.turn_id == turn_id
+            and not self._active_turn.is_cancelled
+        )
+
     def get_events(self, n: int = 10) -> list[BargeInEvent]:
         """Get recent barge-in events."""
         return self._events[-n:]
@@ -251,6 +385,7 @@ class BargeInHandler:
         return {
             "total_interrupts": self._total_interrupts,
             "ignored_interrupts": self._ignored_interrupts,
+            "cancelled_turns": self._cancelled_turns,
             "interrupt_rate": (
                 self._total_interrupts / (self._total_interrupts + self._ignored_interrupts)
                 if (self._total_interrupts + self._ignored_interrupts) > 0
