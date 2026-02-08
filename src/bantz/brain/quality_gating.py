@@ -154,8 +154,16 @@ class PolicyConfig:
     @classmethod
     def from_env(cls) -> "PolicyConfig":
         """Load configuration from environment variables."""
-        def env_float(name: str, default: float) -> float:
+        def env_raw(name: str, legacy: str | None = None) -> str:
             raw = os.getenv(name, "")
+            if raw.strip():
+                return raw
+            if legacy:
+                return os.getenv(legacy, "")
+            return ""
+
+        def env_float(name: str, default: float) -> float:
+            raw = env_raw(name)
             if not raw.strip():
                 return default
             try:
@@ -164,7 +172,7 @@ class PolicyConfig:
                 return default
         
         def env_int(name: str, default: int) -> int:
-            raw = os.getenv(name, "")
+            raw = env_raw(name)
             if not raw.strip():
                 return default
             try:
@@ -173,17 +181,17 @@ class PolicyConfig:
                 return default
         
         def env_str(name: str, default: str) -> str:
-            return os.getenv(name, default).strip() or default
+            return (env_raw(name) or default).strip() or default
         
         def env_list(name: str) -> List[str]:
-            raw = os.getenv(name, "")
+            raw = env_raw(name)
             if not raw.strip():
                 return []
             return [x.strip() for x in raw.split(",") if x.strip()]
         
         def env_weights() -> Dict[str, float]:
             """Parse BANTZ_SCORE_WEIGHTS='complexity=0.4,writing=0.4,risk=0.2'."""
-            raw = os.getenv("BANTZ_SCORE_WEIGHTS", "")
+            raw = env_raw("BANTZ_TIER_SCORE_WEIGHTS", "BANTZ_SCORE_WEIGHTS")
             if not raw.strip():
                 return {"complexity": 0.35, "writing": 0.45, "risk": 0.20}
             weights: Dict[str, float] = {}
@@ -199,15 +207,38 @@ class PolicyConfig:
             return weights
         
         return cls(
-            quality_threshold=env_float("BANTZ_QUALITY_SCORE_THRESHOLD", 2.5),
-            fast_max_threshold=env_float("BANTZ_FAST_MAX_THRESHOLD", 1.5),
-            min_complexity_for_quality=env_int("BANTZ_MIN_COMPLEXITY_FOR_QUALITY", 4),
-            min_writing_for_quality=env_int("BANTZ_MIN_WRITING_FOR_QUALITY", 4),
-            quality_rate_limit=env_int("BANTZ_QUALITY_RATE_LIMIT", 30),
-            rate_window_seconds=env_float("BANTZ_RATE_WINDOW_SECONDS", 60.0),
-            finalizer_mode=env_str("BANTZ_FINALIZER_MODE", "auto"),
-            bypass_patterns=env_list("BANTZ_QUALITY_BYPASS_PATTERNS"),
-            force_quality_patterns=env_list("BANTZ_FORCE_QUALITY_PATTERNS"),
+            quality_threshold=env_float(
+                "BANTZ_TIER_QUALITY_THRESHOLD",
+                env_float("BANTZ_QUALITY_SCORE_THRESHOLD", 2.5),
+            ),
+            fast_max_threshold=env_float(
+                "BANTZ_TIER_FAST_MAX_THRESHOLD",
+                env_float("BANTZ_FAST_MAX_THRESHOLD", 1.5),
+            ),
+            min_complexity_for_quality=env_int(
+                "BANTZ_TIER_MIN_COMPLEXITY_FOR_QUALITY",
+                env_int("BANTZ_MIN_COMPLEXITY_FOR_QUALITY", 4),
+            ),
+            min_writing_for_quality=env_int(
+                "BANTZ_TIER_MIN_WRITING_FOR_QUALITY",
+                env_int("BANTZ_MIN_WRITING_FOR_QUALITY", 4),
+            ),
+            quality_rate_limit=env_int(
+                "BANTZ_TIER_QUALITY_RATE_LIMIT",
+                env_int("BANTZ_QUALITY_RATE_LIMIT", 30),
+            ),
+            rate_window_seconds=env_float(
+                "BANTZ_TIER_RATE_WINDOW_SECONDS",
+                env_float("BANTZ_RATE_WINDOW_SECONDS", 60.0),
+            ),
+            finalizer_mode=env_str(
+                "BANTZ_TIER_FINALIZER_MODE",
+                env_str("BANTZ_FINALIZER_MODE", "auto"),
+            ),
+            bypass_patterns=env_list("BANTZ_TIER_BYPASS_PATTERNS")
+            or env_list("BANTZ_QUALITY_BYPASS_PATTERNS"),
+            force_quality_patterns=env_list("BANTZ_TIER_FORCE_QUALITY_PATTERNS")
+            or env_list("BANTZ_FORCE_QUALITY_PATTERNS"),
             score_weights=env_weights(),
         )
 
@@ -481,6 +512,7 @@ class GatingPolicy:
         *,
         tool_names: Optional[List[str]] = None,
         requires_confirmation: bool = False,
+        route: str = "unknown",
         enforce_rate_limit: bool = True,
         score_weights: Optional[Dict[str, float]] = None,
     ) -> GatingResult:
@@ -506,6 +538,63 @@ class GatingPolicy:
             requires_confirmation=requires_confirmation,
             weights=weights,
         )
+
+        # Smalltalk fast/quality split (Issue #367 / #409 parity).
+        # Keep greetings fast, but allow complex questions to escalate.
+        route_norm = (route or "").strip().lower()
+        if route_norm in {"smalltalk", "smalltalk_stage1"}:
+            t = (user_input or "").strip().lower()
+            simple_greetings = [
+                "merhaba",
+                "selam",
+                "selamlar",
+                "günaydın",
+                "iyi akşamlar",
+                "iyi geceler",
+                "naber",
+                "nasılsın",
+            ]
+            complex_prompts = [
+                "nedir",
+                "ne demek",
+                "açıkla",
+                "anlat",
+                "nasıl",
+                "neden",
+                "niye",
+                "farkı",
+                "karşılaştır",
+                "düşünüyorsun",
+                "yorumla",
+            ]
+
+            if any(p in t for p in simple_greetings):
+                result = GatingResult(
+                    decision=GatingDecision.USE_FAST,
+                    score=score,
+                    reason="smalltalk_simple",
+                )
+                self._record_decision(result)
+                return result
+
+            if any(p in t for p in complex_prompts):
+                if enforce_rate_limit and not self.rate_limiter.acquire():
+                    result = GatingResult(
+                        decision=GatingDecision.BLOCKED,
+                        score=score,
+                        reason="smalltalk_complex_rate_limited",
+                        rate_limited=True,
+                    )
+                    self._record_decision(result)
+                    return result
+
+                result = GatingResult(
+                    decision=GatingDecision.USE_QUALITY,
+                    score=score,
+                    reason="smalltalk_complex",
+                )
+                self._record_decision(result)
+                return result
         
         # Check Gemini availability gate (Issue #439)
         if not self.gemini_gate.is_available:
@@ -698,6 +787,7 @@ def evaluate_quality_gating(
     *,
     tool_names: Optional[List[str]] = None,
     requires_confirmation: bool = False,
+    route: str = "unknown",
 ) -> GatingResult:
     """Convenience function for quality gating evaluation.
     
@@ -714,6 +804,7 @@ def evaluate_quality_gating(
         user_input,
         tool_names=tool_names,
         requires_confirmation=requires_confirmation,
+        route=route,
     )
 
 
