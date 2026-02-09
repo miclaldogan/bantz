@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from bantz.agent.core import Agent, AgentState, Step, Task
 from bantz.agent.planner import Planner
 from bantz.agent.tools import ToolRegistry
-from bantz.agent.builtin_tools import build_default_registry
+from bantz.agent.builtin_tools import build_planner_registry
 
 if TYPE_CHECKING:
     from bantz.ui.jarvis_panel import JarvisPanelController
@@ -142,7 +142,7 @@ class AgentController:
             auto_confirm: Auto-confirm plans without waiting
         """
         if agent is None:
-            tools = build_default_registry()
+            tools = build_planner_registry()
             planner = Planner()
             agent = Agent(planner, tools)
         

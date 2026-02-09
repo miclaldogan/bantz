@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from bantz.agent.builtin_tools import build_default_registry
+from bantz.agent.builtin_tools import build_planner_registry
 from bantz.google.calendar import list_events
 
 
 def test_calendar_list_events_tool_registered():
-    reg = build_default_registry()
+    reg = build_planner_registry()
     tool = reg.get("calendar.list_events")
     assert tool is not None
     assert tool.risk_level == "LOW"

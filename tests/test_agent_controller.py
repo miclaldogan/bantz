@@ -641,10 +641,10 @@ class TestToolRegistry:
 class TestBuiltinTools:
     """Test builtin tools registry."""
     
-    def test_build_default_registry(self):
-        from bantz.agent.builtin_tools import build_default_registry
+    def test_build_planner_registry(self):
+        from bantz.agent.builtin_tools import build_planner_registry
         
-        registry = build_default_registry()
+        registry = build_planner_registry()
         
         # Check some expected tools exist
         assert registry.get("browser_open") is not None
@@ -653,9 +653,9 @@ class TestBuiltinTools:
         assert registry.get("browser_type") is not None
     
     def test_browser_open_tool_schema(self):
-        from bantz.agent.builtin_tools import build_default_registry
+        from bantz.agent.builtin_tools import build_planner_registry
         
-        registry = build_default_registry()
+        registry = build_planner_registry()
         tool = registry.get("browser_open")
         
         assert tool is not None

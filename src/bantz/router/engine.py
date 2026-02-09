@@ -216,11 +216,11 @@ class Router:
             skip_preview = bool(parsed.slots.get("skip_preview", False))
 
             try:
-                from bantz.agent.builtin_tools import build_default_registry
+                from bantz.agent.builtin_tools import build_planner_registry
                 from bantz.agent.core import Agent
                 from bantz.agent.planner import Planner
 
-                tools = build_default_registry()
+                tools = build_planner_registry()
                 agent = Agent(planner=Planner(), tools=tools)
 
                 task_id = f"agent-{len(self._agent_history) + 1}"
@@ -471,11 +471,11 @@ class Router:
 
             # Delegate to agent_run logic
             try:
-                from bantz.agent.builtin_tools import build_default_registry
+                from bantz.agent.builtin_tools import build_planner_registry
                 from bantz.agent.core import Agent
                 from bantz.agent.planner import Planner
 
-                tools = build_default_registry()
+                tools = build_planner_registry()
                 agent = Agent(planner=Planner(), tools=tools)
 
                 task_id = f"agent-{len(self._agent_history) + 1}"
