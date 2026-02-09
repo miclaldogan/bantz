@@ -476,8 +476,8 @@ USER: merhaba mesajı gönder
                     "reason": "router_unhealthy",
                     "input_len": len(user_input),
                 })
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[ROUTER] event_bus.publish failed: %s", exc)
         
         return OrchestratorOutput(
             route="unknown",
@@ -1409,8 +1409,8 @@ class HybridJarvisLLMOrchestrator:
                 from dataclasses import replace
 
                 return replace(planned, assistant_reply=reply)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("[HYBRID] Finalizer error (swallowed): %s", exc)
 
         return planned
 
