@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def system_status(*, include_env: bool = False, **_: Any) -> dict[str, Any]:
@@ -68,3 +71,38 @@ def system_status(*, include_env: bool = False, **_: Any) -> dict[str, Any]:
         out["env"] = {k: (os.getenv(k) or "") for k in allow}
 
     return out
+
+
+def system_screenshot_tool(*, monitor: int = 0, **_: Any) -> dict[str, Any]:
+    """Capture a screenshot and return base64-encoded image data.
+
+    Uses the vision module's capture_screen() which tries mss → PIL → pyautogui
+    → X11 fallback, in order of availability.
+
+    Returns:
+        dict with ok, base64, width, height, format on success;
+        dict with ok=False and error on failure.
+    """
+    try:
+        from bantz.vision.capture import capture_screen
+    except ImportError:
+        return {
+            "ok": False,
+            "error": (
+                "Vision dependencies are not installed. "
+                "Install with: pip install -e '.[vision]'"
+            ),
+        }
+
+    try:
+        result = capture_screen(monitor=monitor)
+        return {
+            "ok": True,
+            "base64": result.to_base64(),
+            "width": result.width,
+            "height": result.height,
+            "format": result.format,
+        }
+    except Exception as e:
+        logger.warning("system.screenshot failed: %s", e)
+        return {"ok": False, "error": str(e)}

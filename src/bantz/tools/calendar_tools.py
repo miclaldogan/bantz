@@ -4,7 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, time as dtime
 from typing import Any, Optional
 
-from bantz.google.calendar import create_event, find_free_slots, list_events
+from bantz.google.calendar import (
+    create_event,
+    delete_event,
+    find_free_slots,
+    list_events,
+    update_event,
+)
 from bantz.tools.calendar_idempotency import create_event_with_idempotency
 
 
@@ -254,5 +260,84 @@ def calendar_create_event_tool(
             end=end_dt.isoformat(),
             create_fn=do_create,
         )
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def calendar_update_event_tool(
+    *,
+    event_id: Optional[str] = None,
+    title: Optional[str] = None,
+    date: Optional[str] = None,
+    time: Optional[str] = None,
+    duration: Optional[int] = None,
+    location: Optional[str] = None,
+    description: Optional[str] = None,
+    **_: Any,
+) -> dict[str, Any]:
+    """Update a calendar event from orchestrator slots.
+
+    Required: event_id.
+    At least one of title, date+time, location, or description must be provided.
+    """
+
+    eid = (event_id or "").strip()
+    if not eid:
+        return {"ok": False, "error": "Missing event_id"}
+
+    summary = (title or "").strip() or None
+    loc = (location or "").strip() or None
+    desc = (description or "").strip() or None
+
+    # Build start/end only if date+time are provided
+    start_iso: Optional[str] = None
+    end_iso: Optional[str] = None
+    hhmm = (time or "").strip()
+    d = (date or "").strip()
+
+    if hhmm:
+        if not d:
+            d = _date_today()
+        else:
+            d = _resolve_date_token(d)
+        start_dt = _dt(d, hhmm)
+        dur = int(duration) if duration is not None else 60
+        end_dt = start_dt + timedelta(minutes=dur)
+        start_iso = start_dt.isoformat()
+        end_iso = end_dt.isoformat()
+
+    # Ensure at least one field is being updated
+    if not any([summary, start_iso, loc, desc]):
+        return {"ok": False, "error": "No fields to update (need title, time, location, or description)"}
+
+    try:
+        return update_event(
+            event_id=eid,
+            start=start_iso,
+            end=end_iso,
+            summary=summary,
+            description=desc,
+            location=loc,
+        )
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def calendar_delete_event_tool(
+    *,
+    event_id: Optional[str] = None,
+    **_: Any,
+) -> dict[str, Any]:
+    """Delete a calendar event.
+
+    Required: event_id.
+    """
+
+    eid = (event_id or "").strip()
+    if not eid:
+        return {"ok": False, "error": "Missing event_id"}
+
+    try:
+        return delete_event(event_id=eid)
     except Exception as e:
         return {"ok": False, "error": str(e)}
