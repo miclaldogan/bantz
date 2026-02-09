@@ -141,7 +141,9 @@ class TestPipelineFinalizerModel:
 
         pipeline = FinalizationPipeline()
         result = pipeline.run(ctx)
-        assert result.finalizer_model == "none(no_tools)"
+        # Issue #628: tool-first guard now fires for calendar/gmail routes
+        # with empty tool_results, providing better anti-hallucination tracing.
+        assert result.finalizer_model == "none(tool_first_guard/no_tools_run)"
 
 
 # ---------------------------------------------------------------------------
