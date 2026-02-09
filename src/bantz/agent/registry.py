@@ -13,8 +13,10 @@ from bantz.tools.registry import register_web_tools
 
 from bantz.tools.calendar_tools import (
     calendar_create_event_tool,
+    calendar_delete_event_tool,
     calendar_find_free_slots_tool,
     calendar_list_events_tool,
+    calendar_update_event_tool,
 )
 from bantz.tools.gmail_tools import (
     gmail_get_message_tool,
@@ -23,7 +25,7 @@ from bantz.tools.gmail_tools import (
     gmail_smart_search_tool,
     gmail_unread_count_tool,
 )
-from bantz.tools.system_tools import system_status
+from bantz.tools.system_tools import system_screenshot_tool, system_status
 from bantz.tools.time_tools import time_now_tool
 
 
@@ -31,9 +33,9 @@ def build_default_registry() -> ToolRegistry:
     """Build the canonical ToolRegistry with all runtime tools.
 
     Returns a registry containing:
-      - calendar.* (list_events, find_free_slots, create_event)
+      - calendar.* (list_events, find_free_slots, create_event, update_event, delete_event)
       - gmail.* (unread_count, list_messages, smart_search, get_message, send)
-      - system.status
+      - system.status, system.screenshot
       - time.now
       - web.* (search, open — via register_web_tools)
     """
@@ -105,6 +107,44 @@ def build_default_registry() -> ToolRegistry:
                 "additionalProperties": True,
             },
             function=calendar_create_event_tool,
+            requires_confirmation=True,
+        )
+    )
+    reg.register(
+        Tool(
+            name="calendar.update_event",
+            description="Google Calendar: update an existing event (write). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "string", "description": "Google Calendar event ID"},
+                    "title": {"type": "string"},
+                    "date": {"type": "string"},
+                    "time": {"type": "string"},
+                    "duration": {"type": "integer"},
+                    "location": {"type": "string"},
+                    "description": {"type": "string"},
+                },
+                "required": ["event_id"],
+                "additionalProperties": True,
+            },
+            function=calendar_update_event_tool,
+            requires_confirmation=True,
+        )
+    )
+    reg.register(
+        Tool(
+            name="calendar.delete_event",
+            description="Google Calendar: delete an event (write). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "string", "description": "Google Calendar event ID"},
+                },
+                "required": ["event_id"],
+                "additionalProperties": True,
+            },
+            function=calendar_delete_event_tool,
             requires_confirmation=True,
         )
     )
@@ -245,6 +285,21 @@ def build_default_registry() -> ToolRegistry:
                 "additionalProperties": True,
             },
             function=system_status,
+        )
+    )
+    reg.register(
+        Tool(
+            name="system.screenshot",
+            description="System: capture a screenshot of the screen (vision)",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "monitor": {"type": "integer", "description": "Monitor index (0 = primary)"},
+                },
+                "required": [],
+                "additionalProperties": True,
+            },
+            function=system_screenshot_tool,
         )
     )
     reg.register(
