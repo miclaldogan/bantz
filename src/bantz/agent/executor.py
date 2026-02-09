@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Protocol
 from .tools import ToolRegistry
+
+
+def _make_action_key(action: str, params: dict[str, Any]) -> str:
+    """Build a deterministic, hashable key for an action + params pair.
+
+    ``frozenset(params.items())`` crashes with *TypeError: unhashable type*
+    when values contain lists or nested dicts (e.g. ``recurrence``,
+    ``attendees``).  We serialise via ``json.dumps`` instead.  See #631.
+    """
+    stable = json.dumps(params, sort_keys=True, default=str)
+    return f"{action}:{hash(stable)}"
 
 
 @dataclass(frozen=True)
@@ -66,7 +78,7 @@ class Executor:
         
         if not skip_confirmation and is_destructive(step.action):
             # Check if this action is already confirmed
-            action_key = f"{step.action}:{hash(frozenset(step.params.items()))}"
+            action_key = _make_action_key(step.action, step.params)
             
             if action_key not in self.confirmed_actions:
                 # Need confirmation
@@ -109,7 +121,7 @@ class Executor:
         Args:
             step: Step to confirm
         """
-        action_key = f"{step.action}:{hash(frozenset(step.params.items()))}"
+        action_key = _make_action_key(step.action, step.params)
         self.confirmed_actions.add(action_key)
 
 
