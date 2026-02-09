@@ -381,7 +381,6 @@ class OrchestratorLoop:
         config: Optional[OrchestratorConfig] = None,
         finalizer_llm: Optional[Any] = None,
         audit_logger: Optional[Any] = None,
-        fsm_bridge: Optional[Any] = None,
     ):
         self.orchestrator = orchestrator
         self.tools = tools
@@ -389,7 +388,6 @@ class OrchestratorLoop:
         self.config = config or OrchestratorConfig()
         self.finalizer_llm = finalizer_llm
         self.audit_logger = audit_logger  # For tool execution auditing (Issue #160)
-        self.fsm_bridge = fsm_bridge  # Issue #596: ConversationFSM integration (optional)
 
         # Issue #597: Cache FinalizationPipeline (avoid per-turn object allocation)
         self._finalization_pipeline: Any = None
@@ -607,15 +605,6 @@ class OrchestratorLoop:
         
         start_time = time.time()
 
-        # Issue #596: FSM lifecycle integration (best-effort)
-        try:
-            if self.fsm_bridge is not None:
-                rec = self.fsm_bridge.on_turn_start(int(state.turn_count) + 1)
-                if rec is not None:
-                    state.trace.setdefault("fsm_transitions", []).append(rec.to_trace_line())
-        except Exception:
-            pass
-
         # Issue #417: Build session context once per turn (cached with TTL)
         if not state.session_context:
             state.session_context = self._session_ctx_cache.get_or_build()
@@ -638,15 +627,6 @@ class OrchestratorLoop:
                 # Phase 2.5: Verify tool results (Issue #591 / #523)
                 tool_results = self._verify_results_phase(tool_results, state)
 
-                # Issue #596: If confirmation is pending, drive FSM into CONFIRMING.
-                try:
-                    if self.fsm_bridge is not None and state.has_pending_confirmation():
-                        rec = self.fsm_bridge.on_confirmation_needed()
-                        if rec is not None:
-                            state.trace.setdefault("fsm_transitions", []).append(rec.to_trace_line())
-                except Exception:
-                    pass
-                
                 # Phase 3: LLM Finalization (generate final response with tool results)
                 final_output = self._llm_finalization_phase(
                     user_input,
@@ -655,15 +635,6 @@ class OrchestratorLoop:
                     state,
                 )
 
-            # Issue #596: Finalization complete → response ready (unless we are confirming)
-            try:
-                if self.fsm_bridge is not None and not state.has_pending_confirmation():
-                    rec = self.fsm_bridge.on_finalization_done()
-                    if rec is not None:
-                        state.trace.setdefault("fsm_transitions", []).append(rec.to_trace_line())
-            except Exception:
-                pass
-            
             # Phase 4: Update State (rolling summary, conversation history, trace)
             self._update_state_phase(user_input, final_output, tool_results, state)
             
@@ -717,15 +688,6 @@ class OrchestratorLoop:
         if state is None:
             state = OrchestratorState()
 
-        # Issue #596: FSM lifecycle integration (best-effort)
-        try:
-            if self.fsm_bridge is not None:
-                rec = self.fsm_bridge.on_turn_start(int(state.turn_count) + 1)
-                if rec is not None:
-                    state.trace.setdefault("fsm_transitions", []).append(rec.to_trace_line())
-        except Exception:
-            pass
-
         # Phase 1: plan
         orchestrator_output = self._llm_planning_phase(user_input, state)
 
@@ -740,15 +702,6 @@ class OrchestratorLoop:
             # Phase 2.5: verify
             tool_results = self._verify_results_phase(tool_results, state)
 
-            # Issue #596: If confirmation is pending, drive FSM into CONFIRMING.
-            try:
-                if self.fsm_bridge is not None and state.has_pending_confirmation():
-                    rec = self.fsm_bridge.on_confirmation_needed()
-                    if rec is not None:
-                        state.trace.setdefault("fsm_transitions", []).append(rec.to_trace_line())
-            except Exception:
-                pass
-
             # Phase 3: finalize
             final_output = self._llm_finalization_phase(
                 user_input,
@@ -756,15 +709,6 @@ class OrchestratorLoop:
                 tool_results,
                 state,
             )
-
-        # Issue #596: Finalization complete → response ready (unless we are confirming)
-        try:
-            if self.fsm_bridge is not None and not state.has_pending_confirmation():
-                rec = self.fsm_bridge.on_finalization_done()
-                if rec is not None:
-                    state.trace.setdefault("fsm_transitions", []).append(rec.to_trace_line())
-        except Exception:
-            pass
 
         # Phase 4: update state
         self._update_state_phase(user_input, final_output, tool_results, state)
