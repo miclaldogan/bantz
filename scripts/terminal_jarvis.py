@@ -32,29 +32,13 @@ from typing import Optional
 # Add src to path when running as a script
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from bantz.agent.tools import Tool, ToolRegistry
+from bantz.agent.tools import ToolRegistry
 from bantz.agent.registry import build_default_registry
 from bantz.brain.orchestrator_state import OrchestratorState
 from bantz.core.events import EventBus
 from bantz.llm.vllm_openai_client import VLLMOpenAIClient
 from bantz.security.env_loader import load_env
-from bantz.tools.registry import register_web_tools
-
-from bantz.tools.calendar_tools import (
-    calendar_create_event_tool,
-    calendar_find_free_slots_tool,
-    calendar_list_events_tool,
-)
-from bantz.tools.gmail_tools import (
-    gmail_get_message_tool,
-    gmail_list_categories_tool,
-    gmail_list_messages_tool,
-    gmail_send_tool,
-    gmail_smart_search_tool,
-    gmail_unread_count_tool,
-)
-from bantz.tools.system_tools import system_status
-from bantz.tools.time_tools import time_now_tool
+from bantz.tools.calendar_tools import calendar_list_events_tool
 
 
 def _build_registry() -> ToolRegistry:
