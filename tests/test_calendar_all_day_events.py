@@ -357,7 +357,7 @@ def test_all_day_event_in_busy_intervals(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_tool_registration_includes_all_day(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that calendar.create_event tool is registered with all_day parameter."""
-    from bantz.agent.builtin_tools import build_default_registry
+    from bantz.agent.builtin_tools import build_planner_registry
 
     # Mock google calendar import
     def mock_import_error(*args, **kwargs):
@@ -367,7 +367,7 @@ def test_tool_registration_includes_all_day(monkeypatch: pytest.MonkeyPatch) -> 
     import bantz.google.calendar
     monkeypatch.setattr(bantz.google.calendar, "create_event", lambda **kwargs: {})
 
-    registry = build_default_registry()
+    registry = build_planner_registry()
     tool = registry.get("calendar.create_event")
 
     assert tool is not None

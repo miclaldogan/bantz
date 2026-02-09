@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
-from bantz.agent.builtin_tools import build_default_registry
+from bantz.agent.builtin_tools import build_planner_registry
 from bantz.google.calendar import create_event
 
 
 def test_calendar_create_event_tool_registered():
-    reg = build_default_registry()
+    reg = build_planner_registry()
     tool = reg.get("calendar.create_event")
     assert tool is not None
     assert tool.risk_level == "MED"

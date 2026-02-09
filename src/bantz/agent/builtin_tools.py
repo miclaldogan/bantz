@@ -1,13 +1,67 @@
+"""Agent planner tool catalog — schema definitions for LLM tool-call generation.
+
+Architecture (Issue #633)
+─────────────────────────
+Bantz has TWO tool registries that serve different purposes:
+
+  ┌──────────────────────────────────────────────────────────────┐
+  │  registry.py  → build_default_registry()                     │
+  │  "Runtime registry" — 15 tools with REAL handlers            │
+  │  Used by: runtime_factory.py, terminal_jarvis.py             │
+  │  Purpose: OrchestratorLoop calls tool.function(**params)      │
+  │  Handlers: bantz.tools.* wrappers (Turkish date parsing,     │
+  │            idempotency, error wrapping over bantz.google.*)   │
+  └──────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────┐
+  │  builtin_tools.py  → build_planner_registry()                │
+  │  "Planner catalog" — 69 tools with full JSON schemas         │
+  │  Used by: router/engine.py, agent/controller.py              │
+  │  Purpose: LLM reads tool descriptions to generate plans;     │
+  │           planned steps are dispatched as router intents      │
+  │  Handlers: bantz.google.* raw functions (attached for        │
+  │            optional direct execution, NOT primary path)       │
+  └──────────────────────────────────────────────────────────────┘
+
+The 10 overlapping tool names (calendar.*, gmail core) intentionally
+share names so agent-planned steps map directly to router intents.
+
+For the overlapping tools, the canonical handler lives in registry.py
+(the wrapper version with Turkish NL support).  This module provides
+the full Google API schemas for richer agent planning.
+"""
+
 from __future__ import annotations
+
+import warnings
+from typing import TYPE_CHECKING
 
 from .tools import Tool, ToolRegistry
 
+if TYPE_CHECKING:
+    pass
 
-def build_default_registry() -> ToolRegistry:
-    """Tools available to the agent planner.
 
-    These tool names intentionally match existing router intents so the planned
-    steps can be executed by the Router queue runner.
+def build_planner_registry() -> ToolRegistry:
+    """Build the planner tool catalog — schemas for LLM tool-call generation.
+
+    Returns a ``ToolRegistry`` with 69 tools.  Most have ``function=``
+    handlers attached (via ``bantz.google.*`` imports), but the primary
+    consumer (``router/engine.py``, ``agent/controller.py``) only reads
+    tool schemas to compose LLM prompts — it never calls
+    ``tool.function()`` directly.
+
+    For the 10 tools that overlap with :func:`registry.build_default_registry`,
+    this catalog provides the full Google Calendar / Gmail API schemas
+    (RFC3339 timestamps, ``calendar_id``, ``page_token`` etc.) while
+    ``registry.py`` provides orchestrator-friendly schemas
+    (``date``, ``time``, ``window_hint``).
+
+    See Also
+    --------
+    bantz.agent.registry.build_default_registry :
+        The *runtime* registry whose tools are actually executed by
+        :class:`~bantz.brain.orchestrator_loop.OrchestratorLoop`.
     """
 
     reg = ToolRegistry()
@@ -1840,3 +1894,22 @@ def build_default_registry() -> ToolRegistry:
     )
 
     return reg
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Backward-compatible alias (Issue #633)
+# ─────────────────────────────────────────────────────────────────────
+def build_default_registry() -> ToolRegistry:
+    """**Deprecated** — use :func:`build_planner_registry` instead.
+
+    This alias exists so that existing callers (tests, scripts) keep
+    working after the rename.  It emits a ``DeprecationWarning`` to
+    nudge callers toward the canonical name.
+    """
+    warnings.warn(
+        "builtin_tools.build_default_registry() is deprecated; "
+        "use build_planner_registry() instead (Issue #633)",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return build_planner_registry()

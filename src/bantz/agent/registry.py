@@ -1,7 +1,27 @@
-"""Shared tool registry builder — single source of truth for all runtime tools.
+"""Shared runtime tool registry — single source of truth for executable tools.
 
-Moved from scripts/terminal_jarvis.py so that both the terminal entry point
-and runtime_factory.py can import the same registry without importlib hacks.
+Architecture (Issue #633)
+─────────────────────────
+This module provides the **runtime** tool registry whose tools are
+directly executed by :class:`~bantz.brain.orchestrator_loop.OrchestratorLoop`
+via ``tool.function(**params)``.
+
+Every tool registered here has a real ``function=`` handler from
+``bantz.tools.*`` (wrapper modules that add Turkish date parsing,
+idempotency, error wrapping over the raw ``bantz.google.*`` functions).
+
+Callers
+~~~~~~~
+- ``brain/runtime_factory.py`` — builds the production runtime
+- ``scripts/terminal_jarvis.py`` — terminal REPL
+
+See Also
+~~~~~~~~
+- ``agent/builtin_tools.py`` → ``build_planner_registry()``
+  The **planner** catalog (69 tools, schema-only usage) used by
+  ``router/engine.py`` and ``agent/controller.py`` for LLM prompting.
+  Its 10 overlapping tool names (calendar.*, gmail core) intentionally
+  match so agent-planned steps map to router intents.
 
 Issue #575: Tool registry uses fragile importlib hack
 """

@@ -372,9 +372,9 @@ def test_update_event_preserves_unchanged_fields(monkeypatch: pytest.MonkeyPatch
 
 def test_update_event_tool_registered() -> None:
     """Test that calendar.update_event tool is properly registered."""
-    from bantz.agent.builtin_tools import build_default_registry
+    from bantz.agent.builtin_tools import build_planner_registry
     
-    registry = build_default_registry()
+    registry = build_planner_registry()
     tool = registry.get("calendar.update_event")
     
     assert tool is not None
