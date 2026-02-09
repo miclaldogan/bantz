@@ -1625,7 +1625,17 @@ class OrchestratorLoop:
                     continue
                 
                 if tool.function is None:
-                    raise ValueError(f"Tool {tool_name} has no function implementation")
+                    logger.warning(
+                        "[TOOLS] Tool '%s' has no function impl (schema-only), skipping",
+                        tool_name,
+                    )
+                    tool_results.append({
+                        "tool": tool_name,
+                        "success": False,
+                        "error": f"'{tool_name}' henüz aktif değil (schema-only tool).",
+                        "user_message": f"'{tool_name}' komutu şu an kullanılamıyor.",
+                    })
+                    continue
                 
                 # Build parameters: prefer explicit tool_plan args, else fall back to slots.
                 args = tool_args_by_name.get(tool_name)
