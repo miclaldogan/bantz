@@ -509,6 +509,20 @@ class FinalizationPipeline:
         if error_reply is not None:
             return replace(output, assistant_reply=error_reply, finalizer_model="none(error)")
 
+        # --- Early exit: tools succeeded but returned empty data (#628) -----
+        # Prevents Gemini from hallucinating calendar events or emails when
+        # the underlying API returned an empty result set.
+        route = (output.route or "").strip().lower()
+        if route in ("calendar", "gmail") and ctx.tool_results and _tool_data_is_empty(ctx.tool_results):
+            cal_intent = (output.calendar_intent or "").strip().lower()
+            ctx.state.update_trace(
+                finalizer_guard="empty_data",
+                finalizer_guard_triggered=True,
+                finalizer_guard_route=route,
+            )
+            msg = _empty_data_message(route=route, calendar_intent=cal_intent)
+            return replace(output, assistant_reply=msg, finalizer_model="none(empty_data_guard)")
+
         # --- Quality finalizer path -----------------------------------------
         if ctx.use_quality and self._quality is not None:
             text = self._try_quality(ctx)
@@ -628,15 +642,76 @@ class FinalizationPipeline:
         )
 
 
+def _all_tools_failed(tool_results: list[dict[str, Any]]) -> bool:
+    """Return True when every tool result is a non-confirmation failure."""
+    if not tool_results:
+        return False
+    return all(
+        (not r.get("success", False)) and (not r.get("pending_confirmation"))
+        for r in tool_results
+    )
+
+
+def _tool_data_is_empty(tool_results: list[dict[str, Any]]) -> bool:
+    """Return True when tools succeeded but returned no useful data.
+
+    Detects the hallucination-prone case where calendar/gmail tools return
+    ``{"ok": True, "events": []}`` or ``{"ok": True, "messages": []}`` etc.
+    Gemini would fabricate content from these empty results.
+    """
+    if not tool_results:
+        return True
+    for r in tool_results:
+        if not r.get("success", False):
+            continue  # skip failures — handled elsewhere
+        raw = r.get("raw_result")
+        if not isinstance(raw, dict):
+            return False  # non-dict result — assume it has data
+        if raw.get("ok") is False:
+            continue  # tool-level failure
+        # Check known data-carrying keys
+        for key in ("events", "messages", "slots", "results", "items", "data"):
+            val = raw.get(key)
+            if isinstance(val, list) and len(val) > 0:
+                return False
+            if isinstance(val, dict) and val:
+                return False
+        # Check count/total fields
+        for key in ("total_count", "resultSizeEstimate", "count"):
+            val = raw.get(key)
+            if isinstance(val, (int, float)) and val > 0:
+                return False
+    return True
+
+
+def _empty_data_message(*, route: str, calendar_intent: str = "") -> str:
+    """Deterministic message when tools succeed but return empty data."""
+    if route == "calendar":
+        if calendar_intent in ("query", "list"):
+            return "Efendim, takvimde bu zaman aralığında etkinlik bulunamadı."
+        if calendar_intent == "free_slots":
+            return "Efendim, belirtilen aralıkta boş slot bulunamadı."
+        return "Efendim, takvimden veri alınamadı."
+    if route == "gmail":
+        return "Efendim, gelen kutunuzda bu kriterlere uyan mesaj bulunamadı."
+    return "Efendim, istenen bilgi bulunamadı."
+
+
 def _apply_tool_first_guard_if_needed(ctx: FinalizationContext) -> Optional[OrchestratorOutput]:
-    """Prevent tool-dependent hallucinations when no tools were run.
+    """Prevent tool-dependent hallucinations.
+
+    Fires when:
+    1. No tools were run at all (empty tool_results), OR
+    2. All tools failed (every result has success=False)
 
     If the router decided a tool-dependent route+intent (calendar/gmail) but we
-    have no tool results (and the turn isn't waiting on ask_user/confirmation),
+    have no usable tool data (and the turn isn't waiting on ask_user/confirmation),
     we replace any speculative assistant reply with a deterministic message.
     """
     output = ctx.orchestrator_output
-    if ctx.tool_results:
+    # Guard fires when there are NO results OR when ALL results are failures
+    has_no_usable_results = (not ctx.tool_results) or _all_tools_failed(ctx.tool_results)
+    if not has_no_usable_results:
         return None
 
     if output.ask_user or output.requires_confirmation:
@@ -655,15 +730,17 @@ def _apply_tool_first_guard_if_needed(ctx: FinalizationContext) -> Optional[Orch
     if not needs_guard:
         return None
 
+    guard_reason = "all_tools_failed" if ctx.tool_results else "no_tools_run"
     ctx.state.update_trace(
         finalizer_guard="tool_first",
         finalizer_guard_triggered=True,
         finalizer_guard_route=route,
         finalizer_guard_intent=(gmail_intent if route == "gmail" else calendar_intent),
+        finalizer_guard_reason=guard_reason,
     )
 
     msg = _tool_first_guard_message(route=route)
-    return replace(output, assistant_reply=msg, finalizer_model="none(tool_first_guard)")
+    return replace(output, assistant_reply=msg, finalizer_model=f"none(tool_first_guard/{guard_reason})")
 
 
 def _tool_first_guard_message(*, route: str) -> str:
