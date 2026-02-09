@@ -565,7 +565,7 @@ class TestFinalizationPipeline:
         ctx = _make_ctx(orchestrator_output=output, tool_results=[], use_quality=False)
         result = pipeline.run(ctx)
         assert "takvim" in result.assistant_reply.lower()
-        assert result.finalizer_model == "none(tool_first_guard)"
+        assert result.finalizer_model == "none(tool_first_guard/no_tools_run)"
 
     def test_tool_first_guard_gmail_list_no_tools_overrides_reply(self):
         pipeline = FinalizationPipeline()
@@ -579,7 +579,7 @@ class TestFinalizationPipeline:
         ctx = _make_ctx(orchestrator_output=output, tool_results=[], use_quality=False)
         result = pipeline.run(ctx)
         assert "gmail" in result.assistant_reply.lower()
-        assert result.finalizer_model == "none(tool_first_guard)"
+        assert result.finalizer_model == "none(tool_first_guard/no_tools_run)"
 
     def test_tool_first_guard_skips_when_requires_confirmation(self):
         pipeline = FinalizationPipeline()
