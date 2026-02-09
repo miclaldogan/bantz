@@ -83,7 +83,7 @@ class TTFTStatistics:
         # Check threshold
         if self.threshold_ms and ttft_ms > self.threshold_ms:
             self.violations += 1
-            logger.warning(
+            logger.debug(
                 f"[TTFT] Threshold violation: {self.phase} TTFT={ttft_ms}ms > {self.threshold_ms}ms "
                 f"(p95={self.p95_ms:.0f}ms, violations={self.violations}/{self.count})"
             )
@@ -144,10 +144,15 @@ class TTFTMonitor:
         self._stats: Dict[str, TTFTStatistics] = {}
         self._measurements: List[TTFTMeasurement] = []
         
-        # Default thresholds (Issue #158 requirements)
+        # Default thresholds (Issue #636: raised from 300→1000 for router,
+        # 500→2000 for finalizer to avoid false-positive violation spam).
+        # Env-configurable: BANTZ_TTFT_ROUTER_THRESHOLD_MS, BANTZ_TTFT_FINALIZER_THRESHOLD_MS
+        import os
+        router_th = int(os.getenv("BANTZ_TTFT_ROUTER_THRESHOLD_MS", "1000"))
+        finalizer_th = int(os.getenv("BANTZ_TTFT_FINALIZER_THRESHOLD_MS", "2000"))
         self._thresholds = {
-            "router": 300,      # 3B router p95 < 300ms
-            "finalizer": 500,   # 7B finalizer p95 < 500ms
+            "router": router_th,
+            "finalizer": finalizer_th,
         }
         
         self._enabled = True
