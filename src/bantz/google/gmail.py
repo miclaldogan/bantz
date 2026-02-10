@@ -618,39 +618,53 @@ def gmail_list_messages(
             estimated_count = None
 
         out_messages: list[dict[str, Any]] = []
-        for ref in msg_refs:
-            if not isinstance(ref, dict):
-                continue
-            msg_id = ref.get("id")
-            if not msg_id:
-                continue
+        msg_ids = [
+            str(ref.get("id"))
+            for ref in msg_refs
+            if isinstance(ref, dict) and ref.get("id")
+        ]
 
-            msg = (
-                svc.users()
-                .messages()
-                .get(
-                    userId="me",
-                    id=str(msg_id),
-                    format="metadata",
-                    metadataHeaders=["From", "Subject", "Date"],
+        if msg_ids:
+            # Batch fetch: single HTTP round-trip instead of N sequential calls
+            batch_results: dict[str, dict] = {}
+
+            def _batch_callback(request_id: str, response: Any, exception: Any) -> None:
+                if exception is not None:
+                    logger.warning("Batch gmail.get failed for %s: %s", request_id, exception)
+                    return
+                if isinstance(response, dict):
+                    batch_results[request_id] = response
+
+            batch = svc.new_batch_http_request(callback=_batch_callback)
+            for mid in msg_ids:
+                batch.add(
+                    svc.users()
+                    .messages()
+                    .get(
+                        userId="me",
+                        id=mid,
+                        format="metadata",
+                        metadataHeaders=["From", "Subject", "Date"],
+                    ),
+                    request_id=mid,
                 )
-                .execute()
-                or {}
-            )
+            batch.execute()
 
-            payload = msg.get("payload")
-            if not isinstance(payload, dict):
-                payload = {}
-
-            out_messages.append(
-                {
-                    "id": str(msg.get("id") or msg_id),
-                    "from": _get_header(payload, "From"),
-                    "subject": _get_header(payload, "Subject"),
-                    "snippet": str(msg.get("snippet") or ""),
-                    "date": _get_header(payload, "Date"),
-                }
-            )
+            # Preserve original order from list() response
+            for mid in msg_ids:
+                msg = batch_results.get(mid, {})
+                payload = msg.get("payload")
+                if not isinstance(payload, dict):
+                    payload = {}
+                out_messages.append(
+                    {
+                        "id": str(msg.get("id") or mid),
+                        "from": _get_header(payload, "From"),
+                        "subject": _get_header(payload, "Subject"),
+                        "snippet": str(msg.get("snippet") or ""),
+                        "date": _get_header(payload, "Date"),
+                    }
+                )
 
         return {
             "ok": True,
