@@ -902,7 +902,22 @@ class OrchestratorLoop:
 
                 # Unknown system tool (volume, brightness, etc.): fall through
 
-            # Calendar / other high-confidence: fall through to hint injection
+            # Issue #650: Destructive intents (calendar create/delete/update)
+            # are never bypassed — they always fall through to LLM planning
+            # so that safety guard and confirmation firewall remain active.
+            if preroute_match.intent.is_destructive:
+                logger.info(
+                    "[PREROUTE] Destructive intent blocked from bypass: "
+                    "intent=%s conf=%.2f rule=%s → routing to LLM",
+                    preroute_match.intent.value,
+                    preroute_match.confidence,
+                    preroute_match.rule_name,
+                )
+                self.event_bus.publish("preroute.destructive_blocked", {
+                    "intent": preroute_match.intent.value,
+                    "confidence": preroute_match.confidence,
+                    "rule": preroute_match.rule_name,
+                })
 
         # Issue #407: Prepare preroute hint for medium-confidence or calendar bypass
         if preroute_match.matched and preroute_match.confidence >= 0.5:
