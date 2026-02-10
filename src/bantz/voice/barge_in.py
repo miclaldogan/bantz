@@ -99,6 +99,7 @@ class BargeInController:
         self._active = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._lock = threading.Lock()
         self._barge_in_count = 0
         self._last_event: Optional[BargeInEvent] = None
 
@@ -112,11 +113,13 @@ class BargeInController:
 
     @property
     def barge_in_count(self) -> int:
-        return self._barge_in_count
+        with self._lock:
+            return self._barge_in_count
 
     @property
     def last_event(self) -> Optional[BargeInEvent]:
-        return self._last_event
+        with self._lock:
+            return self._last_event
 
     def start_monitoring(self) -> bool:
         """Start monitoring microphone for barge-in.
@@ -210,8 +213,9 @@ class BargeInController:
             energy=energy,
             duration_ms=duration_ms,
         )
-        self._last_event = event
-        self._barge_in_count += 1
+        with self._lock:
+            self._last_event = event
+            self._barge_in_count += 1
         self._active.clear()
 
         logger.info(
