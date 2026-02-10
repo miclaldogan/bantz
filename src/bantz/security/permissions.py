@@ -175,6 +175,9 @@ class PermissionManager:
     Controls access to dangerous operations by requiring
     explicit permission grants or user confirmation.
     
+    Permissions in ``NEVER_AUTO_ALLOW`` can never be moved to the
+    *never_ask* set — they always require explicit user confirmation.
+    
     Example:
         manager = PermissionManager()
         
@@ -192,6 +195,19 @@ class PermissionManager:
         # Grant permission
         manager.grant(Permission.FILE_READ, resource_pattern="~/*")
     """
+    
+    # These permissions must ALWAYS require user confirmation.
+    # They cannot be moved to the never_ask set.
+    NEVER_AUTO_ALLOW: Set[Permission] = {
+        Permission.FILE_DELETE,
+        Permission.FILE_EXECUTE,
+        Permission.TERMINAL_EXECUTE,
+        Permission.PROCESS_KILL,
+        Permission.SYSTEM_SHUTDOWN,
+        Permission.SYSTEM_SETTINGS,
+        Permission.CREDENTIAL_ACCESS,
+        Permission.BROWSER_INJECT,
+    }
     
     def __init__(
         self,
@@ -395,12 +411,21 @@ class PermissionManager:
         """
         Set whether a permission should never require asking.
         
+        Permissions in ``NEVER_AUTO_ALLOW`` are refused — they always
+        require explicit user confirmation.
+        
         Args:
             permission: Permission to configure
             never_ask: Whether to never ask
         """
         with self._lock:
             if never_ask:
+                if permission in self.NEVER_AUTO_ALLOW:
+                    logger.warning(
+                        "[PERM] Refused auto-allow for dangerous permission: %s",
+                        permission.name,
+                    )
+                    return
                 self._never_ask.add(permission)
                 self._always_ask.discard(permission)
             else:
