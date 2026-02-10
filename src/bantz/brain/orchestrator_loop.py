@@ -1971,7 +1971,8 @@ class OrchestratorLoop:
         finalizer_backend = getattr(self.finalizer_llm, "backend_name", None) if self.finalizer_llm is not None else None
 
         # Issue #517: Also capture which finalizer strategy was actually used
-        finalizer_strategy = getattr(output, "finalizer_model", "") or ""
+        prior_strategy = str(state.trace.get("finalizer_strategy") or "").strip()
+        finalizer_strategy = prior_strategy or (getattr(output, "finalizer_model", "") or "")
 
         state.update_trace(
             route_source="llm",  # Everything comes from LLM now
@@ -1991,6 +1992,30 @@ class OrchestratorLoop:
             finalizer_model=finalizer_model,
             finalizer_backend=finalizer_backend,
             finalizer_strategy=finalizer_strategy,
+        )
+
+        # Issue #662: Tier decision trace (router vs finalizer)
+        response_tier = str(state.trace.get("response_tier") or "").strip().lower()
+        tier_reason = str(state.trace.get("response_tier_reason") or "").strip()
+
+        planner_model_l = str(planner_model or "").lower()
+        planner_backend_l = str(planner_backend or "").lower()
+        router_label = "gemini" if ("gemini" in planner_model_l or planner_backend_l == "gemini") else "3b"
+
+        if response_tier == "quality":
+            if str(finalizer_strategy or "").strip().lower() == "fast_fallback":
+                finalizer_label = "3b_fallback"
+            else:
+                finalizer_label = "gemini"
+        else:
+            finalizer_label = "3b"
+
+        state.update_trace(
+            tier_decision={
+                "router": router_label,
+                "finalizer": finalizer_label,
+                "reason": tier_reason or "unknown",
+            }
         )
         
         if self.config.debug:
