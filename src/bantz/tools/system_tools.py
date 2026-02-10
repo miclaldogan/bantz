@@ -67,6 +67,13 @@ def system_status(*, include_env: bool = False, **_: Any) -> dict[str, Any]:
         from bantz.llm.privacy import get_cloud_privacy_config
         from bantz.llm.gemini_client import get_default_circuit_breaker, get_default_quota_tracker
         from bantz.llm.quality_status import get_quality_degradation_status
+        from bantz.llm.tier_env import (
+            get_tier_debug,
+            get_tier_force,
+            get_tier_force_finalizer,
+            get_tier_metrics,
+            get_tier_mode_enabled,
+        )
 
         privacy = get_cloud_privacy_config()
         api_key_configured = bool(
@@ -85,9 +92,17 @@ def system_status(*, include_env: bool = False, **_: Any) -> dict[str, Any]:
             "quota": asdict(quota.get_stats()) if quota is not None else None,
         }
         out["quality_degradation"] = get_quality_degradation_status()
+        out["tiering"] = {
+            "enabled": bool(get_tier_mode_enabled()),
+            "forced": get_tier_force() or "auto",
+            "finalizer_forced": get_tier_force_finalizer() or "auto",
+            "debug": bool(get_tier_debug()),
+            "metrics": bool(get_tier_metrics()),
+        }
     except Exception:
         out["gemini"] = None
         out["quality_degradation"] = None
+        out["tiering"] = None
 
     if include_env:
         # Never include secrets. Only expose a small allowlist of non-sensitive flags.

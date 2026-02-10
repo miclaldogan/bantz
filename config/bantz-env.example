@@ -7,7 +7,8 @@ BANTZ_VLLM_MODEL=Qwen/Qwen2.5-3B-Instruct-AWQ
 
 # === Gemini (optional) ===
 # GEMINI_API_KEY=
-BANTZ_CLOUD_ENABLED=false
+# Cloud privacy mode: local | cloud
+BANTZ_CLOUD_MODE=local
 BANTZ_GEMINI_MODEL=gemini-2.0-flash
 
 # === Audio ===
@@ -35,6 +36,11 @@ BANTZ_BRIEFING_HOUR=08
 # BANTZ_TIER_MODE=1
 # Force tier: fast | quality | auto
 # BANTZ_TIER_FORCE=auto
+# Force finalizer tier: fast | quality | auto
+# BANTZ_TIER_FORCE_FINALIZER=auto
+# Tiering debug / metrics
+# BANTZ_TIER_DEBUG=0
+# BANTZ_TIER_METRICS=0
 
 # === Metrics ===
 BANTZ_METRICS_ENABLED=true

@@ -449,7 +449,9 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
                     qos_timeout_s = float(qos.timeout_s)
                     qos_max_tokens = int(qos.max_tokens)
 
-                    if str(os.getenv("BANTZ_TIERED_DEBUG", "")).strip().lower() in {"1", "true", "yes", "on"}:
+                    from bantz.llm.tier_env import get_tier_debug
+
+                    if get_tier_debug():
                         tier = "quality" if use_quality else "fast"
                         print(
                             f"[tiered] voice_fallback tier={tier} reason={decision.reason} c={decision.complexity} w={decision.writing} r={decision.risk} qos_timeout_s={qos_timeout_s} qos_max_tokens={qos_max_tokens}"

@@ -404,7 +404,7 @@ def decide_finalization_tier(
     Env overrides:
         BANTZ_TIER_FORCE_FINALIZER=quality  → always use Gemini
         BANTZ_TIER_FORCE_FINALIZER=fast     → always skip Gemini
-        (legacy: BANTZ_FORCE_FINALIZER_TIER)
+        (legacy: BANTZ_FORCE_FINALIZER_TIER — deprecated)
 
     Returns:
         ``(use_quality, tier_name, tier_reason)``
@@ -413,10 +413,9 @@ def decide_finalization_tier(
         return False, "fast", "no_finalizer"
 
     # Issue #517: env override for forcing finalizer tier
-    forced = (
-        os.getenv("BANTZ_TIER_FORCE_FINALIZER", "")
-        or os.getenv("BANTZ_FORCE_FINALIZER_TIER", "")
-    ).strip().lower()
+    from bantz.llm.tier_env import get_tier_force_finalizer, get_tier_debug
+
+    forced = get_tier_force_finalizer()
     if forced in ("quality", "gemini"):
         logger.info("[TIER] forced=quality via tier env override")
         return True, "quality", "forced_quality"
@@ -460,9 +459,7 @@ def decide_finalization_tier(
         use_q = bool(decision.use_quality)
         tier = "quality" if use_q else "fast"
 
-        if str(os.getenv("BANTZ_TIERED_DEBUG", "")).strip().lower() in {
-            "1", "true", "yes", "on",
-        }:
+        if get_tier_debug():
             logger.info(
                 "[tiered] finalizer tier=%s reason=%s c=%s w=%s r=%s",
                 tier,
@@ -552,7 +549,20 @@ class FinalizationPipeline:
             return replace(output, assistant_reply=msg, finalizer_model="none(empty_data_guard)")
 
         # --- Quality finalizer path -----------------------------------------
-        if ctx.use_quality and self._quality is not None:
+        _quality_llm = getattr(self._quality, "_llm", None) if self._quality else None
+        _fast_llm = None
+        if self._fast is not None:
+            _fast_llm = getattr(self._fast, "_planner", None) or getattr(self._fast, "_llm", None)
+
+        quality_is_fast_fallback = bool(
+            ctx.use_quality
+            and self._quality is not None
+            and _quality_llm is not None
+            and _fast_llm is not None
+            and _quality_llm is _fast_llm
+        )
+
+        if ctx.use_quality and self._quality is not None and not quality_is_fast_fallback:
             text = self._try_quality(ctx)
             if text:
                 # Issue #653: language post-validation
@@ -574,6 +584,30 @@ class FinalizationPipeline:
                     ctx.state.update_trace(
                         response_tier=ctx.tier_name or "quality",
                         response_tier_reason=ctx.tier_reason or "quality_finalizer",
+                        finalizer_attempted=True,
+                        finalizer_used=False,
+                        finalizer_fallback="planner",
+                        finalizer_strategy="fast_fallback",
+                    )
+                    return replace(output, assistant_reply=text, finalizer_model=_fast_model or "fast(fallback)")
+
+        # --- Quality requested but unavailable → deterministic fast fallback --
+        if ctx.use_quality and (self._quality is None or quality_is_fast_fallback):
+            if self._fast is not None:
+                text = self._fast.finalize(ctx)
+                if text:
+                    # Issue #653: language post-validation
+                    text = _validate_reply_language(text)
+                    self._emit_quality_degraded(
+                        ctx,
+                        reason="quality_unavailable_fallback",
+                        quality_model=_quality_model,
+                        fast_model=_fast_model,
+                    )
+                    logger.warning("[TIER] quality requested but unavailable → fast fallback")
+                    ctx.state.update_trace(
+                        response_tier=ctx.tier_name or "quality",
+                        response_tier_reason=ctx.tier_reason or "quality_unavailable_fallback",
                         finalizer_attempted=True,
                         finalizer_used=False,
                         finalizer_fallback="planner",

@@ -8,6 +8,12 @@ from typing import Iterable, Optional
 from bantz.llm.base import LLMClientProtocol
 
 from . import create_fast_client, create_quality_client
+from .tier_env import (
+    get_tier_debug,
+    get_tier_force,
+    get_tier_metrics,
+    get_tier_mode_enabled,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -39,14 +45,6 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if not raw:
         return bool(default)
     return raw in {"1", "true", "yes", "y", "on", "enable", "enabled"}
-
-def _env_raw(name: str, legacy: str | None = None) -> str:
-    raw = str(os.getenv(name, "")).strip()
-    if raw:
-        return raw
-    if legacy:
-        return str(os.getenv(legacy, "")).strip()
-    return ""
 
 def _env_int(name: str, default: int) -> int:
     raw = str(os.getenv(name, "")).strip()
@@ -321,20 +319,14 @@ def decide_tier(
     """Decide whether to escalate to the quality model.
 
     Behavior is env-configurable:
-    - BANTZ_TIER_MODE=1 (default: ON) enables auto decisions.
-      Set BANTZ_TIER_MODE=0 to disable and always use fast tier.
-      (legacy alias: BANTZ_TIERED_MODE)
-    - BANTZ_TIER_FORCE=fast|quality|auto forces tier
-      (legacy: BANTZ_LLM_TIER)
+        - BANTZ_TIER_MODE=1 (default: ON) enables auto decisions.
+            Set BANTZ_TIER_MODE=0 to disable and always use fast tier.
+            (legacy alias: BANTZ_TIERED_MODE — deprecated)
+        - BANTZ_TIER_FORCE=fast|quality|auto forces tier
+            (legacy: BANTZ_LLM_TIER — deprecated)
     """
-    debug = _env_flag("BANTZ_TIER_DEBUG", default=False) or _env_flag(
-        "BANTZ_TIERED_DEBUG", default=False
-    )
-    metrics = (
-        _env_flag("BANTZ_TIER_METRICS", default=False)
-        or _env_flag("BANTZ_TIERED_METRICS", default=False)
-        or _env_flag("BANTZ_LLM_METRICS", default=False)
-    )
+    debug = get_tier_debug()
+    metrics = get_tier_metrics()
 
     def emit(d: TierDecision) -> None:
         if not metrics:
@@ -349,7 +341,7 @@ def decide_tier(
             d.risk,
         )
 
-    forced = _env_raw("BANTZ_TIER_FORCE", "BANTZ_LLM_TIER").strip().lower()
+    forced = get_tier_force()
     if forced in {"fast", "3b", "small"}:
         d = TierDecision(False, "forced_fast", 0, 0, 0)
         if debug:
@@ -363,10 +355,7 @@ def decide_tier(
         emit(d)
         return d
 
-    if not (
-        _env_flag("BANTZ_TIER_MODE", default=True)
-        or _env_flag("BANTZ_TIERED_MODE", default=True)
-    ):
+    if not get_tier_mode_enabled():
         # Tiering explicitly disabled via env.
         d = TierDecision(False, "tiering_disabled", 0, 0, 0)
         if debug:
