@@ -152,8 +152,10 @@ class SecretsVault:
             try:
                 with open(key_path, "rb") as f:
                     return f.read()
-            except IOError:
-                pass
+            except IOError as e:
+                raise VaultError(
+                    f"Vault key file exists but cannot be read: {key_path} — {e}"
+                ) from e
         
         # Generate new key
         key = os.urandom(32)
@@ -163,8 +165,11 @@ class SecretsVault:
                 f.write(key)
             # Set restrictive permissions
             os.chmod(key_path, 0o600)
-        except IOError:
-            pass
+        except IOError as e:
+            raise VaultError(
+                f"Vault key could not be written to {key_path}: {e}. "
+                "Without a persisted key, secrets will be lost on restart."
+            ) from e
         
         return key
     
