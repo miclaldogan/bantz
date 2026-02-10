@@ -677,7 +677,7 @@ class OrchestratorLoop:
                 slots={},
                 confidence=0.0,
                 tool_plan=[],
-                assistant_reply=f"Efendim, bir sorun oluştu: {e}",
+                assistant_reply="Efendim, bir sorun oluştu. Lütfen tekrar deneyin.",
                 raw_output={"error": str(e)},
             )
             return fallback, state
