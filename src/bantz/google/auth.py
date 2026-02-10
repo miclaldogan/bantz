@@ -154,5 +154,6 @@ def get_credentials(
 
         cfg.token_path.parent.mkdir(parents=True, exist_ok=True)
         cfg.token_path.write_text(creds.to_json(), encoding="utf-8")
+        os.chmod(cfg.token_path, 0o600)  # owner-only: token grants full Google account access
 
     return creds
