@@ -38,7 +38,7 @@ class RepairTracker:
     and exposes a ``repairs_per_100`` metric for dashboards.
     """
 
-    CONFIDENCE_PENALTY: float = 0.7  # multiply confidence when repair is applied
+    CONFIDENCE_PENALTY: float = 0.9  # multiply confidence when repair is applied
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
