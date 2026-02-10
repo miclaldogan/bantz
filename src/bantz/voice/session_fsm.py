@@ -27,6 +27,7 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, List, Optional
@@ -132,7 +133,7 @@ class VoiceFSM:
         self._state = VoiceState.WAKE_ONLY
         self._last_activity = self._clock()
         self._state_entered_at = self._clock()
-        self._history: List[StateTransition] = []
+        self._history: deque[StateTransition] = deque(maxlen=100)
         self._lock = threading.Lock()
 
     @property
