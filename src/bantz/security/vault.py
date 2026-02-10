@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import os
 import threading
 from dataclasses import dataclass, field
@@ -31,6 +32,8 @@ except ImportError:
         "The 'cryptography' package is required for the secrets vault. "
         "Install it with: pip install cryptography"
     )
+
+logger = logging.getLogger(__name__)
 
 
 class SecretType(Enum):
@@ -192,8 +195,9 @@ class SecretsVault:
             )
             with os.fdopen(fd, "w") as f:
                 json.dump(self._secrets, f, indent=2)
-        except IOError:
-            pass
+        except IOError as e:
+            logger.error("Vault save failed: %s", e)
+            raise
     
     def _encrypt(self, value: str) -> str:
         """Encrypt a value using Fernet."""
