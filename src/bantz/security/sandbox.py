@@ -18,6 +18,7 @@ from datetime import datetime
 from enum import Enum
 import logging
 import os
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -245,10 +246,16 @@ class Sandbox:
         Returns:
             SandboxResult
         """
+        # Issue #691: NEVER use shell=True — tokenize string commands
+        # with shlex.split to prevent command injection attacks.
         if isinstance(command, str):
-            shell = True
-        else:
-            shell = False
+            try:
+                command = shlex.split(command)
+            except ValueError as e:
+                return SandboxResult(
+                    success=False,
+                    error=f"Invalid command syntax: {e}",
+                )
         
         start_time = time.time()
         result = SandboxResult(success=False)
@@ -268,7 +275,7 @@ class Sandbox:
             
             process = subprocess.Popen(
                 command,
-                shell=shell,
+                shell=False,
                 stdin=subprocess.PIPE if stdin else None,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
