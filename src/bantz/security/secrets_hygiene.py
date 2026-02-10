@@ -418,6 +418,10 @@ class LoggerRedactionHandler(logging.Handler):
                 exc_info=record.exc_info,
             )
             
+            # Redact exception text (traceback strings may contain secrets)
+            if record.exc_text:
+                new_record.exc_text = self._redact(record.exc_text)
+            
             # Forward to wrapped handler
             self.wrapped.emit(new_record)
         except Exception:
