@@ -54,9 +54,14 @@ REDACTION_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
         "[EMAIL]",
         "Email address",
     ),
-    # Credit card numbers — 4 groups of 4 digits
+    # Credit card numbers — 4 groups of 4 digits with valid BIN prefixes
+    # Only match cards starting with 4 (Visa), 5 (MC), 3 (Amex/Diners),
+    # 6 (Discover), or 9 (Turkish domestic) to avoid false positives on
+    # arbitrary 16-digit sequences.
     (
-        re.compile(r"\b\d{4}[\s.-]?\d{4}[\s.-]?\d{4}[\s.-]?\d{4}\b"),
+        re.compile(
+            r"\b[3-6,9]\d{3}[\s.-]?\d{4}[\s.-]?\d{4}[\s.-]?\d{4}\b"
+        ),
         "[KART]",
         "Credit card number",
     ),
@@ -66,9 +71,17 @@ REDACTION_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
         "[IBAN]",
         "IBAN number",
     ),
-    # IP addresses
+    # IP addresses — validate each octet is 0-255, reject version strings
+    # by requiring that the match is NOT preceded by a letter/dot
     (
-        re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"),
+        re.compile(
+            r"(?<![.\w])"
+            r"(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\."
+            r"(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\."
+            r"(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\."
+            r"(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)"
+            r"(?![.\w])"
+        ),
         "[IP]",
         "IP address",
     ),
