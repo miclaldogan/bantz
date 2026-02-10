@@ -811,6 +811,7 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
                     llm = llm_fast
                 
                 print("🤖 LLM'e soruluyor...")
+                history[:] = history[-20:]
                 history.append(LLMMessage("user", text))
                 
                 try:
