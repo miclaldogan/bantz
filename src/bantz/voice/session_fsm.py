@@ -233,7 +233,7 @@ class VoiceFSM:
 
             if self._state == VoiceState.ACTIVE_LISTEN:
                 elapsed = now - self._last_activity
-                if elapsed >= self.config.silence_threshold:
+                if elapsed >= self.config.active_listen_ttl:
                     self._transition(VoiceState.WAKE_ONLY, "silence_timeout")
 
             elif self._state == VoiceState.WAKE_ONLY and self.config.idle_sleep_enabled:
@@ -247,7 +247,7 @@ class VoiceFSM:
             now = self._clock()
 
             if self._state == VoiceState.ACTIVE_LISTEN:
-                remaining = self.config.silence_threshold - (now - self._last_activity)
+                remaining = self.config.active_listen_ttl - (now - self._last_activity)
                 return max(0.0, remaining)
 
             if self._state == VoiceState.WAKE_ONLY and self.config.idle_sleep_enabled:
