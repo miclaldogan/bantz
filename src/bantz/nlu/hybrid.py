@@ -68,6 +68,7 @@ class HybridConfig:
     caching_enabled: bool = True
     cache_size: int = 1000
     stats_enabled: bool = True
+    max_contexts: int = 1000  # max session contexts in memory (Issue #652)
     
     # LLM config
     llm_model: str = "qwen2.5:3b-instruct"
@@ -707,16 +708,30 @@ class HybridNLU:
     
     def _get_context(self, session_id: str) -> NLUContext:
         """Get or create context for session.
-        
+
+        Enforces ``config.max_contexts`` — when the limit is reached
+        the oldest session (by timestamp) is evicted so memory stays
+        bounded in long-running server processes (Issue #652).
+
         Args:
             session_id: Session identifier
-        
+
         Returns:
             NLUContext for session
         """
         if session_id not in self._context:
+            # Evict oldest sessions when at capacity
+            while len(self._context) >= self.config.max_contexts:
+                self._evict_oldest_context()
             self._context[session_id] = NLUContext(session_id=session_id)
         return self._context[session_id]
+
+    def _evict_oldest_context(self) -> None:
+        """Evict the session context with the oldest timestamp."""
+        if not self._context:
+            return
+        oldest_sid = min(self._context, key=lambda s: self._context[s].timestamp)
+        del self._context[oldest_sid]
     
     # ========================================================================
     # Public Methods

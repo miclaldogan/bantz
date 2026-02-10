@@ -1763,3 +1763,286 @@ class TestIssue651AdaptiveUsesHybrid:
 
             assert legacy.intent == expected_intent, f"Legacy failed on '{text}'"
             assert hybrid.intent == expected_intent, f"Hybrid failed on '{text}'"
+
+
+# ============================================================================
+# Issue #652 — Memory Leak Prevention: Bounded Dicts
+# ============================================================================
+
+
+class TestIssue652ClassifierCacheBounded:
+    """Verify LLMIntentClassifier._cache is bounded and sweeps expired entries."""
+
+    def test_cache_respects_max_size(self):
+        """Cache must not grow beyond max_cache_size."""
+        from bantz.nlu.classifier import LLMIntentClassifier, ClassifierConfig
+        from bantz.nlu.types import IntentResult
+
+        config = ClassifierConfig(
+            cache_enabled=True,
+            max_cache_size=5,
+            cache_ttl_seconds=60,
+        )
+        classifier = LLMIntentClassifier(config=config)
+
+        # Insert 10 entries directly via _put_cache
+        for i in range(10):
+            result = IntentResult(intent=f"intent_{i}", slots={}, confidence=0.9,
+                                  original_text=f"text_{i}", source="test")
+            classifier._put_cache(f"key_{i}", result)
+
+        assert len(classifier._cache) <= 5, (
+            f"Cache grew to {len(classifier._cache)}, expected <= 5"
+        )
+
+    def test_cache_evicts_oldest_entry(self):
+        """When at capacity, the oldest entry should be evicted."""
+        from bantz.nlu.classifier import LLMIntentClassifier, ClassifierConfig
+        from bantz.nlu.types import IntentResult
+
+        config = ClassifierConfig(
+            cache_enabled=True,
+            max_cache_size=3,
+            cache_ttl_seconds=60,
+            cache_sweep_interval=999,  # disable sweep for this test
+        )
+        classifier = LLMIntentClassifier(config=config)
+
+        for i in range(3):
+            result = IntentResult(intent=f"intent_{i}", slots={}, confidence=0.9,
+                                  original_text=f"text_{i}", source="test")
+            classifier._put_cache(f"key_{i}", result)
+
+        # All three should be present
+        assert "key_0" in classifier._cache
+        assert "key_1" in classifier._cache
+        assert "key_2" in classifier._cache
+
+        # Add a 4th — key_0 (oldest) should be evicted
+        result = IntentResult(intent="intent_3", slots={}, confidence=0.9,
+                              original_text="text_3", source="test")
+        classifier._put_cache("key_3", result)
+
+        assert "key_0" not in classifier._cache, "Oldest entry should be evicted"
+        assert "key_3" in classifier._cache
+        assert len(classifier._cache) == 3
+
+    def test_sweep_removes_expired_entries(self):
+        """_sweep_expired should remove TTL-expired entries."""
+        import time
+        from bantz.nlu.classifier import LLMIntentClassifier, ClassifierConfig
+        from bantz.nlu.types import IntentResult
+
+        config = ClassifierConfig(
+            cache_enabled=True,
+            max_cache_size=100,
+            cache_ttl_seconds=0.01,  # 10ms TTL
+        )
+        classifier = LLMIntentClassifier(config=config)
+
+        # Insert entries
+        for i in range(5):
+            result = IntentResult(intent=f"intent_{i}", slots={}, confidence=0.9,
+                                  original_text=f"text_{i}", source="test")
+            classifier._cache[f"key_{i}"] = (result, time.time())
+
+        # Wait for expiry
+        time.sleep(0.02)
+
+        removed = classifier._sweep_expired()
+        assert removed == 5
+        assert len(classifier._cache) == 0
+
+    def test_periodic_sweep_triggers(self):
+        """Sweep should trigger every cache_sweep_interval classifies."""
+        import time
+        from bantz.nlu.classifier import LLMIntentClassifier, ClassifierConfig
+        from bantz.nlu.types import IntentResult
+
+        config = ClassifierConfig(
+            cache_enabled=True,
+            max_cache_size=100,
+            cache_ttl_seconds=0.001,  # 1ms TTL
+            cache_sweep_interval=3,
+        )
+        classifier = LLMIntentClassifier(config=config)
+
+        # Pre-load expired entries
+        for i in range(5):
+            result = IntentResult(intent=f"intent_{i}", slots={}, confidence=0.9,
+                                  original_text=f"text_{i}", source="test")
+            classifier._cache[f"old_key_{i}"] = (result, time.time() - 1.0)
+
+        assert len(classifier._cache) == 5
+
+        # _put_cache increments _classify_count; on 3rd call sweep fires
+        for i in range(3):
+            r = IntentResult(intent=f"new_{i}", slots={}, confidence=0.9,
+                             original_text=f"new_text_{i}", source="test")
+            classifier._put_cache(f"new_key_{i}", r)
+
+        # After sweep, old expired entries should be gone
+        assert all(f"old_key_{i}" not in classifier._cache for i in range(5)), \
+            "Expired entries should have been swept"
+
+    def test_cache_disabled_put_does_nothing(self):
+        """_put_cache should be a no-op when cache is disabled."""
+        from bantz.nlu.classifier import LLMIntentClassifier, ClassifierConfig
+        from bantz.nlu.types import IntentResult
+
+        config = ClassifierConfig(cache_enabled=False)
+        classifier = LLMIntentClassifier(config=config)
+
+        result = IntentResult(intent="test", slots={}, confidence=0.9,
+                              original_text="test", source="test")
+        classifier._put_cache("key", result)
+
+        assert len(classifier._cache) == 0
+
+    def test_cache_stats_includes_max_size(self):
+        """get_cache_stats should report max_size."""
+        from bantz.nlu.classifier import LLMIntentClassifier, ClassifierConfig
+
+        config = ClassifierConfig(max_cache_size=42)
+        classifier = LLMIntentClassifier(config=config)
+
+        stats = classifier.get_cache_stats()
+        assert stats["max_size"] == 42
+
+
+class TestIssue652HybridContextBounded:
+    """Verify HybridNLU._context dict is bounded."""
+
+    def test_context_respects_max_size(self):
+        """Context dict must not grow beyond max_contexts."""
+        from bantz.nlu.hybrid import HybridNLU, HybridConfig
+
+        config = HybridConfig(
+            llm_enabled=False,
+            max_contexts=5,
+        )
+        nlu = HybridNLU(config=config)
+
+        for i in range(10):
+            nlu.parse(f"test {i}", session_id=f"session_{i}")
+
+        assert len(nlu._context) <= 5, (
+            f"Context dict grew to {len(nlu._context)}, expected <= 5"
+        )
+
+    def test_context_evicts_oldest_session(self):
+        """Oldest session by timestamp should be evicted first."""
+        from bantz.nlu.hybrid import HybridNLU, HybridConfig
+
+        config = HybridConfig(
+            llm_enabled=False,
+            max_contexts=3,
+        )
+        nlu = HybridNLU(config=config)
+
+        # Create 3 sessions with staggered timestamps
+        nlu.parse("test a", session_id="session_a")
+        nlu.parse("test b", session_id="session_b")
+        nlu.parse("test c", session_id="session_c")
+
+        # Force timestamps to be ordered
+        nlu._context["session_a"].timestamp = 100.0
+        nlu._context["session_b"].timestamp = 200.0
+        nlu._context["session_c"].timestamp = 300.0
+
+        # Adding 4th should evict session_a (oldest timestamp)
+        nlu.parse("test d", session_id="session_d")
+
+        assert "session_a" not in nlu._context, "Oldest session should be evicted"
+        assert "session_d" in nlu._context
+        assert len(nlu._context) == 3
+
+    def test_existing_session_not_evicted_on_reuse(self):
+        """Accessing an existing session should not cause eviction."""
+        from bantz.nlu.hybrid import HybridNLU, HybridConfig
+
+        config = HybridConfig(
+            llm_enabled=False,
+            max_contexts=3,
+        )
+        nlu = HybridNLU(config=config)
+
+        nlu.parse("test a", session_id="session_a")
+        nlu.parse("test b", session_id="session_b")
+        nlu.parse("test c", session_id="session_c")
+
+        # Re-use session_a — no eviction should happen
+        nlu.parse("test a again", session_id="session_a")
+
+        assert len(nlu._context) == 3
+        assert "session_a" in nlu._context
+
+
+class TestIssue652ClarificationBounded:
+    """Verify ClarificationManager._pending and _history are bounded."""
+
+    def test_pending_respects_max_size(self):
+        """Pending dict must not grow beyond _MAX_PENDING."""
+        from bantz.nlu.clarification import ClarificationManager
+        from bantz.nlu.types import ClarificationRequest
+
+        manager = ClarificationManager()
+        # Override limit for testing
+        manager._MAX_PENDING = 5
+
+        for i in range(10):
+            req = ClarificationRequest(
+                question=f"question_{i}",
+                original_text=f"text_{i}",
+            )
+            manager.set_pending(f"session_{i}", req)
+
+        assert len(manager._pending) <= 5, (
+            f"Pending grew to {len(manager._pending)}, expected <= 5"
+        )
+
+    def test_pending_fifo_eviction(self):
+        """Oldest pending entry (by insertion order) should be evicted first."""
+        from bantz.nlu.clarification import ClarificationManager
+        from bantz.nlu.types import ClarificationRequest
+
+        manager = ClarificationManager()
+        manager._MAX_PENDING = 3
+
+        for i in range(3):
+            req = ClarificationRequest(
+                question=f"q_{i}",
+                original_text=f"t_{i}",
+            )
+            manager.set_pending(f"session_{i}", req)
+
+        # Add 4th — session_0 should be evicted (FIFO)
+        req = ClarificationRequest(question="q_3", original_text="t_3")
+        manager.set_pending("session_3", req)
+
+        assert "session_0" not in manager._pending
+        assert "session_3" in manager._pending
+        assert len(manager._pending) == 3
+
+    def test_history_respects_max_size(self):
+        """History list must not grow beyond _MAX_HISTORY."""
+        from bantz.nlu.clarification import ClarificationManager
+        from bantz.nlu.types import ClarificationRequest
+
+        manager = ClarificationManager()
+        manager._MAX_HISTORY = 5
+
+        for i in range(10):
+            req = ClarificationRequest(
+                question=f"q_{i}",
+                original_text=f"t_{i}",
+            )
+            manager._history.append((req, f"intent_{i}"))
+            if len(manager._history) > manager._MAX_HISTORY:
+                manager._history = manager._history[-manager._MAX_HISTORY:]
+
+        assert len(manager._history) <= 5, (
+            f"History grew to {len(manager._history)}, expected <= 5"
+        )
+        # Most recent entries should survive
+        assert manager._history[-1][1] == "intent_9"

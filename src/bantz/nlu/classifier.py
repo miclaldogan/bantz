@@ -48,6 +48,8 @@ class ClassifierConfig:
         min_confidence_threshold: Below this, mark as ambiguous
         cache_enabled: Whether to cache results
         cache_ttl_seconds: Cache entry lifetime
+        max_cache_size: Maximum cache entries (prevents memory leak)
+        cache_sweep_interval: Sweep expired entries every N classifies
     """
     
     model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ"
@@ -57,6 +59,8 @@ class ClassifierConfig:
     min_confidence_threshold: float = 0.5
     cache_enabled: bool = True
     cache_ttl_seconds: float = 300.0  # 5 minutes
+    max_cache_size: int = 1000
+    cache_sweep_interval: int = 50  # sweep every N classifies
 
 
 # ============================================================================
@@ -311,6 +315,7 @@ class LLMIntentClassifier:
         self.config = config or ClassifierConfig()
         self._client = llm_client
         self._cache: Dict[str, Tuple[IntentResult, float]] = {}  # text -> (result, timestamp)
+        self._classify_count: int = 0  # classify call counter for periodic sweep
     
     @property
     def client(self):
@@ -365,9 +370,8 @@ class LLMIntentClassifier:
             # Parse response
             result = self._parse_response(response, text, start_time)
             
-            # Cache result
-            if self.config.cache_enabled:
-                self._cache[cache_key] = (result, time.time())
+            # Cache result (bounded — Issue #652)
+            self._put_cache(cache_key, result)
             
             return result
             
@@ -623,7 +627,48 @@ class LLMIntentClassifier:
             return None
         
         return result
-    
+
+    def _put_cache(self, key: str, result: IntentResult) -> None:
+        """Store a result in the cache, enforcing max size.
+
+        When the cache exceeds ``max_cache_size`` the oldest entry
+        (by insertion timestamp) is evicted.  A periodic sweep of
+        expired entries runs every ``cache_sweep_interval`` classifies.
+        """
+        if not self.config.cache_enabled:
+            return
+
+        # Periodic sweep — remove all TTL-expired entries
+        self._classify_count += 1
+        if self._classify_count % self.config.cache_sweep_interval == 0:
+            self._sweep_expired()
+
+        # Evict oldest if at capacity
+        while len(self._cache) >= self.config.max_cache_size:
+            self._evict_oldest()
+
+        self._cache[key] = (result, time.time())
+
+    def _sweep_expired(self) -> int:
+        """Remove all TTL-expired cache entries.
+
+        Returns:
+            Number of entries removed.
+        """
+        now = time.time()
+        ttl = self.config.cache_ttl_seconds
+        expired = [k for k, (_, ts) in self._cache.items() if now - ts > ttl]
+        for k in expired:
+            del self._cache[k]
+        return len(expired)
+
+    def _evict_oldest(self) -> None:
+        """Evict the single oldest cache entry by timestamp."""
+        if not self._cache:
+            return
+        oldest_key = min(self._cache, key=lambda k: self._cache[k][1])
+        del self._cache[oldest_key]
+
     def clear_cache(self):
         """Clear the result cache."""
         self._cache.clear()
@@ -632,6 +677,7 @@ class LLMIntentClassifier:
         """Get cache statistics."""
         return {
             "size": len(self._cache),
+            "max_size": self.config.max_cache_size,
             "enabled": self.config.cache_enabled,
             "ttl_seconds": self.config.cache_ttl_seconds,
         }
