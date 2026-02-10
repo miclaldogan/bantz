@@ -389,6 +389,16 @@ def main(argv: list[str] | None = None) -> int:
 
         return google_main(argv[1:])
 
+    # Proactive Engine CLI (Issue #835)
+    if argv and argv[0] == "proactive":
+        from bantz.proactive.cli import handle_proactive_command, add_proactive_subparser
+
+        proactive_p = argparse.ArgumentParser(prog="bantz")
+        proactive_subs = proactive_p.add_subparsers(dest="command")
+        add_proactive_subparser(proactive_subs)
+        proactive_args = proactive_p.parse_args(argv)
+        return handle_proactive_command(proactive_args)
+
     # Declarative skill CLI (Issue #833)
     if argv and argv[0] == "skill":
         from bantz.skills.declarative.cli import handle_skill_command, add_skill_subparser
