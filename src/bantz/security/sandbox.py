@@ -146,6 +146,20 @@ class Sandbox:
         # Run a command
         result = sandbox.execute_command(["python", "script.py"])
     """
+
+    # Issue #696: Environment variables that can bypass sandbox isolation.
+    # These enable library injection, module hijack, or PATH manipulation.
+    BLOCKED_ENV_VARS: Set[str] = {
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "NODE_OPTIONS",
+        "PERL5LIB",
+        "RUBYLIB",
+    }
     
     def __init__(self, config: Optional[SandboxConfig] = None):
         """
@@ -158,6 +172,21 @@ class Sandbox:
         self._temp_dir: Optional[Path] = None
         self._active = False
         self._lock = threading.Lock()
+
+    @classmethod
+    def _sanitize_env(cls, env: Dict[str, str]) -> Dict[str, str]:
+        """Return a copy of *env* with dangerous variables stripped.
+
+        Issue #696: Variables like LD_PRELOAD, PYTHONPATH etc. allow
+        sandbox escape via library/module injection.
+        """
+        clean: Dict[str, str] = {}
+        for key, value in env.items():
+            if key.upper() in cls.BLOCKED_ENV_VARS:
+                logger.warning("[SANDBOX] Blocked dangerous env var: %s", key)
+                continue
+            clean[key] = value
+        return clean
     
     @property
     def temp_dir(self) -> Path:
@@ -261,11 +290,11 @@ class Sandbox:
         start_time = time.time()
         result = SandboxResult(success=False)
         
-        # Prepare environment
-        run_env = os.environ.copy()
-        run_env.update(self.config.environment)
+        # Prepare environment — filter dangerous variables
+        run_env = self._sanitize_env(os.environ)
+        run_env.update(self._sanitize_env(self.config.environment))
         if env:
-            run_env.update(env)
+            run_env.update(self._sanitize_env(env))
         
         # Working directory
         work_dir = cwd or self.temp_dir
