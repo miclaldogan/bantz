@@ -145,11 +145,15 @@ export BANTZ_VLLM_QUALITY_MODEL=auto
 
 ## Tiered routing (3B → Gemini eskalasyon)
 
-Varsayılan davranış: Bantz çoğu yerde **3B (fast)** ile gider.
-Quality otomatik devreye girsin istiyorsan:
+Varsayılan davranış: Tiering **açık** gelir. Basit istekler 3B (fast) ile gider,
+karmaşık/yazım gerektiren istekler quality tier'a (Gemini) otomatik escalate olur.
+
+Kapatmak istersen:
 
 ```bash
-export BANTZ_TIERED_MODE=1
+export BANTZ_TIER_MODE=0       # Tiering'i kapat, her şey fast tier
+# veya legacy alias:
+export BANTZ_TIERED_MODE=0
 ```
 
 İsteğe göre zorlamak için:

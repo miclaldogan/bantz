@@ -30,6 +30,12 @@ BANTZ_WAKE_SENSITIVITY=0.5
 BANTZ_MORNING_BRIEFING=false
 BANTZ_BRIEFING_HOUR=08
 
+# === Tiering ===
+# Tiering is ON by default. Set to 0 to disable.
+# BANTZ_TIER_MODE=1
+# Force tier: fast | quality | auto
+# BANTZ_TIER_FORCE=auto
+
 # === Metrics ===
 BANTZ_METRICS_ENABLED=true
 BANTZ_LATENCY_BUDGET_MS=3000
