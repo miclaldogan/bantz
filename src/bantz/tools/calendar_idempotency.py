@@ -358,14 +358,16 @@ def normalize_title(title: str) -> str:
 def normalize_datetime(dt_str: str) -> str:
     """Normalize datetime string for consistent key generation.
     
-    Parses the datetime and formats it in a consistent way.
+    Parses the datetime, converts to UTC, and formats in a consistent way.
+    This ensures that the same moment in time (e.g. Europe/Istanbul vs UTC+3)
+    always produces the same normalized string for idempotency key hashing.
     Falls back to stripping whitespace if parsing fails.
     
     Args:
         dt_str: Datetime string (ISO format expected)
     
     Returns:
-        Normalized datetime string
+        Normalized datetime string (UTC)
     """
     if not dt_str:
         return ""
@@ -378,6 +380,9 @@ def normalize_datetime(dt_str: str) -> str:
         if "T" in dt_str:
             # ISO format with time
             dt = datetime.fromisoformat(dt_str)
+            # Convert to UTC for consistent hashing
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc)
             return dt.isoformat()
         else:
             # Date only
