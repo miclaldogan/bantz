@@ -573,8 +573,8 @@ class AuditLogger:
                     parsed = urlparse(entry.resource)
                     if parsed.netloc:
                         domains.add(parsed.netloc)
-                except Exception:
-                    pass
+                except (ValueError, AttributeError) as exc:
+                    logger.debug("Failed to parse resource URL %r: %s", entry.resource, exc)
             
             # Track file operations
             if entry.action in ("file_read", "file_write", "file_delete", "file_create"):
