@@ -61,6 +61,34 @@ def system_status(*, include_env: bool = False, **_: Any) -> dict[str, Any]:
 
     out["memory"] = mem or None
 
+    # --- Gemini / quality status (Issue #658) -------------------------------
+    try:
+        from dataclasses import asdict
+        from bantz.llm.privacy import get_cloud_privacy_config
+        from bantz.llm.gemini_client import get_default_circuit_breaker, get_default_quota_tracker
+        from bantz.llm.quality_status import get_quality_degradation_status
+
+        privacy = get_cloud_privacy_config()
+        api_key_configured = bool(
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+            or os.getenv("BANTZ_GEMINI_API_KEY")
+        )
+
+        circuit = get_default_circuit_breaker()
+        quota = get_default_quota_tracker()
+
+        out["gemini"] = {
+            "cloud_mode": str(getattr(privacy, "mode", "") or ""),
+            "api_key_configured": api_key_configured,
+            "circuit_state": str(getattr(circuit, "state", "") or ""),
+            "quota": asdict(quota.get_stats()) if quota is not None else None,
+        }
+        out["quality_degradation"] = get_quality_degradation_status()
+    except Exception:
+        out["gemini"] = None
+        out["quality_degradation"] = None
+
     if include_env:
         # Never include secrets. Only expose a small allowlist of non-sensitive flags.
         allow = [

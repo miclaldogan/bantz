@@ -18,6 +18,7 @@ import json
 import os
 import re
 import time
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -61,6 +62,31 @@ class ClassifierConfig:
     cache_ttl_seconds: float = 300.0  # 5 minutes
     max_cache_size: int = 1000
     cache_sweep_interval: int = 50  # sweep every N classifies
+
+
+# ============================================================================
+# Global classifier singleton (thread-safe)
+# ============================================================================
+
+_classifier_instance: Optional["LLMIntentClassifier"] = None
+_classifier_lock = threading.Lock()
+
+
+def get_classifier() -> "LLMIntentClassifier":
+    """Get the canonical global classifier instance (thread-safe)."""
+    global _classifier_instance
+    if _classifier_instance is None:
+        with _classifier_lock:
+            if _classifier_instance is None:
+                _classifier_instance = LLMIntentClassifier()
+    return _classifier_instance
+
+
+def reset_classifier_instance() -> None:
+    """Reset the global classifier instance (testing only)."""
+    global _classifier_instance
+    with _classifier_lock:
+        _classifier_instance = None
 
 
 # ============================================================================
@@ -702,7 +728,7 @@ def classify_batch(
         List of IntentResults
     """
     if classifier is None:
-        classifier = LLMIntentClassifier()
+        classifier = get_classifier()
     
     return [classifier.classify(text) for text in texts]
 
@@ -721,5 +747,5 @@ def quick_classify(text: str) -> IntentResult:
     Returns:
         IntentResult
     """
-    classifier = LLMIntentClassifier()
+    classifier = get_classifier()
     return classifier.classify(text)

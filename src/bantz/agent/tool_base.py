@@ -225,10 +225,18 @@ class ToolBase(ABC):
             "array": list,
             "object": dict,
         }
-        
+
         if expected_type not in type_map:
             return True  # Unknown type, allow
-        
+
+        # bool is a subclass of int in Python; ensure correct ordering
+        if expected_type == "boolean":
+            return isinstance(value, bool)
+        if expected_type == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if expected_type == "number":
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+
         return isinstance(value, type_map[expected_type])
     
     @property

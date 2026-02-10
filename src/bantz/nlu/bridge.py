@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import threading
 from typing import Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 
@@ -34,6 +35,7 @@ from bantz.nlu.hybrid import HybridNLU, HybridConfig
 # ============================================================================
 
 _nlu_instance: Optional[HybridNLU] = None
+_nlu_lock = threading.Lock()
 
 # Hybrid NLU varsayılan AÇIK.  Env-var ile kapatılabilir:
 #   BANTZ_HYBRID_NLU=0  → legacy regex-only parse_intent
@@ -50,12 +52,14 @@ def get_nlu() -> HybridNLU:
     """
     global _nlu_instance
     if _nlu_instance is None:
-        config = HybridConfig(
-            llm_enabled=True,
-            clarification_enabled=True,
-            slot_extraction_enabled=True,
-        )
-        _nlu_instance = HybridNLU(config=config)
+        with _nlu_lock:
+            if _nlu_instance is None:
+                config = HybridConfig(
+                    llm_enabled=True,
+                    clarification_enabled=True,
+                    slot_extraction_enabled=True,
+                )
+                _nlu_instance = HybridNLU(config=config)
     return _nlu_instance
 
 

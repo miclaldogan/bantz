@@ -238,7 +238,9 @@ class SafetyGuard:
                 
                 if expected_type == "string" and not isinstance(value, str):
                     return False, f"Field '{fld}' must be string, got {type(value).__name__}"
-                elif expected_type == "number" and not isinstance(value, (int, float)):
+                elif expected_type == "integer" and (isinstance(value, bool) or not isinstance(value, int)):
+                    return False, f"Field '{fld}' must be integer, got {type(value).__name__}"
+                elif expected_type == "number" and (isinstance(value, bool) or not isinstance(value, (int, float))):
                     return False, f"Field '{fld}' must be number, got {type(value).__name__}"
                 elif expected_type == "boolean" and not isinstance(value, bool):
                     return False, f"Field '{fld}' must be boolean, got {type(value).__name__}"

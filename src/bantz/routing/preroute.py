@@ -365,7 +365,7 @@ def create_greeting_rule() -> PreRouteRule:
         intent=IntentCategory.GREETING,
         keywords=[
             "merhaba", "selam", "selamlar", "hey", "hi", "hello",
-            "günaydın", "iyi günler", "iyi akşamlar", "iyi geceler",
+            "günaydın", "iyi günler", "iyi akşamlar",
             "hayırlı günler", "hayırlı sabahlar",
         ],
         confidence=0.95,

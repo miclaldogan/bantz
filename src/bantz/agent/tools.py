@@ -161,9 +161,9 @@ class ToolRegistry:
             if not spec:
                 continue
             expected = spec.get("type")
-            if expected == "integer" and not isinstance(value, int):
+            if expected == "integer" and (isinstance(value, bool) or not isinstance(value, int)):
                 return False, f"bad_type:{key}:expected_int"
-            if expected == "number" and not isinstance(value, (int, float)):
+            if expected == "number" and (isinstance(value, bool) or not isinstance(value, (int, float))):
                 return False, f"bad_type:{key}:expected_number"
             if expected == "string" and not isinstance(value, str):
                 return False, f"bad_type:{key}:expected_string"
