@@ -133,13 +133,17 @@ class ActionClassifier:
         Classify an action into a permission level.
         
         Args:
-            action: Action to classify
+            action: Action to classify (string or Enum with .value)
             context: Optional context for elevation
             
         Returns:
             ActionClassification result
         """
         context = context or {}
+        
+        # Normalise: accept Enum members as well as plain strings
+        if hasattr(action, "value"):
+            action = action.value
         
         # Get base level
         base_level = self._levels.get(action, self._default_level)
@@ -151,11 +155,16 @@ class ActionClassifier:
         is_destructive = self.is_destructive(action)
         is_external = self.is_external(action)
         
-        # Build reason
-        if action in self._levels:
-            reason = f"Mapped action: {action} → {level.value}"
-        else:
+        # Build reason — include elevation info when level was raised
+        if action not in self._levels:
             reason = f"Unknown action, using default: {self._default_level.value}"
+        elif level is not base_level:
+            reason = (
+                f"Mapped action: {action} → {base_level.value}, "
+                f"elevated to {level.value} by context"
+            )
+        else:
+            reason = f"Mapped action: {action} → {level.value}"
         
         return ActionClassification(
             action=action,
@@ -202,14 +211,20 @@ class ActionClassifier:
     
     def is_destructive(self, action: str) -> bool:
         """Check if action is destructive."""
+        if hasattr(action, "value"):
+            action = action.value
         return action in self.DESTRUCTIVE_ACTIONS
     
     def is_external(self, action: str) -> bool:
         """Check if action involves external access."""
+        if hasattr(action, "value"):
+            action = action.value
         return action in self.EXTERNAL_ACTIONS
     
     def get_level(self, action: str) -> PermissionLevel:
         """Get level for action (without context)."""
+        if hasattr(action, "value"):
+            action = action.value
         return self._levels.get(action, self._default_level)
     
     def add_action(self, action: str, level: PermissionLevel) -> None:
