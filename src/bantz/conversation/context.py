@@ -10,6 +10,7 @@ Maintains conversation history and turn information:
 
 from __future__ import annotations
 
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -130,6 +131,7 @@ class ConversationContext:
         self._max_turns = max_turns
         self._conversation_id = conversation_id or str(uuid.uuid4())
         self._turns: List[TurnInfo] = []
+        self._lock = threading.Lock()
         self._created_at = datetime.now()
         self._metadata: Dict[str, Any] = {}
     
@@ -141,7 +143,8 @@ class ConversationContext:
     @property
     def turn_count(self) -> int:
         """Get number of turns."""
-        return len(self._turns)
+        with self._lock:
+            return len(self._turns)
     
     @property
     def max_turns(self) -> int:
@@ -156,19 +159,21 @@ class ConversationContext:
     @property
     def is_empty(self) -> bool:
         """Check if context is empty."""
-        return len(self._turns) == 0
+        with self._lock:
+            return len(self._turns) == 0
     
     def add_turn(self, turn: TurnInfo) -> None:
         """
-        Add a turn to the context.
+        Add a turn to the context (thread-safe).
         
         Evicts oldest turn if max limit is reached.
         """
-        self._turns.append(turn)
-        
-        # Evict oldest if needed
-        while len(self._turns) > self._max_turns:
-            self._turns.pop(0)
+        with self._lock:
+            self._turns.append(turn)
+            
+            # Evict oldest if needed
+            while len(self._turns) > self._max_turns:
+                self._turns.pop(0)
     
     def add_user_turn(
         self,
@@ -194,42 +199,49 @@ class ConversationContext:
         return turn
     
     def get_recent_turns(self, n: int = 5) -> List[TurnInfo]:
-        """Get the N most recent turns."""
-        return self._turns[-n:]
+        """Get the N most recent turns (thread-safe)."""
+        with self._lock:
+            return list(self._turns[-n:])
     
     def get_all_turns(self) -> List[TurnInfo]:
-        """Get all turns."""
-        return list(self._turns)
+        """Get all turns (thread-safe)."""
+        with self._lock:
+            return list(self._turns)
     
     def get_last_turn(self) -> Optional[TurnInfo]:
-        """Get the last turn."""
-        if not self._turns:
-            return None
-        return self._turns[-1]
+        """Get the last turn (thread-safe)."""
+        with self._lock:
+            if not self._turns:
+                return None
+            return self._turns[-1]
     
     def get_last_user_turn(self) -> Optional[TurnInfo]:
-        """Get the last user turn."""
-        for turn in reversed(self._turns):
-            if turn.role == "user":
-                return turn
-        return None
+        """Get the last user turn (thread-safe)."""
+        with self._lock:
+            for turn in reversed(self._turns):
+                if turn.role == "user":
+                    return turn
+            return None
     
     def get_last_assistant_turn(self) -> Optional[TurnInfo]:
-        """Get the last assistant turn."""
-        for turn in reversed(self._turns):
-            if turn.role == "assistant":
-                return turn
-        return None
+        """Get the last assistant turn (thread-safe)."""
+        with self._lock:
+            for turn in reversed(self._turns):
+                if turn.role == "assistant":
+                    return turn
+            return None
     
     def get_turns_by_role(self, role: str) -> List[TurnInfo]:
-        """Get all turns by role."""
-        return [t for t in self._turns if t.role == role]
+        """Get all turns by role (thread-safe)."""
+        with self._lock:
+            return [t for t in self._turns if t.role == role]
     
     def clear(self) -> int:
-        """Clear all turns."""
-        count = len(self._turns)
-        self._turns.clear()
-        return count
+        """Clear all turns (thread-safe)."""
+        with self._lock:
+            count = len(self._turns)
+            self._turns.clear()
+            return count
     
     def set_metadata(self, key: str, value: Any) -> None:
         """Set context metadata."""
@@ -240,34 +252,37 @@ class ConversationContext:
         return self._metadata.get(key, default)
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "conversation_id": self._conversation_id,
-            "created_at": self._created_at.isoformat(),
-            "max_turns": self._max_turns,
-            "turn_count": len(self._turns),
-            "turns": [t.to_dict() for t in self._turns],
-            "metadata": self._metadata,
-        }
+        """Convert to dictionary (thread-safe)."""
+        with self._lock:
+            return {
+                "conversation_id": self._conversation_id,
+                "created_at": self._created_at.isoformat(),
+                "max_turns": self._max_turns,
+                "turn_count": len(self._turns),
+                "turns": [t.to_dict() for t in self._turns],
+                "metadata": self._metadata,
+            }
     
     def to_messages(self) -> List[Dict[str, str]]:
-        """Convert to chat message format for LLM."""
-        return [
-            {"role": t.role, "content": t.text}
-            for t in self._turns
-        ]
+        """Convert to chat message format for LLM (thread-safe)."""
+        with self._lock:
+            return [
+                {"role": t.role, "content": t.text}
+                for t in self._turns
+            ]
     
     def get_summary(self) -> str:
-        """Get a text summary of the conversation."""
-        if not self._turns:
-            return "No conversation yet."
-        
-        lines = []
-        for turn in self._turns[-5:]:  # Last 5 turns
-            role = "User" if turn.role == "user" else "Assistant"
-            lines.append(f"{role}: {turn.text[:100]}...")
-        
-        return "\n".join(lines)
+        """Get a text summary of the conversation (thread-safe)."""
+        with self._lock:
+            if not self._turns:
+                return "No conversation yet."
+            
+            lines = []
+            for turn in self._turns[-5:]:  # Last 5 turns
+                role = "User" if turn.role == "user" else "Assistant"
+                lines.append(f"{role}: {turn.text[:100]}...")
+            
+            return "\n".join(lines)
 
 
 def create_conversation_context(
