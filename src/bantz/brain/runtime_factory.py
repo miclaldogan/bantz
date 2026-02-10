@@ -189,6 +189,20 @@ def create_runtime(
         # Never block startup due to skill loading failure
         logger.warning("Declarative skill loading failed: %s", exc)
 
+    # ── Proactive Engine (Issue #835) ───────────────────────────────
+    try:
+        from bantz.proactive.engine import setup_proactive_engine
+
+        _proactive_engine = setup_proactive_engine(
+            tool_registry=_tools,
+            event_bus=_event_bus,
+            auto_start=True,
+        )
+        logger.info("Proactive Engine started: %d checks", len(_proactive_engine.get_all_checks()))
+    except Exception as exc:
+        # Never block startup due to proactive engine failure
+        logger.warning("Proactive Engine startup failed: %s", exc)
+
     # ── Orchestrator ────────────────────────────────────────────────
     orchestrator = JarvisLLMOrchestrator(llm_client=router_client)
 
