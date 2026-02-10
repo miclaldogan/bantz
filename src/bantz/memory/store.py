@@ -472,10 +472,35 @@ class MemoryStore:
             result = []
             for memory, _ in scored[:limit]:
                 memory.access()
-                self._update_access(memory)
                 result.append(memory)
             
+            # Batch-update access counts in a single transaction
+            if result:
+                self._batch_update_access(result)
+            
             return result
+    
+    def _batch_update_access(self, memories: List[Memory]) -> None:
+        """Batch-update access metadata in a single transaction."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("BEGIN")
+            for memory in memories:
+                cursor.execute("""
+                    UPDATE memories 
+                    SET access_count = ?, last_accessed = ?, importance = ?
+                    WHERE id = ?
+                """, (
+                    memory.access_count,
+                    memory.last_accessed.isoformat() if memory.last_accessed else None,
+                    memory.importance,
+                    memory.id,
+                ))
+            cursor.execute("COMMIT")
+        except Exception:
+            cursor.execute("ROLLBACK")
+            raise
     
     def _update_access(self, memory: Memory) -> None:
         """Update memory access in database."""
@@ -720,23 +745,28 @@ class MemoryStore:
         rows = cursor.fetchall()
         
         updated = 0
-        for row in rows:
-            memory = self._row_to_memory(row)
-            decay_amount = self.decay.calculate_decay(memory, days)
-            
-            if decay_amount > 0:
-                new_importance = max(0.0, memory.importance - decay_amount)
-                cursor.execute(
-                    "UPDATE memories SET importance = ? WHERE id = ?",
-                    (new_importance, memory.id)
-                )
-                updated += 1
+        try:
+            cursor.execute("BEGIN")
+            for row in rows:
+                memory = self._row_to_memory(row)
+                decay_amount = self.decay.calculate_decay(memory, days)
                 
-                # Update index
-                if self.index and memory.id in self.index.by_id:
-                    self.index.by_id[memory.id].importance = new_importance
+                if decay_amount > 0:
+                    new_importance = max(0.0, memory.importance - decay_amount)
+                    cursor.execute(
+                        "UPDATE memories SET importance = ? WHERE id = ?",
+                        (new_importance, memory.id)
+                    )
+                    updated += 1
+                    
+                    # Update index
+                    if self.index and memory.id in self.index.by_id:
+                        self.index.by_id[memory.id].importance = new_importance
+            cursor.execute("COMMIT")
+        except Exception:
+            cursor.execute("ROLLBACK")
+            raise
         
-        conn.commit()
         return updated
     
     def get_stats(self) -> MemoryStats:
