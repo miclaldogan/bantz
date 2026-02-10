@@ -10,6 +10,16 @@ logger = logging.getLogger(__name__)
 # Project root: three levels up from this file (src/bantz/security/ → project root)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
+# Keys that must never be set from .env — they allow code injection.
+_BLOCKED_KEYS = frozenset({
+    "PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+    "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP",
+    "NODE_OPTIONS", "HOME", "USER", "SHELL",
+})
+
+# Only keys starting with these prefixes are accepted.
+_ALLOWED_PREFIXES = ("BANTZ_", "LLM_", "GOOGLE_", "VLLM_")
+
 
 def _strip_quotes(value: str) -> str:
     v = value.strip()
@@ -48,6 +58,9 @@ def load_env_file(path: str | os.PathLike[str], *, override: bool = False) -> li
         if not key:
             continue
         value = _strip_quotes(value)
+        if key in _BLOCKED_KEYS or not key.startswith(_ALLOWED_PREFIXES):
+            logger.warning("Skipping blocked/disallowed env key: %s", key)
+            continue
         if not override and key in os.environ:
             continue
         os.environ[key] = value
