@@ -96,7 +96,7 @@ class BargeInController:
         self._tts = tts
         self._config = config or BargeInConfig()
         self._on_barge_in = on_barge_in
-        self._monitoring = False
+        self._active = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._barge_in_count = 0
@@ -108,7 +108,7 @@ class BargeInController:
 
     @property
     def monitoring(self) -> bool:
-        return self._monitoring
+        return self._active.is_set()
 
     @property
     def barge_in_count(self) -> int:
@@ -133,12 +133,12 @@ class BargeInController:
                 logger.debug("TTS backend does not support barge-in")
                 return False
 
-        if self._monitoring:
+        if self._active.is_set():
             logger.debug("Already monitoring for barge-in")
             return True
 
         self._stop_event.clear()
-        self._monitoring = True
+        self._active.set()
         self._thread = threading.Thread(
             target=self._monitor_loop,
             name="barge-in-monitor",
@@ -150,7 +150,7 @@ class BargeInController:
 
     def stop_monitoring(self) -> None:
         """Stop monitoring."""
-        self._monitoring = False
+        self._active.clear()
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
@@ -201,7 +201,7 @@ class BargeInController:
         except Exception as exc:
             logger.warning("Barge-in monitor error: %s", exc)
         finally:
-            self._monitoring = False
+            self._active.clear()
 
     def _on_speech_detected(self, energy: float, duration_ms: float) -> None:
         """Handle detected user speech during TTS playback."""
@@ -212,7 +212,7 @@ class BargeInController:
         )
         self._last_event = event
         self._barge_in_count += 1
-        self._monitoring = False
+        self._active.clear()
 
         logger.info(
             "🎤 Barge-in detected! energy=%.4f, duration=%.0fms (count=%d)",
