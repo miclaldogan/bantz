@@ -199,7 +199,6 @@ def score_writing_need(text: str) -> int:
         "ikna",
         "uzun özet",
         "blog",
-        "linkedin",
         "cv",
         "cover letter",
         "doküman",
@@ -221,9 +220,11 @@ def score_writing_need(text: str) -> int:
         "kaynak",
         "pdf",
         "classroom",
+        "linkedin",
     ]
 
     # Read-only dampeners: if these appear alongside read_keywords, it's read intent.
+    # Issue #648: "ara", "bul", "getir", "tara", "sorgula" eklendi.
     read_only_verbs = [
         "listele",
         "göster",
@@ -235,6 +236,11 @@ def score_writing_need(text: str) -> int:
         "var mı",
         "unread",
         "okunmamış",
+        "ara",
+        "bul",
+        "getir",
+        "tara",
+        "sorgula",
     ]
 
     if _contains_any(t, write_keywords):
