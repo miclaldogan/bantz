@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Iterable
+
+logger = logging.getLogger(__name__)
+
+# Project root: three levels up from this file (src/bantz/security/ → project root)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 def _strip_quotes(value: str) -> str:
@@ -66,6 +72,13 @@ def load_env(
 
     explicit = (os.getenv(env_var) or "").strip()
     if explicit:
+        env_path = Path(explicit).resolve()
+        if not str(env_path).startswith(str(_PROJECT_ROOT)):
+            logger.warning(
+                "Ignoring %s=%s — path is outside project root %s",
+                env_var, explicit, _PROJECT_ROOT,
+            )
+            return []
         return load_env_file(explicit, override=override)
 
     for name in default_files:
