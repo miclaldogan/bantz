@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import fcntl
 import logging
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -172,7 +174,24 @@ def get_credentials(
                 creds = flow.run_console()
 
         cfg.token_path.parent.mkdir(parents=True, exist_ok=True)
-        cfg.token_path.write_text(creds.to_json(), encoding="utf-8")
-        os.chmod(cfg.token_path, 0o600)  # owner-only: token grants full Google account access
+        # Atomic write with file locking to prevent corruption from
+        # concurrent processes reading/writing the same token file.
+        token_json = creds.to_json()
+        dir_str = str(cfg.token_path.parent)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_str, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                fcntl.flock(f, fcntl.LOCK_EX)
+                f.write(token_json)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp_path, 0o600)  # owner-only: token grants full Google account access
+            os.replace(tmp_path, str(cfg.token_path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     return creds
