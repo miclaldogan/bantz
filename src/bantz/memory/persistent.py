@@ -23,7 +23,7 @@ import logging
 import os
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -223,7 +223,7 @@ class PersistentMemoryStore:
 
     def update_access(self, item_id: str) -> bool:
         """Bump access count and timestamp for a memory item."""
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE memory_item SET access_count = access_count + 1, "
@@ -269,7 +269,7 @@ class PersistentMemoryStore:
 
     def close_session(self, session_id: str, summary: str = "") -> bool:
         """Close a session (set end_time and summary)."""
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE session SET end_time = ?, summary = ? WHERE id = ?",
@@ -357,7 +357,7 @@ class PersistentMemoryStore:
 
     def set_profile(self, key: str, value: str) -> str:
         """Set (upsert) a user-profile entry.  Returns the profile row id."""
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             row = self._conn.execute(
                 "SELECT id FROM user_profile WHERE key = ?", (key,)
