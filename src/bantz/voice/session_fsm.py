@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -132,24 +133,28 @@ class VoiceFSM:
         self._last_activity = self._clock()
         self._state_entered_at = self._clock()
         self._history: List[StateTransition] = []
+        self._lock = threading.Lock()
 
     @property
     def state(self) -> VoiceState:
-        """Current state."""
-        return self._state
+        """Current state (thread-safe)."""
+        with self._lock:
+            return self._state
 
     @property
     def last_activity(self) -> float:
-        """Timestamp of last user activity."""
-        return self._last_activity
+        """Timestamp of last user activity (thread-safe)."""
+        with self._lock:
+            return self._last_activity
 
     @property
     def history(self) -> List[StateTransition]:
-        """State transition history."""
-        return list(self._history)
+        """State transition history (thread-safe)."""
+        with self._lock:
+            return list(self._history)
 
     def _transition(self, new_state: VoiceState, trigger: str) -> None:
-        """Execute a state transition."""
+        """Execute a state transition (caller must hold _lock)."""
         if new_state == self._state:
             return
 
@@ -174,72 +179,79 @@ class VoiceFSM:
         if self._on_transition:
             self._on_transition(transition)
 
-    # ── Event handlers ────────────────────────────────────────────
+    # ── Event handlers (thread-safe) ──────────────────────────────
 
     def on_boot_ready(self) -> None:
         """LLM warmup complete — enter active listening."""
-        self._transition(VoiceState.ACTIVE_LISTEN, "boot_ready")
-        self._last_activity = self._clock()
+        with self._lock:
+            self._transition(VoiceState.ACTIVE_LISTEN, "boot_ready")
+            self._last_activity = self._clock()
 
     def on_user_speech(self) -> None:
         """User started speaking — reset TTL."""
-        self._last_activity = self._clock()
+        with self._lock:
+            self._last_activity = self._clock()
 
-        if self._state == VoiceState.WAKE_ONLY:
-            # Should not happen without wake word, but handle gracefully
-            logger.debug("[fsm] speech in WAKE_ONLY — ignoring (need wake word)")
-            return
+            if self._state == VoiceState.WAKE_ONLY:
+                # Should not happen without wake word, but handle gracefully
+                logger.debug("[fsm] speech in WAKE_ONLY — ignoring (need wake word)")
+                return
 
-        if self._state == VoiceState.IDLE_SLEEP:
-            self._transition(VoiceState.ACTIVE_LISTEN, "speech_from_idle")
-            return
+            if self._state == VoiceState.IDLE_SLEEP:
+                self._transition(VoiceState.ACTIVE_LISTEN, "speech_from_idle")
+                return
 
-        # Already in ACTIVE_LISTEN — just reset timer
-        logger.debug("[fsm] speech in ACTIVE_LISTEN — TTL reset")
+            # Already in ACTIVE_LISTEN — just reset timer
+            logger.debug("[fsm] speech in ACTIVE_LISTEN — TTL reset")
 
     def on_silence_timeout(self) -> None:
         """Silence detected — transition to wake-only."""
-        if self._state == VoiceState.ACTIVE_LISTEN:
-            self._transition(VoiceState.WAKE_ONLY, "silence_timeout")
+        with self._lock:
+            if self._state == VoiceState.ACTIVE_LISTEN:
+                self._transition(VoiceState.WAKE_ONLY, "silence_timeout")
 
     def on_dismiss_intent(self) -> None:
         """User said goodbye — transition to wake-only."""
-        if self._state == VoiceState.ACTIVE_LISTEN:
-            self._transition(VoiceState.WAKE_ONLY, "dismiss_intent")
+        with self._lock:
+            if self._state == VoiceState.ACTIVE_LISTEN:
+                self._transition(VoiceState.WAKE_ONLY, "dismiss_intent")
 
     def on_wake_word(self) -> None:
         """Wake word detected — enter active listening."""
-        self._transition(VoiceState.ACTIVE_LISTEN, "wake_word")
-        self._last_activity = self._clock()
+        with self._lock:
+            self._transition(VoiceState.ACTIVE_LISTEN, "wake_word")
+            self._last_activity = self._clock()
 
     def tick(self) -> None:
-        """Timer check — call periodically to enforce timeouts.
+        """Timer check — call periodically to enforce timeouts (thread-safe).
 
         Checks if current state has exceeded its TTL and transitions
         accordingly.
         """
-        now = self._clock()
+        with self._lock:
+            now = self._clock()
 
-        if self._state == VoiceState.ACTIVE_LISTEN:
-            elapsed = now - self._last_activity
-            if elapsed >= self.config.silence_threshold:
-                self._transition(VoiceState.WAKE_ONLY, "silence_timeout")
+            if self._state == VoiceState.ACTIVE_LISTEN:
+                elapsed = now - self._last_activity
+                if elapsed >= self.config.silence_threshold:
+                    self._transition(VoiceState.WAKE_ONLY, "silence_timeout")
 
-        elif self._state == VoiceState.WAKE_ONLY and self.config.idle_sleep_enabled:
-            elapsed = now - self._state_entered_at
-            if elapsed >= self.config.idle_sleep_timeout:
-                self._transition(VoiceState.IDLE_SLEEP, "idle_timeout")
+            elif self._state == VoiceState.WAKE_ONLY and self.config.idle_sleep_enabled:
+                elapsed = now - self._state_entered_at
+                if elapsed >= self.config.idle_sleep_timeout:
+                    self._transition(VoiceState.IDLE_SLEEP, "idle_timeout")
 
     def time_until_timeout(self) -> Optional[float]:
-        """Seconds until next timeout, or None if no timeout pending."""
-        now = self._clock()
+        """Seconds until next timeout, or None if no timeout pending (thread-safe)."""
+        with self._lock:
+            now = self._clock()
 
-        if self._state == VoiceState.ACTIVE_LISTEN:
-            remaining = self.config.silence_threshold - (now - self._last_activity)
-            return max(0.0, remaining)
+            if self._state == VoiceState.ACTIVE_LISTEN:
+                remaining = self.config.silence_threshold - (now - self._last_activity)
+                return max(0.0, remaining)
 
-        if self._state == VoiceState.WAKE_ONLY and self.config.idle_sleep_enabled:
-            remaining = self.config.idle_sleep_timeout - (now - self._state_entered_at)
-            return max(0.0, remaining)
+            if self._state == VoiceState.WAKE_ONLY and self.config.idle_sleep_enabled:
+                remaining = self.config.idle_sleep_timeout - (now - self._state_entered_at)
+                return max(0.0, remaining)
 
-        return None
+            return None
