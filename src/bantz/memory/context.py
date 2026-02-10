@@ -125,7 +125,7 @@ class ContextBuilder:
         
         # Cache for built sections
         self._section_cache: Dict[PromptSection, str] = {}
-        self._cache_timestamp: Optional[datetime] = None
+        self._cache_timestamps: Dict[PromptSection, datetime] = {}
         self._cache_ttl = timedelta(minutes=5)
     
     def build_system_prompt(self) -> str:
@@ -146,8 +146,8 @@ class ContextBuilder:
     
     def _build_section(self, section: PromptSection) -> str:
         """Build a single prompt section."""
-        # Check cache
-        if self._is_cache_valid() and section in self._section_cache:
+        # Check per-section cache
+        if self._is_section_cache_valid(section) and section in self._section_cache:
             return self._section_cache[section]
         
         builders = {
@@ -164,22 +164,31 @@ class ContextBuilder:
         builder = builders.get(section)
         content = builder() if builder else ""
         
-        # Cache result
+        # Cache result with per-section timestamp
         self._section_cache[section] = content
-        self._cache_timestamp = datetime.now()
+        self._cache_timestamps[section] = datetime.now()
         
         return content
     
-    def _is_cache_valid(self) -> bool:
-        """Check if section cache is still valid."""
-        if not self._cache_timestamp:
+    def _is_section_cache_valid(self, section: PromptSection) -> bool:
+        """Check if a specific section's cache is still valid."""
+        ts = self._cache_timestamps.get(section)
+        if not ts:
             return False
-        return datetime.now() - self._cache_timestamp < self._cache_ttl
+        return datetime.now() - ts < self._cache_ttl
+    
+    def _is_cache_valid(self) -> bool:
+        """Check if all section caches are still valid."""
+        if not self._cache_timestamps:
+            return False
+        return all(
+            self._is_section_cache_valid(s) for s in self._section_cache
+        )
     
     def invalidate_cache(self) -> None:
         """Invalidate section cache."""
         self._section_cache.clear()
-        self._cache_timestamp = None
+        self._cache_timestamps.clear()
     
     def _build_system_section(self) -> str:
         """Build system instructions section."""
