@@ -383,11 +383,16 @@ class Sandbox:
             
         Returns:
             Path to created file
+            
+        Raises:
+            SandboxPermissionError: If name escapes temp directory
         """
-        path = self.temp_dir / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
-        return path
+        resolved = (self.temp_dir / name).resolve()
+        if not str(resolved).startswith(str(self.temp_dir.resolve())):
+            raise SandboxPermissionError(f"Path traversal blocked: {name}")
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(content)
+        return resolved
     
     def read_file(self, name: str) -> str:
         """
@@ -400,12 +405,15 @@ class Sandbox:
             File content
             
         Raises:
+            SandboxPermissionError: If name escapes temp directory
             FileNotFoundError: If file doesn't exist
         """
-        path = self.temp_dir / name
-        if not path.exists():
+        resolved = (self.temp_dir / name).resolve()
+        if not str(resolved).startswith(str(self.temp_dir.resolve())):
+            raise SandboxPermissionError(f"Path traversal blocked: {name}")
+        if not resolved.exists():
             raise FileNotFoundError(f"File not found in sandbox: {name}")
-        return path.read_text()
+        return resolved.read_text()
     
     def list_files(self) -> List[str]:
         """List files in sandbox temp directory."""
