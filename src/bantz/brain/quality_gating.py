@@ -667,7 +667,14 @@ class GatingPolicy:
         
         # Auto mode: use thresholds
         # Fast path for very low scores
-        if score.total <= self.config.fast_max_threshold:
+        # Issue #649: component-based escalation must override the fast threshold.
+        # If complexity or writing alone hits the per-component threshold we
+        # should NOT short-circuit here.
+        has_component_escalation = (
+            score.complexity >= self.config.min_complexity_for_quality or
+            score.writing >= self.config.min_writing_for_quality
+        )
+        if score.total <= self.config.fast_max_threshold and not has_component_escalation:
             result = GatingResult(
                 decision=GatingDecision.USE_FAST,
                 score=score,
