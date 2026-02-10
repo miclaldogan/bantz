@@ -183,15 +183,15 @@ def validate_tool_slots(
         return SlotValidationResult(tool_name=tool_name, valid=True)
 
     missing: List[str] = []
-    first_question: Optional[str] = None
+    questions: List[str] = []
 
     for req in reqs:
         # Check if the primary slot or any alternative is present
         satisfied = any(_slot_present(slots, n) for n in req.all_names)
         if not satisfied:
             missing.append(req.name)
-            if first_question is None and req.question_tr:
-                first_question = req.question_tr
+            if req.question_tr:
+                questions.append(req.question_tr)
 
     if missing:
         logger.info(
@@ -199,11 +199,14 @@ def validate_tool_slots(
             tool_name,
             ", ".join(missing),
         )
+        # Combine all missing-slot questions into a single prompt so
+        # the user can answer them in one turn instead of N turns.
+        combined_question = " ".join(questions) if questions else None
         return SlotValidationResult(
             tool_name=tool_name,
             valid=False,
             missing_slots=missing,
-            question=first_question,
+            question=combined_question,
             ask_user=True,
         )
 
