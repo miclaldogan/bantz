@@ -1216,6 +1216,16 @@ USER: merhaba mesajı gönder
 
         assistant_reply = str(parsed.get("assistant_reply") or "").strip()
 
+        # ── Issue #653: Language post-validation ────────────────────────
+        # 3B Qwen model may output Chinese/English despite Turkish-only
+        # system prompt.  Clear non-Turkish assistant_reply so the
+        # finalization pipeline generates a proper Turkish response.
+        if assistant_reply:
+            from bantz.brain.language_guard import detect_language_issue
+            lang_issue = detect_language_issue(assistant_reply)
+            if lang_issue:
+                assistant_reply = ""
+
         # Orchestrator extensions (Issue #134)
         ask_user = bool(parsed.get("ask_user", False))
         question = str(parsed.get("question") or "").strip()

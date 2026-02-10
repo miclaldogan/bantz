@@ -33,6 +33,27 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Language post-validation helper (Issue #653)
+# ---------------------------------------------------------------------------
+
+_LANG_FALLBACK = "Efendim, isteğiniz işlendi."
+
+
+def _validate_reply_language(text: str) -> str:
+    """Return *text* if it looks Turkish, otherwise a deterministic fallback.
+
+    Uses :func:`bantz.brain.language_guard.validate_turkish` to detect
+    CJK, Cyrillic, or other non-Turkish output from the 3B model.
+    """
+    from bantz.brain.language_guard import validate_turkish
+
+    validated, ok = validate_turkish(text, fallback=_LANG_FALLBACK)
+    if not ok:
+        logger.warning("language_guard rejected LLM output (non-Turkish): %.60s…", text)
+    return validated
+
+
+# ---------------------------------------------------------------------------
 # Protocols
 # ---------------------------------------------------------------------------
 
@@ -534,12 +555,16 @@ class FinalizationPipeline:
         if ctx.use_quality and self._quality is not None:
             text = self._try_quality(ctx)
             if text:
+                # Issue #653: language post-validation
+                text = _validate_reply_language(text)
                 return replace(output, assistant_reply=text, finalizer_model=_quality_model or "quality")
 
             # Quality failed / guard rejected → fall back to fast
             if self._fast is not None:
                 text = self._fast.finalize(ctx)
                 if text:
+                    # Issue #653: language post-validation
+                    text = _validate_reply_language(text)
                     ctx.state.update_trace(
                         response_tier=ctx.tier_name or "quality",
                         response_tier_reason=ctx.tier_reason or "quality_finalizer",
@@ -566,6 +591,8 @@ class FinalizationPipeline:
             if should_fast_finalize:
                 text = self._fast.finalize(ctx)
                 if text:
+                    # Issue #653: language post-validation
+                    text = _validate_reply_language(text)
                     return replace(output, assistant_reply=text, finalizer_model=_fast_model or "fast")
 
         # --- Default fallback -----------------------------------------------
