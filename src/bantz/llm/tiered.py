@@ -295,8 +295,9 @@ def decide_tier(
     """Decide whether to escalate to the quality model.
 
     Behavior is env-configurable:
-    - BANTZ_TIER_MODE=1 enables auto decisions (otherwise always fast unless forced)
-      (legacy: BANTZ_TIERED_MODE)
+    - BANTZ_TIER_MODE=1 (default: ON) enables auto decisions.
+      Set BANTZ_TIER_MODE=0 to disable and always use fast tier.
+      (legacy alias: BANTZ_TIERED_MODE)
     - BANTZ_TIER_FORCE=fast|quality|auto forces tier
       (legacy: BANTZ_LLM_TIER)
     """
@@ -337,10 +338,10 @@ def decide_tier(
         return d
 
     if not (
-        _env_flag("BANTZ_TIER_MODE", default=False)
-        or _env_flag("BANTZ_TIERED_MODE", default=False)
+        _env_flag("BANTZ_TIER_MODE", default=True)
+        or _env_flag("BANTZ_TIERED_MODE", default=True)
     ):
-        # Tiering disabled: default to fast.
+        # Tiering explicitly disabled via env.
         d = TierDecision(False, "tiering_disabled", 0, 0, 0)
         if debug:
             logger.info("[tiered] disabled -> fast")

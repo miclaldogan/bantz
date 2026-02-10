@@ -427,6 +427,13 @@ def decide_finalization_tier(
         )
 
         if decision.reason == "tiering_disabled":
+            # Issue #647: Tiering is now ON by default. This branch is only
+            # reachable when the user explicitly sets BANTZ_TIER_MODE=0.
+            # Log a warning so it's visible in observability.
+            logger.warning(
+                "[finalization] tiering explicitly disabled via env — "
+                "all requests will use fast tier"
+            )
             return False, "fast", "tiering_disabled_default_fast"
 
         use_q = bool(decision.use_quality)

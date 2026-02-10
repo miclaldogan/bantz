@@ -119,7 +119,9 @@ def _tools() -> ToolRegistry:
 
 def test_quality_finalizer_no_new_facts_falls_back(monkeypatch: pytest.MonkeyPatch):
     # Keep tiering disabled so the finalizer is selected by default.
-    monkeypatch.delenv("BANTZ_TIERED_MODE", raising=False)
+    # Issue #647: default is now True, so we must explicitly disable.
+    monkeypatch.setenv("BANTZ_TIER_MODE", "0")
+    monkeypatch.setenv("BANTZ_TIERED_MODE", "0")
     monkeypatch.delenv("BANTZ_LLM_TIER", raising=False)
 
     planner = PlannerMock()
@@ -144,7 +146,9 @@ def test_quality_finalizer_no_new_facts_falls_back(monkeypatch: pytest.MonkeyPat
 
 
 def test_quality_finalizer_error_has_reason_code_and_falls_back(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("BANTZ_TIERED_MODE", raising=False)
+    # Issue #647: default is now True, so we must explicitly disable.
+    monkeypatch.setenv("BANTZ_TIER_MODE", "0")
+    monkeypatch.setenv("BANTZ_TIERED_MODE", "0")
     monkeypatch.delenv("BANTZ_LLM_TIER", raising=False)
 
     planner = PlannerMock()
