@@ -125,13 +125,13 @@ class PolicyConfig:
     
     All values can be overridden via environment variables.
     """
-    # Score thresholds
-    quality_threshold: float = 2.5  # Total score >= this → quality tier
-    fast_max_threshold: float = 1.5  # Total score <= this → always fast
+    # Score thresholds (tuned for 3B router – Issue #681)
+    quality_threshold: float = 1.8  # Total score >= this → quality tier
+    fast_max_threshold: float = 0.8  # Total score <= this → always fast
     
     # Component thresholds
-    min_complexity_for_quality: int = 4
-    min_writing_for_quality: int = 4
+    min_complexity_for_quality: int = 3
+    min_writing_for_quality: int = 3
     
     # Rate limiting
     quality_rate_limit: int = 30  # Max quality requests per window
@@ -209,19 +209,19 @@ class PolicyConfig:
         return cls(
             quality_threshold=env_float(
                 "BANTZ_TIER_QUALITY_THRESHOLD",
-                env_float("BANTZ_QUALITY_SCORE_THRESHOLD", 2.5),
+                env_float("BANTZ_QUALITY_SCORE_THRESHOLD", 1.8),
             ),
             fast_max_threshold=env_float(
                 "BANTZ_TIER_FAST_MAX_THRESHOLD",
-                env_float("BANTZ_FAST_MAX_THRESHOLD", 1.5),
+                env_float("BANTZ_FAST_MAX_THRESHOLD", 0.8),
             ),
             min_complexity_for_quality=env_int(
                 "BANTZ_TIER_MIN_COMPLEXITY_FOR_QUALITY",
-                env_int("BANTZ_MIN_COMPLEXITY_FOR_QUALITY", 4),
+                env_int("BANTZ_MIN_COMPLEXITY_FOR_QUALITY", 3),
             ),
             min_writing_for_quality=env_int(
                 "BANTZ_TIER_MIN_WRITING_FOR_QUALITY",
-                env_int("BANTZ_MIN_WRITING_FOR_QUALITY", 4),
+                env_int("BANTZ_MIN_WRITING_FOR_QUALITY", 3),
             ),
             quality_rate_limit=env_int(
                 "BANTZ_TIER_QUALITY_RATE_LIMIT",
