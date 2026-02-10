@@ -177,6 +177,18 @@ def create_runtime(
         from bantz.agent.registry import build_default_registry
         _tools = build_default_registry()
 
+    # ── Declarative Skills (Issue #833) ─────────────────────────────
+    try:
+        from bantz.skills.declarative.bridge import setup_declarative_skills
+
+        _skill_registry = setup_declarative_skills(_tools)
+        _skill_count = len(_skill_registry.skill_names)
+        if _skill_count:
+            logger.info("Declarative skills loaded: %d", _skill_count)
+    except Exception as exc:
+        # Never block startup due to skill loading failure
+        logger.warning("Declarative skill loading failed: %s", exc)
+
     # ── Orchestrator ────────────────────────────────────────────────
     orchestrator = JarvisLLMOrchestrator(llm_client=router_client)
 

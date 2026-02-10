@@ -389,6 +389,25 @@ def main(argv: list[str] | None = None) -> int:
 
         return google_main(argv[1:])
 
+    # Declarative skill CLI (Issue #833)
+    if argv and argv[0] == "skill":
+        from bantz.skills.declarative.cli import handle_skill_command, add_skill_subparser
+
+        skill_parser = argparse.ArgumentParser(prog="bantz skill")
+        skill_sub = skill_parser.add_subparsers(dest="skill_action")
+        skill_sub.required = True
+        add_skill_subparser(
+            # We need a parent parser that delegates to skill subcommands
+            type("_FakeSubparsers", (), {"add_parser": lambda self, *a, **kw: skill_parser})()  # noqa: E501
+        )
+        # Re-parse with proper subparser
+        skill_p = argparse.ArgumentParser(prog="bantz")
+        skill_subs = skill_p.add_subparsers(dest="command")
+        from bantz.skills.declarative.cli import add_skill_subparser as _add_sp
+        _add_sp(skill_subs)
+        skill_args = skill_p.parse_args(argv)
+        return handle_skill_command(skill_args)
+
     parser = argparse.ArgumentParser(
         prog="bantz",
         description="Bantz v0.3 - Local voice assistant with live browser",
