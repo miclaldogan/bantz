@@ -46,8 +46,12 @@ REDACTION_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     ),
     # International phone numbers — require + prefix to avoid TC Kimlik clash
     (re.compile(r"\+\d{10,15}"), "[TELEFON]", "International phone"),
-    # Turkish ID number — 11-digit TC Kimlik No (not starting with 05)
-    (re.compile(r"\b(?!05\d{2})\d{11}\b"), "[TC_KIMLIK]", "Turkish ID (TC Kimlik)"),
+    # Turkish ID number — 11-digit TC Kimlik No
+    # Rules: first digit 1-9, last digit even, exactly 11 digits.
+    # Negative lookahead excludes phone-like patterns (0XXX prefix was
+    # already consumed by the phone pattern above, but standalone
+    # 11-digit numbers starting with 0 are not valid TC Kimlik anyway).
+    (re.compile(r"\b[1-9]\d{9}[02468]\b"), "[TC_KIMLIK]", "Turkish ID (TC Kimlik)"),
     # Email addresses
     (
         re.compile(r"\b[\w.+-]+@[\w.-]+\.\w{2,}\b"),
