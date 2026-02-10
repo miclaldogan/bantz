@@ -116,6 +116,7 @@ class IdempotencyStore:
         self._records: dict[str, IdempotencyRecord] = {}
         self._lock = threading.Lock()
         self._loaded = False
+        self._last_mtime: float = 0.0
     
     def _ensure_directory(self) -> None:
         """Ensure parent directory exists."""
@@ -123,24 +124,36 @@ class IdempotencyStore:
         path.parent.mkdir(parents=True, exist_ok=True)
     
     def _load(self) -> None:
-        """Load records from disk."""
-        if self._loaded:
-            return
-        
+        """Load records from disk.
+
+        Re-reads the file when its mtime changes so that records written
+        by another process are picked up automatically.
+        """
         path = Path(self.store_path)
         if not path.exists():
             self._loaded = True
             return
-        
+
+        try:
+            current_mtime = path.stat().st_mtime
+        except OSError:
+            self._loaded = True
+            return
+
+        if self._loaded and current_mtime == self._last_mtime:
+            return
+
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             
+            self._records.clear()
             for key, record_data in data.get("records", {}).items():
                 record = IdempotencyRecord.from_dict(record_data)
                 if not record.is_expired():
                     self._records[key] = record
             
+            self._last_mtime = current_mtime
             self._loaded = True
             logger.debug("Loaded %d idempotency records from %s", len(self._records), path)
         except Exception as e:
