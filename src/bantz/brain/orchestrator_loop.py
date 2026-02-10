@@ -646,6 +646,21 @@ class OrchestratorLoop:
                 "intent": final_output.calendar_intent,
                 "confidence": final_output.confidence,
             })
+
+            # Issue #664: Structured trace export (per turn)
+            try:
+                from bantz.brain.trace_exporter import build_turn_trace, write_turn_trace
+                turn_trace = build_turn_trace(
+                    turn_id=state.turn_count,
+                    user_input=user_input,
+                    output=final_output,
+                    tool_results=tool_results,
+                    state_trace=state.trace,
+                    total_elapsed_ms=int(elapsed * 1000),
+                )
+                write_turn_trace(turn_trace)
+            except Exception as exc:
+                logger.debug("[TRACE] Export failed: %s", exc)
             
             return final_output, state
         
@@ -687,6 +702,8 @@ class OrchestratorLoop:
         """
         if state is None:
             state = OrchestratorState()
+
+        start_time = time.time()
 
         # Phase 1: plan
         orchestrator_output = self._llm_planning_phase(user_input, state)
@@ -804,6 +821,22 @@ class OrchestratorLoop:
         if policy_violation:
             trace["policy_violation"] = True
             trace["violation_type"] = violation_type or "policy"
+
+        # Issue #664: Structured trace export for replay/regression
+        try:
+            from bantz.brain.trace_exporter import build_turn_trace, write_turn_trace
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            turn_trace = build_turn_trace(
+                turn_id=state.turn_count,
+                user_input=user_input,
+                output=final_output,
+                tool_results=tool_results,
+                state_trace=state.trace,
+                total_elapsed_ms=elapsed_ms,
+            )
+            write_turn_trace(turn_trace)
+        except Exception as exc:
+            logger.debug("[TRACE] Export failed: %s", exc)
 
         return trace
     
@@ -1688,16 +1721,21 @@ class OrchestratorLoop:
                             "success": False,
                             "error": f"Invalid arguments: {error}",
                             "safety_rejected": True,
+                            "params": params,
+                            "elapsed_ms": 0,
                         })
                         continue
                 
                 # Execute tool (Issue #431: with timeout protection)
                 timeout = self.config.tool_timeout_seconds
                 try:
+                    exec_start = time.time()
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                         future = executor.submit(tool.function, **params)
                         result = future.result(timeout=timeout)
+                    elapsed_ms = int((time.time() - exec_start) * 1000)
                 except concurrent.futures.TimeoutError:
+                    elapsed_ms = int((time.time() - exec_start) * 1000) if "exec_start" in locals() else 0
                     logger.error(
                         "[TOOLS] Tool %s timed out after %.1fs",
                         tool_name, timeout,
@@ -1712,6 +1750,8 @@ class OrchestratorLoop:
                         "error": f"Tool '{tool_name}' timed out after {timeout:.0f}s",
                         "user_message": f"Efendim, '{tool_name}' işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.",
                         "risk_level": risk.value,
+                        "params": params,
+                        "elapsed_ms": elapsed_ms,
                     })
                     state.add_tool_result(tool_name, f"timeout after {timeout}s", success=False)
                     continue
@@ -1738,6 +1778,7 @@ class OrchestratorLoop:
                     "error": tool_error,
                     "risk_level": risk.value,
                     "params": params,
+                    "elapsed_ms": elapsed_ms,
                 })
 
                 # Add to state
@@ -1783,6 +1824,8 @@ class OrchestratorLoop:
                     "success": False,
                     "error": str(e),
                     "risk_level": risk.value,
+                    "params": params if "params" in locals() else {},
+                    "elapsed_ms": 0,
                 })
                 state.add_tool_result(tool_name, str(e), success=False)
                 

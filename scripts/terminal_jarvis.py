@@ -488,7 +488,7 @@ class TerminalJarvis:
         print("BANTZ Terminal Jarvis")
         print("────────────────────")
         print("Sizi tekrardan görmek güzel efendim. Dinliyorum.")
-        print("Komutlar: /help  /status  /trace  /auth  /sleep  /wake  /exit")
+        print("Komutlar: /help  /status  /trace  /trace export <N>  /auth  /sleep  /wake  /exit")
         print()
 
     def help(self) -> None:
@@ -499,6 +499,7 @@ class TerminalJarvis:
                     "  /help   → bu yardım",
                     "  /status → model/bağlantı durumu",
                     "  /trace  → reasoning özeti + tool adımları (aç/kapat)",
+                    "  /trace export <N> → son N turn trace JSON export",
                     "  /auth   → Google OAuth kurulum/yetkilendirme",
                     "  /sleep  → beklemeye al (wake-word emülasyonu)",
                     "  /wake   → beklemeden çık",
@@ -760,6 +761,15 @@ class TerminalJarvis:
             return self.auth(mode="help")
         if text.startswith("/trace") or text.strip() == "trace":
             parts = text.split()
+            if len(parts) >= 2 and parts[1].strip().lower() == "export":
+                try:
+                    from bantz.brain.trace_exporter import export_recent_traces
+                    n = int(parts[2]) if len(parts) >= 3 else 5
+                    path = export_recent_traces(n)
+                    return f"Trace export hazır: {path}"
+                except Exception:
+                    return "Trace export başarısız oldu."
+
             if len(parts) >= 2:
                 v = parts[1].strip().lower()
                 self._trace_enabled = v in {"1", "on", "true", "yes", "aç"}

@@ -1,0 +1,24 @@
+[
+  {
+    "turn_id": 1,
+    "timestamp": "2026-02-10T10:00:00",
+    "user_input": "okunmamış maillerim var mı",
+    "route": "gmail",
+    "intent": "read",
+    "confidence": 0.93,
+    "tier_decision": {"router": "3b", "finalizer": "3b", "reason": "read_only"},
+    "tools": [
+      {
+        "name": "gmail.unread_count",
+        "params": {},
+        "result": {"ok": true, "unread": 3},
+        "elapsed_ms": 200,
+        "success": true,
+        "error": null
+      }
+    ],
+    "finalizer_strategy": "fast",
+    "assistant_reply": "3 okunmamış mailiniz var efendim.",
+    "total_elapsed_ms": 900
+  }
+]
