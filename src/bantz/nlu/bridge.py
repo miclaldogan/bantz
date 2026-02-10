@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 from typing import Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 
@@ -29,15 +30,24 @@ from bantz.nlu.hybrid import HybridNLU, HybridConfig
 
 
 # ============================================================================
-# Global NLU Instance
+# Global NLU Instance  (canonical singleton — Issue #651)
 # ============================================================================
 
 _nlu_instance: Optional[HybridNLU] = None
-_use_hybrid: bool = False  # Feature flag
+
+# Hybrid NLU varsayılan AÇIK.  Env-var ile kapatılabilir:
+#   BANTZ_HYBRID_NLU=0  → legacy regex-only parse_intent
+_use_hybrid: bool = os.getenv("BANTZ_HYBRID_NLU", "1") not in ("0", "false", "False", "no")
 
 
 def get_nlu() -> HybridNLU:
-    """Get the global NLU instance."""
+    """Get the canonical global NLU instance.
+
+    This is the **single** HybridNLU singleton for the entire process.
+    ``hybrid.py:get_nlu()`` delegates here so that every call-site
+    — regardless of which module it imports from — shares the same
+    instance and therefore the same session context.
+    """
     global _nlu_instance
     if _nlu_instance is None:
         config = HybridConfig(
@@ -55,8 +65,18 @@ def set_nlu(nlu: HybridNLU):
     _nlu_instance = nlu
 
 
+def reset_nlu_instance():
+    """Reset the global NLU singleton (for testing only)."""
+    global _nlu_instance
+    _nlu_instance = None
+
+
 def enable_hybrid_nlu(enabled: bool = True):
-    """Enable or disable hybrid NLU."""
+    """Enable or disable hybrid NLU at runtime.
+
+    The default is read once from ``BANTZ_HYBRID_NLU`` env-var (default
+    ``"1"`` = enabled).  This function allows runtime overrides.
+    """
     global _use_hybrid
     _use_hybrid = enabled
 

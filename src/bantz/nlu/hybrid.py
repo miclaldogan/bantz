@@ -788,35 +788,40 @@ class HybridNLU:
 
 def quick_parse(text: str) -> IntentResult:
     """Quick parse with default settings.
-    
+
+    Uses the canonical singleton from ``bridge.get_nlu()`` so that
+    session context is shared across all call-sites (Issue #651).
+
     Args:
         text: Text to parse
-    
+
     Returns:
         IntentResult
     """
-    nlu = HybridNLU()
-    return nlu.parse(text)
+    return get_nlu().parse(text)
 
 
 # ============================================================================
-# Singleton Instance
+# Singleton Instance — delegates to bridge.py (Issue #651)
 # ============================================================================
-
-
-_default_nlu: Optional[HybridNLU] = None
 
 
 def get_nlu() -> HybridNLU:
-    """Get the default HybridNLU instance.
-    
+    """Get the canonical HybridNLU singleton.
+
+    Delegates to ``bantz.nlu.bridge.get_nlu()`` so that *every*
+    import path — ``from bantz.nlu.hybrid import get_nlu`` **or**
+    ``from bantz.nlu.bridge import get_nlu`` — returns the *same*
+    ``HybridNLU`` instance.  This eliminates the dual-singleton
+    problem that caused silent session-context loss.
+
     Returns:
         Shared HybridNLU instance
     """
-    global _default_nlu
-    if _default_nlu is None:
-        _default_nlu = HybridNLU()
-    return _default_nlu
+    # Late import to avoid circular dependency
+    from bantz.nlu.bridge import get_nlu as _bridge_get_nlu  # noqa: F811
+
+    return _bridge_get_nlu()
 
 
 def parse(text: str, session_id: Optional[str] = None) -> IntentResult:
