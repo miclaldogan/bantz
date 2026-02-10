@@ -145,6 +145,7 @@ class RegexPatterns:
         # Simple search: "X ara", "X'i ara"
         self.patterns.append((
             re.compile(
+                r"^(?!.*\b(?:takvim|calendar|etkinlik|randevu|meeting|gmail|e-?posta|email|mail|posta|mesaj|ileti)\b)"
                 r"(.+?)[''`]?(?:y[ıi]|[ıiuü])?\s*ara\s*$",
                 re.IGNORECASE,
             ),
@@ -335,13 +336,30 @@ class RegexPatterns:
     def _handle_simple_search(self, match: re.Match, text: str) -> IntentResult:
         """Handle simple search pattern."""
         query = match.group(1).strip()
+        q_lower = query.lower()
+        blocked = (
+            "takvim",
+            "calendar",
+            "etkinlik",
+            "randevu",
+            "meeting",
+            "gmail",
+            "e-posta",
+            "email",
+            "mail",
+            "posta",
+            "mesaj",
+            "ileti",
+        )
+        if any(term in q_lower for term in blocked):
+            return IntentResult.unknown(text, source="regex")
         # Remove common prefixes
         query = re.sub(r"^(?:bana\s+|google\s+)", "", query)
         return IntentResult.from_regex(
             "browser_search",
             {"query": query},
             text,
-            confidence=0.85,
+            confidence=0.75,
         )
     
     def _handle_app_open(self, match: re.Match, text: str) -> IntentResult:

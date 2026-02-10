@@ -565,12 +565,19 @@ class FinalizationPipeline:
                 if text:
                     # Issue #653: language post-validation
                     text = _validate_reply_language(text)
+                    self._emit_quality_degraded(
+                        ctx,
+                        reason="quality_failed_fallback",
+                        quality_model=_quality_model,
+                        fast_model=_fast_model,
+                    )
                     ctx.state.update_trace(
                         response_tier=ctx.tier_name or "quality",
                         response_tier_reason=ctx.tier_reason or "quality_finalizer",
                         finalizer_attempted=True,
                         finalizer_used=False,
                         finalizer_fallback="planner",
+                        finalizer_strategy="fast_fallback",
                     )
                     return replace(output, assistant_reply=text, finalizer_model=_fast_model or "fast(fallback)")
 
@@ -641,6 +648,42 @@ class FinalizationPipeline:
                 )
         except Exception:
             pass
+
+    def _emit_quality_degraded(
+        self,
+        ctx: FinalizationContext,
+        *,
+        reason: str,
+        quality_model: str = "",
+        fast_model: str = "",
+    ) -> None:
+        """Publish quality degradation telemetry and update status tracker."""
+        try:
+            from bantz.llm.quality_status import record_quality_degradation
+
+            payload = record_quality_degradation(
+                reason=reason,
+                tier=ctx.tier_name or "quality",
+                tier_reason=ctx.tier_reason or "quality_finalizer",
+                quality_model=quality_model or "",
+                fast_model=fast_model or "",
+                error_code=str(ctx.state.trace.get("finalizer_error_code") or ""),
+            )
+        except Exception:
+            payload = {
+                "reason": reason,
+                "tier": ctx.tier_name or "quality",
+                "tier_reason": ctx.tier_reason or "quality_finalizer",
+                "quality_model": quality_model or "",
+                "fast_model": fast_model or "",
+                "error_code": str(ctx.state.trace.get("finalizer_error_code") or ""),
+            }
+
+        if self._event_bus is not None:
+            try:
+                self._event_bus.publish("quality.degraded", payload)
+            except Exception as exc:
+                logger.debug("[FINALIZER] event_bus.publish failed: %s", exc)
 
     @staticmethod
     def _default_fallback(ctx: FinalizationContext) -> OrchestratorOutput:

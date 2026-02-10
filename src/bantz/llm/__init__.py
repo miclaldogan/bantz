@@ -78,6 +78,7 @@ def create_quality_client(
     base_url: str | None = None,
     model: str | None = None,
     timeout: float = 240.0,
+    event_bus: object | None = None,
 ) -> LLMClientProtocol:
     """Create the "quality" client.
 
@@ -104,13 +105,41 @@ def create_quality_client(
     provider = _env_str("QUALITY_PROVIDER", "BANTZ_QUALITY_PROVIDER", default="vllm").lower()
     fallback_to_fast = _env_flag("BANTZ_QUALITY_FALLBACK_TO_FAST", default=True)
 
+    def _publish_degraded(reason: str, **details: object) -> None:
+        from bantz.llm.quality_status import record_quality_degradation
+
+        payload = record_quality_degradation(reason=reason, **details)
+
+        bus = event_bus
+        if bus is None:
+            try:
+                from bantz.core.events import get_event_bus
+                bus = get_event_bus()
+            except Exception:
+                bus = None
+
+        if bus is not None:
+            try:
+                bus.publish("quality.degraded", payload)
+            except Exception:
+                pass
+
     if provider in {"gemini", "google", "genai"}:
         privacy = get_cloud_privacy_config()
         if privacy.mode != "cloud":
+            _publish_degraded(
+                "privacy_mode_blocked",
+                provider=provider,
+                cloud_mode=str(privacy.mode or ""),
+            )
             return create_fast_client(timeout=timeout)
 
         api_key = _env_str("GEMINI_API_KEY", "GOOGLE_API_KEY", "BANTZ_GEMINI_API_KEY", default="")
         if not api_key:
+            _publish_degraded(
+                "missing_api_key",
+                provider=provider,
+            )
             return create_fast_client(timeout=timeout)
 
         gem_model = (
@@ -126,7 +155,15 @@ def create_quality_client(
 
         from bantz.llm.gemini_client import GeminiClient
 
-        return GeminiClient(api_key=api_key, model=gem_model, timeout_seconds=timeout)
+        try:
+            return GeminiClient(api_key=api_key, model=gem_model, timeout_seconds=timeout)
+        except Exception:
+            _publish_degraded(
+                "gemini_init_failed",
+                provider=provider,
+                model=gem_model,
+            )
+            return create_fast_client(timeout=timeout)
 
     # Default: vLLM quality endpoint (8002)
     quality_client = create_client(
@@ -155,8 +192,18 @@ def create_quality_client(
 
     try:
         if not quality_client.is_available(timeout_seconds=probe_timeout):
+            _publish_degraded(
+                "quality_unavailable",
+                provider="vllm",
+                model=str(getattr(quality_client, "model_name", "") or ""),
+            )
             return create_fast_client(timeout=timeout)
     except Exception:
+        _publish_degraded(
+            "quality_probe_failed",
+            provider="vllm",
+            model=str(getattr(quality_client, "model_name", "") or ""),
+        )
         return create_fast_client(timeout=timeout)
 
     return quality_client

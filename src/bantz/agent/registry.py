@@ -61,10 +61,10 @@ def build_default_registry() -> ToolRegistry:
     """
     reg = ToolRegistry()
 
-    # Common orchestrator slots that may be passed through even for non-calendar
-    # tools.  Mark these as "known" fields so SafetyGuard doesn't warn, but keep
-    # them untyped because orchestrator slots may pass None.
-    common_slot_props = {
+    # Calendar-only orchestrator slots (Issue #654): these should NOT be
+    # injected into Gmail tool schemas to avoid irrelevant slot hallucinations.
+    # Keep untyped because orchestrator slots may pass None.
+    calendar_slot_props = {
         "date": {},
         "time": {},
         "duration": {},
@@ -80,6 +80,7 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
+                    **calendar_slot_props,
                     "date": {"type": "string"},
                     "time": {"type": "string"},
                     "window_hint": {"type": "string"},
@@ -99,6 +100,7 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
+                    **calendar_slot_props,
                     "duration": {"type": "integer"},
                     "window_hint": {"type": "string"},
                     "date": {"type": "string"},
@@ -117,6 +119,7 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
+                    **calendar_slot_props,
                     "title": {"type": "string"},
                     "date": {"type": "string"},
                     "time": {"type": "string"},
@@ -137,6 +140,7 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
+                    **calendar_slot_props,
                     "event_id": {"type": "string", "description": "Google Calendar event ID"},
                     "title": {"type": "string"},
                     "date": {"type": "string"},
@@ -159,6 +163,7 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
+                    **calendar_slot_props,
                     "event_id": {"type": "string", "description": "Google Calendar event ID"},
                 },
                 "required": ["event_id"],
@@ -176,7 +181,7 @@ def build_default_registry() -> ToolRegistry:
             description="Gmail: unread count (read-only)",
             parameters={
                 "type": "object",
-                "properties": {**common_slot_props},
+                "properties": {},
                 "required": [],
                 "additionalProperties": True,
             },
@@ -190,7 +195,6 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
-                    **common_slot_props,
                     "max_results": {"type": "integer"},
                     "unread_only": {"type": "boolean"},
                     "query": {
@@ -234,7 +238,6 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
-                    **common_slot_props,
                     "natural_query": {
                         "type": "string",
                         "description": (
@@ -259,7 +262,6 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
-                    **common_slot_props,
                     "message_id": {"type": "string"},
                     "prefer_unread": {"type": "boolean"},
                 },
@@ -278,7 +280,6 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
-                    **common_slot_props,
                     "to": {"type": "string"},
                     "subject": {"type": "string"},
                     "body": {"type": "string"},
