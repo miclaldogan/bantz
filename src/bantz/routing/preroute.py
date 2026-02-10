@@ -281,8 +281,19 @@ class KeywordRule(PreRouteRule):
         self.confidence = confidence
         self.exact_match = exact_match
     
+    # Maximum word count for full-confidence keyword bypass.
+    # Inputs longer than this get reduced confidence to avoid
+    # swallowing real queries that happen to start with a greeting.
+    MAX_BYPASS_WORDS: int = 4
+
     def match(self, text: str) -> PreRouteMatch:
-        """Match against keywords."""
+        """Match against keywords.
+
+        When *exact_match* is ``False`` and the input exceeds
+        ``MAX_BYPASS_WORDS`` words the returned confidence is reduced
+        proportionally so the orchestrator will **not** bypass the LLM
+        planning phase for inputs like "merhaba, yarın toplantı var mı?".
+        """
         text_lower = text.strip().lower()
         
         for keyword in self.keywords:
@@ -296,9 +307,16 @@ class KeywordRule(PreRouteRule):
                     )
             else:
                 if keyword in text_lower:
+                    word_count = len(text_lower.split())
+                    if word_count > self.MAX_BYPASS_WORDS:
+                        # Scale confidence down: 4 words → 1.0×, 8 words → 0.5×
+                        scale = self.MAX_BYPASS_WORDS / word_count
+                        reduced = round(self.confidence * scale, 3)
+                    else:
+                        reduced = self.confidence
                     return PreRouteMatch.create(
                         intent=self.intent,
-                        confidence=self.confidence,
+                        confidence=reduced,
                         rule_name=self.name,
                         extracted={"keyword": keyword},
                     )
