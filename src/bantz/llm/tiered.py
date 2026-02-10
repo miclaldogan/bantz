@@ -162,6 +162,26 @@ def score_complexity(text: str) -> int:
     if _contains_any(t, strong_signals):
         score += 1  # bonus, not a full +2
 
+    # Issue #649: "haftalık bir plan yap" gibi arada sözcük olan kalıpları yakala.
+    # "haftalık plan" substring match ile bulunamaz ama ikisi de metinde geçiyorsa
+    # aynı strong signal'dır.
+    if "haftalık" in t and "plan" in t and not _contains_any(t, ["haftalık plan"]):
+        score += 1  # same bonus as strong_signals
+
+    # Issue #649: Action verb bonus — planlama/analiz keyword'leri ile birlikte
+    # "yap", "oluştur", "hazırla" gibi action verb'ler geldiğinde complexity artar.
+    action_verbs = ["yap", "oluştur", "hazırla", "çıkar", "üret", "belirle"]
+    complexity_matched = _contains_any(
+        t,
+        [
+            "adım adım", "roadmap", "plan", "planla", "gün gün",
+            "haftalık", "strateji", "kıyasla", "tradeoff", "alternatif",
+            "detaylı", "derinlemesine", "analiz", "gerekçelendir",
+        ],
+    )
+    if complexity_matched and _contains_any(t, action_verbs):
+        score += 1  # complexity keyword + action verb = stronger signal
+
     # Explicit "long" request
     if _contains_any(t, ["uzun", "kapsamlı", "çok detay", "tam rapor", "tümünü"]):
         score += 1
