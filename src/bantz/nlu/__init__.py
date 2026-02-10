@@ -73,6 +73,7 @@ from bantz.nlu.bridge import (
     resolve_clarification,
     enable_hybrid_nlu,
     is_hybrid_enabled,
+    reset_nlu_instance,
     get_nlu_stats,
     compare_parsers,
 )
@@ -115,6 +116,7 @@ __all__ = [
     "resolve_clarification",
     "enable_hybrid_nlu",
     "is_hybrid_enabled",
+    "reset_nlu_instance",
     "get_nlu_stats",
     "compare_parsers",
 ]

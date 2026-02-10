@@ -1195,8 +1195,8 @@ class TestBridge:
         assert result1.intent == "browser_open"
         assert result2.intent == "browser_open"
         
-        # Reset
-        enable_hybrid_nlu(False)
+        # Reset — default is now True (Issue #651)
+        enable_hybrid_nlu(True)
     
     def test_compare_parsers(self):
         from bantz.nlu.bridge import compare_parsers
@@ -1532,3 +1532,234 @@ class TestPerformance:
         
         # Should be fast
         assert elapsed < 0.5, f"Slot extraction too slow: {elapsed}s for 100 extractions"
+
+
+# ============================================================================
+# Issue #651 — Hybrid NLU Default ON, Unified Singleton, Env-var Control
+# ============================================================================
+
+
+class TestIssue651HybridNLUDefault:
+    """Verify hybrid NLU is enabled by default and env-var controllable."""
+
+    def setup_method(self):
+        """Reset singleton and flag between tests."""
+        from bantz.nlu.bridge import enable_hybrid_nlu, reset_nlu_instance
+        reset_nlu_instance()
+        enable_hybrid_nlu(True)
+
+    def teardown_method(self):
+        """Restore default state."""
+        from bantz.nlu.bridge import enable_hybrid_nlu, reset_nlu_instance
+        reset_nlu_instance()
+        enable_hybrid_nlu(True)
+
+    # ── default flag ──────────────────────────────────────────────────
+
+    def test_hybrid_enabled_by_default(self):
+        """_use_hybrid should be True out of the box (no env-var set)."""
+        from bantz.nlu.bridge import is_hybrid_enabled
+        assert is_hybrid_enabled(), "Hybrid NLU must be enabled by default"
+
+    def test_enable_disable_runtime_toggle(self):
+        """enable_hybrid_nlu() should flip the flag at runtime."""
+        from bantz.nlu.bridge import enable_hybrid_nlu, is_hybrid_enabled
+
+        enable_hybrid_nlu(False)
+        assert not is_hybrid_enabled()
+
+        enable_hybrid_nlu(True)
+        assert is_hybrid_enabled()
+
+    # ── env-var control ───────────────────────────────────────────────
+
+    def test_env_var_disables_hybrid(self, monkeypatch):
+        """BANTZ_HYBRID_NLU=0 should disable hybrid NLU."""
+        monkeypatch.setenv("BANTZ_HYBRID_NLU", "0")
+        # Re-import to trigger module-level evaluation
+        import importlib, bantz.nlu.bridge as mod
+        importlib.reload(mod)
+        assert not mod.is_hybrid_enabled()
+        # Restore
+        monkeypatch.delenv("BANTZ_HYBRID_NLU", raising=False)
+        importlib.reload(mod)
+
+    def test_env_var_false_string(self, monkeypatch):
+        """BANTZ_HYBRID_NLU=false should disable hybrid NLU."""
+        monkeypatch.setenv("BANTZ_HYBRID_NLU", "false")
+        import importlib, bantz.nlu.bridge as mod
+        importlib.reload(mod)
+        assert not mod.is_hybrid_enabled()
+        monkeypatch.delenv("BANTZ_HYBRID_NLU", raising=False)
+        importlib.reload(mod)
+
+    def test_env_var_1_enables_hybrid(self, monkeypatch):
+        """BANTZ_HYBRID_NLU=1 should keep hybrid enabled."""
+        monkeypatch.setenv("BANTZ_HYBRID_NLU", "1")
+        import importlib, bantz.nlu.bridge as mod
+        importlib.reload(mod)
+        assert mod.is_hybrid_enabled()
+        monkeypatch.delenv("BANTZ_HYBRID_NLU", raising=False)
+        importlib.reload(mod)
+
+    def test_env_var_absent_defaults_to_enabled(self, monkeypatch):
+        """Without BANTZ_HYBRID_NLU env var, hybrid should be enabled."""
+        monkeypatch.delenv("BANTZ_HYBRID_NLU", raising=False)
+        import importlib, bantz.nlu.bridge as mod
+        importlib.reload(mod)
+        assert mod.is_hybrid_enabled()
+
+
+class TestIssue651UnifiedSingleton:
+    """Verify bridge.get_nlu() and hybrid.get_nlu() return the same instance."""
+
+    def setup_method(self):
+        from bantz.nlu.bridge import reset_nlu_instance
+        reset_nlu_instance()
+
+    def teardown_method(self):
+        from bantz.nlu.bridge import reset_nlu_instance
+        reset_nlu_instance()
+
+    def test_bridge_and_hybrid_get_nlu_same_instance(self):
+        """Importing get_nlu from either module must give the same object."""
+        from bantz.nlu.bridge import get_nlu as bridge_get_nlu
+        from bantz.nlu.hybrid import get_nlu as hybrid_get_nlu
+
+        nlu_a = bridge_get_nlu()
+        nlu_b = hybrid_get_nlu()
+
+        assert nlu_a is nlu_b, (
+            "bridge.get_nlu() and hybrid.get_nlu() must return the SAME "
+            "HybridNLU instance to prevent session context loss"
+        )
+
+    def test_package_level_get_nlu_same_instance(self):
+        """bantz.nlu.get_nlu() must also return the canonical singleton."""
+        from bantz.nlu import get_nlu as pkg_get_nlu
+        from bantz.nlu.bridge import get_nlu as bridge_get_nlu
+
+        assert pkg_get_nlu() is bridge_get_nlu()
+
+    def test_singleton_has_enhanced_config(self):
+        """Canonical singleton must be created with enhanced config."""
+        from bantz.nlu.bridge import get_nlu
+
+        nlu = get_nlu()
+        assert nlu.config.llm_enabled is True
+        assert nlu.config.clarification_enabled is True
+        assert nlu.config.slot_extraction_enabled is True
+
+    def test_reset_nlu_instance_creates_fresh(self):
+        """reset_nlu_instance should allow a new singleton to be created."""
+        from bantz.nlu.bridge import get_nlu, reset_nlu_instance
+
+        nlu_old = get_nlu()
+        reset_nlu_instance()
+        nlu_new = get_nlu()
+
+        assert nlu_old is not nlu_new
+
+    def test_set_nlu_overrides_singleton(self):
+        """set_nlu() should override the canonical singleton."""
+        from bantz.nlu.bridge import get_nlu, set_nlu
+        from bantz.nlu.hybrid import HybridNLU, HybridConfig, get_nlu as hybrid_get_nlu
+
+        custom = HybridNLU(config=HybridConfig(llm_enabled=False))
+        set_nlu(custom)
+
+        assert get_nlu() is custom
+        # hybrid.get_nlu() should also see the override (delegates to bridge)
+        assert hybrid_get_nlu() is custom
+
+
+class TestIssue651QuickParseSingleton:
+    """Verify quick_parse() uses the singleton instead of creating new instance."""
+
+    def setup_method(self):
+        from bantz.nlu.bridge import reset_nlu_instance
+        reset_nlu_instance()
+
+    def teardown_method(self):
+        from bantz.nlu.bridge import reset_nlu_instance
+        reset_nlu_instance()
+
+    def test_quick_parse_uses_singleton(self):
+        """quick_parse() must not create a new HybridNLU each call."""
+        from bantz.nlu.hybrid import quick_parse
+        from bantz.nlu.bridge import get_nlu
+
+        # Force singleton creation
+        singleton = get_nlu()
+
+        # Parse — should use the same singleton
+        quick_parse("youtube aç")
+
+        # Singleton stats should reflect the parse
+        stats = singleton.get_stats()
+        assert stats.total_requests >= 1, (
+            "quick_parse() should increment the singleton's stats"
+        )
+
+    def test_quick_parse_returns_intent_result(self):
+        from bantz.nlu.hybrid import quick_parse
+        from bantz.nlu.types import IntentResult
+
+        result = quick_parse("youtube aç")
+        assert isinstance(result, IntentResult)
+
+
+class TestIssue651AdaptiveUsesHybrid:
+    """Verify parse_intent_adaptive() now uses hybrid by default."""
+
+    def setup_method(self):
+        from bantz.nlu.bridge import enable_hybrid_nlu, reset_nlu_instance
+        reset_nlu_instance()
+        enable_hybrid_nlu(True)
+
+    def teardown_method(self):
+        from bantz.nlu.bridge import enable_hybrid_nlu, reset_nlu_instance
+        reset_nlu_instance()
+        enable_hybrid_nlu(True)
+
+    def test_adaptive_defaults_to_hybrid(self):
+        """With default settings, adaptive should use hybrid NLU."""
+        from bantz.nlu.bridge import parse_intent_adaptive, get_nlu
+
+        singleton = get_nlu()
+        initial_count = singleton.get_stats().total_requests
+
+        result = parse_intent_adaptive("youtube aç")
+
+        assert result.intent == "browser_open"
+        # Singleton stats should show the request went through hybrid
+        assert singleton.get_stats().total_requests > initial_count, (
+            "parse_intent_adaptive should route through hybrid NLU when enabled"
+        )
+
+    def test_adaptive_falls_back_to_legacy_when_disabled(self):
+        """When hybrid is disabled, adaptive should use legacy parser."""
+        from bantz.nlu.bridge import parse_intent_adaptive, enable_hybrid_nlu
+
+        enable_hybrid_nlu(False)
+        result = parse_intent_adaptive("youtube aç")
+        assert result.intent == "browser_open"
+
+    def test_adaptive_hybrid_and_legacy_agree_on_common_intents(self):
+        """Both paths should agree on unambiguous Turkish commands."""
+        from bantz.nlu.bridge import parse_intent_adaptive, enable_hybrid_nlu
+
+        common_commands = [
+            ("youtube aç", "browser_open"),
+            ("merhaba", "greeting"),
+        ]
+
+        for text, expected_intent in common_commands:
+            enable_hybrid_nlu(False)
+            legacy = parse_intent_adaptive(text)
+
+            enable_hybrid_nlu(True)
+            hybrid = parse_intent_adaptive(text)
+
+            assert legacy.intent == expected_intent, f"Legacy failed on '{text}'"
+            assert hybrid.intent == expected_intent, f"Hybrid failed on '{text}'"
