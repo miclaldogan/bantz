@@ -185,10 +185,13 @@ class SecretsVault:
     def _save(self) -> None:
         """Save secrets to storage."""
         try:
-            with open(self._storage_path, "w") as f:
+            fd = os.open(
+                str(self._storage_path),
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o600,
+            )
+            with os.fdopen(fd, "w") as f:
                 json.dump(self._secrets, f, indent=2)
-            # Set restrictive permissions
-            os.chmod(self._storage_path, 0o600)
         except IOError:
             pass
     
