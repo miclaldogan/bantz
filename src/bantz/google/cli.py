@@ -8,6 +8,12 @@ from typing import Any, Optional
 
 
 def _print_json(data: Any) -> None:
+    try:
+        from bantz.security.secrets import sanitize
+
+        data = sanitize(data)
+    except Exception:
+        pass
     print(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=False))
 
 
