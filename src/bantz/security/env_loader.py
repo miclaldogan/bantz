@@ -23,10 +23,20 @@ _ALLOWED_PREFIXES = ("BANTZ_", "LLM_", "GOOGLE_", "VLLM_")
 
 def _strip_quotes(value: str) -> str:
     v = value.strip()
-    if len(v) >= 2 and ((v[0] == '"' and v[-1] == '"') or (v[0] == "'" and v[-1] == "'")):
+    is_quoted = len(v) >= 2 and (
+        (v[0] == '"' and v[-1] == '"') or (v[0] == "'" and v[-1] == "'")
+    )
+    if is_quoted:
         v = v[1:-1]
-    # Allow writing multiline values using literal \n in .env.
-    return v.replace("\\n", "\n")
+        # Only allow \n replacement inside quoted values
+        v = v.replace("\\n", "\n")
+    # Never allow embedded newlines — they could inject extra KEY=VALUE pairs
+    if "\n" in v:
+        logger.warning(
+            "Stripping newlines from env value to prevent injection"
+        )
+        v = v.replace("\n", " ")
+    return v
 
 
 def load_env_file(path: str | os.PathLike[str], *, override: bool = False) -> list[str]:
