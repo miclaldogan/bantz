@@ -454,19 +454,124 @@ class RestrictedSandbox(Sandbox):
     
     Adds:
     - Path validation
+    - Deep command-tree inspection (chain, pipe, subshell, wrapper)
     - Import restrictions (future)
     - System call filtering (future)
     """
+    
+    # Shell metacharacters that indicate command chaining / piping
+    _CHAIN_OPERATORS = {";", "&&", "||", "|"}
+    
+    # Shells that can be used as wrappers to bypass the blocklist
+    _SHELL_WRAPPERS = {
+        "bash", "sh", "zsh", "dash", "csh", "tcsh", "fish", "ksh",
+        "env", "xargs", "nohup", "setsid", "strace", "ltrace",
+        "sudo", "su", "doas", "pkexec",
+    }
     
     def __init__(self, config: Optional[SandboxConfig] = None):
         config = config or SandboxConfig(isolation_level=IsolationLevel.RESTRICTED)
         super().__init__(config)
         
-        self._blocked_commands = {
+        self._blocked_commands: Set[str] = {
             "rm", "rmdir", "del", "format", "fdisk",
             "mkfs", "dd", "shutdown", "reboot", "halt",
             "poweroff", "init", "systemctl", "service",
         }
+    
+    # ----- private helpers -----
+    
+    @staticmethod
+    def _base_name(token: str) -> str:
+        """Extract the lowercase base name, stripping any directory path."""
+        return Path(token).name.lower()
+    
+    def _token_is_blocked(self, token: str) -> Optional[str]:
+        """Return the blocked base name if *token* resolves to one, else None."""
+        base = self._base_name(token)
+        if base in self._blocked_commands:
+            return base
+        return None
+    
+    def _scan_tokens(self, tokens: List[str]) -> Optional[str]:
+        """
+        Walk every token for blocked commands.
+        
+        Checks:
+        1. Direct invocation  (``rm``, ``/usr/bin/rm``)
+        2. Shell wrappers     (``bash -c "rm -rf /"``)
+        3. Chain / pipe split (``echo hi ; rm -rf /``)
+        
+        Returns the first blocked command name found, or ``None``.
+        """
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            base = self._base_name(tok)
+            
+            # 1. Direct blocked command (handles full paths too)
+            if base in self._blocked_commands:
+                return base
+            
+            # 2. Shell wrapper detection  — e.g. bash -c "rm …"
+            if base in self._SHELL_WRAPPERS:
+                # Scan the remaining args; any sub-command string may
+                # contain a blocked command.
+                for rest_tok in tokens[i + 1:]:
+                    # A "-c" arg's *value* is a mini-script → tokenise it
+                    try:
+                        sub_tokens = shlex.split(rest_tok)
+                    except ValueError:
+                        sub_tokens = rest_tok.split()
+                    for st in sub_tokens:
+                        found = self._token_is_blocked(st)
+                        if found:
+                            return found
+            
+            # 3. Chain / pipe operators — re-tokenise from right side
+            if tok in self._CHAIN_OPERATORS:
+                rest = tokens[i + 1:]
+                if rest:
+                    found = self._scan_tokens(rest)
+                    if found:
+                        return found
+                    # Already scanned everything after the operator
+                    return None
+            
+            i += 1
+        return None
+    
+    def _contains_blocked_command(self, cmd_str: str) -> Optional[str]:
+        """
+        Full inspection of a command string for any blocked command.
+        
+        Handles:
+        - Full-path bypass      ``/usr/bin/rm``
+        - Shell wrapper bypass  ``bash -c "rm -rf /"``
+        - Chain / pipe bypass   ``echo hi ; rm -rf /``
+        - Backtick / $()        ``echo `rm foo` ``
+        - Embedded newlines     ``echo\nrm -rf /``
+        
+        Returns the first blocked name found, or ``None``.
+        """
+        # Reject backtick and $() subshell patterns outright
+        if "`" in cmd_str or "$(" in cmd_str:
+            return "__subshell__"
+        
+        # Replace newlines with ; so multi-line tricks are caught
+        normalised = cmd_str.replace("\n", " ; ")
+        
+        try:
+            tokens = shlex.split(normalised)
+        except ValueError:
+            tokens = normalised.split()
+        
+        if not tokens:
+            return None
+        
+        return self._scan_tokens(tokens)
+    
+    # ----- public API -----
     
     def execute_command(
         self,
@@ -475,21 +580,28 @@ class RestrictedSandbox(Sandbox):
         cwd: Optional[Path] = None,
         env: Optional[Dict[str, str]] = None,
     ) -> SandboxResult:
-        """Execute with additional safety checks."""
+        """Execute with deep command-tree safety checks.
         
-        # Check for blocked commands
+        The blocklist is enforced by scanning the full command tree,
+        not just ``cmd[0]``.  This prevents bypass via full paths,
+        shell wrappers, chain operators, and subshell patterns.
+        """
         cmd_str = command if isinstance(command, str) else " ".join(command)
-        cmd_parts = cmd_str.split()
         
-        if cmd_parts:
-            base_cmd = Path(cmd_parts[0]).name.lower()
-            if base_cmd in self._blocked_commands:
-                return SandboxResult(
-                    success=False,
-                    error=f"Command '{base_cmd}' is not allowed in sandbox",
-                    terminated=True,
-                    termination_reason="blocked_command",
-                )
+        blocked = self._contains_blocked_command(cmd_str)
+        if blocked:
+            reason = (
+                "Subshell/backtick patterns are not allowed in sandbox"
+                if blocked == "__subshell__"
+                else f"Command '{blocked}' is not allowed in sandbox"
+            )
+            logger.warning("Blocked sandbox command: %s", cmd_str)
+            return SandboxResult(
+                success=False,
+                error=reason,
+                terminated=True,
+                termination_reason="blocked_command",
+            )
         
         return super().execute_command(command, stdin, cwd, env)
     
