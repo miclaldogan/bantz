@@ -238,6 +238,10 @@ class WritePolicy:
         """
         Redact all sensitive patterns from content.
         
+        All patterns are applied regardless of their decision type
+        (ALLOW, DENY, REDACT, ENCRYPT) — when redacting, the goal is
+        to strip every piece of sensitive data.
+        
         Args:
             content: Content to redact
             
@@ -247,8 +251,7 @@ class WritePolicy:
         result = content
         
         for pattern in self._patterns:
-            if pattern.decision != WriteDecision.DENY:
-                result = pattern.redact(result)
+            result = pattern.redact(result)
         
         return result
     
