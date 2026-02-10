@@ -1,60 +1,57 @@
 ---
 name: Bug Report
-about: Report a bug or unexpected behavior
+about: Bir hata veya beklenmeyen davranış bildir
 title: '[Bug] '
 labels: 'type:bug, priority:P1'
 assignees: ''
 
 ---
 
-## Describe the Bug
+## Hatanın Açıklaması
 
 <!--
-A clear and concise description of what the bug is.
+Hatayı kısa ve net bir şekilde açıklayın.
 -->
 
-## Steps to Reproduce
+## Tekrar Etme Adımları
 
 <!--
-Steps to reproduce the behavior:
-1. Run command '...'
-2. Say '...'
-3. See error
+1. '...' komutunu çalıştır
+2. '...' de
+3. Hatayı gör
 -->
 
-## Expected Behavior
+## Beklenen Davranış
 
 <!--
-What did you expect to happen?
+Ne olmasını bekliyordunuz?
 -->
 
-## Actual Behavior
+## Gerçekleşen Davranış
 
 <!--
-What actually happened?
+Gerçekte ne oldu?
 -->
 
-## Environment
+## Ortam Bilgileri
 
-- OS: [e.g., Ubuntu 22.04]
-- Python version: [e.g., 3.10.12]
-- Bantz version: [e.g., 0.2.0-alpha]
-- Installation method: [pip, source]
+- OS: [ör. Ubuntu 22.04]
+- Python: [ör. 3.10.12]
+- Bantz sürümü: [ör. 0.2.0-alpha]
+- Kurulum: [pip / source]
 
-## Logs
+## Log Çıktısı
 
 <!--
-Paste relevant logs here. Use triple backticks for code blocks.
-Check: bantz.log.jsonl, test.log.jsonl, or terminal output.
+İlgili logları yapıştırın. bantz.log.jsonl veya terminal çıktısı.
 -->
 
 ```
-Paste logs here
+Logları buraya yapıştırın
 ```
 
-## Additional Context
+## Ek Bağlam
 
 <!--
-Add any other context about the problem here.
-Screenshots, videos, or related issues.
+Ekran görüntüsü, video veya ilgili issue varsa ekleyin.
 -->
