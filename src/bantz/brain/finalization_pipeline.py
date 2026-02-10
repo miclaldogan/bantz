@@ -856,6 +856,8 @@ def _apply_tool_first_guard_if_needed(ctx: FinalizationContext) -> Optional[Orch
         needs_guard = calendar_intent in {"query", "create", "modify", "cancel"}
     elif route == "gmail":
         needs_guard = gmail_intent in {"list", "search", "read", "send"}
+    elif route in ("system", "pc"):
+        needs_guard = True  # system/pc routes are always tool-dependent
 
     if not needs_guard:
         return None
@@ -885,6 +887,11 @@ def _tool_first_guard_message(*, route: str) -> str:
             "Efendim, bunu yanıtlamak için takviminize bakmam gerekiyor. "
             "Takvim aracını çalıştırmadan etkinlik/boşluk bilgisi uyduramam. "
             "İsterseniz şimdi kontrol edip net sonucu söyleyeyim."
+        )
+    if route in ("system", "pc"):
+        return (
+            "Efendim, bu işlemi gerçekleştirmek için sistem aracını çalıştırmam gerekiyor. "
+            "Aracı çalıştırmadan sonuç uyduramam. İsterseniz şimdi deneyelim."
         )
     return "Efendim, bunu yanıtlamak için ilgili aracı çalıştırmam gerekiyor."
 
