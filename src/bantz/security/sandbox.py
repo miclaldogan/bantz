@@ -20,6 +20,7 @@ import logging
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -335,7 +336,7 @@ class Sandbox:
         
         try:
             result = self.execute_command(
-                ["python", str(script_path)],
+                [sys.executable, str(script_path)],
                 cwd=self.temp_dir,
             )
         finally:
