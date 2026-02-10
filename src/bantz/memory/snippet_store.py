@@ -237,12 +237,14 @@ class SQLiteStore(SnippetStore):
     Thread-safe with connection pooling.
     """
     
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, table_name: str = "snippets"):
         """
         Initialize SQLite store.
         
         Args:
             db_path: Path to database file. Defaults to ~/.bantz/memory.db
+            table_name: SQLite table name. Use distinct names for profile
+                        vs episodic stores to prevent ID collisions.
         """
         if db_path is None:
             db_dir = Path.home() / ".bantz"
@@ -250,6 +252,7 @@ class SQLiteStore(SnippetStore):
             db_path = str(db_dir / "memory.db")
         
         self._db_path = db_path
+        self._table = table_name
         self._lock = threading.RLock()
         self._init_db()
     
@@ -261,9 +264,10 @@ class SQLiteStore(SnippetStore):
     
     def _init_db(self) -> None:
         """Initialize database schema."""
+        tbl = self._table
         with self._get_connection() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS snippets (
+            conn.execute(f"""
+                CREATE TABLE IF NOT EXISTS {tbl} (
                     id TEXT PRIMARY KEY,
                     content TEXT NOT NULL,
                     snippet_type TEXT NOT NULL,
@@ -278,14 +282,14 @@ class SQLiteStore(SnippetStore):
                 )
             """)
             
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_snippet_type 
-                ON snippets(snippet_type)
+            conn.execute(f"""
+                CREATE INDEX IF NOT EXISTS idx_{tbl}_type 
+                ON {tbl}(snippet_type)
             """)
             
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_timestamp 
-                ON snippets(timestamp)
+            conn.execute(f"""
+                CREATE INDEX IF NOT EXISTS idx_{tbl}_timestamp 
+                ON {tbl}(timestamp)
             """)
             
             conn.commit()
@@ -294,8 +298,8 @@ class SQLiteStore(SnippetStore):
         """Write snippet to database."""
         with self._lock:
             with self._get_connection() as conn:
-                conn.execute("""
-                    INSERT OR REPLACE INTO snippets 
+                conn.execute(f"""
+                    INSERT OR REPLACE INTO {self._table} 
                     (id, content, snippet_type, source, timestamp, 
                      confidence, ttl_seconds, tags, metadata, 
                      access_count, last_accessed)
@@ -348,7 +352,7 @@ class SQLiteStore(SnippetStore):
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.execute(
-                    "SELECT * FROM snippets WHERE id = ?",
+                    f"SELECT * FROM {self._table} WHERE id = ?",
                     (snippet_id,)
                 )
                 row = cursor.fetchone()
@@ -358,8 +362,8 @@ class SQLiteStore(SnippetStore):
                     snippet.access()
                     
                     # Update access info
-                    conn.execute("""
-                        UPDATE snippets 
+                    conn.execute(f"""
+                        UPDATE {self._table} 
                         SET access_count = ?, last_accessed = ?
                         WHERE id = ?
                     """, (snippet.access_count, snippet.last_accessed.isoformat(), snippet_id))
@@ -378,7 +382,7 @@ class SQLiteStore(SnippetStore):
         """Search snippets by query."""
         with self._lock:
             with self._get_connection() as conn:
-                sql = "SELECT * FROM snippets WHERE content LIKE ?"
+                sql = f"SELECT * FROM {self._table} WHERE content LIKE ?"
                 params = [f"%{query}%"]
                 
                 if snippet_type:
@@ -404,7 +408,7 @@ class SQLiteStore(SnippetStore):
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.execute(
-                    "DELETE FROM snippets WHERE id = ?",
+                    f"DELETE FROM {self._table} WHERE id = ?",
                     (snippet_id,)
                 )
                 conn.commit()
@@ -423,7 +427,7 @@ class SQLiteStore(SnippetStore):
             with self._get_connection() as conn:
                 placeholders = ",".join("?" * len(expired_ids))
                 conn.execute(
-                    f"DELETE FROM snippets WHERE id IN ({placeholders})",
+                    f"DELETE FROM {self._table} WHERE id IN ({placeholders})",
                     expired_ids
                 )
                 conn.commit()
@@ -435,7 +439,7 @@ class SQLiteStore(SnippetStore):
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.execute(
-                    "SELECT * FROM snippets ORDER BY timestamp DESC LIMIT ?",
+                    f"SELECT * FROM {self._table} ORDER BY timestamp DESC LIMIT ?",
                     (limit,)
                 )
                 rows = cursor.fetchall()
@@ -445,7 +449,7 @@ class SQLiteStore(SnippetStore):
         """Count snippets."""
         with self._lock:
             with self._get_connection() as conn:
-                cursor = conn.execute("SELECT COUNT(*) FROM snippets")
+                cursor = conn.execute(f"SELECT COUNT(*) FROM {self._table}")
                 return cursor.fetchone()[0]
 
 
@@ -454,6 +458,8 @@ def create_session_store() -> InMemoryStore:
     return InMemoryStore()
 
 
-def create_persistent_store(db_path: Optional[str] = None) -> SQLiteStore:
+def create_persistent_store(
+    db_path: Optional[str] = None, table_name: str = "snippets"
+) -> SQLiteStore:
     """Factory for creating persistent store."""
-    return SQLiteStore(db_path=db_path)
+    return SQLiteStore(db_path=db_path, table_name=table_name)
