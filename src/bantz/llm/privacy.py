@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from bantz.security.masking import get_default_masker
 from bantz.brain.memory_lite import PIIFilter
+from bantz.privacy.redaction import redact_pii
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ def redact_for_cloud(text: str) -> str:
         return text
 
     t = str(text or "")
+    t = redact_pii(t)
     t = PIIFilter.filter(t, enabled=True)
     t = get_default_masker().mask(t)
     return t
