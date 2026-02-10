@@ -901,7 +901,12 @@ USER: merhaba mesajı gönder
                 ctx = None
 
         if ctx is None or ctx < 256:
-            ctx = 2048
+            ctx = 8192
+            logger.warning(
+                "Could not detect model context length, using fallback %d. "
+                "Set BANTZ_ROUTER_CONTEXT_LEN to override.",
+                ctx,
+            )
 
         self._cached_context_len = int(ctx)
         return int(ctx)
