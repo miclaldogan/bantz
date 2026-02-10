@@ -154,6 +154,19 @@ class VoiceFSM:
         with self._lock:
             return list(self._history)
 
+    def set_on_transition(self, callback: Optional[Callable[[StateTransition], None]]) -> None:
+        """Register (or replace) the transition callback (thread-safe).
+
+        Pass ``None`` to clear a previously registered callback and
+        allow the old reference to be garbage-collected.
+        """
+        with self._lock:
+            self._on_transition = callback
+
+    def clear_on_transition(self) -> None:
+        """Remove the transition callback so the referenced object can be GC'd."""
+        self.set_on_transition(None)
+
     def _transition(self, new_state: VoiceState, trigger: str) -> None:
         """Execute a state transition (caller must hold _lock)."""
         if new_state == self._state:
