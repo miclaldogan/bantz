@@ -747,6 +747,10 @@ class FinalizationPipeline:
             guarded = _apply_tool_first_guard_if_needed(ctx)
             if guarded is not None:
                 return guarded
+            # Validate language — original reply may be from 3B model (CJK/mixed)
+            if output.assistant_reply:
+                validated = _validate_reply_language(output.assistant_reply)
+                return replace(output, assistant_reply=validated, finalizer_model="none(no_tools)")
             return replace(output, finalizer_model="none(no_tools)")
 
         # Check for failures
@@ -761,7 +765,8 @@ class FinalizationPipeline:
 
         # Tools succeeded — use existing reply or generate summary
         if output.assistant_reply:
-            return replace(output, finalizer_model="none(existing_reply)")
+            validated = _validate_reply_language(output.assistant_reply)
+            return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
 
         from bantz.brain.orchestrator_loop import _build_tool_success_summary
 
