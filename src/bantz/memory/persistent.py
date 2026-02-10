@@ -67,7 +67,7 @@ class PersistentMemoryStore:
 
     def __init__(self, db_path: Optional[str] = None) -> None:
         self._db_path = db_path or _default_db_path()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._conn: Optional[sqlite3.Connection] = None
         self._connect()
 
@@ -190,7 +190,7 @@ class PersistentMemoryStore:
             cur = self._conn.execute(
                 "DELETE FROM memory_item WHERE id = ?", (item_id,)
             )
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
     def list_items(
         self,
@@ -230,7 +230,7 @@ class PersistentMemoryStore:
                 "accessed_at = ? WHERE id = ?",
                 (now, item_id),
             )
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
     # ------------------------------------------------------------------
     # Session CRUD
@@ -275,7 +275,7 @@ class PersistentMemoryStore:
                 "UPDATE session SET end_time = ?, summary = ? WHERE id = ?",
                 (now, summary, session_id),
             )
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
     def increment_turn_count(self, session_id: str) -> bool:
         """Increment the turn counter for a session."""
@@ -284,7 +284,7 @@ class PersistentMemoryStore:
                 "UPDATE session SET turn_count = turn_count + 1 WHERE id = ?",
                 (session_id,),
             )
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
     def list_sessions(self, limit: int = 20) -> List[Session]:
         """List recent sessions ordered by start_time descending."""
@@ -391,7 +391,7 @@ class PersistentMemoryStore:
             cur = self._conn.execute(
                 "DELETE FROM user_profile WHERE key = ?", (key,)
             )
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
     def list_profile_keys(self) -> List[str]:
         """Return all profile keys."""
