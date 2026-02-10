@@ -96,7 +96,7 @@ def _tools() -> ToolRegistry:
         return {"items": [], "count": 0}
 
     def list_messages(**_kwargs: Any) -> dict[str, Any]:
-        return {"messages": [], "count": 0}
+        return {"messages": [{"id": "m1", "subject": "Test", "snippet": "Hello"}], "count": 1}
 
     reg.register(
         Tool(
@@ -118,10 +118,9 @@ def _tools() -> ToolRegistry:
 
 
 def test_quality_finalizer_no_new_facts_falls_back(monkeypatch: pytest.MonkeyPatch):
-    # Keep tiering disabled so the finalizer is selected by default.
-    # Issue #647: default is now True, so we must explicitly disable.
-    monkeypatch.setenv("BANTZ_TIER_MODE", "0")
-    monkeypatch.setenv("BANTZ_TIERED_MODE", "0")
+    # Issue #647: tiering is now ON by default.  We need quality finalizer
+    # to run, so force the quality tier explicitly.
+    monkeypatch.setenv("BANTZ_TIER_FORCE_FINALIZER", "quality")
     monkeypatch.delenv("BANTZ_LLM_TIER", raising=False)
 
     planner = PlannerMock()
@@ -146,9 +145,9 @@ def test_quality_finalizer_no_new_facts_falls_back(monkeypatch: pytest.MonkeyPat
 
 
 def test_quality_finalizer_error_has_reason_code_and_falls_back(monkeypatch: pytest.MonkeyPatch):
-    # Issue #647: default is now True, so we must explicitly disable.
-    monkeypatch.setenv("BANTZ_TIER_MODE", "0")
-    monkeypatch.setenv("BANTZ_TIERED_MODE", "0")
+    # Issue #647: tiering is now ON by default.  Force quality tier so
+    # the quality finalizer is actually invoked (and triggers the error).
+    monkeypatch.setenv("BANTZ_TIER_FORCE_FINALIZER", "quality")
     monkeypatch.delenv("BANTZ_LLM_TIER", raising=False)
 
     planner = PlannerMock()
@@ -198,7 +197,7 @@ def test_gemini_client_emits_metrics_and_reason_codes(monkeypatch: pytest.Monkey
 
     caplog.set_level("INFO", logger="bantz.llm.metrics")
 
-    c = GeminiClient(api_key="x", model="gemini-2.0-flash")
+    c = GeminiClient(api_key="x", model="gemini-2.0-flash", use_default_gates=False)
     out = c.complete_text(prompt="hello", temperature=0.0, max_tokens=5)
     assert out == "ok"
 

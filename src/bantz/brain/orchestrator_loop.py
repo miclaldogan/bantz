@@ -1306,6 +1306,12 @@ class OrchestratorLoop:
                 if is_destructive(tool_name):
                     return original
 
+                # Safety-rejected results should never be retried: the args
+                # failed validation and retrying with empty/same params would
+                # bypass the safety guard.
+                if original.get("safety_rejected"):
+                    return original
+
                 tool = self.tools.get(tool_name)
                 if tool is None or tool.function is None:
                     return original
@@ -1666,6 +1672,7 @@ class OrchestratorLoop:
                             "tool": tool_name,
                             "success": False,
                             "error": f"Invalid arguments: {error}",
+                            "safety_rejected": True,
                         })
                         continue
                 

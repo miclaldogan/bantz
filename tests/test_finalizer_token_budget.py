@@ -185,8 +185,12 @@ def mock_tools_large_events():
     return registry
 
 
-def test_finalizer_handles_large_tool_results(mock_orchestrator, mock_tools_large_events, caplog):
+def test_finalizer_handles_large_tool_results(mock_orchestrator, mock_tools_large_events, caplog, monkeypatch):
     """Finalizer should handle 200 events by using budget control."""
+    # Issue #647: tiering is ON by default; calendar queries go to fast path.
+    # Force quality so the mock finalizer LLM is actually invoked.
+    monkeypatch.setenv("BANTZ_TIER_FORCE_FINALIZER", "quality")
+
     config = OrchestratorConfig()
     
     # Create a mock finalizer LLM

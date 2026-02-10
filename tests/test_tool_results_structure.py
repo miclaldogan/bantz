@@ -215,8 +215,12 @@ def test_tool_execution_preserves_raw_result(mock_orchestrator, mock_tools):
     assert result["success"] is True
 
 
-def test_finalizer_uses_raw_result(mock_orchestrator, mock_tools):
+def test_finalizer_uses_raw_result(mock_orchestrator, mock_tools, monkeypatch):
     """Finalizer should use raw_result for structured data, not truncated summary."""
+    # Issue #647: tiering is ON by default; calendar queries go to fast path.
+    # Force quality so the mock finalizer LLM is actually invoked.
+    monkeypatch.setenv("BANTZ_TIER_FORCE_FINALIZER", "quality")
+
     config = OrchestratorConfig()
     
     # Create a mock finalizer LLM that will be called

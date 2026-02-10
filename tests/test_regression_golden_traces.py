@@ -90,7 +90,7 @@ def mock_llm() -> MockLLM:
         },
         "bugün neler": {
             "route": "calendar",
-            "calendar_intent": "list_events",
+            "calendar_intent": "query",
             "slots": {"time_range": "today"},
             "confidence": 0.90,
             "tool_plan": [{"name": "calendar.list_events", "args": {"time_min": "2026-01-30T00:00:00", "time_max": "2026-01-30T23:59:59"}}],
@@ -98,7 +98,7 @@ def mock_llm() -> MockLLM:
         },
         "saat 4 için bir toplantı": {
             "route": "calendar",
-            "calendar_intent": "create_event",
+            "calendar_intent": "create",
             "slots": {"time": "16:00", "title": "toplantı"},
             "confidence": 0.85,
             "tool_plan": [{"name": "calendar.create_event", "args": {"title": "toplantı", "start": "2026-01-30T16:00:00"}}],
@@ -188,7 +188,7 @@ class TestGoldenTraceRegression:
         golden = load_golden_trace("scenario_2_calendar_list")
         
         orchestrator = JarvisLLMOrchestrator(llm_client=mock_llm)
-        config = OrchestratorConfig(enable_safety_guard=False)
+        config = OrchestratorConfig(enable_safety_guard=False, enable_preroute=False)
         loop = OrchestratorLoop(orchestrator, mock_tools, event_bus, config)
         
         user_input = golden["user_input"]
@@ -210,7 +210,7 @@ class TestGoldenTraceRegression:
         golden = load_golden_trace("scenario_3_calendar_create")
         
         orchestrator = JarvisLLMOrchestrator(llm_client=mock_llm)
-        config = OrchestratorConfig(enable_safety_guard=False)
+        config = OrchestratorConfig(enable_safety_guard=False, enable_preroute=False)
         loop = OrchestratorLoop(orchestrator, mock_tools, event_bus, config)
         
         user_input = golden["user_input"]
