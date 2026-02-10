@@ -58,8 +58,28 @@ class IntentCategory(Enum):
     AMBIGUOUS = "ambiguous"
     
     @property
+    def is_destructive(self) -> bool:
+        """Check if this intent modifies external state (create/delete/update).
+
+        Issue #650: Destructive intents must NEVER bypass the router.
+        They require LLM planning, safety guard, and confirmation firewall.
+        """
+        return self in {
+            IntentCategory.CALENDAR_CREATE,
+            IntentCategory.CALENDAR_DELETE,
+            IntentCategory.CALENDAR_UPDATE,
+            IntentCategory.EMAIL_SEND,
+        }
+
+    @property
     def can_bypass_router(self) -> bool:
-        """Check if this intent can bypass the router."""
+        """Check if this intent can bypass the router.
+
+        Issue #650: Destructive intents (create/delete/update) are excluded.
+        They are passed as hints only, never bypassed.
+        """
+        if self.is_destructive:
+            return False
         return self in {
             IntentCategory.GREETING,
             IntentCategory.FAREWELL,
@@ -70,9 +90,6 @@ class IntentCategory(Enum):
             IntentCategory.TIME_QUERY,
             IntentCategory.DATE_QUERY,
             IntentCategory.CALENDAR_LIST,
-            IntentCategory.CALENDAR_CREATE,
-            IntentCategory.CALENDAR_DELETE,
-            IntentCategory.CALENDAR_UPDATE,
             IntentCategory.VOLUME_CONTROL,
             IntentCategory.BRIGHTNESS,
             IntentCategory.APP_LAUNCH,
@@ -151,10 +168,17 @@ class PreRouteMatch:
         )
     
     def should_bypass(self, min_confidence: float = 0.8) -> bool:
-        """Check if router should be bypassed."""
+        """Check if router should be bypassed.
+
+        Issue #650: Defense-in-depth — destructive intents are explicitly
+        blocked even if can_bypass_router were accidentally changed.
+        """
+        if not self.matched:
+            return False
+        if self.intent.is_destructive:
+            return False
         return (
-            self.matched
-            and self.intent.can_bypass_router
+            self.intent.can_bypass_router
             and self.confidence >= min_confidence
         )
 
