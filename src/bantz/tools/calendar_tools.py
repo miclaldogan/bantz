@@ -13,6 +13,56 @@ from bantz.google.calendar import (
 )
 from bantz.tools.calendar_idempotency import create_event_with_idempotency
 
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+# ── Date / time format validation (Issue #663) ──────────────────────
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
+
+
+def _validate_date_format(date_str: str) -> Optional[str]:
+    """Return error message if *date_str* is not YYYY-MM-DD or a known token."""
+    if not date_str:
+        return None
+    token = date_str.strip().lower()
+    if token in _RELATIVE_DATE_TOKENS:
+        return None
+    if not _DATE_RE.match(token):
+        return f"Geçersiz tarih formatı: '{date_str}'. YYYY-MM-DD veya bugün/yarın kullanın."
+    # Structural check: valid month/day
+    try:
+        y, m, d = [int(x) for x in token.split("-")]
+        datetime(y, m, d)
+    except (ValueError, OverflowError):
+        return f"Geçersiz tarih: '{date_str}'."
+    return None
+
+
+def _validate_time_format(time_str: str) -> Optional[str]:
+    """Return error message if *time_str* is not HH:MM."""
+    if not time_str:
+        return None
+    t = time_str.strip()
+    if not _TIME_RE.match(t):
+        return f"Geçersiz saat formatı: '{time_str}'. HH:MM formatında giriniz."
+    hh, mm = [int(x) for x in t.split(":")]
+    if hh > 23 or mm > 59:
+        return f"Geçersiz saat: '{time_str}'."
+    return None
+
+
+def _is_past(date_str: str, time_str: str) -> bool:
+    """Return True if date+time is strictly in the past."""
+    try:
+        resolved = _resolve_date_token(date_str)
+        start = _dt(resolved, time_str)
+        return start < datetime.now().astimezone()
+    except Exception:
+        return False
+
 
 @dataclass(frozen=True)
 class TimeWindow:
@@ -228,7 +278,14 @@ def calendar_create_event_tool(
     if not hhmm:
         return {"ok": False, "error": "Missing time slot (HH:MM)"}
 
+    # Date / time format validation (Issue #663)
     d = (date or "").strip()
+    time_err = _validate_time_format(hhmm)
+    if time_err:
+        return {"ok": False, "error": time_err}
+    date_err = _validate_date_format(d) if d else None
+    if date_err:
+        return {"ok": False, "error": date_err}
     if not d:
         if (window_hint or "").strip().lower() == "tomorrow":
             d = _date_tomorrow()
@@ -238,6 +295,10 @@ def calendar_create_event_tool(
             d = _date_today()
     else:
         d = _resolve_date_token(d)
+
+    # Past-date guard (Issue #663): warn but allow (user may update existing events)
+    if _is_past(d, hhmm):
+        logger.warning("[CALENDAR] Event in the past: %s %s", d, hhmm)
 
     start_dt = _dt(d, hhmm)
     dur = int(duration) if duration is not None else 60

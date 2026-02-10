@@ -143,6 +143,23 @@ class ToolRegistry:
             "tools": self.as_llm_catalog(format=format),
         }
 
+    def list_tools(self) -> list[Tool]:
+        """Return all registered tools sorted by name."""
+        return [self._tools[n] for n in self.names()]
+
+    def get_schema(self, name: str) -> dict[str, Any] | None:
+        """Return the JSON Schema for a single tool, or None if not found."""
+        tool = self.get(name)
+        if tool is None:
+            return None
+        return {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+            "requires_confirmation": bool(tool.requires_confirmation),
+            "risk_level": tool.risk_level,
+        }
+
     def validate_call(self, name: str, params: dict[str, Any]) -> tuple[bool, str]:
         tool = self.get(name)
         if not tool:
@@ -155,20 +172,36 @@ class ToolRegistry:
                 return False, f"missing_param:{key}"
 
         # Lightweight type checks (avoid extra deps like jsonschema)
+        # Issue #656: check bool BEFORE int because bool is a subclass of int.
         props = schema.get("properties") or {}
-        for key, value in params.items():
+        for key, value in list(params.items()):
+            # Empty-string → None coercion (Issue #663)
+            if isinstance(value, str) and not value.strip():
+                params[key] = None
+                continue
+
             spec = props.get(key)
             if not spec:
                 continue
             expected = spec.get("type")
-            if expected == "integer" and (isinstance(value, bool) or not isinstance(value, int)):
-                return False, f"bad_type:{key}:expected_int"
-            if expected == "number" and (isinstance(value, bool) or not isinstance(value, (int, float))):
-                return False, f"bad_type:{key}:expected_number"
-            if expected == "string" and not isinstance(value, str):
-                return False, f"bad_type:{key}:expected_string"
-            if expected == "boolean" and not isinstance(value, bool):
-                return False, f"bad_type:{key}:expected_boolean"
+            # bool must be checked before int (bool ⊂ int in Python)
+            if expected == "boolean":
+                if not isinstance(value, bool):
+                    return False, f"bad_type:{key}:expected_boolean"
+            elif expected == "integer":
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return False, f"bad_type:{key}:expected_int"
+            elif expected == "number":
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    return False, f"bad_type:{key}:expected_number"
+            elif expected == "string":
+                if not isinstance(value, str):
+                    return False, f"bad_type:{key}:expected_string"
+
+            # Enum validation (Issue #663)
+            allowed = spec.get("enum")
+            if allowed and value not in allowed:
+                return False, f"bad_enum:{key}:expected_one_of:{allowed}"
 
         return True, "ok"
 
