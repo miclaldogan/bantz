@@ -995,8 +995,7 @@ class OrchestratorLoop:
             except Exception:
                 pass
 
-        def _estimate_tokens(s: str) -> int:
-            return max(0, len(s or "") // 4)
+        from bantz.llm.token_utils import estimate_tokens as _estimate_tokens
 
         try:
             budget_tokens = int(getattr(getattr(self, "_memory_tracer", None), "budget", None).max_tokens)  # type: ignore[union-attr]
