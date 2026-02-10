@@ -43,6 +43,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 import unicodedata
@@ -147,7 +148,7 @@ class IdempotencyStore:
             self._loaded = True
     
     def _save(self) -> None:
-        """Persist records to disk."""
+        """Persist records to disk (atomic write via temp-file + rename)."""
         try:
             self._ensure_directory()
             
@@ -164,8 +165,20 @@ class IdempotencyStore:
                 "records": {k: v.to_dict() for k, v in active_records.items()},
             }
             
-            with open(self.store_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            # Atomic write: write to temp file, then os.replace (POSIX atomic)
+            dir_path = os.path.dirname(self.store_path) or "."
+            fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, str(self.store_path))
+            except BaseException:
+                # Clean up temp file on any failure
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             
             logger.debug("Saved %d idempotency records to %s", len(active_records), self.store_path)
         except Exception as e:
