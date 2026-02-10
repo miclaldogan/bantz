@@ -46,12 +46,25 @@ class CachedEvent:
         return age.total_seconds() > ttl_seconds
     
     def to_event_dict(self) -> dict[str, Any]:
-        """Convert to standard event dict format for merging."""
+        """Convert to standard event dict format for merging.
+
+        Matches the Google Calendar API format where ``start`` and ``end``
+        are dicts with either ``dateTime`` (timed events) or ``date``
+        (all-day events) keys.
+        """
+        def _wrap_dt(value: str) -> dict[str, str]:
+            """Wrap an ISO string in the Google-API style dict."""
+            v = (value or "").strip()
+            # All-day dates are exactly YYYY-MM-DD (10 chars)
+            if len(v) == 10 and v[4] == "-" and v[7] == "-":
+                return {"date": v}
+            return {"dateTime": v}
+
         return {
             "id": self.event_id,
             "summary": self.summary,
-            "start": self.start,
-            "end": self.end,
+            "start": _wrap_dt(self.start),
+            "end": _wrap_dt(self.end),
             "location": self.location,
             "status": self.status,
             "htmlLink": None,  # Won't have link until API sync
