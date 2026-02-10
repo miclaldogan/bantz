@@ -620,6 +620,7 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
         if not cfg.piper_model_path:
             print("❌ Piper model path gerekli. Örn: --piper-model /path/to/tr.onnx  (veya geçici: --no-tts)")
             return 1
+        tts = PiperTTS(PiperTTSConfig(model_path=cfg.piper_model_path))
 
     # Preflight: if LLM is enabled but vLLM isn't reachable, disable it once and continue.
     if cfg.enable_llm_fallback:
@@ -637,7 +638,6 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
             print(f"   URL: {cfg.vllm_url}")
             print("   Başlat: scripts/vllm/start_3b.sh  (veya docs/setup/vllm.md)")
             cfg.enable_llm_fallback = False
-        tts = PiperTTS(PiperTTSConfig(model_path=cfg.piper_model_path))
     
     # Setup ASR (lazy)
     asr: Optional[ASR] = None
