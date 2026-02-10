@@ -44,10 +44,16 @@ class PiperTTS:
                 [piper_path, "-m", self.cfg.model_path, "-f", out_wav],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 text=True,
             )
-            p.communicate(text)
+            _, stderr_output = p.communicate(text)
+
+            if p.returncode != 0:
+                raise RuntimeError(
+                    f"Piper TTS failed (exit code {p.returncode}): "
+                    f"{(stderr_output or '').strip()[:200]}"
+                )
 
             player = shutil.which("paplay") or shutil.which("aplay")
             if not player:
