@@ -208,6 +208,8 @@ class MemoryStore:
         # Thread safety
         self._lock = threading.RLock()
         self._local = threading.local()
+        self._connections: list[sqlite3.Connection] = []
+        self._conn_lock = threading.Lock()
         
         # Initialize database
         self._init_db()
@@ -224,6 +226,8 @@ class MemoryStore:
                 check_same_thread=False,
             )
             self._local.connection.row_factory = sqlite3.Row
+            with self._conn_lock:
+                self._connections.append(self._local.connection)
         return self._local.connection
     
     def _init_db(self) -> None:
@@ -884,7 +888,13 @@ class MemoryStore:
         return count
     
     def close(self) -> None:
-        """Close database connection."""
+        """Close all database connections (including other threads)."""
+        with self._conn_lock:
+            for conn in self._connections:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._connections.clear()
         if hasattr(self._local, 'connection'):
-            self._local.connection.close()
             del self._local.connection
