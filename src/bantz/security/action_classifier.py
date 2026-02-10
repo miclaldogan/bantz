@@ -53,7 +53,7 @@ class ActionClassifier:
         "calculator": PermissionLevel.LOW,
         "translate": PermissionLevel.LOW,
         "define_word": PermissionLevel.LOW,
-        "read_clipboard": PermissionLevel.LOW,
+        "read_clipboard": PermissionLevel.MEDIUM,
         
         # MEDIUM - External access, first-time ask
         "send_email": PermissionLevel.MEDIUM,
