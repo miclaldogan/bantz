@@ -339,10 +339,23 @@ class LoggerRedactionHandler(logging.Handler):
     def _compile_patterns(self) -> None:
         """Compile redaction patterns."""
         self._patterns = [
-            # API keys
+            # API keys — Google
             re.compile(r"\bAIza[0-9A-Za-z\-_]{20,}\b"),
+            # API keys — OpenAI (classic + project)
+            re.compile(r"\bsk-proj-[A-Za-z0-9_\-]{20,}\b"),
             re.compile(r"\bsk-[a-zA-Z0-9]{32,}\b"),
             re.compile(r"\bsk-ant-[a-zA-Z0-9]{40,}\b"),
+            
+            # GitHub tokens (PAT, OAuth, Server-to-server, fine-grained)
+            re.compile(r"\bghp_[A-Za-z0-9_]{36,}\b"),
+            re.compile(r"\bgho_[A-Za-z0-9_]{36,}\b"),
+            re.compile(r"\bghs_[A-Za-z0-9_]{36,}\b"),
+            re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b"),
+            
+            # Slack tokens
+            re.compile(r"\bxoxb-[A-Za-z0-9\-]+\b"),
+            re.compile(r"\bxoxp-[A-Za-z0-9\-]+\b"),
+            re.compile(r"\bxoxa-[A-Za-z0-9\-]+\b"),
             
             # OAuth tokens
             re.compile(r"\bya29\.[0-9A-Za-z\-_]+\b"),
