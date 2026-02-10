@@ -538,7 +538,6 @@ class OrchestratorLoop:
             return output
         
         # Issue #317: Check gmail_intent first for gmail route
-        gmail_intent = getattr(output, "gmail_intent", None) or ""
         if output.route == "gmail" and gmail_intent and gmail_intent != "none":
             mandatory_tools = self._gmail_intent_map.get(gmail_intent)
             if mandatory_tools:
