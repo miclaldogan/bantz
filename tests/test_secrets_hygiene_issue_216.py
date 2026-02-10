@@ -3,9 +3,12 @@ import os
 from bantz.security.env_loader import load_env, load_env_file
 from bantz.security.secrets import mask_path, mask_secrets, sanitize
 
+# Use os.path.join so tests work on any OS/machine
+_FAKE_CONFIG = os.path.join("home", "user", ".config", "bantz", "google")
+
 
 def test_mask_path_basename_only() -> None:
-    assert mask_path("/home/user/.config/bantz/google/client_secret.json") == "…/client_secret.json"
+    assert mask_path(os.path.join(_FAKE_CONFIG, "client_secret.json")) == "…/client_secret.json"
     assert mask_path("client_secret.json") == "…/client_secret.json"
 
 
@@ -15,9 +18,10 @@ def test_mask_secrets_common_patterns() -> None:
     jwt = "eyJ" + ("A" * 12) + "." + ("B" * 12) + "." + ("C" * 12)
     bearer = "Bearer abcDEF0123-._~+/=="
 
+    fake_token_path = os.path.join(_FAKE_CONFIG, "token.json")
     text = (
         f"key={google_key} oauth={ya29} jwt={jwt} auth={bearer} "
-        "path=/home/user/.config/bantz/google/token.json"
+        f"path={fake_token_path}"
     )
 
     masked = mask_secrets(text)
@@ -46,9 +50,10 @@ def test_mask_secrets_private_key_block() -> None:
 
 
 def test_sanitize_recursive() -> None:
+    fake_sa_path = os.path.join(_FAKE_CONFIG, "service_account.json")
     data = {
         "auth": "Bearer abcDEF0123-._~+/==",
-        "nested": {"path": "/home/user/.config/bantz/google/service_account.json"},
+        "nested": {"path": fake_sa_path},
         "list": ["ya29.ABCDEF", "ok"],
     }
 
