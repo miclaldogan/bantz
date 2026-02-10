@@ -405,7 +405,7 @@ def generate_idempotency_key(
     canonical = f"{norm_title}|{norm_start}|{norm_end}|{norm_calendar}"
     
     # Hash to fixed-length key
-    key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
     
     return key
 
