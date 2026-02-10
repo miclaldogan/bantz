@@ -15,6 +15,7 @@ Design:
 
 from __future__ import annotations
 
+import copy
 import re
 import threading
 from dataclasses import dataclass, field
@@ -204,7 +205,11 @@ class DialogSummaryManager:
         - Evicts oldest turns if over token limit
         - Keeps max N turns regardless of token count
         """
-        # Filter PII before acquiring lock (CPU-bound, no shared state)
+        # Deep-copy so we don't mutate the caller's object and avoid
+        # TOCTOU races when two threads share the same CompactSummary.
+        summary = copy.deepcopy(summary)
+
+        # Filter PII on private copy (CPU-bound, safe outside lock)
         if self.pii_filter_enabled:
             summary.user_intent = PIIFilter.filter(summary.user_intent)
             summary.action_taken = PIIFilter.filter(summary.action_taken)
