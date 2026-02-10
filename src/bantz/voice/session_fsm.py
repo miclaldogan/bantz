@@ -238,7 +238,10 @@ class VoiceFSM:
 
             elif self._state == VoiceState.WAKE_ONLY and self.config.idle_sleep_enabled:
                 elapsed = now - self._state_entered_at
-                if elapsed >= self.config.idle_sleep_timeout:
+                # Guard: don't sleep if there was recent activity (e.g.
+                # user speaking without a wake word match).
+                since_activity = now - self._last_activity
+                if elapsed >= self.config.idle_sleep_timeout and since_activity >= self.config.idle_sleep_timeout:
                     self._transition(VoiceState.IDLE_SLEEP, "idle_timeout")
 
     def time_until_timeout(self) -> Optional[float]:
