@@ -129,6 +129,8 @@
     "weather.current":          "safe",
     "weather.forecast":         "safe",
     "system.status":            "safe",
+    "system.screenshot":        "safe",
+    "calendar.find_free_slots": "safe",
 
     "file.read":                "safe",
     "file.list":                "safe",

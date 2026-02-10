@@ -61,15 +61,14 @@ def build_default_registry() -> ToolRegistry:
     """
     reg = ToolRegistry()
 
-    # Calendar-only orchestrator slots (Issue #654): these should NOT be
-    # injected into Gmail tool schemas to avoid irrelevant slot hallucinations.
-    # Keep untyped because orchestrator slots may pass None.
+    # Calendar-only orchestrator slots (Issue #654, #663): strict typed schemas.
+    # These must NOT be injected into Gmail tool schemas.
     calendar_slot_props = {
-        "date": {},
-        "time": {},
-        "duration": {},
-        "title": {},
-        "window_hint": {},
+        "date": {"type": "string", "description": "Date in YYYY-MM-DD or relative (bugün/yarın/dün)"},
+        "time": {"type": "string", "description": "Time in HH:MM format"},
+        "duration": {"type": "integer", "description": "Duration in minutes"},
+        "title": {"type": "string", "description": "Event title / summary"},
+        "window_hint": {"type": "string", "description": "Relative window: today/tomorrow/yesterday/morning/evening/week"},
     }
 
     # ── Calendar tools ──────────────────────────────────────────────
@@ -81,11 +80,45 @@ def build_default_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     **calendar_slot_props,
-                    "date": {"type": "string"},
-                    "time": {"type": "string"},
-                    "window_hint": {"type": "string"},
-                    "max_results": {"type": "integer"},
-                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "description": "Max events to return (default 10)"},
+                    "query": {"type": "string", "description": "Free-text search query"},
+                },
+                "required": [],
+                "additionalProperties": True,
+            },
+            function=calendar_list_events_tool,
+        )
+    )
+
+    # Phantom tool aliases (Issue #663): calendar.find_event and calendar.get_event
+    # are referenced in scenarios/tests but were missing from the runtime registry.
+    reg.register(
+        Tool(
+            name="calendar.find_event",
+            description="Google Calendar: find events by query (alias for list_events)",
+            parameters={
+                "type": "object",
+                "properties": {
+                    **calendar_slot_props,
+                    "max_results": {"type": "integer", "description": "Max events to return"},
+                    "query": {"type": "string", "description": "Free-text search query"},
+                },
+                "required": [],
+                "additionalProperties": True,
+            },
+            function=calendar_list_events_tool,
+        )
+    )
+    reg.register(
+        Tool(
+            name="calendar.get_event",
+            description="Google Calendar: get a single event by query (alias for list_events)",
+            parameters={
+                "type": "object",
+                "properties": {
+                    **calendar_slot_props,
+                    "max_results": {"type": "integer", "description": "Max events to return"},
+                    "query": {"type": "string", "description": "Free-text search query"},
                 },
                 "required": [],
                 "additionalProperties": True,
@@ -101,10 +134,7 @@ def build_default_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     **calendar_slot_props,
-                    "duration": {"type": "integer"},
-                    "window_hint": {"type": "string"},
-                    "date": {"type": "string"},
-                    "suggestions": {"type": "integer"},
+                    "suggestions": {"type": "integer", "description": "Number of suggestions (default 3)"},
                 },
                 "required": [],
                 "additionalProperties": True,
@@ -120,11 +150,6 @@ def build_default_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     **calendar_slot_props,
-                    "title": {"type": "string"},
-                    "date": {"type": "string"},
-                    "time": {"type": "string"},
-                    "duration": {"type": "integer"},
-                    "window_hint": {"type": "string"},
                 },
                 "required": ["time"],
                 "additionalProperties": True,
@@ -142,12 +167,8 @@ def build_default_registry() -> ToolRegistry:
                 "properties": {
                     **calendar_slot_props,
                     "event_id": {"type": "string", "description": "Google Calendar event ID"},
-                    "title": {"type": "string"},
-                    "date": {"type": "string"},
-                    "time": {"type": "string"},
-                    "duration": {"type": "integer"},
-                    "location": {"type": "string"},
-                    "description": {"type": "string"},
+                    "location": {"type": "string", "description": "Event location"},
+                    "description": {"type": "string", "description": "Event description"},
                 },
                 "required": ["event_id"],
                 "additionalProperties": True,

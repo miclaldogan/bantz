@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import logging
+import threading
+import time as _time
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -16,6 +20,38 @@ from bantz.google.gmail_labels import (
     format_labels_summary,
     get_category_labels,
 )
+
+logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────────────────────────────
+# Gmail send duplicate guard (Issue #663)
+# ─────────────────────────────────────────────────────────────────────
+_GMAIL_SEND_WINDOW = 60  # seconds
+_gmail_send_log: dict[str, float] = {}  # key → timestamp
+_gmail_send_lock = threading.Lock()
+
+
+def _gmail_send_dedup_key(to: str, subject: str) -> str:
+    norm = f"{to.strip().lower()}|{subject.strip().lower()}"
+    return hashlib.sha256(norm.encode()).hexdigest()[:16]
+
+
+def _gmail_check_duplicate(to: str, subject: str) -> bool:
+    """Return True if this to+subject was sent within the last N seconds."""
+    key = _gmail_send_dedup_key(to, subject)
+    now = _time.time()
+    with _gmail_send_lock:
+        # Clean expired
+        expired = [k for k, ts in _gmail_send_log.items() if now - ts > _GMAIL_SEND_WINDOW]
+        for k in expired:
+            del _gmail_send_log[k]
+        return key in _gmail_send_log
+
+
+def _gmail_record_send(to: str, subject: str) -> None:
+    key = _gmail_send_dedup_key(to, subject)
+    with _gmail_send_lock:
+        _gmail_send_log[key] = _time.time()
 
 
 def _now_local() -> datetime:
@@ -189,7 +225,16 @@ def gmail_send_tool(
     """
 
     try:
-        return gmail_send(
+        # Duplicate guard (Issue #663)
+        if _gmail_check_duplicate(str(to or ""), str(subject or "")):
+            logger.warning("[GMAIL] Duplicate send blocked: to=%s subject=%s", to, subject)
+            return {
+                "ok": False,
+                "error": "Bu e-posta az önce gönderildi. Tekrar göndermek için biraz bekleyin.",
+                "duplicate": True,
+            }
+
+        result = gmail_send(
             to=str(to or ""),
             subject=str(subject or ""),
             body=str(body or ""),
@@ -197,6 +242,12 @@ def gmail_send_tool(
             bcc=str(bcc) if bcc is not None else None,
             interactive=False,
         )
+
+        # Record successful send for dedup
+        if isinstance(result, dict) and result.get("ok", True):
+            _gmail_record_send(str(to or ""), str(subject or ""))
+
+        return result
     except Exception as e:
         msg = str(e)
         if "yetkilendirmesi gerekli" in msg.lower() or "oauth" in msg.lower():

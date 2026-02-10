@@ -25,6 +25,10 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+# Confirmation timeout in seconds (Issue #663)
+CONFIRMATION_TIMEOUT_SECONDS = 30
+
+
 class ToolRisk(str, Enum):
     """Risk classification for tools."""
     
@@ -71,6 +75,8 @@ _FALLBACK_TOOL_REGISTRY: dict[str, ToolRisk] = {
     "weather.current": ToolRisk.SAFE,
     "weather.forecast": ToolRisk.SAFE,
     "system.status": ToolRisk.SAFE,
+    "system.screenshot": ToolRisk.SAFE,
+    "calendar.find_free_slots": ToolRisk.SAFE,
     "file.read": ToolRisk.SAFE,
     "file.list": ToolRisk.SAFE,
     "vision.analyze": ToolRisk.SAFE,
