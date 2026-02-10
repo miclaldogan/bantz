@@ -151,8 +151,12 @@ class TestSmalltalkFinalizerUsage:
 class TestToolRouteFinalizerUsage:
     """Test that tool routes also use finalizer correctly."""
     
-    def test_tool_route_with_results_uses_finalizer(self, orchestrator_loop, mock_finalizer_llm):
+    def test_tool_route_with_results_uses_finalizer(self, orchestrator_loop, mock_finalizer_llm, monkeypatch):
         """Test that tool route with results uses finalizer."""
+        # Issue #647: tiering is ON by default; calendar routes go to fast
+        # path. Force quality so the mock finalizer LLM is actually invoked.
+        monkeypatch.setenv("BANTZ_TIER_FORCE_FINALIZER", "quality")
+
         from bantz.brain.orchestrator_loop import OrchestratorOutput, OrchestratorState
         
         orchestrator_output = OrchestratorOutput(

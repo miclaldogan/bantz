@@ -101,7 +101,7 @@ def _tools() -> ToolRegistry:
         }
 
     def list_messages(**_kwargs: Any) -> dict[str, Any]:
-        return {"messages": [], "count": 0}
+        return {"messages": [{"id": "m1", "subject": "Test", "snippet": "Hello"}], "count": 1}
 
     reg.register(
         Tool(

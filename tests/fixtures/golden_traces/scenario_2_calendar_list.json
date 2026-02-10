@@ -3,7 +3,7 @@
   "user_input": "bugün neler yapacağız bakalım",
   "expected_trace": {
     "route": "calendar",
-    "calendar_intent": "list_events",
+    "calendar_intent": "query",
     "confidence_min": 0.7,
     "tool_plan_len_min": 1,
     "tools_executed_min": 1,
