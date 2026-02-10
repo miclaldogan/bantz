@@ -53,6 +53,22 @@ def _validate_reply_language(text: str) -> str:
     return validated
 
 
+def _reply_needs_refinalization(reply: str | None) -> bool:
+    """Return ``True`` when an existing assistant reply contains non-Turkish.
+
+    Issue #683: When the 3B router produces a reply that contains CJK,
+    Cyrillic or other non-Latin content the fast finalizer should still
+    run so the user never sees garbled output.  We intentionally avoid
+    importing ``validate_turkish`` at module level to keep the lazy-import
+    pattern.
+    """
+    if not reply or not reply.strip():
+        return False
+    from bantz.brain.language_guard import detect_language_issue
+
+    return detect_language_issue(reply) is not None
+
+
 # ---------------------------------------------------------------------------
 # Protocols
 # ---------------------------------------------------------------------------
@@ -627,6 +643,9 @@ class FinalizationPipeline:
                 and (
                     bool(ctx.tool_results)
                     or not (output.assistant_reply or "").strip()
+                    # Issue #683: non-Turkish replies from 3B router must be
+                    # re-finalized even when assistant_reply is present.
+                    or _reply_needs_refinalization(output.assistant_reply)
                 )
             )
             if should_fast_finalize:
