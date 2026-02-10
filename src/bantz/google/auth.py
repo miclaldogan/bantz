@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 import os
 
 from bantz.security.secrets import mask_path
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_CLIENT_SECRET_PATH = "~/.config/bantz/google/client_secret.json"
@@ -122,7 +126,22 @@ def get_credentials(
                 creds = None
 
     if creds is not None and getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
-        creds.refresh(Request())
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                creds.refresh(Request())
+                break
+            except Exception as exc:
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt  # 1s, 2s, 4s
+                    logger.warning(
+                        "Token refresh failed (attempt %d/%d): %s — retrying in %ds",
+                        attempt + 1, max_retries, exc, delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error("Token refresh failed after %d attempts: %s", max_retries, exc)
+                    raise
 
     if creds is None or not getattr(creds, "valid", False):
         if not interactive:
