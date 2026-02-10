@@ -6,6 +6,7 @@ for LLM-first orchestrator architecture.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -51,9 +52,19 @@ class OrchestratorState:
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue)."""
+        # JSON-safe serialisation preserves structure for the finalizer
+        try:
+            result_str = json.dumps(result, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            result_str = str(result)
+
+        max_chars = 1500
+        if len(result_str) > max_chars:
+            result_str = result_str[:max_chars] + "… [truncated]"
+
         self.last_tool_results.append({
             "tool": tool_name,
-            "result": str(result)[:500],  # Truncate to 500 chars
+            "result": result_str,
             "success": success,
         })
         
