@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from pathlib import Path
 from datetime import datetime, timedelta
 from enum import Enum
+import hashlib
 import logging
 import json
 import os
@@ -199,6 +200,7 @@ class AuditLogger:
         self._masker = masker
         
         self._lock = threading.Lock()
+        self._prev_hash = "0" * 64  # genesis hash for integrity chain
         self._ensure_directory()
     
     def _ensure_directory(self) -> None:
@@ -219,10 +221,14 @@ class AuditLogger:
             if self._masker and entry.details:
                 entry.details = self._masker.mask_dict(entry.details)
             
-            line = entry.to_json() + "\n"
+            # Build hash chain for tamper detection
+            data = entry.to_dict()
+            data["prev_hash"] = self._prev_hash
+            line = json.dumps(data, ensure_ascii=False)
+            self._prev_hash = hashlib.sha256(line.encode("utf-8")).hexdigest()
             
             with open(self.log_path, "a", encoding="utf-8") as f:
-                f.write(line)
+                f.write(line + "\n")
     
     def log_action(
         self,
