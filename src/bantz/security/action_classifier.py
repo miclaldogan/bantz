@@ -149,7 +149,7 @@ class ActionClassifier:
         base_level = self._levels.get(action, self._default_level)
         
         # Check for elevation from context
-        level = self._check_elevation(action, base_level, context)
+        level, elevation_reason = self._check_elevation(action, base_level, context)
         
         # Determine flags
         is_destructive = self.is_destructive(action)
@@ -158,10 +158,10 @@ class ActionClassifier:
         # Build reason — include elevation info when level was raised
         if action not in self._levels:
             reason = f"Unknown action, using default: {self._default_level.value}"
-        elif level is not base_level:
+        elif elevation_reason:
             reason = (
                 f"Mapped action: {action} → {base_level.value}, "
-                f"elevated to {level.value} by context"
+                f"elevated to {level.value} ({elevation_reason})"
             )
         else:
             reason = f"Mapped action: {action} → {level.value}"
@@ -179,35 +179,47 @@ class ActionClassifier:
         action: str,
         base_level: PermissionLevel,
         context: Dict[str, Any]
-    ) -> PermissionLevel:
+    ) -> tuple:
         """
         Check if context requires level elevation.
         
         Context can elevate but never lower the level.
+        
+        Returns:
+            (PermissionLevel, reason_str | None)
         """
         level = base_level
+        reasons: List[str] = []
         
         # Sensitive domain elevation
-        if context.get("domain") in ["banking", "medical", "legal"]:
+        domain = context.get("domain")
+        if domain in ["banking", "medical", "legal"]:
             if level < PermissionLevel.HIGH:
                 level = PermissionLevel.HIGH
+                reasons.append(f"sensitive domain: {domain}")
         
         # Large amount elevation
-        if context.get("amount", 0) > 1000:
+        amount = context.get("amount", 0)
+        if amount > 1000:
             if level < PermissionLevel.HIGH:
                 level = PermissionLevel.HIGH
+                reasons.append(f"high amount: {amount}")
         
         # Multiple targets elevation
-        if context.get("target_count", 1) > 10:
+        target_count = context.get("target_count", 1)
+        if target_count > 10:
             if level < PermissionLevel.MEDIUM:
                 level = PermissionLevel.MEDIUM
+                reasons.append(f"multiple targets: {target_count}")
         
         # Sensitive file elevation
         if context.get("is_sensitive_file", False):
             if level < PermissionLevel.HIGH:
                 level = PermissionLevel.HIGH
+                reasons.append("sensitive file")
         
-        return level
+        reason = ", ".join(reasons) if reasons else None
+        return level, reason
     
     def is_destructive(self, action: str) -> bool:
         """Check if action is destructive."""
