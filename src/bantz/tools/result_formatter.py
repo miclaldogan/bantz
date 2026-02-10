@@ -102,6 +102,22 @@ def _calc_duration_minutes(start: datetime, end: datetime) -> int:
 # ─────────────────────────────────────────────────────────────────
 
 
+def _is_all_day(raw_start: Any) -> bool:
+    """Check if the event start value represents an all-day event.
+
+    Google Calendar API uses ``{"date": "YYYY-MM-DD"}`` for all-day
+    events and ``{"dateTime": "..."}`` for timed events.
+    A bare ``YYYY-MM-DD`` string (10 chars) is also treated as all-day.
+    """
+    if isinstance(raw_start, dict):
+        # Has explicit 'date' key but no 'dateTime' → all-day
+        return "date" in raw_start and "dateTime" not in raw_start
+    if isinstance(raw_start, str):
+        s = raw_start.strip()
+        return len(s) == 10 and s[4:5] == "-" and s[7:8] == "-"
+    return False
+
+
 def format_calendar_list_events(result: Dict[str, Any]) -> str:
     """Format calendar.list_events result as Turkish summary.
 
@@ -115,19 +131,31 @@ def format_calendar_list_events(result: Dict[str, Any]) -> str:
     lines: List[str] = []
     for ev in events:
         summary = ev.get("summary") or ev.get("title") or "İsimsiz Etkinlik"
-        start_str = ev.get("start") or ev.get("start_time") or ""
-        end_str = ev.get("end") or ev.get("end_time") or ""
+        raw_start = ev.get("start") or ev.get("start_time") or ""
+        raw_end = ev.get("end") or ev.get("end_time") or ""
+
+        # Detect all-day events before unwrapping the dict
+        all_day = _is_all_day(raw_start)
 
         # Handle Google Calendar's dateTime / date nested format
+        start_str = raw_start
+        end_str = raw_end
         if isinstance(start_str, dict):
             start_str = start_str.get("dateTime") or start_str.get("date") or ""
         if isinstance(end_str, dict):
             end_str = end_str.get("dateTime") or end_str.get("date") or ""
 
         start_dt = _parse_iso(start_str)
-        end_dt = _parse_iso(end_str)
 
-        if start_dt:
+        if all_day:
+            # All-day event → show "Tüm gün" instead of "00:00"
+            if start_dt:
+                date_str = _format_date_tr(start_dt)
+                lines.append(f"Tüm gün — {summary} ({date_str})")
+            else:
+                lines.append(f"Tüm gün — {summary}")
+        elif start_dt:
+            end_dt = _parse_iso(end_str)
             time_str = _format_time_tr(start_dt)
             dur_str = ""
             if end_dt:
