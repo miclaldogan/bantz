@@ -68,12 +68,39 @@ def _get_header(payload: dict[str, Any], name: str) -> Optional[str]:
 
 
 def _strip_html(html: str) -> str:
+    from html.parser import HTMLParser
+    from io import StringIO
+
+    class _TagStripper(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self._fed: list[str] = []
+            self._skip = False
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            if tag.lower() in ("script", "style"):
+                self._skip = True
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag.lower() in ("script", "style"):
+                self._skip = False
+
+        def handle_data(self, data: str) -> None:
+            if not self._skip:
+                self._fed.append(data)
+
+        def get_text(self) -> str:
+            return " ".join(self._fed)
+
     h = str(html or "")
-    h = re.sub(r"<script[\s\S]*?</script>", " ", h, flags=re.IGNORECASE)
-    h = re.sub(r"<style[\s\S]*?</style>", " ", h, flags=re.IGNORECASE)
-    h = re.sub(r"<[^>]+>", " ", h)
-    h = re.sub(r"\s+", " ", h).strip()
-    return h
+    stripper = _TagStripper()
+    try:
+        stripper.feed(h)
+        result = stripper.get_text()
+    except Exception:
+        # Fallback: naive whitespace collapse
+        result = h
+    return re.sub(r"\s+", " ", result).strip()
 
 
 def _collect_parts(payload: dict[str, Any]) -> list[dict[str, Any]]:

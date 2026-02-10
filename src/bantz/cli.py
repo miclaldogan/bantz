@@ -526,7 +526,7 @@ Kullanım örnekleri:
 
                     msg = mask_secrets(str(e))
                 except Exception:
-                    msg = str(e)
+                    msg = f"[{type(e).__name__}] (details redacted)"
                 print(f"❌ Warmup başarısız: {msg}")
                 return 1
             print("✅ Warmup tamam. Artık voice modunda indirmeye takılmaz.")

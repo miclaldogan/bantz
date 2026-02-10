@@ -370,7 +370,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
             msg = mask_secrets(str(e))
         except Exception:
-            msg = str(e)
+            msg = f"[{type(e).__name__}] (details redacted)"
         print(f"❌ {msg}", file=sys.stderr)
         return 2
     except RuntimeError as e:
@@ -379,7 +379,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
             msg = mask_secrets(str(e))
         except Exception:
-            msg = str(e)
+            msg = f"[{type(e).__name__}] (details redacted)"
         if "dependencies" in msg.lower() and "google" in msg.lower():
             print(f"❌ {msg}", file=sys.stderr)
             print("\n💡 Install Google deps: pip install -e '.[calendar]'", file=sys.stderr)
@@ -392,6 +392,6 @@ def main(argv: Optional[list[str]] = None) -> int:
 
             msg = mask_secrets(str(e))
         except Exception:
-            msg = str(e)
+            msg = f"[{type(e).__name__}] (details redacted)"
         print(f"❌ {msg}", file=sys.stderr)
         return 1

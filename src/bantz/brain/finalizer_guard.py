@@ -95,7 +95,7 @@ TURKISH_NUMBERS: Dict[str, int] = {
 }
 
 # List markers to ignore
-_LIST_MARKER_RE = re.compile(r"^\s*(\d{1,2})([\.)-:])\s+")
+_LIST_MARKER_RE = re.compile(r"^\s*(\d{1,2})([.\)\-:])\s+")
 
 
 def _normalize_number(s: str) -> str:

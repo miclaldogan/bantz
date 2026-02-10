@@ -41,8 +41,13 @@ __all__ = [
 # When `cryptography` IS available, real Fernet is used.
 
 def _derive_key(passphrase: str) -> bytes:
-    """Derive a 32-byte key from a passphrase via SHA-256."""
-    return hashlib.sha256(passphrase.encode()).digest()
+    """Derive a 32-byte key from a passphrase via PBKDF2-HMAC-SHA256."""
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        passphrase.encode(),
+        salt=b"bantz-vault-v0-salt",
+        iterations=100_000,
+    )
 
 
 def _machine_key() -> str:
