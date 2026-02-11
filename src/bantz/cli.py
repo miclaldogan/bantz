@@ -137,7 +137,15 @@ def clear_screen() -> None:
     os.system("clear" if os.name != "nt" else "cls")
 
 
-def run_interactive_with_server(session_name: str, policy_path: str, log_path: str) -> int:
+def run_interactive_with_server(
+    session_name: str,
+    policy_path: str,
+    log_path: str,
+    *,
+    http_enabled: bool = False,
+    http_host: str = "0.0.0.0",
+    http_port: int = 8088,
+) -> int:
     """Run interactive mode with integrated server (browser stays alive)."""
     from bantz.server import BantzServer, get_socket_path
     from bantz.core.events import get_event_bus, Event
@@ -165,6 +173,25 @@ def run_interactive_with_server(session_name: str, policy_path: str, log_path: s
     
     event_bus = get_event_bus()
     event_bus.subscribe("bantz_message", on_bantz_message)
+
+    # Start HTTP API server in background if requested (Issue #834)
+    _http_thread = None
+    if http_enabled:
+        try:
+            from bantz.api.server import start_http_server_background
+
+            _http_thread = start_http_server_background(
+                bantz_server=server,
+                host=http_host,
+                port=http_port,
+                event_bus=event_bus,
+            )
+            print(f"{Colors.GREEN}🌐 HTTP API:{Colors.RESET} http://{http_host}:{http_port} (docs: /docs)")
+        except ImportError as e:
+            print(f"{Colors.RED}✗ HTTP API başlatılamadı:{Colors.RESET} {e}")
+            print(f"  {Colors.DIM}pip install -r requirements-http.txt{Colors.RESET}")
+        except Exception as e:
+            print(f"{Colors.RED}✗ HTTP API hatası:{Colors.RESET} {e}")
 
     clear_screen()
     print_welcome()
@@ -362,6 +389,43 @@ def stop_session(session_name: str) -> int:
         return 1
 
 
+def run_http_only(
+    session_name: str,
+    policy_path: str,
+    log_path: str,
+    host: str = "0.0.0.0",
+    port: int = 8088,
+) -> int:
+    """Run HTTP-only mode (no interactive CLI) — Issue #834.
+
+    Starts a BantzServer and exposes it exclusively via FastAPI HTTP API.
+    Useful for headless deployments, Docker containers, and mobile/phone clients.
+    """
+    from bantz.server import BantzServer
+    from bantz.core.events import get_event_bus
+
+    server = BantzServer(session_name=session_name, policy_path=policy_path, log_path=log_path)
+    event_bus = get_event_bus()
+
+    try:
+        from bantz.api.server import run_http_server
+
+        run_http_server(
+            bantz_server=server,
+            host=host,
+            port=port,
+            event_bus=event_bus,
+        )
+    except ImportError as e:
+        print(f"{Colors.RED}✗ HTTP API başlatılamadı:{Colors.RESET} {e}")
+        print(f"  {Colors.DIM}pip install -r requirements-http.txt{Colors.RESET}")
+        return 1
+    except KeyboardInterrupt:
+        print(f"\n{Colors.DIM}👋 HTTP API kapatılıyor...{Colors.RESET}")
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -429,6 +493,9 @@ Kullanım örnekleri:
   bantz --session work --serve   # 'work' adlı oturum başlat
   bantz --session work --once "instagram aç"  # Çalışan oturuma komut gönder
   bantz --session work --stop    # Oturumu kapat
+  bantz --serve --http            # Interactive + HTTP API (port 8088)
+  bantz --serve --http --port 9000  # Farklı portta HTTP
+  bantz --http-only               # Sadece HTTP API (CLI yok)
   bantz --once "google aç"       # Tek seferlik (tarayıcı kalıcı değil)
 """,
     )
@@ -438,6 +505,12 @@ Kullanım örnekleri:
     parser.add_argument("--serve", action="store_true", help="Interactive server modu başlat")
     parser.add_argument("--once", default=None, metavar="CMD", help="Tek seferlik komut")
     parser.add_argument("--stop", action="store_true", help="Çalışan session'ı kapat")
+
+    # HTTP REST API (Issue #834)
+    parser.add_argument("--http", action="store_true", help="HTTP REST API sunucusu başlat (port 8088)")
+    parser.add_argument("--port", type=int, default=8088, help="HTTP API portu (default: 8088)")
+    parser.add_argument("--http-host", default="0.0.0.0", help="HTTP API bind adresi (default: 0.0.0.0)")
+    parser.add_argument("--http-only", action="store_true", help="Sadece HTTP (interactive CLI olmadan)")
 
     # Compatibility flags (README/back-compat)
     parser.add_argument("--text", action="store_true", help="Text mod (varsayılan). (Uyumluluk)")
@@ -622,8 +695,17 @@ Kullanım örnekleri:
             pass
         return run_stateless_once(args.once, args.policy, args.log)
 
-    # Interactive mode (default or --serve)
-    return run_interactive_with_server(args.session, args.policy, args.log)
+    # HTTP-only mode: start FastAPI server without interactive CLI (Issue #834)
+    if args.http_only:
+        return run_http_only(args.session, args.policy, args.log, args.http_host, args.port)
+
+    # Interactive mode (default or --serve), optionally with HTTP API
+    return run_interactive_with_server(
+        args.session, args.policy, args.log,
+        http_enabled=getattr(args, "http", False),
+        http_host=getattr(args, "http_host", "0.0.0.0"),
+        http_port=getattr(args, "port", 8088),
+    )
 
 
 if __name__ == "__main__":
