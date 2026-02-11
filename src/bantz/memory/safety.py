@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from bantz.brain.memory_lite import PIIFilter
+
+def _get_pii_filter():
+    """Lazy import to break memory → brain reverse dependency (Issue #872)."""
+    from bantz.brain.memory_lite import PIIFilter
+    return PIIFilter
 
 
 def mask_pii(text: str) -> str:
@@ -17,6 +21,7 @@ def mask_pii(text: str) -> str:
     if not t:
         return ""
     try:
+        PIIFilter = _get_pii_filter()
         return PIIFilter.filter(t, enabled=True)
     except Exception:
         return t
