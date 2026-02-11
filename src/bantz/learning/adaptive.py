@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from bantz.learning.profile import UserProfile
+from bantz.learning.profile import BehavioralProfile as UserProfile
 
 
 class VerbosityLevel(Enum):

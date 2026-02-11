@@ -419,6 +419,15 @@ class OrchestratorLoop:
             pii_filter_enabled=self.config.memory_pii_filter,
         )
 
+        # Issue #873: Persistent user memory (profile + SQLite store + learning)
+        try:
+            from bantz.brain.user_memory import UserMemoryBridge
+
+            self.user_memory: Any = UserMemoryBridge()
+        except Exception as _umx:
+            logger.warning("[ORCHESTRATOR] UserMemoryBridge init failed: %s", _umx)
+            self.user_memory = None
+
         # Issue #599: Memory injection trace/audit (best-effort, non-fatal)
         try:
             from bantz.brain.memory_trace import MemoryBudgetConfig, MemoryTracer
@@ -1137,6 +1146,22 @@ class OrchestratorLoop:
         
         if dialog_summary:
             context_parts.append(dialog_summary)
+
+        # Issue #873: Inject persistent user profile context
+        if getattr(self, "user_memory", None) is not None:
+            try:
+                _um_result = self.user_memory.on_turn_start(user_input)
+                _profile_ctx = _um_result.get("profile_context", "")
+                if _profile_ctx:
+                    context_parts.append(f"USER_PROFILE:\n{_profile_ctx}")
+                _memory_snippets = _um_result.get("memories", [])
+                if _memory_snippets:
+                    _mem_block = "LONG_TERM_MEMORY:\n" + "\n".join(
+                        f"  - {s}" for s in _memory_snippets[:5]
+                    )
+                    context_parts.append(_mem_block)
+            except Exception as _um_exc:
+                logger.debug("[ORCHESTRATOR] user_memory.on_turn_start failed: %s", _um_exc)
         
         # Add recent conversation (last 2 turns)
         if conversation_history:
@@ -2095,6 +2120,18 @@ class OrchestratorLoop:
             pending_items=self._extract_pending_items(output),
         )
         self.memory.add_turn(summary)
+
+        # Issue #873: Persistent user memory — learn from interaction
+        if getattr(self, "user_memory", None) is not None:
+            try:
+                self.user_memory.on_turn_end(
+                    user_input=user_input,
+                    assistant_reply=output.assistant_reply or "",
+                    route=output.route or "",
+                    tool_results=tool_results,
+                )
+            except Exception as _um_exc:
+                logger.debug("[ORCHESTRATOR] user_memory.on_turn_end failed: %s", _um_exc)
         
         # Update rolling summary (legacy - for backward compatibility)
         if output.memory_update:
