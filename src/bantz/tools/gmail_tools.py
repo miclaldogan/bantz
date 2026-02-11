@@ -23,6 +23,29 @@ from bantz.google.gmail_labels import (
 
 logger = logging.getLogger(__name__)
 
+# ── Issue #870: Türkçe hata mesajı çevirici ─────────────────────────
+_GMAIL_ERROR_TR_MAP: list[tuple[str, str]] = [
+    ("Google client secret not found", "Google hesap bilgileri bulunamadı. Lütfen BANTZ_GOOGLE_CLIENT_SECRET ayarını yapın."),
+    ("Gmail dependencies are not installed", "Gmail bağımlılıkları yüklü değil. pip install -e '.[calendar]' ile yükleyin."),
+    ("HttpError 401", "Gmail yetkilendirmesi başarısız. Lütfen tekrar giriş yapın."),
+    ("HttpError 403", "Gmail erişim izni yok. Lütfen izinleri kontrol edin."),
+    ("HttpError 404", "Belirtilen e-posta bulunamadı."),
+    ("HttpError 429", "Gmail API istek limiti aşıldı. Lütfen biraz bekleyin."),
+    ("timeout", "Gmail bağlantı zaman aşımına uğradı."),
+    ("ConnectionError", "Gmail'e bağlanılamadı. İnternet bağlantınızı kontrol edin."),
+    ("token", "Gmail oturum süresi dolmuş. Lütfen tekrar giriş yapın."),
+]
+
+
+def _tr_gmail_error(e: Exception) -> str:
+    """Return a user-friendly Turkish error message for Gmail exceptions."""
+    raw = str(e)
+    for pattern, tr_msg in _GMAIL_ERROR_TR_MAP:
+        if pattern.lower() in raw.lower():
+            return tr_msg
+    logger.error("[GMAIL] Unhandled error: %s", raw)
+    return f"Gmail işlemi başarısız oldu: {raw}"
+
 # ─────────────────────────────────────────────────────────────────────
 # Gmail send duplicate guard (Issue #663)
 # ─────────────────────────────────────────────────────────────────────
@@ -98,7 +121,7 @@ def gmail_unread_count_tool(**_: Any) -> dict[str, Any]:
     try:
         return gmail_unread_count(interactive=False)
     except Exception as e:
-        return {"ok": False, "error": str(e), "unread": None}
+        return {"ok": False, "error": _tr_gmail_error(e), "unread": None}
 
 
 def gmail_list_messages_tool(
@@ -165,7 +188,7 @@ def gmail_list_messages_tool(
         
         return result
     except Exception as e:
-        return {"ok": False, "error": str(e), "messages": []}
+        return {"ok": False, "error": _tr_gmail_error(e), "messages": []}
 
 
 def gmail_get_message_tool(
@@ -185,7 +208,7 @@ def gmail_get_message_tool(
         try:
             listing = gmail_list_messages(max_results=1, unread_only=bool(prefer_unread), interactive=False)
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": _tr_gmail_error(e)}
 
         msgs = listing.get("messages") if isinstance(listing, dict) else None
         if not isinstance(msgs, list) or not msgs:
@@ -193,7 +216,7 @@ def gmail_get_message_tool(
             try:
                 listing = gmail_list_messages(max_results=1, unread_only=False, interactive=False)
             except Exception as e:
-                return {"ok": False, "error": str(e)}
+                return {"ok": False, "error": _tr_gmail_error(e)}
 
             msgs = listing.get("messages") if isinstance(listing, dict) else None
 
@@ -207,7 +230,7 @@ def gmail_get_message_tool(
     try:
         return gmail_get_message(message_id=msg_id, interactive=False)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _tr_gmail_error(e)}
 
 
 def gmail_send_tool(
@@ -310,7 +333,7 @@ def gmail_smart_search_tool(
         
         return result
     except Exception as e:
-        return {"ok": False, "error": str(e), "messages": []}
+        return {"ok": False, "error": _tr_gmail_error(e), "messages": []}
 
 
 def gmail_list_categories_tool(**_: Any) -> dict[str, Any]:
