@@ -299,8 +299,9 @@ class JarvisLLMOrchestrator:
     # ── CORE PROMPT (~700 tokens) ─── always included ───────────────────
     _SYSTEM_PROMPT_CORE = """Kimlik: Sen BANTZ'sın. SADECE TÜRKÇE konuş; 'Efendim' hitabını kullan. Asla başka dil karıştırma!
 
-OUTPUT SCHEMA (tek JSON object döndür):
-{"route":"calendar|gmail|system|smalltalk|unknown","calendar_intent":"create|modify|cancel|query|none","gmail_intent":"list|search|read|send|none","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dk|null","title":"str|null","window_hint":"evening|tomorrow|morning|today|week|null"},"gmail":{"to":"email|null","subject":"str|null","body":"str|null","label":"str|null","category":"str|null","natural_query":"str|null","search_term":"str|null"},"confidence":0.0-1.0,"tool_plan":["tool_name"],"ask_user":false,"question":"","requires_confirmation":false}
+OUTPUT SCHEMA (her cevabında bu yapıyı DOLDUR, değerleri kullanıcının söylediğine göre belirle):
+{"route":"<ROUTE>","calendar_intent":"<INTENT>","gmail_intent":"none","slots":{"date":"<YYYY-MM-DD veya null>","time":"<HH:MM veya null>","duration":"<dakika veya null>","title":"<etkinlik adı veya null>","window_hint":"<today/tomorrow/evening/morning/week veya null>"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["<tool_adı>"],"ask_user":false,"question":"","requires_confirmation":false}
+route: calendar|gmail|system|smalltalk|unknown. calendar_intent: create|modify|cancel|query|none. gmail_intent: list|search|read|send|none. Kullanıcının söylediğine göre slot değerlerini doldur. Söylemediği alanları null yap. confidence: 0.0-1.0 arası ondalık sayı.
 
 NOT: assistant_reply, memory_update, reasoning_summary alanları gerekli DEĞİL — bunlar finalization fazında doldurulur.
 
@@ -391,7 +392,13 @@ USER: test@gmail.com adresine merhaba mesajı gönder
 → {"route":"gmail","gmail_intent":"send","gmail":{"to":"test@gmail.com","subject":"Merhaba","body":"Merhaba"},"confidence":0.9,"tool_plan":["gmail.send"],"requires_confirmation":true}
 
 USER: merhaba mesajı gönder
-→ {"route":"gmail","gmail_intent":"send","gmail":{"subject":"Merhaba","body":"Merhaba"},"confidence":0.5,"tool_plan":[],"ask_user":true,"question":"Kime göndermek istiyorsunuz efendim?"}"""
+→ {"route":"gmail","gmail_intent":"send","gmail":{"subject":"Merhaba","body":"Merhaba"},"confidence":0.5,"tool_plan":[],"ask_user":true,"question":"Kime göndermek istiyorsunuz efendim?"}
+
+USER: akşam sekize etkinlik ekle
+→ {"route":"calendar","calendar_intent":"create","slots":{"time":"20:00","title":null},"confidence":0.6,"tool_plan":[],"ask_user":true,"question":"Ne ekleyeyim efendim? Etkinlik adı nedir?"}
+
+USER: saat 8e toplantı ekle
+→ {"route":"calendar","calendar_intent":"create","slots":{"time":"20:00","title":"toplantı","window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true}"""
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
@@ -602,11 +609,16 @@ USER: merhaba mesajı gönder
         call_temperature = temperature if temperature is not None else 0.0
         call_max_tokens = max_tokens_override if max_tokens_override is not None else max_tokens
         
+        # ── Issue #LLM-quality: Stop tokens to prevent 3B model from
+        # continuing past JSON (generating examples, explanations, etc.)
+        _stop_tokens = ["\nUSER:", "\n\nUSER:", "\nÖRNEK", "\n---"]
+        
         try:
             raw_text = self._llm.complete_text(
                 prompt=prompt,
                 temperature=call_temperature,
-                max_tokens=call_max_tokens
+                max_tokens=call_max_tokens,
+                stop=_stop_tokens,
             )
         except TypeError:
             # Backward compatibility for mocks/adapters that only accept `prompt`.
@@ -709,7 +721,18 @@ USER: merhaba mesajı gönder
 
         budget = int(token_budget) if token_budget is not None else 10_000_000
 
-        system_prompt = self._maybe_compact_system_prompt(self._system_prompt, token_budget=budget)
+        # ── Issue #LLM-quality: Inject today's date into system prompt ──
+        # 3B model hallucinates dates (e.g. "2023-03-15") if it doesn't know
+        # today. SESSION_CONTEXT has current_datetime but can be trimmed by
+        # budget. Inject directly into CORE to guarantee it's always present.
+        from datetime import datetime as _dt
+        _now = _dt.now().astimezone()
+        _TR_DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        _day_name = _TR_DAYS[_now.weekday()]
+        _date_line = f"BUGÜN: {_now.strftime('%Y-%m-%d')} {_day_name}, saat {_now.strftime('%H:%M')}.\n\n"
+        dated_system_prompt = _date_line + self._system_prompt
+
+        system_prompt = self._maybe_compact_system_prompt(dated_system_prompt, token_budget=budget)
         system_tokens = _estimate_tokens(system_prompt)
         user_tokens = _estimate_tokens(f"USER: {user_input}\nASSISTANT (sadece JSON):")
         
@@ -1168,6 +1191,30 @@ USER: merhaba mesajı gönder
         if not isinstance(slots, dict):
             slots = {}
 
+        # ── Issue #LLM-quality: Clean slot values polluted by schema format ──
+        # 3B model sometimes copies type hints from schema literally, producing
+        # values like "str:Etkinlik", "email:test@x.com", "dk:30". Strip these.
+        # Also clean placeholder strings the model copies from schema template.
+        _TYPE_PREFIX_RE = re.compile(r"^(str|string|email|dk|int|null)\s*[:]\s*", re.IGNORECASE)
+        _PLACEHOLDER_RE = re.compile(r"^<.*>$")  # e.g. "<YYYY-MM-DD veya null>"
+        _JUNK_VALUES = frozenset({"pm", "am", "none", "null", "<route>", "<intent>", "<tool_adı>"})
+        cleaned_slots: dict[str, Any] = {}
+        for k, v in slots.items():
+            if isinstance(v, str):
+                cleaned = _TYPE_PREFIX_RE.sub("", v).strip()
+                # If the cleaned value is empty, null, or a placeholder, set to None
+                if (
+                    not cleaned
+                    or cleaned.lower() in _JUNK_VALUES
+                    or _PLACEHOLDER_RE.match(cleaned)
+                ):
+                    cleaned_slots[k] = None
+                else:
+                    cleaned_slots[k] = cleaned
+            else:
+                cleaned_slots[k] = v
+        slots = cleaned_slots
+
         # ── Issue #419: Rule-based Turkish time post-processing ──────────
         if route == "calendar" and user_input:
             try:
@@ -1229,24 +1276,6 @@ USER: merhaba mesajı gönder
 
         assistant_reply = str(parsed.get("assistant_reply") or "").strip()
 
-        # ── Issue #title-hallucination: Validate title actually appears in user input ──
-        # 3B models hallucinate titles when user says "ekle" without specifying one.
-        # If calendar create intent has a title that doesn't appear anywhere in the
-        # user's original message, clear it and ask the user.
-        if route == "calendar" and calendar_intent == "create" and user_input:
-            slot_title = (slots.get("title") or "").strip()
-            if slot_title and slot_title.lower() not in user_input.lower():
-                # Title was hallucinated — not in user's words
-                logger.info(
-                    "[title_validation] Hallucinated title '%s' not found in user input, clearing",
-                    slot_title,
-                )
-                slots = {**slots, "title": None}
-                ask_user = True
-                if not question:
-                    question = "Ne ekleyeyim efendim? Etkinlik adı nedir?"
-                confidence = min(confidence, 0.6)
-
         # ── Issue #653: Language post-validation ────────────────────────
         # 3B Qwen model may output Chinese/English despite Turkish-only
         # system prompt.  Clear non-Turkish assistant_reply so the
@@ -1263,6 +1292,25 @@ USER: merhaba mesajı gönder
         requires_confirmation = bool(parsed.get("requires_confirmation", False))
         confirmation_prompt = str(parsed.get("confirmation_prompt") or "").strip()
         memory_update = str(parsed.get("memory_update") or "").strip()
+
+        # ── Issue #title-hallucination: Validate title actually appears in user input ──
+        # 3B models hallucinate titles when user says "ekle" without specifying one.
+        # If calendar create intent has a title that doesn't appear anywhere in the
+        # user's original message, clear it and ask the user.
+        # NOTE: Must run AFTER ask_user/question are extracted from parsed JSON.
+        if route == "calendar" and calendar_intent == "create" and user_input:
+            slot_title = (slots.get("title") or "").strip()
+            if slot_title and slot_title.lower() not in user_input.lower():
+                # Title was hallucinated — not in user's words
+                logger.info(
+                    "[title_validation] Hallucinated title '%s' not found in user input, clearing",
+                    slot_title,
+                )
+                slots = {**slots, "title": None}
+                ask_user = True
+                if not question:
+                    question = "Ne ekleyeyim efendim? Etkinlik adı nedir?"
+                confidence = min(confidence, 0.6)
 
         reasoning_summary = parsed.get("reasoning_summary") or []
         if not isinstance(reasoning_summary, list):

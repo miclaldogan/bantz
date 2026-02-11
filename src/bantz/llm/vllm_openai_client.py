@@ -185,6 +185,7 @@ class VLLMOpenAIClient(LLMClient):
         temperature: float = 0.4,
         max_tokens: int = 512,
         response_format: Optional[dict[str, Any]] = None,
+        stop: Optional[List[str]] = None,
     ) -> str:
         """Chat completion (simple string response)."""
         response = self.chat_detailed(
@@ -192,6 +193,7 @@ class VLLMOpenAIClient(LLMClient):
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,
+            stop=stop,
         )
         return response.content
     
@@ -203,6 +205,7 @@ class VLLMOpenAIClient(LLMClient):
         max_tokens: int = 512,
         seed: Optional[int] = None,
         response_format: Optional[dict[str, Any]] = None,
+        stop: Optional[List[str]] = None,
     ) -> LLMResponse:
         """Chat completion with detailed metadata."""
         client = self._get_client()
@@ -230,6 +233,8 @@ class VLLMOpenAIClient(LLMClient):
             kwargs: dict[str, Any] = {}
             if response_format is not None:
                 kwargs["response_format"] = response_format
+            if stop is not None:
+                kwargs["stop"] = stop
 
             completion = client.chat.completions.create(
                 model=self.model,
@@ -458,10 +463,10 @@ class VLLMOpenAIClient(LLMClient):
                     f"vLLM stream failed: {e}"
                 ) from e
     
-    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None) -> str:
         """Simple text completion (used by Router)."""
         messages = [LLMMessage(role="user", content=prompt)]
-        return self.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        return self.chat(messages, temperature=temperature, max_tokens=max_tokens, stop=stop)
     
     @property
     def model_name(self) -> str:

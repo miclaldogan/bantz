@@ -252,6 +252,10 @@ def post_process_slot_time(
     Returns:
         Corrected HH:MM string, or the original slot_time if no correction needed.
     """
+    # Guard: ensure slot_time is str or None (3B model may produce int/list/etc.)
+    if slot_time is not None and not isinstance(slot_time, str):
+        slot_time = str(slot_time).strip() if slot_time else None
+
     rule_based = parse_hhmm_turkish(user_text)
 
     if not slot_time:
