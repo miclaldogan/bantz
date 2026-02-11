@@ -455,7 +455,7 @@ class TestLLMRouterPostProcessing:
         assert result.slots.get("time") == "17:00"
 
     def test_extract_output_no_change_for_non_calendar(self):
-        """_extract_output should not touch slots for non-calendar routes."""
+        """_extract_output should not touch slots for non-calendar routes (genuine smalltalk)."""
         router = self._make_router()
         parsed = {
             "route": "smalltalk",
@@ -465,8 +465,9 @@ class TestLLMRouterPostProcessing:
             "tool_plan": [],
             "assistant_reply": "İyiyim efendim",
         }
-        result = router._extract_output(parsed, raw_text="{}", user_input="beşe toplantı koy")
-        # Route is smalltalk, so no time post-processing
+        # Use a genuine smalltalk input — not a calendar request
+        result = router._extract_output(parsed, raw_text="{}", user_input="nasılsın")
+        # Route stays smalltalk for genuine smalltalk input
         assert result.route == "smalltalk"
 
     def test_extract_output_no_user_input(self):

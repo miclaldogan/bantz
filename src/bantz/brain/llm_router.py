@@ -1129,6 +1129,73 @@ USER: saat 8e toplantı ekle
         # Final attempt: re-raise the original error
         return extract_first_json_object(text, strict=False), True
 
+    # ── Issue #LLM-quality: Route detection from Turkish user input ─────────
+    _ROUTE_KEYWORDS: dict[str, list[str]] = {
+        "calendar": [
+            "etkinlik", "takvim", "randevu", "toplantı", "plan",
+            "saat", "yarın", "bugün", "akşam", "sabah", "öğle",
+            "ekle", "iptal", "oluştur", "planla", "ne yapıyoruz",
+            "programım", "programda", "gündem",
+        ],
+        "gmail": [
+            "mail", "e-posta", "eposta", "mesaj", "gönder",
+            "oku", "inbox", "gelen kutusu", "draft", "taslak",
+            "yaz", "cevapla", "reply",
+        ],
+        "system": [
+            "saat kaç", "tarih", "gün ne", "pil", "batarya",
+            "sistem", "ayar", "volume", "ses",
+        ],
+        "smalltalk": [
+            "nasılsın", "merhaba", "selam", "teşekkür",
+            "günaydın", "iyi geceler", "hoşça kal",
+        ],
+    }
+
+    def _detect_route_from_input(self, user_input: str) -> str:
+        """Detect route from Turkish user input using keyword matching."""
+        text = (user_input or "").lower()
+        scores: dict[str, int] = {}
+        for route, keywords in self._ROUTE_KEYWORDS.items():
+            score = sum(1 for kw in keywords if kw in text)
+            if score > 0:
+                scores[route] = score
+        if scores:
+            return max(scores, key=scores.get)  # type: ignore[arg-type]
+        return "unknown"
+
+    # ── Issue #LLM-quality: Deterministic tool resolution from route+intent ──
+    _TOOL_LOOKUP: dict[tuple[str, str], str] = {
+        ("calendar", "create"): "calendar.create_event",
+        ("calendar", "query"): "calendar.list_events",
+        ("calendar", "modify"): "calendar.create_event",
+        ("calendar", "cancel"): "calendar.list_events",
+        ("calendar", "list"): "calendar.list_events",
+        ("calendar", "none"): "calendar.list_events",
+        ("gmail", "search"): "gmail.smart_search",
+        ("gmail", "list"): "gmail.list_messages",
+        ("gmail", "send"): "gmail.send",
+        ("gmail", "read"): "gmail.list_messages",
+        ("gmail", "draft"): "gmail.create_draft",
+        ("gmail", "reply"): "gmail.generate_reply",
+        ("gmail", "none"): "gmail.list_messages",
+        ("system", "none"): "time.now",
+        ("system", "time"): "time.now",
+        ("system", "status"): "system.status",
+    }
+
+    def _resolve_tool_from_intent(
+        self, route: str, calendar_intent: str, gmail_intent: str = "none",
+    ) -> str | None:
+        """Resolve the correct tool name from route + intent."""
+        if route == "calendar":
+            return self._TOOL_LOOKUP.get((route, calendar_intent))
+        elif route == "gmail":
+            return self._TOOL_LOOKUP.get((route, gmail_intent))
+        elif route == "system":
+            return self._TOOL_LOOKUP.get((route, "none"))
+        return None
+
     def _extract_output(
         self,
         parsed: dict[str, Any],
@@ -1155,12 +1222,23 @@ USER: saat 8e toplantı ekle
         # Apply defaults for missing/invalid fields
         normalized = apply_orchestrator_defaults(parsed)
 
-        # ── Issue #421: Post-repair route validation ─────────────────────
+        # ── Issue #LLM-quality: Aggressive route normalization ────────────
+        # 3B model often outputs pipe-separated routes ('calendar|gmail|...')
+        # or invalid routes. Fix by: 1) split pipes 2) keyword-based fallback.
         route = str(normalized.get("route") or "unknown").strip().lower()
         if route not in VALID_ROUTES:
-            route = "unknown"
-        # Track if the route was corrected by apply_orchestrator_defaults or us
-        if pre_route not in VALID_ROUTES and pre_route != route:
+            # Try extracting first valid route from pipe-separated string
+            _extracted_route = None
+            for _part in route.split("|"):
+                _part = _part.strip()
+                if _part in VALID_ROUTES:
+                    _extracted_route = _part
+                    break
+            if _extracted_route:
+                route = _extracted_route
+            else:
+                # Keyword-based route detection from user input
+                route = self._detect_route_from_input(user_input)
             logger.info("[repair_validation] invalid route '%s' → '%s'", pre_route, route)
             _repair_tracker.record_route_correction()
             self._publish_json_event("route_corrected", {
@@ -1168,6 +1246,21 @@ USER: saat 8e toplantı ekle
                 "corrected": route,
                 "repaired": repaired,
             })
+
+        # ── Issue #LLM-quality: Route override for misclassified inputs ──
+        # 3B model sometimes picks a valid-but-wrong route (e.g. "system"
+        # for "bugün ne yapıyoruz" which is clearly calendar query).
+        # Check if keyword-based detection disagrees with model's route.
+        _route_was_overridden = False
+        if route in ("system", "smalltalk", "unknown") and user_input:
+            keyword_route = self._detect_route_from_input(user_input)
+            if keyword_route == "calendar":
+                logger.info(
+                    "[route_override] model=%s but keywords=%s for '%s'",
+                    route, keyword_route, user_input[:40],
+                )
+                route = keyword_route
+                _route_was_overridden = True
 
         # ── Issue #421: Post-repair intent validation ────────────────────
         raw_intent = str(normalized.get("calendar_intent") or "none").strip().lower()
@@ -1187,17 +1280,43 @@ USER: saat 8e toplantı ekle
         else:
             calendar_intent = raw_intent
 
+        # ── Issue #LLM-quality: Intent inference from user input ──────────
+        # If route is calendar but intent is "none", infer intent from Turkish input
+        if route == "calendar" and calendar_intent == "none":
+            _input_lower = (user_input or "").lower()
+            _CREATE_WORDS = ("ekle", "ekleyebilir", "koy", "oluştur", "planla", "kur", "ayarla")
+            _QUERY_WORDS = ("ne yapıyoruz", "ne var", "neler var", "planım", "programım", "gündem", "takvim", "bugün", "yarın", "var mı", "ne yapacağız", "planımız")
+            _CANCEL_WORDS = ("iptal", "sil", "kaldır")
+            _MODIFY_WORDS = ("değiştir", "ertele", "kaydır", "güncelle")
+            
+            if any(w in _input_lower for w in _CREATE_WORDS):
+                calendar_intent = "create"
+            elif any(w in _input_lower for w in _QUERY_WORDS):
+                calendar_intent = "query"
+            elif any(w in _input_lower for w in _CANCEL_WORDS):
+                calendar_intent = "cancel"
+            elif any(w in _input_lower for w in _MODIFY_WORDS):
+                calendar_intent = "modify"
+            else:
+                calendar_intent = "query"  # default for calendar route
+            logger.info("[intent_inference] calendar intent inferred from input: '%s'", calendar_intent)
+
         slots = normalized.get("slots") or {}
         if not isinstance(slots, dict):
             slots = {}
 
-        # ── Issue #LLM-quality: Clean slot values polluted by schema format ──
-        # 3B model sometimes copies type hints from schema literally, producing
-        # values like "str:Etkinlik", "email:test@x.com", "dk:30". Strip these.
-        # Also clean placeholder strings the model copies from schema template.
+        # ── Issue #LLM-quality: Aggressive slot value cleaning ────────────
+        # 3B model produces many garbled slot values. Clean them all.
         _TYPE_PREFIX_RE = re.compile(r"^(str|string|email|dk|int|null)\s*[:]\s*", re.IGNORECASE)
         _PLACEHOLDER_RE = re.compile(r"^<.*>$")  # e.g. "<YYYY-MM-DD veya null>"
         _JUNK_VALUES = frozenset({"pm", "am", "none", "null", "<route>", "<intent>", "<tool_adı>"})
+        _VALID_TIME_RE = re.compile(r"^\d{2}:\d{2}$")  # HH:MM
+        _VALID_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # YYYY-MM-DD
+        # Strings that are instruction copies, not real values
+        _INSTRUCTION_FRAGMENTS = [
+            "kullanıcı", "etkinlik adı söylemedi", "söylemediği", "belirtilmedi",
+            "girilmedi", "verilmedi", "yoksa null", "veya null",
+        ]
         cleaned_slots: dict[str, Any] = {}
         for k, v in slots.items():
             if isinstance(v, str):
@@ -1208,6 +1327,15 @@ USER: saat 8e toplantı ekle
                     or cleaned.lower() in _JUNK_VALUES
                     or _PLACEHOLDER_RE.match(cleaned)
                 ):
+                    cleaned_slots[k] = None
+                # Check if value is an instruction copy (model copies rule text)
+                elif any(frag in cleaned.lower() for frag in _INSTRUCTION_FRAGMENTS):
+                    cleaned_slots[k] = None
+                # time must be HH:MM format — anything else is garbage
+                elif k == "time" and not _VALID_TIME_RE.match(cleaned):
+                    cleaned_slots[k] = None
+                # date must be YYYY-MM-DD format
+                elif k == "date" and not _VALID_DATE_RE.match(cleaned):
                     cleaned_slots[k] = None
                 else:
                     cleaned_slots[k] = cleaned
@@ -1250,29 +1378,52 @@ USER: saat 8e toplantı ekle
         tool_plan: list[str] = []
         tool_plan_with_args: list[dict[str, Any]] = []  # Issue #360: preserve args
         
+        # Known valid tool names (used for filtering invented names)
+        _VALID_TOOLS = frozenset({
+            "calendar.list_events", "calendar.find_free_slots", "calendar.create_event",
+            "gmail.list_messages", "gmail.unread_count", "gmail.get_message",
+            "gmail.smart_search", "gmail.send", "gmail.create_draft",
+            "gmail.list_drafts", "gmail.update_draft", "gmail.generate_reply",
+            "gmail.send_draft", "gmail.delete_draft", "gmail.download_attachment",
+            "gmail.query_from_nl", "gmail.search_template_upsert",
+            "gmail.search_template_get", "gmail.search_template_list",
+            "gmail.search_template_delete", "gmail.list_labels", "gmail.add_label",
+            "gmail.remove_label", "gmail.mark_read", "gmail.mark_unread",
+            "gmail.archive", "gmail.batch_modify", "gmail.send_to_contact",
+            "contacts.upsert", "contacts.resolve", "contacts.list", "contacts.delete",
+            "time.now", "system.status",
+        })
+        
         if isinstance(raw_tool_plan, list):
             for item in raw_tool_plan:
                 if isinstance(item, str):
-                    name = item
-                    tool_plan.append(name)
-                    # Add to tool_plan_with_args with no args
-                    tool_plan_with_args.append({"name": name, "args": {}})
+                    name = item.strip()
                 elif isinstance(item, dict):
-                    name = item.get("name") or item.get("tool") or item.get("tool_name")
-                    name = str(name or "").strip()
-                    
-                    if name:
-                        tool_plan.append(name)
-                        # Preserve full dict with args (Issue #360)
-                        args = item.get("args", {})
-                        if not isinstance(args, dict):
-                            args = {}
-                        tool_plan_with_args.append({"name": name, "args": args})
+                    name = str(item.get("name") or item.get("tool") or item.get("tool_name") or "").strip()
                 else:
                     name = str(item or "").strip()
-                    if name:
-                        tool_plan.append(name)
-                        tool_plan_with_args.append({"name": name, "args": {}})
+                
+                # Only accept known valid tool names
+                if name and name in _VALID_TOOLS:
+                    tool_plan.append(name)
+                    args = item.get("args", {}) if isinstance(item, dict) else {}
+                    if not isinstance(args, dict):
+                        args = {}
+                    tool_plan_with_args.append({"name": name, "args": args})
+                elif name:
+                    logger.info("[tool_validation] Invalid tool name '%s' dropped from tool_plan", name)
+        
+        # ── Issue #LLM-quality: Route+intent-based tool resolution ────────
+        # If 3B model gave empty or all-invalid tool_plan but route+intent are
+        # clear, resolve the correct tool deterministically.
+        # Also re-resolve if route was overridden (model's tools are for wrong route).
+        if (not tool_plan or _route_was_overridden) and route in ("calendar", "gmail", "system"):
+            resolved_tool = self._resolve_tool_from_intent(
+                route, calendar_intent, gmail_intent=str(normalized.get("gmail_intent") or "none").strip().lower(),
+            )
+            if resolved_tool:
+                tool_plan = [resolved_tool]
+                tool_plan_with_args = [{"name": resolved_tool, "args": {}}]
 
         assistant_reply = str(parsed.get("assistant_reply") or "").strip()
 
@@ -1294,38 +1445,85 @@ USER: saat 8e toplantı ekle
         memory_update = str(parsed.get("memory_update") or "").strip()
 
         # ── Issue #title-hallucination: Validate title actually appears in user input ──
-        # 3B models hallucinate titles when user says "ekle" without specifying one.
-        # If calendar create intent has a title that doesn't appear anywhere in the
-        # user's original message, clear it and ask the user.
+        # 3B models hallucinate titles or copy user input fragments as title.
+        # e.g. "dokuza bir etkinlik" is NOT a title — it's the whole user input.
+        # Only accept title if it's a specific noun/phrase, not the whole request.
         # NOTE: Must run AFTER ask_user/question are extracted from parsed JSON.
+        _TITLE_NOISE_WORDS = frozenset({
+            "etkinlik", "etkinik", "bir", "ekle", "ekleyebilir", "misin",
+            "koy", "koyabilir", "ekleyebilirmisin", "olsun", "yap",
+            # Turkish number words (used as time references, not event titles)
+            "bire", "ikiye", "üçe", "dörde", "beşe", "altıya", "yediye",
+            "sekize", "dokuza", "ona", "onbire", "onikiye",
+            "bir", "iki", "üç", "dört", "beş", "altı", "yedi",
+            "sekiz", "dokuz", "on", "onbir", "oniki",
+            # Time-related words
+            "akşam", "sabah", "öğle", "gece", "yarın", "bugün",
+            "saat", "saate", "için",
+        })
         if route == "calendar" and calendar_intent == "create" and user_input:
             slot_title = (slots.get("title") or "").strip()
-            if slot_title and slot_title.lower() not in user_input.lower():
-                # Title was hallucinated — not in user's words
-                logger.info(
-                    "[title_validation] Hallucinated title '%s' not found in user input, clearing",
-                    slot_title,
-                )
-                slots = {**slots, "title": None}
-                ask_user = True
-                if not question:
-                    question = "Ne ekleyeyim efendim? Etkinlik adı nedir?"
-                confidence = min(confidence, 0.6)
+            if slot_title:
+                # Check 1: title not in user input → hallucinated
+                title_hallucinated = slot_title.lower() not in user_input.lower()
+                # Check 2: title is mostly noise words (not a real event name)
+                title_words = set(slot_title.lower().split())
+                title_is_noise = len(title_words - _TITLE_NOISE_WORDS) == 0
+                # Check 3: title is too long (>5 words) → probably user input copy
+                title_too_long = len(title_words) > 5
+                
+                if title_hallucinated or title_is_noise or title_too_long:
+                    logger.info(
+                        "[title_validation] Invalid title '%s' (hallucinated=%s noise=%s long=%s), clearing",
+                        slot_title, title_hallucinated, title_is_noise, title_too_long,
+                    )
+                    slots = {**slots, "title": None}
+                    ask_user = True
+                    if not question:
+                        question = "Ne ekleyeyim efendim? Etkinlik adı nedir?"
 
         reasoning_summary = parsed.get("reasoning_summary") or []
         if not isinstance(reasoning_summary, list):
             reasoning_summary = []
         reasoning_summary = [str(r).strip() for r in reasoning_summary if r]
 
-        # Apply confidence threshold: if below threshold, clear tools and ask for clarification
+        # ── Issue #LLM-quality: Smart confidence handling ─────────────
+        # 3B model often gives correct route+intent but low/unreliable confidence.
+        # Instead of blindly blocking on confidence < 0.7, boost confidence
+        # when the route+intent make sense for the user input.
         if confidence < self._confidence_threshold:
-            tool_plan = []
-            tool_plan_with_args = []
-            if not assistant_reply:
-                assistant_reply = "Efendim, tam anlayamadım. Tekrar eder misiniz?"
-            ask_user = True
-            if not question:
-                question = assistant_reply
+            # Check if route+intent are actually valid and meaningful
+            _route_valid = route in ("calendar", "gmail", "system")
+            _has_intent = calendar_intent not in ("none", "")
+            _has_tools = bool(tool_plan)
+            
+            if _route_valid and (_has_intent or _has_tools):
+                # Route is valid with intent or tools → trust the model's decision,
+                # boost confidence to just above threshold
+                old_conf = confidence
+                confidence = max(confidence, self._confidence_threshold + 0.05)
+                logger.info(
+                    "[confidence_boost] Valid route=%s intent=%s tools=%s → boosted %.2f → %.2f",
+                    route, calendar_intent, tool_plan, old_conf, confidence,
+                )
+            elif _route_valid and ask_user:
+                # Model correctly identified route but is asking user for more info
+                # (e.g. missing title) — this is fine, don't block with "Tam anlayamadım"
+                old_conf = confidence
+                confidence = max(confidence, self._confidence_threshold + 0.05)
+                logger.info(
+                    "[confidence_boost] Valid route=%s with ask_user → boosted %.2f → %.2f",
+                    route, calendar_intent, old_conf, confidence,
+                )
+            else:
+                # Genuinely unknown → apply threshold block
+                tool_plan = []
+                tool_plan_with_args = []
+                if not assistant_reply:
+                    assistant_reply = "Efendim, tam anlayamadım. Tekrar eder misiniz?"
+                ask_user = True
+                if not question:
+                    question = assistant_reply
         
         # Gmail extensions (Issue #317 + #422: rule-based fallback)
         gmail_intent = str(parsed.get("gmail_intent") or "none").strip().lower()

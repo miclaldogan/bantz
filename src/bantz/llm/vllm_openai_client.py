@@ -154,8 +154,14 @@ class VLLMOpenAIClient(LLMClient):
                     "openai kütüphanesi yüklü değil. Kurulum: pip install openai"
                 ) from e
             
+            # OpenAI client expects base_url to point to API root.
+            # self.base_url might already include /v1 or not.
+            _api_base = self.base_url.rstrip("/")
+            if not _api_base.endswith("/v1"):
+                _api_base = f"{_api_base}/v1"
+            
             self._client = OpenAI(
-                base_url=f"{self.base_url}/v1",
+                base_url=_api_base,
                 api_key="EMPTY",  # vLLM doesn't require API key for local usage
                 timeout=self.timeout_seconds,
             )
@@ -170,8 +176,10 @@ class VLLMOpenAIClient(LLMClient):
             return False
         
         try:
+            # base_url already includes /v1, so just append /models
+            health_url = f"{self.base_url.rstrip('/')}/models"
             r = requests.get(
-                f"{self.base_url}/v1/models",
+                health_url,
                 timeout=float(timeout_seconds),
             )
             return r.status_code == 200
