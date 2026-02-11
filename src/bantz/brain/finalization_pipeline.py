@@ -109,6 +109,9 @@ class FinalizationContext:
     tier_reason: str = ""
     use_quality: bool = True
 
+    # Issue #874: Personality block for finalizer prompt injection
+    personality_block: Optional[str] = None
+
 
 # ---------------------------------------------------------------------------
 # No-New-Facts Guard
@@ -266,6 +269,7 @@ class QualityFinalizer:
             recent_turns=ctx.recent_turns,
             session_context=ctx.session_context,
             seed=seed,
+            personality_block=ctx.personality_block,
         )
         return built.prompt
 
@@ -276,12 +280,24 @@ class QualityFinalizer:
     ) -> str:
         if finalizer_results:
             logger.warning("[FINALIZER_FALLBACK] Tool results truncated to fit budget")
-        return "\n".join(
-            [
+
+        # Issue #874: Use personality block if available, else default identity
+        if ctx.personality_block:
+            identity_lines = [
+                "Kimlik / Roller:",
+                ctx.personality_block,
+            ]
+        else:
+            identity_lines = [
                 "Kimlik / Roller:",
                 "- Sen BANTZ'sın. Kullanıcı USER'dır.",
                 "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
                 "- 'Efendim' hitabını kullan.",
+            ]
+
+        return "\n".join(
+            [
+                *identity_lines,
                 "",
                 "FORMAT KURALLARI (KESİN):",
                 "- Sadece kullanıcıya söyleyeceğin düz metni üret.",
@@ -972,6 +988,7 @@ def build_finalization_context(
     state: OrchestratorState,
     memory: Any,
     finalizer_llm: Any,
+    personality_block: Optional[str] = None,
 ) -> FinalizationContext:
     """Build a ``FinalizationContext`` from ``OrchestratorLoop`` internals.
 
@@ -1026,6 +1043,7 @@ def build_finalization_context(
         tier_name=tier_name,
         tier_reason=tier_reason,
         use_quality=use_quality,
+        personality_block=personality_block,
     )
 
 
