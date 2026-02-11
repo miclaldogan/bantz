@@ -624,17 +624,98 @@ class BantzServer:
         # Legacy Router is only used when brain is unavailable or for browser_* intents.
         if self._brain is not None and not parsed.intent.startswith("browser_"):
             try:
+                # ── Issue #869: Handle pending confirmation from previous turn ──
+                if (
+                    self._brain_state is not None
+                    and self._brain_state.has_pending_confirmation()
+                ):
+                    from bantz.brain.orchestrator_state import OrchestratorState
+
+                    pending = self._brain_state.peek_pending_confirmation() or {}
+                    pending_tool = str(pending.get("tool") or "")
+                    prompt = str(pending.get("prompt") or "")
+                    lower = command.strip().lower()
+
+                    # Accept confirmation
+                    _yes_tokens = {
+                        "evet", "e", "ok", "tamam", "onay", "onaylıyorum",
+                        "kabul", "yes", "y", "olur", "peki", "ekle", "yap",
+                        "koy", "kaydet",
+                    }
+                    _no_tokens = {
+                        "hayır", "hayir", "h", "no", "n", "iptal", "vazgeç",
+                        "vazgec", "reddet", "istemiyorum", "olmaz", "yok",
+                    }
+                    first_word = lower.split()[0] if lower.split() else ""
+
+                    if lower in _yes_tokens or first_word in _yes_tokens:
+                        # User confirmed — set confirmed_tool and re-run
+                        self._brain_state.confirmed_tool = pending_tool
+                        output, self._brain_state = self._brain.process_turn(
+                            command, self._brain_state
+                        )
+                        reply = str(getattr(output, "assistant_reply", "") or "").strip()
+                        return {
+                            "ok": True,
+                            "text": reply or "Tamamdır efendim.",
+                            "brain": True,
+                            "route": getattr(output, "route", "unknown"),
+                        }
+                    elif lower in _no_tokens or first_word in _no_tokens:
+                        # User rejected — clear pending
+                        self._brain_state.clear_pending_confirmation()
+                        return {
+                            "ok": True,
+                            "text": "Anlaşıldı efendim, iptal ettim.",
+                            "brain": True,
+                            "route": "cancelled",
+                        }
+                    else:
+                        # Unknown response — re-show confirmation prompt
+                        return {
+                            "ok": True,
+                            "text": prompt or "Efendim, devam etmek için 'evet' veya 'hayır' diyebilir misiniz?",
+                            "brain": True,
+                            "route": "confirmation",
+                            "needs_confirmation": True,
+                            "confirmation_prompt": prompt,
+                            "confirmation_tool": pending_tool,
+                        }
+
                 output, self._brain_state = self._brain.process_turn(
                     command, self._brain_state
                 )
                 reply = str(getattr(output, "assistant_reply", "") or "").strip()
                 if not reply and getattr(output, "ask_user", False):
                     reply = str(getattr(output, "question", "") or "").strip()
+
+                # ── Issue #869: Check if this turn created a pending confirmation ──
+                confirmation_pending = (
+                    self._brain_state is not None
+                    and self._brain_state.has_pending_confirmation()
+                )
+                if confirmation_pending:
+                    pending = self._brain_state.peek_pending_confirmation() or {}
+                    conf_prompt = str(pending.get("prompt") or "").strip()
+                    conf_tool = str(pending.get("tool") or "")
+                    # Use the confirmation prompt as the reply text
+                    if conf_prompt:
+                        reply = conf_prompt
+
                 return {
                     "ok": True,
                     "text": reply or "Anlayamadım efendim.",
                     "brain": True,
                     "route": getattr(output, "route", "unknown"),
+                    "needs_confirmation": confirmation_pending,
+                    "confirmation_prompt": (
+                        str((self._brain_state.peek_pending_confirmation() or {}).get("prompt", ""))
+                        if confirmation_pending else None
+                    ),
+                    "confirmation_tool": (
+                        str((self._brain_state.peek_pending_confirmation() or {}).get("tool", ""))
+                        if confirmation_pending else None
+                    ),
                 }
             except Exception as e:
                 logging.getLogger(__name__).warning("Brain handler failed: %s", e)
