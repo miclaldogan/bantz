@@ -566,6 +566,23 @@ class BantzServer:
             return self._paginate_prev()
 
         # ─────────────────────────────────────────────────────────────
+        # Self-Evolving Agent — skill approval / rejection (Issue #837)
+        # ─────────────────────────────────────────────────────────────
+        try:
+            from bantz.skills.declarative.generator import get_self_evolving_manager
+            mgr = get_self_evolving_manager()
+            if mgr is not None and mgr.has_pending:
+                lower = command.strip().lower()
+                if lower in {"evet", "yes", "kur", "onayla", "approve", "evet kur"}:
+                    result = mgr.approve_pending()
+                    return {"ok": result.get("ok", False), "text": result.get("text", ""), "skill_approved": True}
+                elif lower in {"hayır", "no", "reddet", "reject", "iptal", "vazgeç"}:
+                    result = mgr.reject_pending()
+                    return {"ok": result.get("ok", False), "text": result.get("text", ""), "skill_rejected": True}
+        except ImportError:
+            pass
+
+        # ─────────────────────────────────────────────────────────────
         # Overnight mode — "gece şunu yap" intent (Issue #836)
         # ─────────────────────────────────────────────────────────────
         try:

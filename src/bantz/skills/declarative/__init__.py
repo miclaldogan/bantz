@@ -29,6 +29,17 @@ from bantz.skills.declarative.models import (
 from bantz.skills.declarative.loader import SkillLoader
 from bantz.skills.declarative.registry import DeclarativeSkillRegistry
 from bantz.skills.declarative.executor import SkillExecutor
+from bantz.skills.declarative.generator import (
+    SelfEvolvingSkillManager,
+    SkillGenerator,
+    SkillNeedDetector,
+    SkillValidator,
+    SkillVersionManager,
+    SkillGap,
+    GenerationResult,
+    get_self_evolving_manager,
+    setup_self_evolving,
+)
 
 __all__ = [
     "DeclarativeSkill",
@@ -39,4 +50,13 @@ __all__ = [
     "SkillLoader",
     "DeclarativeSkillRegistry",
     "SkillExecutor",
+    "SelfEvolvingSkillManager",
+    "SkillGenerator",
+    "SkillNeedDetector",
+    "SkillValidator",
+    "SkillVersionManager",
+    "SkillGap",
+    "GenerationResult",
+    "get_self_evolving_manager",
+    "setup_self_evolving",
 ]
