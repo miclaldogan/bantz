@@ -142,6 +142,23 @@ input,textarea{font-family:var(--font);outline:none}
 .qr-container img{max-width:200px;border-radius:var(--radius);border:2px solid var(--bg3)}
 .qr-url{font-family:var(--mono);font-size:.85rem;color:var(--accent2);margin-top:12px;word-break:break-all}
 
+/* ── Confirmation Modal (Issue #869) ───────────────── */
+.confirm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;justify-content:center;align-items:center;animation:fadeIn .2s ease}
+.confirm-overlay.active{display:flex}
+.confirm-modal{background:var(--bg2);border:1px solid var(--bg3);border-radius:var(--radius);padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.5);animation:modalIn .25s ease}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes modalIn{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:none}}
+.confirm-modal .confirm-icon{font-size:2rem;text-align:center;margin-bottom:12px}
+.confirm-modal .confirm-title{font-size:1.1rem;font-weight:600;text-align:center;margin-bottom:8px}
+.confirm-modal .confirm-tool{font-size:.75rem;color:var(--fg3);text-align:center;margin-bottom:16px;font-family:var(--mono)}
+.confirm-modal .confirm-text{font-size:.95rem;line-height:1.6;color:var(--fg);text-align:center;padding:16px;background:var(--bg);border-radius:var(--radius-sm);margin-bottom:20px}
+.confirm-modal .confirm-actions{display:flex;gap:12px;justify-content:center}
+.confirm-modal .confirm-actions button{padding:10px 28px;border-radius:var(--radius-sm);font-size:.95rem;font-weight:600;transition:all .15s}
+.confirm-modal .btn-confirm{background:var(--green);color:#fff}
+.confirm-modal .btn-confirm:hover{opacity:.85;transform:translateY(-1px)}
+.confirm-modal .btn-reject{background:var(--bg3);color:var(--fg2)}
+.confirm-modal .btn-reject:hover{background:var(--red);color:#fff;transform:translateY(-1px)}
+
 /* ── Toast ────────────────────────────────────────── */
 .toast{position:fixed;bottom:24px;right:24px;background:var(--bg2);border:1px solid var(--bg3);border-radius:var(--radius);padding:14px 20px;color:var(--fg);font-size:.9rem;box-shadow:var(--shadow);z-index:200;animation:toastIn .3s ease;max-width:360px}
 .toast.success{border-left:3px solid var(--green)}
@@ -307,6 +324,20 @@ input,textarea{font-family:var(--font);outline:none}
   </div>
 </div>
 
+<!-- Confirmation Modal (Issue #869) -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-modal">
+    <div class="confirm-icon">⚠️</div>
+    <div class="confirm-title">İşlem Onayı</div>
+    <div class="confirm-tool" id="confirmTool"></div>
+    <div class="confirm-text" id="confirmText"></div>
+    <div class="confirm-actions">
+      <button class="btn-confirm" onclick="confirmAction('yes')">✅ Evet, Devam Et</button>
+      <button class="btn-reject" onclick="confirmAction('no')">❌ İptal</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ── State ────────────────────────────────────────── */
 let ws = null;
@@ -349,6 +380,12 @@ function connectWS(){
         hideTyping();
         addMessage('assistant', msg.data.response||'(boş yanıt)', msg.data.route);
         document.getElementById('lastRoute').textContent = msg.data.route||'unknown';
+      } else if(msg.type==='confirm_request'){
+        // Issue #869: Show confirmation dialog
+        hideTyping();
+        addMessage('assistant', msg.data.response||'İşlem onayı bekleniyor...', msg.data.route);
+        document.getElementById('lastRoute').textContent = msg.data.route||'confirmation';
+        showConfirmDialog(msg.data.tool||'', msg.data.prompt||msg.data.response||'');
       } else if(msg.type==='event'){
         // Orchestrator trace events — could show in future
       } else if(msg.type==='error'){
@@ -368,6 +405,35 @@ function setWSStatus(status, label){
   lbl.textContent = label;
 }
 
+/* ── Confirmation Dialog (Issue #869) ──────────────── */
+function showConfirmDialog(tool, prompt){
+  document.getElementById('confirmTool').textContent = tool||'';
+  document.getElementById('confirmText').textContent = prompt||'Bu işlemi onaylıyor musunuz?';
+  document.getElementById('confirmOverlay').classList.add('active');
+}
+function hideConfirmDialog(){
+  document.getElementById('confirmOverlay').classList.remove('active');
+}
+function confirmAction(action){
+  hideConfirmDialog();
+  if(action==='yes'){
+    addMessage('user','✅ Evet, onaylıyorum');
+  } else {
+    addMessage('user','❌ İptal');
+  }
+  showTyping();
+  if(ws && ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify({type:'confirm',action:action}));
+  } else {
+    // REST fallback — send Turkish confirmation token
+    const msg = action==='yes'?'evet':'hayır';
+    fetch(API+'/api/v1/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})})
+      .then(r=>r.json())
+      .then(d=>{hideTyping();addMessage('assistant',d.response||d.text||'(boş)',d.route);})
+      .catch(e=>{hideTyping();addMessage('system','⚠️ Bağlantı hatası: '+e.message)});
+  }
+}
+
 /* ── Chat ─────────────────────────────────────────── */
 function sendMessage(){
   const input = document.getElementById('chatInput');
@@ -383,7 +449,15 @@ function sendMessage(){
     // Fallback to REST
     fetch(API+'/api/v1/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})})
       .then(r=>r.json())
-      .then(d=>{hideTyping();addMessage('assistant',d.response||d.text||'(boş)',d.route);document.getElementById('lastRoute').textContent=d.route||'unknown'})
+      .then(d=>{
+        hideTyping();
+        addMessage('assistant',d.response||d.text||'(boş)',d.route);
+        document.getElementById('lastRoute').textContent=d.route||'unknown';
+        // Issue #869: Handle confirmation in REST response
+        if(d.requires_confirmation && d.confirmation_prompt){
+          showConfirmDialog(d.confirmation_tool||'', d.confirmation_prompt);
+        }
+      })
       .catch(e=>{hideTyping();addMessage('system','⚠️ Bağlantı hatası: '+e.message)});
   }
 }

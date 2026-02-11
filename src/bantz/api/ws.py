@@ -5,10 +5,13 @@ WS /ws/chat — Bidirectional WebSocket for streaming chat.
 Protocol:
   Client → Server:
     {"type": "chat", "message": "bugün plan var mı?"}
+    {"type": "confirm", "action": "yes"}  — confirm pending tool (Issue #869)
+    {"type": "confirm", "action": "no"}   — reject pending tool (Issue #869)
     {"type": "ping"}
 
   Server → Client:
     {"type": "chat", "data": {"ok": true, "response": "...", "route": "calendar", ...}}
+    {"type": "confirm_request", "data": {"tool": "...", "prompt": "...", "response": "..."}}
     {"type": "event", "data": {"type": "tool.call", ...}}
     {"type": "pong", "data": {}}
     {"type": "error", "data": {"error": "...", "code": "..."}}
@@ -126,6 +129,55 @@ async def websocket_chat(
                     _ws_executor,
                     server.handle_command,
                     message,
+                )
+
+                # Issue #869: Check if response includes confirmation request
+                needs_confirmation = result.get("needs_confirmation", False)
+                if needs_confirmation:
+                    await websocket.send_json({
+                        "type": "confirm_request",
+                        "data": {
+                            "ok": True,
+                            "response": result.get("text", ""),
+                            "route": result.get("route", result.get("intent", "unknown")),
+                            "brain": result.get("brain", False),
+                            "tool": result.get("confirmation_tool", ""),
+                            "prompt": result.get("confirmation_prompt", ""),
+                        },
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                else:
+                    await websocket.send_json({
+                        "type": "chat",
+                        "data": {
+                            "ok": result.get("ok", False),
+                            "response": result.get("text", ""),
+                            "route": result.get("route", result.get("intent", "unknown")),
+                            "brain": result.get("brain", False),
+                        },
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                continue
+
+            # Issue #869: Handle confirmation responses from web dashboard
+            if msg_type == "confirm":
+                action = str(msg.get("action", "")).strip().lower()
+                if action not in ("yes", "no"):
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": "Invalid confirm action. Use 'yes' or 'no'.", "code": "invalid_confirm"},
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    continue
+
+                # Map to Turkish confirmation tokens that handle_command expects
+                confirm_text = "evet" if action == "yes" else "hayır"
+
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    _ws_executor,
+                    server.handle_command,
+                    confirm_text,
                 )
 
                 await websocket.send_json({
