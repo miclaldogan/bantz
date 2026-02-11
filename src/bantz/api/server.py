@@ -409,13 +409,14 @@ def _get_skills(server: Any) -> list[SkillInfo]:
     if server and server._brain is not None:
         try:
             tool_registry = server._brain.tools
-            for name in tool_registry.list_tools():
-                tool_meta = tool_registry.get_tool(name)
+            for name in tool_registry.names():
+                tool = tool_registry.get(name)
                 desc = ""
                 category = "builtin"
-                if tool_meta:
-                    desc = getattr(tool_meta, "description", "") or ""
-                    category = getattr(tool_meta, "category", "builtin") or "builtin"
+                if tool:
+                    desc = getattr(tool, "description", "") or ""
+                    # Derive category from tool name prefix (e.g. gmail.send → gmail)
+                    category = name.split(".")[0] if "." in name else "builtin"
                 skills.append(
                     SkillInfo(name=name, description=desc, category=category, source="builtin")
                 )

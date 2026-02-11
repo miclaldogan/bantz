@@ -1166,4 +1166,159 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    # ── Gmail query_from_nl + search templates (Issue #874 sync) ─────
+    try:
+        from bantz.google.gmail_query import gmail_query_from_nl as _gmail_query_from_nl
+    except Exception:  # pragma: no cover
+        _gmail_query_from_nl = None  # type: ignore[assignment]
+
+    reg.register(
+        Tool(
+            name="gmail.query_from_nl",
+            description="Convert natural language into a Gmail search query string (SAFE).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Natural language query"},
+                    "reference_date": {"type": "string", "description": "Optional ISO date (YYYY-MM-DD)"},
+                    "inbox_only": {"type": "boolean", "description": "Default true; prepends in:inbox"},
+                },
+                "required": ["text"],
+                "additionalProperties": True,
+            },
+            function=_gmail_query_from_nl,
+        )
+    )
+
+    try:
+        from bantz.google.gmail_search_templates import (
+            templates_delete as _templates_delete,
+            templates_get as _templates_get,
+            templates_list as _templates_list,
+            templates_upsert as _templates_upsert,
+        )
+    except Exception:  # pragma: no cover
+        _templates_upsert = None  # type: ignore[assignment]
+        _templates_get = None  # type: ignore[assignment]
+        _templates_list = None  # type: ignore[assignment]
+        _templates_delete = None  # type: ignore[assignment]
+
+    reg.register(
+        Tool(
+            name="gmail.search_template_upsert",
+            description="Save a Gmail search template (name → query). SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Template name"},
+                    "query": {"type": "string", "description": "Gmail query string"},
+                },
+                "required": ["name", "query"],
+                "additionalProperties": True,
+            },
+            function=_templates_upsert,
+        )
+    )
+    reg.register(
+        Tool(
+            name="gmail.search_template_get",
+            description="Get a saved Gmail search template. SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Template name"},
+                },
+                "required": ["name"],
+                "additionalProperties": True,
+            },
+            function=_templates_get,
+        )
+    )
+    reg.register(
+        Tool(
+            name="gmail.search_template_list",
+            description="List saved Gmail search templates. SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prefix": {"type": "string", "description": "Optional name prefix"},
+                    "limit": {"type": "integer", "description": "Max results (default: 50)"},
+                },
+                "additionalProperties": True,
+            },
+            function=_templates_list,
+        )
+    )
+    reg.register(
+        Tool(
+            name="gmail.search_template_delete",
+            description="Delete a saved Gmail search template. SAFE.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Template name"},
+                },
+                "required": ["name"],
+                "additionalProperties": True,
+            },
+            function=_templates_delete,
+        )
+    )
+
+    # ── Calendar plan/draft tools ───────────────────────────────────
+    try:
+        from bantz.planning.executor import (
+            apply_plan_draft as _apply_plan_draft,
+            plan_events_from_draft as _plan_events_from_draft,
+        )
+    except Exception:  # pragma: no cover
+        _apply_plan_draft = None  # type: ignore[assignment]
+        _plan_events_from_draft = None  # type: ignore[assignment]
+
+    reg.register(
+        Tool(
+            name="calendar.plan_events_from_draft",
+            description="Parse a multi-event draft text into structured event list (SAFE).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "draft_text": {"type": "string", "description": "Multi-event draft text"},
+                    "reference_date": {"type": "string", "description": "Optional ISO date"},
+                },
+                "required": ["draft_text"],
+                "additionalProperties": True,
+            },
+            function=_plan_events_from_draft,
+        )
+    )
+
+    def _apply_plan_draft_runtime(**params):
+        """Wrapper that injects Google Calendar backend."""
+        if _apply_plan_draft is None:
+            return {"ok": False, "error": "planning.executor not available"}
+        try:
+            from bantz.tools.calendar_tools import _get_calendar_service
+            svc = _get_calendar_service()
+        except Exception:
+            svc = None
+        return _apply_plan_draft(calendar_service=svc, **params)
+
+    reg.register(
+        Tool(
+            name="calendar.apply_plan_draft",
+            description="Apply a planned event draft to Google Calendar (write). Requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "plan_id": {"type": "string", "description": "Plan ID from plan_events_from_draft"},
+                    "dry_run": {"type": "boolean", "description": "If true, validate only"},
+                },
+                "required": ["plan_id"],
+                "additionalProperties": True,
+            },
+            function=_apply_plan_draft_runtime,
+            requires_confirmation=True,
+        )
+    )
+
     return reg

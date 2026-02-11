@@ -1620,7 +1620,36 @@ class OrchestratorLoop:
         Returns:
             List of tool results
         """
-        if not output.tool_plan:
+        # Issue #351: Confirmation queue support — check BEFORE early return.
+        # When user confirms a pending destructive tool, the new LLM pass may
+        # produce an empty tool_plan (since input is just "evet").  We must
+        # still execute the confirmed tool, so handle confirmation first.
+        confirmed_override_tool: Optional[str] = None
+        if state.has_pending_confirmation():
+            pending = state.peek_pending_confirmation() or {}
+            pending_tool = str(pending.get("tool") or "").strip()
+
+            if state.confirmed_tool and pending_tool and pending_tool == state.confirmed_tool:
+                # Confirmation accepted for the head of the queue.
+                confirmed_override_tool = pending_tool
+                state.pop_pending_confirmation()
+                state.confirmed_tool = None
+                logger.info("[FIREWALL] Confirmation accepted for %s — executing.", pending_tool)
+            else:
+                prompt = str(pending.get("prompt") or "Confirm to continue")
+                logger.warning(
+                    f"[FIREWALL] Cannot execute tools - confirmation pending for {pending_tool}. "
+                    f"User must confirm first."
+                )
+                return [{
+                    "tool": "blocked",
+                    "success": False,
+                    "error": f"Confirmation required for {pending_tool}: {prompt}",
+                    "pending_confirmation": True,
+                    "confirmation_prompt": prompt,
+                }]
+
+        if not output.tool_plan and not confirmed_override_tool:
             return []
 
         # Support both legacy `tool_plan: ["tool.name", ...]` and richer
@@ -1640,7 +1669,7 @@ class OrchestratorLoop:
         
         # Safety Guard: Filter tool plan based on route
         filtered_tool_plan = output.tool_plan
-        if self.safety_guard:
+        if self.safety_guard and not confirmed_override_tool:
             filtered_tool_plan, violations = self.safety_guard.filter_tool_plan(
                 route=output.route,
                 tool_plan=output.tool_plan,
@@ -1656,40 +1685,15 @@ class OrchestratorLoop:
                         reason=violation.reason,
                         metadata=violation.metadata,
                     )
+        elif confirmed_override_tool:
+            filtered_tool_plan = [confirmed_override_tool]
         
         tool_results = []
 
-        # Issue #351: Confirmation queue support (multiple destructive tools)
-        # If a confirmation is already pending, block all tools unless the
-        # pending tool is explicitly confirmed for this execution pass.
-        confirmed_override_tool: Optional[str] = None
-        if state.has_pending_confirmation():
-            pending = state.peek_pending_confirmation() or {}
-            pending_tool = str(pending.get("tool") or "").strip()
 
-            if state.confirmed_tool and pending_tool and pending_tool == state.confirmed_tool:
-                # Confirmation accepted for the head of the queue.
-                confirmed_override_tool = pending_tool
-                state.pop_pending_confirmation()
-                state.confirmed_tool = None
-                filtered_tool_plan = [pending_tool]
-            else:
-                prompt = str(pending.get("prompt") or "Confirm to continue")
-                logger.warning(
-                    f"[FIREWALL] Cannot execute tools - confirmation pending for {pending_tool}. "
-                    f"User must confirm first."
-                )
-                return [{
-                    "tool": "blocked",
-                    "success": False,
-                    "error": f"Confirmation required for {pending_tool}: {prompt}",
-                    "pending_confirmation": True,
-                    "confirmation_prompt": prompt,
-                }]
-
-        # If no confirmation is pending, pre-scan tool_plan and queue all
-        # confirmations in order, then return a pending confirmation placeholder.
-        if not state.has_pending_confirmation():
+        # If no confirmation is pending AND we're not executing a confirmed tool,
+        # pre-scan tool_plan and queue all confirmations in order.
+        if not state.has_pending_confirmation() and not confirmed_override_tool:
             try:
                 from bantz.tools.metadata import (
                     get_tool_risk,
