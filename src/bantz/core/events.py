@@ -74,7 +74,18 @@ class EventType(Enum):
     FINALIZER_START = "finalizer.start"  # Yanıt son haline getiriliyor
     FINALIZER_END = "finalizer.end"  # Yanıt tamamlandı
     TURN_END = "turn.end"  # Turn bitti
-    
+
+    # === Overnight Mode (Issue #836) ===
+    OVERNIGHT_STARTED = "overnight.started"  # Gece modu başladı
+    OVERNIGHT_TASK_STARTED = "overnight.task.started"  # Bir görev başladı
+    OVERNIGHT_TASK_COMPLETED = "overnight.task.completed"  # Görev tamamlandı
+    OVERNIGHT_TASK_FAILED = "overnight.task.failed"  # Görev başarısız
+    OVERNIGHT_CHECKPOINT = "overnight.checkpoint"  # Checkpoint kaydedildi
+    OVERNIGHT_WAITING_HUMAN = "overnight.waiting_human"  # İnsan kararı bekleniyor
+    OVERNIGHT_RESUMED = "overnight.resumed"  # Checkpoint'tan devam
+    OVERNIGHT_MORNING_REPORT = "overnight.morning_report"  # Sabah raporu hazır
+    OVERNIGHT_COMPLETED = "overnight.completed"  # Tüm görevler tamamlandı
+
     # === Legacy (for backward compatibility) ===
     REMINDER_FIRED = "reminder_fired"
     CHECKIN_TRIGGERED = "checkin_triggered"
