@@ -112,6 +112,7 @@ class PromptBuilder:
         recent_turns: Optional[list[dict[str, str]]] = None,
         session_context: Optional[dict[str, Any]] = None,
         seed: str = "default",
+        personality_block: Optional[str] = None,
     ) -> PromptBuildResult:
         """Return a single prompt string suitable for `complete_text(prompt=...)`."""
 
@@ -125,11 +126,15 @@ class PromptBuilder:
 
         variant = _stable_ab_variant(seed=seed, experiment=f"{self._experiment}:{route_key}")
 
-        system = self._build_system_prompt(variant=variant, writing=writing)
+        system = self._build_system_prompt(variant=variant, writing=writing, personality_block=personality_block)
         template = self._build_template(route=route_key, variant=variant, complexity=complexity, writing=writing)
 
         # Optional blocks (ordered by usefulness; trim later if needed).
         blocks: list[tuple[str, str]] = []
+
+        # Issue #874: Inject personality block as first content block
+        if personality_block:
+            blocks.append(("PERSONALITY", personality_block))
 
         if session_context:
             blocks.append(("SESSION_CONTEXT", _json_dumps_compact(session_context, max_chars=1200)))
@@ -259,10 +264,25 @@ class PromptBuilder:
         truncated_user = _truncate(user_input, max_chars=500)
         return self._assemble(system=system, template=template, blocks=b, user_input=truncated_user)
 
-    def _build_system_prompt(self, *, variant: PromptVariant, writing: int) -> str:
+    def _build_system_prompt(self, *, variant: PromptVariant, writing: int, personality_block: Optional[str] = None) -> str:
         # Keep this short; we have a strict token budget.
         style = "kısa ve öz" if writing < 3 else "kibar ve akıcı"
         extra = "" if variant == "A" else "- Gereksiz teknik detay verme; sonuç odaklı ol."
+
+        # Issue #874: Use personality identity lines if available
+        if personality_block:
+            # Personality block already contains identity, style, honorifics.
+            # Keep language and output format rules as non-negotiable.
+            return "\n".join(
+                [
+                    "Kimlik / Roller:",
+                    personality_block,
+                    "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
+                    f"- Ton: {style}.",
+                    "- Çıktı: Sadece kullanıcıya söyleyeceğin metin. JSON/Markdown yok.",
+                    extra,
+                ]
+            ).strip()
 
         return "\n".join(
             [

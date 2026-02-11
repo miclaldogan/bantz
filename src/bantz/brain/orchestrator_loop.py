@@ -428,6 +428,15 @@ class OrchestratorLoop:
             logger.warning("[ORCHESTRATOR] UserMemoryBridge init failed: %s", _umx)
             self.user_memory = None
 
+        # Issue #874: Personality injection (Jarvis/Friday/Alfred presets)
+        try:
+            from bantz.brain.personality_injector import PersonalityInjector
+
+            self.personality_injector: Any = PersonalityInjector()
+        except Exception as _pix:
+            logger.warning("[ORCHESTRATOR] PersonalityInjector init failed: %s", _pix)
+            self.personality_injector = None
+
         # Issue #599: Memory injection trace/audit (best-effort, non-fatal)
         try:
             from bantz.brain.memory_trace import MemoryBudgetConfig, MemoryTracer
@@ -1148,10 +1157,13 @@ class OrchestratorLoop:
             context_parts.append(dialog_summary)
 
         # Issue #873: Inject persistent user profile context
+        _um_facts: dict[str, str] = {}
+        _um_prefs: dict = {}
         if getattr(self, "user_memory", None) is not None:
             try:
                 _um_result = self.user_memory.on_turn_start(user_input)
                 _profile_ctx = _um_result.get("profile_context", "")
+                _um_facts = _um_result.get("facts", {})
                 if _profile_ctx:
                     context_parts.append(f"USER_PROFILE:\n{_profile_ctx}")
                 _memory_snippets = _um_result.get("memories", [])
@@ -1160,8 +1172,25 @@ class OrchestratorLoop:
                         f"  - {s}" for s in _memory_snippets[:5]
                     )
                     context_parts.append(_mem_block)
+                # Update personality injector with user name from profile
+                if getattr(self, "personality_injector", None) is not None:
+                    _pname = _um_facts.get("name", "")
+                    if _pname:
+                        self.personality_injector.update_user_name(_pname)
             except Exception as _um_exc:
                 logger.debug("[ORCHESTRATOR] user_memory.on_turn_start failed: %s", _um_exc)
+
+        # Issue #874: Inject personality block (Jarvis/Friday/Alfred)
+        if getattr(self, "personality_injector", None) is not None:
+            try:
+                _pi_block = self.personality_injector.build_router_block(
+                    facts=_um_facts,
+                    preferences=_um_prefs,
+                )
+                if _pi_block:
+                    context_parts.append(f"PERSONALITY:\n{_pi_block}")
+            except Exception as _pi_exc:
+                logger.debug("[ORCHESTRATOR] personality injection failed: %s", _pi_exc)
         
         # Add recent conversation (last 2 turns)
         if conversation_history:
@@ -2084,6 +2113,32 @@ class OrchestratorLoop:
             build_finalization_context,
         )
 
+        # Issue #874: Build personality block for finalizer prompt
+        _personality_block: Optional[str] = None
+        try:
+            if hasattr(self, "personality_injector") and self.personality_injector:
+                _pi = self.personality_injector
+                # Gather user facts/preferences from user_memory if available
+                _fin_facts: dict = {}
+                _fin_prefs: dict = {}
+                if hasattr(self, "user_memory") and self.user_memory:
+                    try:
+                        _um_data = self.user_memory.on_turn_start(user_input)
+                        _fin_facts = _um_data.get("facts", {}) if isinstance(_um_data, dict) else {}
+                        # Extract preferences from profile_context
+                        _pc = _um_data.get("profile_context", "") if isinstance(_um_data, dict) else ""
+                        if "tercih" in str(_pc).lower() or "preference" in str(_pc).lower():
+                            _fin_prefs = {"raw_context": str(_pc)[:300]}
+                    except Exception:
+                        pass
+                _personality_block = _pi.build_finalizer_block(
+                    user_name=getattr(_pi, "_config", None) and _pi._config.user_name or None,
+                    facts=_fin_facts,
+                    preferences=_fin_prefs,
+                )
+        except Exception:
+            _personality_block = None
+
         ctx = build_finalization_context(
             user_input=user_input,
             orchestrator_output=orchestrator_output,
@@ -2091,6 +2146,7 @@ class OrchestratorLoop:
             state=state,
             memory=self.memory,
             finalizer_llm=self.finalizer_llm,
+            personality_block=_personality_block,
         )
 
         pipeline = self._get_finalization_pipeline()
