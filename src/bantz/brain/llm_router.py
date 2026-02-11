@@ -315,6 +315,8 @@ KURALLAR:
 8. Asla saat/tarih/numara uydurma. Uydurma link/web sitesi KESİNLİKLE YASAK.
 9. Mail gönderme: email adresi yoksa → ask_user=true, question="Kime göndermek istiyorsunuz efendim?"
 10. CONTEXT: RECENT_CONVERSATION/LAST_TOOL_RESULTS varsa önceki turları dikkate al. Belirsiz referanslar (o, bu, önceki) → context'ten anla.
+11. Title/başlık: Kullanıcı açıkça bir etkinlik adı söylemediyse title=null yap. Asla title uydurma! Title yoksa ask_user=true, question="Ne ekleyeyim efendim?" sor.
+12. Soru cümleleri (var mı, ne var, neler, ne yapacağız, planımız) → calendar_intent="query", tool="calendar.list_events". Asla soru cümlesini create olarak yorumlama.
 
 ROUTE: calendar=takvim, gmail=mail, system=sistem(saat/cpu), smalltalk=sohbet, unknown=belirsiz.
 INTENT: query=oku, create=ekle, modify=değiştir, cancel=sil, none=yok.
@@ -372,6 +374,12 @@ USER: bugün beşe toplantı koy
 
 USER: sabah beşte koşu
 → {"route":"calendar","calendar_intent":"create","slots":{"time":"05:00","title":"koşu"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true}
+
+USER: akşam yediye ekle bakalım
+→ {"route":"calendar","calendar_intent":"create","slots":{"time":"19:00","title":null},"confidence":0.6,"tool_plan":[],"ask_user":true,"question":"Ne ekleyeyim efendim? Etkinlik adı nedir?"}
+
+USER: bugün bir planımız var mı
+→ {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.list_events"]}
 
 USER: saat kaç
 → {"route":"system","calendar_intent":"none","slots":{},"confidence":0.95,"tool_plan":["time.now"]}
@@ -1220,6 +1228,24 @@ USER: merhaba mesajı gönder
                         tool_plan_with_args.append({"name": name, "args": {}})
 
         assistant_reply = str(parsed.get("assistant_reply") or "").strip()
+
+        # ── Issue #title-hallucination: Validate title actually appears in user input ──
+        # 3B models hallucinate titles when user says "ekle" without specifying one.
+        # If calendar create intent has a title that doesn't appear anywhere in the
+        # user's original message, clear it and ask the user.
+        if route == "calendar" and calendar_intent == "create" and user_input:
+            slot_title = (slots.get("title") or "").strip()
+            if slot_title and slot_title.lower() not in user_input.lower():
+                # Title was hallucinated — not in user's words
+                logger.info(
+                    "[title_validation] Hallucinated title '%s' not found in user input, clearing",
+                    slot_title,
+                )
+                slots = {**slots, "title": None}
+                ask_user = True
+                if not question:
+                    question = "Ne ekleyeyim efendim? Etkinlik adı nedir?"
+                confidence = min(confidence, 0.6)
 
         # ── Issue #653: Language post-validation ────────────────────────
         # 3B Qwen model may output Chinese/English despite Turkish-only

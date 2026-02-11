@@ -695,8 +695,41 @@ class OrchestratorLoop:
         self.event_bus.publish("turn.start", {"user_input": user_input})
         
         try:
-            # Phase 1: LLM Planning (route, intent, tools, confirmation)
-            orchestrator_output = self._llm_planning_phase(user_input, state)
+            # ── Issue #869 fix: When a confirmed_tool is set and there is a
+            # pending confirmation, skip LLM planning entirely.  The prerouter
+            # would otherwise intercept "evet" as AFFIRMATIVE/smalltalk and
+            # return "Tamam, anlaşıldı" with preroute_complete=True, which
+            # causes _execute_tools_phase to be skipped and the confirmed tool
+            # to never execute.
+            if (
+                state.confirmed_tool
+                and state.has_pending_confirmation()
+            ):
+                pending = state.peek_pending_confirmation() or {}
+                pending_tool = str(pending.get("tool") or "").strip()
+                pending_slots = pending.get("slots") or {}
+                # Derive route/intent from the tool name (e.g. "calendar.create_event" → "calendar" / "create_event")
+                _parts = pending_tool.split(".", 1)
+                _derived_route = _parts[0] if _parts else "unknown"
+                _derived_intent = _parts[1] if len(_parts) > 1 else "none"
+                logger.info(
+                    "[CONFIRMATION] Bypassing LLM planning — executing confirmed "
+                    "tool %s directly.",
+                    pending_tool,
+                )
+                from bantz.brain.llm_router import OrchestratorOutput
+                orchestrator_output = OrchestratorOutput(
+                    route=_derived_route,
+                    calendar_intent=_derived_intent,
+                    slots=pending_slots,
+                    confidence=1.0,
+                    tool_plan=[pending_tool] if pending_tool else [],
+                    assistant_reply="",
+                    raw_output={"confirmation_bypass": True, "confirmed_tool": pending_tool},
+                )
+            else:
+                # Phase 1: LLM Planning (route, intent, tools, confirmation)
+                orchestrator_output = self._llm_planning_phase(user_input, state)
             
             # Issue #837: Self-Evolving Agent — detect skill gaps
             if (

@@ -654,6 +654,16 @@ class BantzServer:
                         output, self._brain_state = self._brain.process_turn(
                             command, self._brain_state
                         )
+                        # Safety net: if the confirmed tool was not consumed
+                        # (e.g. preroute intercepted "evet"), clear stale state
+                        # so the next query doesn't re-show the old prompt.
+                        if self._brain_state.confirmed_tool is not None:
+                            logging.getLogger(__name__).warning(
+                                "[CONFIRMATION] confirmed_tool '%s' was not consumed "
+                                "by process_turn — clearing stale confirmation state.",
+                                self._brain_state.confirmed_tool,
+                            )
+                            self._brain_state.clear_pending_confirmation()
                         reply = str(getattr(output, "assistant_reply", "") or "").strip()
                         return {
                             "ok": True,

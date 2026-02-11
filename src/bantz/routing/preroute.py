@@ -492,6 +492,9 @@ def create_calendar_list_rule() -> PreRouteRule:
             r"toplantı(?:lar)?(?:ım)?\s*(?:ne|neler|göster|listele)",
             r"program(?:ım)?\s*(?:ne|nasıl|göster)",
             r"(?:show|list)\s+(?:my\s+)?(?:calendar|events|meetings)",
+            r"(?:bugün|yarın|bu\s+hafta).*\bplan\w*\b.*\b(?:var\s+m[ıi]|ne\b)",
+            r"\bplan\w*\b.*\b(?:var\s+m[ıi]|ne\s+var|neler)",
+            r"(?:bugün|yarın).*\bne(?:ler)?\s+(?:var|yapacağız|yapıyoruz)\b",
         ],
         confidence=0.9,
     )
