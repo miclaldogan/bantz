@@ -84,6 +84,14 @@ def setup_declarative_skills(
         injected,
     )
 
+    # Issue #837: Bootstrap self-evolving skill manager
+    try:
+        from bantz.skills.declarative.generator import setup_self_evolving
+        setup_self_evolving()
+        logger.info("Self-evolving skill manager initialized (Issue #837)")
+    except Exception as exc:
+        logger.debug("Self-evolving init skipped: %s", exc)
+
     return registry
 
 

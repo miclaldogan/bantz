@@ -617,6 +617,50 @@ class OrchestratorLoop:
             # Phase 1: LLM Planning (route, intent, tools, confirmation)
             orchestrator_output = self._llm_planning_phase(user_input, state)
             
+            # Issue #837: Self-Evolving Agent — detect skill gaps
+            if (
+                orchestrator_output.route == "unknown"
+                and not orchestrator_output.ask_user
+                and orchestrator_output.confidence < 0.4
+            ):
+                try:
+                    from bantz.skills.declarative.generator import get_self_evolving_manager
+                    mgr = get_self_evolving_manager()
+                    if mgr is not None:
+                        gap = mgr.check_for_skill_gap(
+                            user_input=user_input,
+                            route=orchestrator_output.route,
+                            confidence=orchestrator_output.confidence,
+                        )
+                        if gap is not None:
+                            gen_result = mgr.generate_skill(gap)
+                            if gen_result.success and gen_result.skill:
+                                skill = gen_result.skill
+                                from dataclasses import replace as _dc_replace
+                                orchestrator_output = _dc_replace(
+                                    orchestrator_output,
+                                    assistant_reply=(
+                                        f"Bu isteği karşılayacak bir yeteneğim yok, ama "
+                                        f"{skill.metadata.icon} **{skill.name}** adında bir skill "
+                                        f"oluşturdum.\n\n"
+                                        f"📝 {skill.metadata.description}\n\n"
+                                        f"Kurmamı ister misiniz? "
+                                        f"(**evet** / **hayır**)"
+                                    ),
+                                    raw_output={
+                                        **orchestrator_output.raw_output,
+                                        "skill_gap_detected": True,
+                                        "generated_skill": gen_result.to_dict(),
+                                    },
+                                    ask_user=True,
+                                )
+                                logger.info(
+                                    "[Issue #837] Skill gap → generated %r, awaiting approval",
+                                    skill.name,
+                                )
+                except Exception as exc:
+                    logger.debug("[Issue #837] Self-evolving check failed: %s", exc)
+
             # Issue #407: Full preroute bypass → skip tools + finalization
             if orchestrator_output.raw_output.get("preroute_complete"):
                 final_output = orchestrator_output
