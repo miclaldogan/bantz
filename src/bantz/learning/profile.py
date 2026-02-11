@@ -1,7 +1,9 @@
 """
-User Profile module.
+Behavioral Profile module.
 
-Stores learned user preferences, behavior patterns, and personality traits.
+Stores learned user behavioral patterns, preferences, and personality traits.
+Renamed from UserProfile → BehavioralProfile in Issue #873 to disambiguate
+from memory.profile.UserProfile (fact-based, demographic profile).
 """
 
 import uuid
@@ -11,12 +13,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
-class UserProfile:
+class BehavioralProfile:
     """
-    Öğrenilen kullanıcı profili.
+    Öğrenilen davranışsal kullanıcı profili.
     
-    Kullanıcının tercihlerini, davranış kalıplarını ve
+    Kullanıcının davranış kalıplarını, tercihlerini ve
     kişilik özelliklerini saklar.
+    
+    Not: memory.profile.UserProfile ile karıştırılmamalı
+    (o modül demografik/fact bilgileri saklar).
     """
     
     id: str = ""
@@ -218,7 +223,7 @@ class UserProfile:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UserProfile":
+    def from_dict(cls, data: Dict[str, Any]) -> "BehavioralProfile":
         """Create from dictionary."""
         profile = cls(
             id=data.get("id", ""),
@@ -282,15 +287,15 @@ class ProfileManager:
             storage: Optional ProfileStorage instance.
         """
         self._storage = storage
-        self._current_profile: Optional[UserProfile] = None
-        self._profiles: Dict[str, UserProfile] = {}
+        self._current_profile: Optional[BehavioralProfile] = None
+        self._profiles: Dict[str, BehavioralProfile] = {}
     
     @property
-    def current_profile(self) -> Optional[UserProfile]:
+    def current_profile(self) -> Optional[BehavioralProfile]:
         """Get current active profile."""
         return self._current_profile
     
-    def create_profile(self, profile_id: str = None) -> UserProfile:
+    def create_profile(self, profile_id: str = None) -> BehavioralProfile:
         """
         Create a new profile.
         
@@ -298,9 +303,9 @@ class ProfileManager:
             profile_id: Optional custom profile ID.
             
         Returns:
-            New UserProfile instance.
+            New BehavioralProfile instance.
         """
-        profile = UserProfile(id=profile_id or "")
+        profile = BehavioralProfile(id=profile_id or "")
         self._profiles[profile.id] = profile
         
         if self._current_profile is None:
@@ -308,7 +313,7 @@ class ProfileManager:
         
         return profile
     
-    def get_profile(self, profile_id: str) -> Optional[UserProfile]:
+    def get_profile(self, profile_id: str) -> Optional[BehavioralProfile]:
         """
         Get profile by ID.
         
@@ -429,7 +434,7 @@ class ProfileManager:
             return profile.to_dict()
         return None
     
-    def import_profile(self, data: Dict[str, Any]) -> UserProfile:
+    def import_profile(self, data: Dict[str, Any]) -> BehavioralProfile:
         """
         Import profile from dictionary.
         
@@ -437,9 +442,9 @@ class ProfileManager:
             data: Profile data dictionary.
             
         Returns:
-            Imported UserProfile instance.
+            Imported BehavioralProfile instance.
         """
-        profile = UserProfile.from_dict(data)
+        profile = BehavioralProfile.from_dict(data)
         self._profiles[profile.id] = profile
         return profile
 
@@ -455,3 +460,7 @@ def create_profile_manager(storage: Any = None) -> ProfileManager:
         Configured ProfileManager instance.
     """
     return ProfileManager(storage=storage)
+
+
+# Backward-compatibility alias (Issue #873)
+UserProfile = BehavioralProfile

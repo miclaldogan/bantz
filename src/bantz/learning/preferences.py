@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from bantz.learning.profile import UserProfile
+from bantz.learning.profile import BehavioralProfile as UserProfile
 
 
 class PreferenceType(Enum):

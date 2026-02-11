@@ -97,7 +97,11 @@ class TestImportGraphIntegrity(unittest.TestCase):
     ]
 
     def test_no_memory_imports_in_production(self):
-        """Production brain/ files must not import from bantz.memory."""
+        """Production brain/ files must not import from bantz.memory directly.
+        
+        Note: Issue #873 wires memory via bantz.brain.user_memory (a façade),
+        which is allowed — we only block direct bantz.memory imports.
+        """
         violations = []
         for relpath in self.PRODUCTION_FILES:
             fpath = _SRC / relpath
