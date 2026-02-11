@@ -565,6 +565,33 @@ class BantzServer:
         if command.lower() in {"önceki", "previous", "prev", "geri"}:
             return self._paginate_prev()
 
+        # ─────────────────────────────────────────────────────────────
+        # Overnight mode — "gece şunu yap" intent (Issue #836)
+        # ─────────────────────────────────────────────────────────────
+        try:
+            from bantz.automation.overnight import is_overnight_request, parse_overnight_tasks
+
+            if is_overnight_request(command):
+                tasks = parse_overnight_tasks(command)
+                if not tasks:
+                    return {"ok": False, "text": "Gece modu için görev belirtmelisin. Örnek: 'gece şunları yap: 1. X  2. Y'"}
+                from bantz.automation.overnight import OvernightRunner
+                runner = OvernightRunner(bantz_server=self)
+                runner.add_tasks(tasks)
+                import threading
+                t = threading.Thread(target=runner.run, daemon=True, name="overnight-runner")
+                t.start()
+                task_list = "\n".join(f"  {i+1}. {desc}" for i, desc in enumerate(tasks))
+                return {
+                    "ok": True,
+                    "text": f"🌙 Gece modu başlatıldı! {len(tasks)} görev sıraya alındı:\n{task_list}\n\nSabah raporu inbox'ınıza gelecek.",
+                    "overnight": True,
+                    "session_id": runner.state.session_id if runner.state else None,
+                    "task_count": len(tasks),
+                }
+        except ImportError:
+            pass
+
         # Browser commands need browser init
         from bantz.router.nlu import parse_intent
         parsed = parse_intent(command)

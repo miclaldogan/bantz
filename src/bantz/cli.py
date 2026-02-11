@@ -426,6 +426,74 @@ def run_http_only(
     return 0
 
 
+def run_overnight(
+    session_name: str,
+    policy_path: str,
+    log_path: str,
+    tasks: list[str],
+) -> int:
+    """Run overnight mode — otonom gece modu (Issue #836).
+
+    Executes tasks sequentially, checkpoints after each task,
+    generates a morning report, and exits.
+    """
+    from bantz.server import BantzServer
+    from bantz.automation.overnight import (
+        OvernightRunner,
+        OvernightState,
+    )
+
+    if not tasks:
+        print(f"{Colors.RED}✗ Gece modu için en az bir görev gerekli.{Colors.RESET}")
+        print(f"  Örnek: bantz --overnight 'AI konferanslarını araştır' 'Haber özetini hazırla'")
+        return 1
+
+    server = BantzServer(session_name=session_name, policy_path=policy_path, log_path=log_path)
+
+    runner = OvernightRunner(bantz_server=server)
+    runner.add_tasks(tasks)
+
+    try:
+        state = runner.run()
+    except KeyboardInterrupt:
+        print(f"\n{Colors.YELLOW}⚠️ Gece modu iptal edildi — checkpoint kaydedildi.{Colors.RESET}")
+        return 130
+
+    if state.morning_report:
+        print()
+        print(state.morning_report)
+
+    return 0 if state.failed_count == 0 else 1
+
+
+def run_overnight_resume(
+    session_name: str,
+    policy_path: str,
+    log_path: str,
+) -> int:
+    """Resume overnight mode from checkpoint (Issue #836)."""
+    from bantz.server import BantzServer
+    from bantz.automation.overnight import resume_overnight
+
+    server = BantzServer(session_name=session_name, policy_path=policy_path, log_path=log_path)
+
+    try:
+        state = resume_overnight(bantz_server=server)
+    except KeyboardInterrupt:
+        print(f"\n{Colors.YELLOW}⚠️ Gece modu devam iptal edildi — checkpoint kaydedildi.{Colors.RESET}")
+        return 130
+
+    if state is None:
+        print(f"{Colors.YELLOW}⚠️ Checkpoint bulunamadı — devam edilecek oturum yok.{Colors.RESET}")
+        return 1
+
+    if state.morning_report:
+        print()
+        print(state.morning_report)
+
+    return 0 if state.failed_count == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -511,6 +579,21 @@ Kullanım örnekleri:
     parser.add_argument("--port", type=int, default=8088, help="HTTP API portu (default: 8088)")
     parser.add_argument("--http-host", default="0.0.0.0", help="HTTP API bind adresi (default: 0.0.0.0)")
     parser.add_argument("--http-only", action="store_true", help="Sadece HTTP (interactive CLI olmadan)")
+
+    # Overnight mode (Issue #836)
+    parser.add_argument(
+        "--overnight",
+        nargs="*",
+        metavar="TASK",
+        default=None,
+        help="Otonom gece modu — görevleri sıraya alır ve sabah raporu üretir. "
+             "Örnek: --overnight 'AI konferanslarını araştır' 'Haftalık haberleri özetle'",
+    )
+    parser.add_argument(
+        "--overnight-resume",
+        action="store_true",
+        help="Son kesilen gece modunu checkpoint'ten devam ettir",
+    )
 
     # Compatibility flags (README/back-compat)
     parser.add_argument("--text", action="store_true", help="Text mod (varsayılan). (Uyumluluk)")
@@ -698,6 +781,13 @@ Kullanım örnekleri:
     # HTTP-only mode: start FastAPI server without interactive CLI (Issue #834)
     if args.http_only:
         return run_http_only(args.session, args.policy, args.log, args.http_host, args.port)
+
+    # Overnight mode: autonomous task execution (Issue #836)
+    if args.overnight_resume:
+        return run_overnight_resume(args.session, args.policy, args.log)
+
+    if args.overnight is not None:
+        return run_overnight(args.session, args.policy, args.log, args.overnight)
 
     # Interactive mode (default or --serve), optionally with HTTP API
     return run_interactive_with_server(
