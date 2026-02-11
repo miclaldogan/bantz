@@ -1,18 +1,25 @@
-"""Bantz REST API Server — FastAPI application (Issue #834).
+"""Bantz REST API Server — FastAPI application (Issues #834 + #867).
 
-This module provides the HTTP REST API for Bantz, wrapping the existing
-BantzServer and brain pipeline behind standard HTTP endpoints.
+This module provides the HTTP REST API and web dashboard for Bantz,
+wrapping the existing BantzServer and brain pipeline behind standard
+HTTP endpoints with a responsive web UI.
 
 Architecture:
     - Shares the same BantzServer instance as the Unix socket
     - handle_command() is the universal entry point for both protocols
     - EventBus provides real-time SSE and WebSocket streaming
     - Bearer token auth via BANTZ_API_TOKEN env var
+    - Web dashboard served from GET / (static HTML, mobile-friendly)
 
 Endpoints:
+    GET  /                         — Web dashboard (Issue #867)
     POST /api/v1/chat              — Send a message, get a response
     GET  /api/v1/health            — Health check
     GET  /api/v1/skills            — List registered skills/tools
+    GET  /api/v1/settings/status   — Key & system status (Issue #867)
+    POST /api/v1/settings/gemini-key — Store Gemini API key (Issue #867)
+    DELETE /api/v1/settings/gemini-key — Remove Gemini API key (Issue #867)
+    GET  /api/v1/qrcode            — QR code for phone access (Issue #867)
     GET  /api/v1/notifications     — SSE event stream
     GET  /api/v1/inbox             — Inbox snapshot
     POST /api/v1/inbox/{id}/read   — Mark inbox item as read
@@ -28,15 +35,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from bantz.api.auth import require_auth, is_auth_enabled
 from bantz.api.models import (
@@ -147,9 +157,33 @@ def create_app(
     # ── Register routers ────────────────────────────────────────────
     from bantz.api.sse import router as sse_router
     from bantz.api.ws import router as ws_router
+    from bantz.api.settings import router as settings_router
 
     app.include_router(sse_router)
     app.include_router(ws_router)
+    app.include_router(settings_router)
+
+    # ── Static files & dashboard ────────────────────────────────────
+    _static_dir = Path(__file__).parent / "static"
+    if _static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def dashboard() -> HTMLResponse:
+        """Serve the web dashboard."""
+        index_path = _static_dir / "index.html"
+        if index_path.exists():
+            return HTMLResponse(content=index_path.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            content=(
+                "<html><body style='background:#0f0f23;color:#e2e2f0;font-family:sans-serif;"
+                "display:flex;justify-content:center;align-items:center;height:100vh'>"
+                "<div style='text-align:center'><h1>🧠 Bantz API</h1>"
+                "<p>Dashboard dosyası bulunamadı.</p>"
+                "<p><a href='/docs' style='color:#a78bfa'>API Docs →</a></p></div>"
+                "</body></html>"
+            )
+        )
 
     # ── Core endpoints ──────────────────────────────────────────────
 
@@ -311,6 +345,59 @@ def _check_components(server: Any) -> list[ComponentHealth]:
             ComponentHealth(name="vllm", status=ComponentStatus.DOWN, detail="unreachable")
         )
 
+    # Gemini (Issue #867) — check if API key is configured
+    gemini_key = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+    if gemini_key.strip():
+        components.append(
+            ComponentHealth(
+                name="gemini",
+                status=ComponentStatus.OK,
+                detail="API key configured",
+            )
+        )
+    else:
+        # Check vault as fallback
+        try:
+            from bantz.security.vault import SecretsVault
+
+            vault = SecretsVault()
+            if vault.exists("GEMINI_API_KEY"):
+                key = vault.retrieve("GEMINI_API_KEY")
+                if key:
+                    os.environ["GEMINI_API_KEY"] = key
+                    os.environ["GOOGLE_API_KEY"] = key
+                    components.append(
+                        ComponentHealth(
+                            name="gemini",
+                            status=ComponentStatus.OK,
+                            detail="API key loaded from vault",
+                        )
+                    )
+                else:
+                    components.append(
+                        ComponentHealth(
+                            name="gemini",
+                            status=ComponentStatus.DOWN,
+                            detail="key in vault but decrypt failed",
+                        )
+                    )
+            else:
+                components.append(
+                    ComponentHealth(
+                        name="gemini",
+                        status=ComponentStatus.DOWN,
+                        detail="no API key — set via /settings",
+                    )
+                )
+        except Exception:
+            components.append(
+                ComponentHealth(
+                    name="gemini",
+                    status=ComponentStatus.DOWN,
+                    detail="no API key configured",
+                )
+            )
+
     return components
 
 
@@ -387,10 +474,20 @@ def run_http_server(
     app = create_app(bantz_server=bantz_server, event_bus=event_bus)
 
     print(f"\n🌐 Bantz HTTP API başlatılıyor — http://{host}:{port}")
+    print(f"   Dashboard: http://localhost:{port}/")
     print(f"   Docs: http://localhost:{port}/docs")
     print(f"   Health: http://localhost:{port}/api/v1/health")
     auth_status = "✓ aktif" if is_auth_enabled() else "⚠ KAPALI (BANTZ_API_TOKEN ayarlanmamış)"
     print(f"   Auth: {auth_status}")
+
+    # Show LAN URL for phone access
+    try:
+        from bantz.api.settings import _get_local_ip
+        lan_ip = _get_local_ip()
+        if lan_ip != "127.0.0.1":
+            print(f"   📱 Telefon: http://{lan_ip}:{port}")
+    except Exception:
+        pass
     print()
 
     uvicorn.run(
