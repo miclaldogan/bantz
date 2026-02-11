@@ -580,6 +580,69 @@ class OrchestratorLoop:
         updated_output = replace(output, tool_plan=mandatory_tools)
         
         return updated_output
+
+    # -- Issue #870: Tool-plan sanitization / LLM hallucination remap ------
+
+    # Map of known LLM-hallucinated or mismatched tool names to correct tools.
+    # Key: (tool_name, gmail_intent or "*") → replacement tool name.
+    _TOOL_REMAP: dict[tuple[str, str], str] = {
+        # "maillerimi kontrol et" → LLM picks gmail.list_drafts with intent=list,
+        # but user wants inbox listing, not drafts.
+        ("gmail.list_drafts", "list"): "gmail.list_messages",
+        # Phantom tool names the LLM sometimes hallucinates
+        ("gmail.list_all", "*"): "gmail.list_messages",
+        ("gmail.search_messages", "*"): "gmail.smart_search",
+        ("gmail.check_inbox", "*"): "gmail.list_messages",
+        ("gmail.get_unread", "*"): "gmail.unread_count",
+        ("gmail.inbox", "*"): "gmail.list_messages",
+        ("gmail.read_mail", "*"): "gmail.get_message",
+        ("calendar.get_events", "*"): "calendar.list_events",
+        ("calendar.add_event", "*"): "calendar.create_event",
+        ("calendar.remove_event", "*"): "calendar.delete_event",
+    }
+
+    def _sanitize_tool_plan(self, output: OrchestratorOutput) -> OrchestratorOutput:
+        """Remap hallucinated or intent-mismatched tool names (Issue #870).
+
+        Two cases:
+        1. LLM emits a phantom tool name not in the registry → remap to a
+           known tool via ``_TOOL_REMAP``.
+        2. LLM emits a valid tool but it contradicts the gmail_intent
+           (e.g. gmail.list_drafts with intent=list → gmail.list_messages).
+
+        Only touches tools that have an entry in ``_TOOL_REMAP``; unknown
+        tools pass through and will be caught by ``_execute_tools_phase``.
+        """
+        if not output.tool_plan:
+            return output
+
+        gmail_intent = (getattr(output, "gmail_intent", None) or "").strip().lower()
+        calendar_intent = (output.calendar_intent or "").strip().lower()
+        intent_key = gmail_intent or calendar_intent or "*"
+
+        changed = False
+        new_plan: list[str] = []
+        for tool_name in output.tool_plan:
+            # Try (tool, intent) first, then (tool, "*") wildcard
+            replacement = self._TOOL_REMAP.get((tool_name, intent_key))
+            if replacement is None:
+                replacement = self._TOOL_REMAP.get((tool_name, "*"))
+
+            if replacement and replacement != tool_name:
+                logger.info(
+                    "[SANITIZE] Remapping tool '%s' → '%s' (intent=%s)",
+                    tool_name, replacement, intent_key,
+                )
+                new_plan.append(replacement)
+                changed = True
+            else:
+                new_plan.append(tool_name)
+
+        if not changed:
+            return output
+
+        from dataclasses import replace
+        return replace(output, tool_plan=new_plan)
     
     def process_turn(
         self,
@@ -1227,6 +1290,9 @@ class OrchestratorLoop:
         
         # Issue #282: Force mandatory tools if LLM returned empty tool_plan
         output = self._force_tool_plan(output)
+
+        # Issue #870: Sanitize tool_plan — remap hallucinated/mismatched tools
+        output = self._sanitize_tool_plan(output)
 
         return output
 

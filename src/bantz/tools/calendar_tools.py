@@ -18,6 +18,31 @@ import re
 
 logger = logging.getLogger(__name__)
 
+
+# ── Issue #870: Türkçe hata mesajı çevirici ─────────────────────────
+_ERROR_TR_MAP: list[tuple[str, str]] = [
+    ("Google client secret not found", "Google hesap bilgileri bulunamadı. Lütfen BANTZ_GOOGLE_CLIENT_SECRET ayarını yapın."),
+    ("Google calendar dependencies are not installed", "Google Takvim bağımlılıkları yüklü değil. pip install -e '.[calendar]' ile yükleyin."),
+    ("HttpError 401", "Google Takvim yetkilendirmesi başarısız. Lütfen tekrar giriş yapın."),
+    ("HttpError 403", "Google Takvim erişim izni yok. Lütfen izinleri kontrol edin."),
+    ("HttpError 404", "Etkinlik bulunamadı."),
+    ("HttpError 429", "Google API istek limiti aşıldı. Lütfen biraz bekleyin."),
+    ("timeout", "Google Takvim bağlantı zaman aşımına uğradı."),
+    ("ConnectionError", "Google Takvim'e bağlanılamadı. İnternet bağlantınızı kontrol edin."),
+    ("token", "Google Takvim oturum süresi dolmuş. Lütfen tekrar giriş yapın."),
+]
+
+
+def _tr_calendar_error(e: Exception) -> str:
+    """Return a user-friendly Turkish error message for calendar exceptions."""
+    raw = str(e)
+    for pattern, tr_msg in _ERROR_TR_MAP:
+        if pattern.lower() in raw.lower():
+            return tr_msg
+    # Fallback: generic Turkish wrapper with raw detail for logs
+    logger.error("[CALENDAR] Unhandled error: %s", raw)
+    return f"Takvim işlemi başarısız oldu: {raw}"
+
 # ── Date / time format validation (Issue #663) ──────────────────────
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
@@ -210,7 +235,7 @@ def calendar_list_events_tool(
             interactive=False,
         )
     except Exception as e:
-        return {"ok": False, "error": str(e), "events": [], "window": {"time_min": win.time_min, "time_max": win.time_max} if win else None}
+        return {"ok": False, "error": _tr_calendar_error(e), "events": [], "window": {"time_min": win.time_min, "time_max": win.time_max} if win else None}
 
     if isinstance(resp, dict):
         resp.setdefault("window", {"time_min": win.time_min, "time_max": win.time_max} if win else None)
@@ -255,7 +280,7 @@ def calendar_find_free_slots_tool(
             interactive=False,
         )
     except Exception as e:
-        return {"ok": False, "error": str(e), "slots": []}
+        return {"ok": False, "error": _tr_calendar_error(e), "slots": []}
 
 
 def calendar_create_event_tool(
@@ -322,7 +347,7 @@ def calendar_create_event_tool(
             create_fn=do_create,
         )
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _tr_calendar_error(e)}
 
 
 def calendar_update_event_tool(
@@ -381,7 +406,7 @@ def calendar_update_event_tool(
             location=loc,
         )
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _tr_calendar_error(e)}
 
 
 def calendar_delete_event_tool(
@@ -401,4 +426,4 @@ def calendar_delete_event_tool(
     try:
         return delete_event(event_id=eid)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _tr_calendar_error(e)}
