@@ -1,21 +1,21 @@
 # Contributing to Bantz
 
-Bantz'a katkıda bulunmak istediğin için teşekkürler! 🎉
+Thanks for wanting to contribute to Bantz! 🎉
 
-Bu doküman, projeye nasıl katkıda bulunabileceğini adım adım anlatır.
+This document explains how you can contribute to the project step by step.
 
 ---
 
-## 🚀 Hızlı Başlangıç
+## 🚀 Quick Start
 
-### 1. Repo'yu klonla
+### 1. Clone the repo
 
 ```bash
 git clone git@github.com:miclaldogan/bantz.git
 cd bantz
 ```
 
-### 2. Python ortamını kur
+### 2. Set up the Python environment
 
 ```bash
 python3 -m venv .venv
@@ -24,58 +24,58 @@ pip install -r requirements-all.txt
 pip install -e .
 ```
 
-### 3. Testleri çalıştır
+### 3. Run the tests
 
 ```bash
 pytest tests/ -v --tb=short
 ```
 
-Tüm testler geçiyorsa, koda başlamaya hazırsın! ✅
+If all tests pass, you’re ready to start coding! ✅
 
 ---
 
-## 🌳 Branch Kuralları
+## 🌳 Branch Rules
 
-| Branch | Amaç |
-|--------|-------|
-| `main` | Stable release — doğrudan push yapma |
-| `dev` | Aktif geliştirme — tüm PR'lar buraya açılır |
-| `fix/XXX-kısa-açıklama` | Bug fix branch'leri |
-| `feat/XXX-kısa-açıklama` | Yeni özellik branch'leri |
-| `chore/XXX-kısa-açıklama` | Refactor, temizlik, CI/CD |
+| Branch                        | Purpose                                         |
+| ----------------------------- | ----------------------------------------------- |
+| `main`                        | Stable release — do not push directly           |
+| `dev`                         | Active development — all PRs target this branch |
+| `fix/XXX-short-description`   | Bug fix branches                                |
+| `feat/XXX-short-description`  | Feature branches                                |
+| `chore/XXX-short-description` | Refactors, cleanup, CI/CD                       |
 
-### Yeni bir branch oluştur
+### Create a new branch
 
 ```bash
 git checkout dev
 git pull origin dev
-git checkout -b fix/123-kisa-aciklama dev
+git checkout -b fix/123-short-description dev
 ```
 
-> ⚠️ **Her zaman `dev` branch'inden türet. Asla `main`'den branch açma.**
+> ⚠️ **Always branch off `dev`. Never create branches from `main`.**
 
 ---
 
-## ✍️ Commit Mesajları
+## ✍️ Commit Messages
 
-[Conventional Commits](https://www.conventionalcommits.org/) formatını kullanıyoruz:
+We use the [Conventional Commits](https://www.conventionalcommits.org/) format:
 
 ```
-tip(kapsam): kısa açıklama (#issue-no)
+type(scope): short description (#issue-no)
 ```
 
-### Tipler
+### Types
 
-| Tip | Kullanım |
-|-----|----------|
-| `fix` | Bug düzeltme |
-| `feat` | Yeni özellik |
-| `refactor` | Davranış değiştirmeyen kod iyileştirmesi |
-| `test` | Test ekleme/düzeltme |
-| `docs` | Dokümantasyon |
-| `chore` | CI/CD, bağımlılık, yapılandırma |
+|       Type | Use                                      |
+| ---------: | ---------------------------------------- |
+|      `fix` | Bug fix                                  |
+|     `feat` | New feature                              |
+| `refactor` | Code improvement without behavior change |
+|     `test` | Add/fix tests                            |
+|     `docs` | Documentation                            |
+|    `chore` | CI/CD, dependencies, configuration       |
 
-### Örnekler
+### Examples
 
 ```
 fix(voice): guard barge-in state with threading.Lock (#759)
@@ -86,43 +86,43 @@ refactor(privacy): tighten IP regex to reject version strings (#748)
 
 ---
 
-## 🔀 Pull Request Süreci
+## 🔀 Pull Request Process
 
-1. **Branch'ini oluştur** ve değişikliklerini yap
-2. **Testleri çalıştır** — kırık test ile PR açma
-3. **Push et** ve `dev` branch'ine PR aç
-4. PR template'ini eksiksiz doldur
-5. Review bekle — en az **1 onay** gerekli
-6. Merge sonrası branch otomatik silinir
+1. **Create your branch** and make your changes
+2. **Run the tests** — don’t open a PR with failing tests
+3. **Push** and open a PR against the `dev` branch
+4. Fill out the PR template completely
+5. Wait for review — at least **1 approval** is required
+6. After merge, the branch is automatically deleted
 
-### PR Kontrol Listesi
+### PR Checklist
 
-- [ ] Testler geçiyor (`pytest tests/ -v`)
-- [ ] Yeni kod için test yazıldı
-- [ ] Commit mesajları conventional format'ta
-- [ ] İlgili issue linkli (`Closes #XXX`)
+* [ ] Tests pass (`pytest tests/ -v`)
+* [ ] Tests were added for new code
+* [ ] Commit messages follow the conventional format
+* [ ] Related issue is linked (`Closes #XXX`)
 
 ---
 
-## 🧪 Test Kuralları
+## 🧪 Testing Rules
 
-- Her yeni özellik/fix için test yaz
-- Test dosyaları: `tests/test_<modül_adı>.py`
-- `pytest` kullanıyoruz, `unittest` değil
-- `tmp_path` fixture'ını kullan, hardcoded path yazma
-- `assert True` gibi boş assertion'lar yasak — gerçek değerleri kontrol et
+* Write tests for every new feature/fix
+* Test files: `tests/test_<module_name>.py`
+* We use `pytest`, not `unittest`
+* Use the `tmp_path` fixture — don’t hardcode paths
+* Empty assertions like `assert True` are forbidden — verify real values
 
 ```bash
-# Tek bir test dosyası çalıştır
+# Run a single test file
 pytest tests/test_scheduler.py -v
 
-# Belirli bir test
+# Run a specific test
 pytest tests/test_ipc.py::TestEncoding::test_roundtrip_state -v
 ```
 
 ---
 
-## 📁 Proje Yapısı
+## 📁 Project Structure
 
 ```
 src/bantz/
@@ -140,13 +140,13 @@ src/bantz/
 
 ---
 
-## 🎨 Kod Stili
+## 🎨 Code Style
 
-- **Python 3.10+** — type hint kullan
-- **Docstring**: Google style
-- **Line length**: 100 karakter (soft limit)
-- **Import sırası**: stdlib → third-party → local
-- **Dil**: Kod ve değişken adları İngilizce, kullanıcıya dönük string'ler Türkçe
+* **Python 3.10+** — use type hints
+* **Docstrings**: Google style
+* **Line length**: 100 characters (soft limit)
+* **Import order**: stdlib → third-party → local
+* **Language**: Code and variable names in English; user-facing strings in Turkish
 
 ```python
 def _parse_time(self, time_str: str) -> Optional[datetime]:
@@ -156,17 +156,17 @@ def _parse_time(self, time_str: str) -> Optional[datetime]:
 
 ---
 
-## 🔒 Güvenlik
+## 🔒 Security
 
-Güvenlik açığı bulduysan **issue açma** — bunun yerine [SECURITY.md](SECURITY.md) dosyasındaki talimatları takip et.
-
----
-
-## 💬 İletişim
-
-- Sorular için [GitHub Discussions](https://github.com/miclaldogan/bantz/discussions) kullan
-- Bug raporları için [issue aç](https://github.com/miclaldogan/bantz/issues/new?template=bug_report.md)
+If you find a security vulnerability, **do not open an issue** — instead follow the instructions in [SECURITY.md](SECURITY.md).
 
 ---
 
-Hoş geldin, iyi kodlamalar! 🚀
+## 💬 Communication
+
+* Use [GitHub Discussions](https://github.com/miclaldogan/bantz/discussions) for questions
+* For bug reports, [open an issue](https://github.com/miclaldogan/bantz/issues/new?template=bug_report.md)
+
+---
+
+Welcome aboard, and happy coding! 🚀
