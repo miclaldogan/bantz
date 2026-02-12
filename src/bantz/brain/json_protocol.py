@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 
 # Optional jsonschema dependency
@@ -30,7 +29,6 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
 class JsonParseError(Exception):
     """Exception raised when JSON parsing fails.
     
@@ -40,16 +38,33 @@ class JsonParseError(Exception):
         position: Optional character position where error occurred
         context: Optional additional context about the error
     """
-    
-    reason: str
-    raw_text: str
-    position: Optional[int] = None
-    context: Optional[dict[str, Any]] = None
+
+    def __init__(
+        self,
+        reason: str,
+        raw_text: str,
+        position: Optional[int] = None,
+        context: Optional[dict[str, Any]] = None,
+    ) -> None:
+        self.reason = reason
+        self.raw_text = raw_text
+        self.position = position
+        self.context = context
+        super().__init__(reason)
 
     def __str__(self) -> str:
         if self.position is not None:
             return f"parse_error:{self.reason}@{self.position}"
         return f"parse_error:{self.reason}"
+
+    def __repr__(self) -> str:
+        return (
+            f"JsonParseError(reason={self.reason!r}, raw_text={self.raw_text[:80]!r}, "
+            f"position={self.position!r})"
+        )
+
+    def __reduce__(self) -> tuple:
+        return (self.__class__, (self.reason, self.raw_text, self.position, self.context))
     
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for structured logging."""
@@ -238,7 +253,6 @@ def extract_first_json_object(text: str, *, strict: bool = False) -> dict[str, A
     )
 
 
-@dataclass
 class ValidationError(Exception):
     """Exception raised when action validation fails.
     
@@ -249,17 +263,35 @@ class ValidationError(Exception):
         field_path: Optional JSON path to the problematic field (e.g., "params.duration")
         suggestions: List of suggestions to fix the error
     """
-    
-    error_type: str  # parse_error | schema_error | unknown_tool | invalid_params
-    message: str
-    details: dict[str, Any] = field(default_factory=dict)
-    field_path: str = ""
-    suggestions: list[str] = field(default_factory=list)
+
+    def __init__(
+        self,
+        error_type: str,
+        message: str,
+        details: Optional[dict[str, Any]] = None,
+        field_path: str = "",
+        suggestions: Optional[list[str]] = None,
+    ) -> None:
+        self.error_type = error_type
+        self.message = message
+        self.details = details or {}
+        self.field_path = field_path
+        self.suggestions = suggestions or []
+        super().__init__(message)
 
     def __str__(self) -> str:
         if self.field_path:
             return f"{self.error_type}:{self.message} (field: {self.field_path})"
         return f"{self.error_type}:{self.message}"
+
+    def __repr__(self) -> str:
+        return (
+            f"ValidationError(error_type={self.error_type!r}, message={self.message!r}, "
+            f"field_path={self.field_path!r})"
+        )
+
+    def __reduce__(self) -> tuple:
+        return (self.__class__, (self.error_type, self.message, self.details, self.field_path, self.suggestions))
     
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for structured logging and repair prompts."""
