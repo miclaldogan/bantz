@@ -59,10 +59,14 @@ class OrchestratorState:
         * ``result_summary``– short human-readable summary for the LLM prompt
         """
         max_chars = 1500
-        max_list_items = 5  # keep first N items for list results
+        max_list_items = 5   # keep first N items for list results
+        max_raw_items = 50   # cap result_raw for memory safety
 
-        # ── raw storage (structured) ──
-        result_raw = result
+        # ── raw storage (structured, capped) ──
+        if isinstance(result, list) and len(result) > max_raw_items:
+            result_raw = result[:max_raw_items]
+        else:
+            result_raw = result
 
         # ── JSON string ──
         try:
@@ -180,11 +184,23 @@ class OrchestratorState:
         self.trace.update(kwargs)
     
     def get_context_for_llm(self) -> dict[str, Any]:
-        """Get context to send to LLM (summary + recent history + tool results)."""
+        """Get context to send to LLM (summary + recent history + tool results).
+
+        NOTE: result_raw is intentionally excluded — only the lightweight
+        result_summary is sent to the LLM to save context window budget.
+        """
+        safe_results = [
+            {
+                "tool": r.get("tool", ""),
+                "result_summary": r.get("result_summary", r.get("result", "")),
+                "success": r.get("success", True),
+            }
+            for r in self.last_tool_results
+        ]
         return {
             "rolling_summary": self.rolling_summary,
             "recent_conversation": self.conversation_history[-2:] if self.conversation_history else [],
-            "last_tool_results": self.last_tool_results,
+            "last_tool_results": safe_results,
             "pending_confirmation": self.peek_pending_confirmation(),
             "pending_confirmations": list(self.pending_confirmations),
         }

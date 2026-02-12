@@ -65,6 +65,7 @@ router:
   temperature: 0.0  # Deterministic routing
   max_tokens: 256   # Issue #418: increased from 128 to avoid JSON truncation with slim schema
   top_p: 1.0
+  boost_floor: 0.3  # Issue #889: min confidence to allow auto-boost (env: BANTZ_ROUTER_BOOST_FLOOR)
   stop_sequences:
     # IMPORTANT: Never use "}" alone as a stop sequence — it truncates JSON
     # at the first nested closing brace instead of the root object's.
