@@ -466,6 +466,12 @@ class OrchestratorLoop:
         self._session_ctx_caches: dict[str, SessionContextCache] = {}
         self._session_ctx_ttl = 60.0
 
+        # Issue #942: Caches to avoid redundant work in _llm_planning_phase
+        self._cached_pii_summary: str | None = None
+        self._cached_pii_summary_key: int | None = None       # hash of raw summary
+        self._cached_personality_block: str | None = None
+        self._personality_block_built: bool = False
+
         # Issue #407: Pre-route rule engine — bypass LLM for obvious patterns
         self.prerouter = PreRouter()
         self._local_responder = LocalResponseGenerator()
@@ -1213,14 +1219,20 @@ class OrchestratorLoop:
         dialog_summary = self.memory.to_prompt_block()
 
         # Issue #599: PII redaction + rough token budget enforcement for injected memory block
+        # Issue #942: Cache PII-redacted summary — only re-redact when content changes
         turns_count = len(self.memory) if hasattr(self.memory, "__len__") else 0
-        if self.config.memory_pii_filter:
-            try:
-                from bantz.privacy.redaction import redact_pii
-
-                dialog_summary = redact_pii(dialog_summary or "")
-            except Exception:
-                pass
+        _raw_hash = hash(dialog_summary) if dialog_summary else None
+        if self.config.memory_pii_filter and dialog_summary:
+            if _raw_hash == self._cached_pii_summary_key and self._cached_pii_summary is not None:
+                dialog_summary = self._cached_pii_summary
+            else:
+                try:
+                    from bantz.privacy.redaction import redact_pii
+                    dialog_summary = redact_pii(dialog_summary)
+                    self._cached_pii_summary = dialog_summary
+                    self._cached_pii_summary_key = _raw_hash
+                except Exception:
+                    pass
 
         from bantz.llm.token_utils import estimate_tokens as _estimate_tokens
 
@@ -1259,9 +1271,15 @@ class OrchestratorLoop:
             context_parts.append(dialog_summary)
 
         # Issue #873: Inject persistent user profile context
+        # Issue #942: Skip user_memory lookup for smalltalk (prerouter detected)
         _um_facts: dict[str, str] = {}
         _um_prefs: dict = {}
-        if getattr(self, "user_memory", None) is not None:
+        _is_smalltalk_preroute = (
+            preroute_match is not None
+            and preroute_match.matched
+            and preroute_match.intent.handler_type == "local"
+        )
+        if getattr(self, "user_memory", None) is not None and not _is_smalltalk_preroute:
             try:
                 _um_result = self.user_memory.on_turn_start(user_input)
                 _profile_ctx = _um_result.get("profile_context", "")
@@ -1283,12 +1301,18 @@ class OrchestratorLoop:
                 logger.debug("[ORCHESTRATOR] user_memory.on_turn_start failed: %s", _um_exc)
 
         # Issue #874: Inject personality block (Jarvis/Friday/Alfred)
+        # Issue #942: Cache personality block — it is static per session
         if getattr(self, "personality_injector", None) is not None:
             try:
-                _pi_block = self.personality_injector.build_router_block(
-                    facts=_um_facts,
-                    preferences=_um_prefs,
-                )
+                if not self._personality_block_built:
+                    _pi_block = self.personality_injector.build_router_block(
+                        facts=_um_facts,
+                        preferences=_um_prefs,
+                    )
+                    self._cached_personality_block = _pi_block
+                    self._personality_block_built = True
+                else:
+                    _pi_block = self._cached_personality_block
                 if _pi_block:
                     context_parts.append(f"PERSONALITY:\n{_pi_block}")
             except Exception as _pi_exc:
