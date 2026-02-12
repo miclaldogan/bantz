@@ -752,7 +752,14 @@ def repair_common_json_issues(text: str) -> str:
     
     # Fix unquoted string values (basic cases)
     # Pattern: : unquoted_value, or : unquoted_value}
-    text = re.sub(r':\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*([,}])', r': "\1"\2', text)
+    # IMPORTANT: Exclude JSON literals true, false, null — wrapping them in
+    # quotes corrupts semantics (e.g. true → "true" becomes a truthy string
+    # instead of a boolean).  See Issue #886.
+    text = re.sub(
+        r':\s*(?!(true|false|null)\s*[,}])([a-zA-Z_][a-zA-Z0-9_]*)\s*([,}])',
+        r': "\2"\3',
+        text,
+    )
     
     return text
 
