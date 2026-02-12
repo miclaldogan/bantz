@@ -51,7 +51,7 @@ def get_terminal_size() -> tuple[int, int]:
     try:
         size = shutil.get_terminal_size()
         return size.columns, size.lines
-    except:
+    except Exception:
         return 80, 24
 
 

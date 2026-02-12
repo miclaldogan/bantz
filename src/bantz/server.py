@@ -925,14 +925,14 @@ class BantzServer:
         try:
             reminder_manager = get_reminder_manager()
             reminder_manager.stop_scheduler()
-        except:
+        except Exception:
             pass
 
         # Close browser
         from bantz.browser.controller import get_controller
         try:
             get_controller().close()
-        except:
+        except Exception:
             pass
 
         print("\n👋 Bantz Server kapatıldı.")
@@ -996,7 +996,7 @@ class BantzServer:
             error_response = {"ok": False, "text": f"Server hatası: {e}"}
             try:
                 self._send_framed(conn, json.dumps(error_response).encode("utf-8"))
-            except:
+            except Exception:
                 pass
         finally:
             conn.close()
@@ -1059,7 +1059,7 @@ def is_server_running(session_name: str = DEFAULT_SESSION) -> bool:
     try:
         response = send_to_server("__status__", session_name, timeout=2.0)
         return response.get("ok", False)
-    except:
+    except Exception:
         return False
 
 
