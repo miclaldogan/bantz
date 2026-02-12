@@ -180,7 +180,10 @@ class TestIntegration:
         assert _estimate_tokens(text) == estimate_tokens(text)
 
     def test_finalizer_uses_token_utils(self):
-        from bantz.brain.finalizer import _estimate_tokens
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from bantz.brain.finalizer import _estimate_tokens
 
         text = "Tool results: calendar query completed."
         assert _estimate_tokens(text) == estimate_tokens(text)
