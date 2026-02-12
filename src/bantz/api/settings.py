@@ -126,7 +126,7 @@ async def save_gemini_key(
         logger.exception("Failed to store Gemini API key: %s", exc)
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "error": f"Key kaydedilemedi: {exc}"},
+            content={"ok": False, "error": "Key kaydedilemedi — sunucu hatası. Loglara bakın."},
         )
 
 
@@ -161,7 +161,7 @@ async def delete_gemini_key(
         logger.exception("Failed to delete Gemini API key: %s", exc)
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "error": f"Key silinemedi: {exc}"},
+            content={"ok": False, "error": "Key silinemedi — sunucu hatası. Loglara bakın."},
         )
 
 
