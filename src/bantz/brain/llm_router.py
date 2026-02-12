@@ -296,6 +296,48 @@ class JarvisLLMOrchestrator:
     """
 
     # -----------------------------------------------------------------------
+    # Issue #900: Known valid tool names — class-level so it can be synced
+    # with the real ToolRegistry at startup via sync_valid_tools().
+    # -----------------------------------------------------------------------
+    _VALID_TOOLS: frozenset[str] = frozenset({
+        "calendar.list_events", "calendar.find_free_slots", "calendar.create_event",
+        "calendar.update_event", "calendar.delete_event",
+        "gmail.list_messages", "gmail.unread_count", "gmail.get_message",
+        "gmail.smart_search", "gmail.send", "gmail.create_draft",
+        "gmail.list_drafts", "gmail.update_draft", "gmail.generate_reply",
+        "gmail.send_draft", "gmail.delete_draft", "gmail.download_attachment",
+        "gmail.query_from_nl", "gmail.search_template_upsert",
+        "gmail.search_template_get", "gmail.search_template_list",
+        "gmail.search_template_delete", "gmail.list_labels", "gmail.add_label",
+        "gmail.remove_label", "gmail.mark_read", "gmail.mark_unread",
+        "gmail.archive", "gmail.batch_modify", "gmail.send_to_contact",
+        "contacts.upsert", "contacts.resolve", "contacts.list", "contacts.delete",
+        "time.now", "system.status",
+    })
+
+    @classmethod
+    def sync_valid_tools(cls, registry_names: list[str]) -> None:
+        """Intersect _VALID_TOOLS with an actual ToolRegistry at startup.
+
+        Logs warnings for tools referenced in the system prompt or
+        _VALID_TOOLS that do not appear in the live registry, then
+        narrows _VALID_TOOLS to the intersection so the router can
+        never emit a tool the executor cannot find.
+        """
+        registry_set = frozenset(registry_names)
+        phantom = cls._VALID_TOOLS - registry_set
+        if phantom:
+            logger.warning(
+                "[tool_validation] %d tool(s) in _VALID_TOOLS are NOT registered: %s",
+                len(phantom), sorted(phantom),
+            )
+        cls._VALID_TOOLS = cls._VALID_TOOLS & registry_set
+        logger.info(
+            "[tool_validation] _VALID_TOOLS synced — %d tools accepted",
+            len(cls._VALID_TOOLS),
+        )
+
+    # -----------------------------------------------------------------------
     # Tiered system prompt (Issue #405)
     # -----------------------------------------------------------------------
     # The prompt is split into tiers so that _maybe_compact_system_prompt()
@@ -1476,21 +1518,8 @@ USER: saat 8e toplantı ekle
         tool_plan: list[str] = []
         tool_plan_with_args: list[dict[str, Any]] = []  # Issue #360: preserve args
         
-        # Known valid tool names (used for filtering invented names)
-        _VALID_TOOLS = frozenset({
-            "calendar.list_events", "calendar.find_free_slots", "calendar.create_event",
-            "gmail.list_messages", "gmail.unread_count", "gmail.get_message",
-            "gmail.smart_search", "gmail.send", "gmail.create_draft",
-            "gmail.list_drafts", "gmail.update_draft", "gmail.generate_reply",
-            "gmail.send_draft", "gmail.delete_draft", "gmail.download_attachment",
-            "gmail.query_from_nl", "gmail.search_template_upsert",
-            "gmail.search_template_get", "gmail.search_template_list",
-            "gmail.search_template_delete", "gmail.list_labels", "gmail.add_label",
-            "gmail.remove_label", "gmail.mark_read", "gmail.mark_unread",
-            "gmail.archive", "gmail.batch_modify", "gmail.send_to_contact",
-            "contacts.upsert", "contacts.resolve", "contacts.list", "contacts.delete",
-            "time.now", "system.status",
-        })
+        # Issue #900: use class-level _VALID_TOOLS (synced with registry at startup)
+        valid_tools = self._VALID_TOOLS
         
         if isinstance(raw_tool_plan, list):
             for item in raw_tool_plan:
@@ -1502,7 +1531,7 @@ USER: saat 8e toplantı ekle
                     name = str(item or "").strip()
                 
                 # Only accept known valid tool names
-                if name and name in _VALID_TOOLS:
+                if name and name in valid_tools:
                     tool_plan.append(name)
                     args = item.get("args", {}) if isinstance(item, dict) else {}
                     if not isinstance(args, dict):

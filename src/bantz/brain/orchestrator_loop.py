@@ -468,6 +468,12 @@ class OrchestratorLoop:
         self.prerouter = PreRouter()
         self._local_responder = LocalResponseGenerator()
 
+        # Issue #900: Sync router _VALID_TOOLS with actual ToolRegistry
+        try:
+            JarvisLLMOrchestrator.sync_valid_tools(self.tools.names())
+        except Exception:
+            logger.warning("[ORCHESTRATOR] sync_valid_tools failed", exc_info=True)
+
         # Route+Intent → Mandatory Tools mapping (Issue #282)
         # Prevents hallucination when LLM returns empty tool_plan for queries
         # Issue #897: Gmail entries removed — they were keyed by
