@@ -50,6 +50,7 @@ from bantz.brain.post_route_corrections import (
 )
 from bantz.brain.plan_verifier import verify_plan
 from bantz.brain.tool_param_builder import build_tool_params
+from bantz.brain.misroute_integration import record_turn_misroute
 
 logger = logging.getLogger(__name__)
 
@@ -502,6 +503,22 @@ class OrchestratorLoop:
                 write_turn_trace(turn_trace)
             except Exception as exc:
                 logger.debug("[TRACE] Export failed: %s", exc)
+
+            # Issue #1012: Record potential misroutes for dataset collection
+            try:
+                record_turn_misroute(
+                    user_input=user_input,
+                    route=final_output.route,
+                    intent=final_output.calendar_intent or final_output.gmail_intent,
+                    confidence=final_output.confidence,
+                    tool_plan=final_output.tool_plan or [],
+                    tool_results=tool_results,
+                    original_route=getattr(orchestrator_output, "route", None)
+                    if orchestrator_output.route != final_output.route else None,
+                    model_name=getattr(self.orchestrator, "model_name", ""),
+                )
+            except Exception as exc:
+                logger.debug("[MISROUTE] Recording failed: %s", exc)
             
             return final_output, state
         
