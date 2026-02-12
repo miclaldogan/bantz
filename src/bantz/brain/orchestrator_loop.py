@@ -470,18 +470,15 @@ class OrchestratorLoop:
 
         # Route+Intent → Mandatory Tools mapping (Issue #282)
         # Prevents hallucination when LLM returns empty tool_plan for queries
+        # Issue #897: Gmail entries removed — they were keyed by
+        # calendar_intent which is the wrong field.  Gmail lookups now
+        # go exclusively through _gmail_intent_map (below).
         self._mandatory_tool_map: dict[tuple[str, str], list[str]] = {
             # Calendar routes
             ("calendar", "query"): ["calendar.list_events"],
             ("calendar", "create"): ["calendar.create_event"],
             ("calendar", "modify"): ["calendar.update_event"],
             ("calendar", "cancel"): ["calendar.delete_event"],
-            # Gmail routes (calendar_intent is used for backwards compat)
-            ("gmail", "list"): ["gmail.list_messages"],
-            ("gmail", "query"): ["gmail.list_messages"],
-            ("gmail", "read"): ["gmail.get_message"],
-            ("gmail", "send"): ["gmail.send"],
-            ("gmail", "search"): ["gmail.smart_search"],  # Issue #317: Gmail label search
             # System routes
             ("system", "time"): ["time.now"],
             ("system", "status"): ["system.status"],
@@ -575,18 +572,21 @@ class OrchestratorLoop:
                 return replace(output, tool_plan=mandatory_tools)
             return output
         
-        # Lookup mandatory tools
-        key = (output.route, output.calendar_intent)
-        mandatory_tools = self._mandatory_tool_map.get(key)
+        # Issue #897: For gmail routes, use gmail_intent as the lookup key
+        # instead of calendar_intent (which is semantically wrong for gmail).
+        if output.route == "gmail":
+            mandatory_tools = self._gmail_intent_map.get(gmail_intent)
+            if not mandatory_tools:
+                mandatory_tools = ["gmail.list_messages"]  # safe fallback
+        else:
+            key = (output.route, output.calendar_intent)
+            mandatory_tools = self._mandatory_tool_map.get(key)
         
         if not mandatory_tools:
-            # Try route-only fallback for system route
+            # Route-only fallback for system route
             if output.route == "system":
                 mandatory_tools = ["time.now"]
-            elif output.route == "gmail":
-                mandatory_tools = ["gmail.list_messages"]
             else:
-                # No mandatory tools for this route+intent
                 return output
         
         if self.config.debug:

@@ -150,7 +150,8 @@ class TestForceToolPlanGmail:
         """Gmail + query with empty tool_plan should force list_messages."""
         output = OrchestratorOutput(
             route="gmail",
-            calendar_intent="query",  # Note: uses calendar_intent field generically
+            calendar_intent="none",
+            gmail_intent="query",  # Issue #897: use gmail_intent for gmail routes
             slots={},
             confidence=0.87,
             tool_plan=[],
@@ -165,7 +166,8 @@ class TestForceToolPlanGmail:
         """Gmail + list with empty tool_plan should force list_messages."""
         output = OrchestratorOutput(
             route="gmail",
-            calendar_intent="list",
+            calendar_intent="none",
+            gmail_intent="list",  # Issue #897
             slots={},
             confidence=0.9,
             tool_plan=[],
@@ -180,7 +182,8 @@ class TestForceToolPlanGmail:
         """Gmail + read with empty tool_plan should force get_message."""
         output = OrchestratorOutput(
             route="gmail",
-            calendar_intent="read",
+            calendar_intent="none",
+            gmail_intent="read",  # Issue #897
             slots={"message_id": "abc123"},
             confidence=0.92,
             tool_plan=[],
@@ -195,7 +198,8 @@ class TestForceToolPlanGmail:
         """Gmail + send with empty tool_plan should force gmail.send."""
         output = OrchestratorOutput(
             route="gmail",
-            calendar_intent="send",
+            calendar_intent="none",
+            gmail_intent="send",  # Issue #897
             slots={"to": "test@example.com"},
             confidence=0.85,
             tool_plan=[],
@@ -210,7 +214,8 @@ class TestForceToolPlanGmail:
         """Gmail with unknown intent should fallback to list_messages."""
         output = OrchestratorOutput(
             route="gmail",
-            calendar_intent="unknown",  # Unknown intent
+            calendar_intent="none",
+            gmail_intent="unknown",  # Issue #897
             slots={},
             confidence=0.7,
             tool_plan=[],
@@ -425,11 +430,11 @@ class TestMandatoryToolMapCoverage:
         assert ("calendar", "cancel") in loop._mandatory_tool_map
     
     def test_gmail_mappings_exist(self, loop):
-        """Verify all gmail intent mappings."""
-        assert ("gmail", "list") in loop._mandatory_tool_map
-        assert ("gmail", "query") in loop._mandatory_tool_map
-        assert ("gmail", "read") in loop._mandatory_tool_map
-        assert ("gmail", "send") in loop._mandatory_tool_map
+        """Verify all gmail intent mappings (Issue #897: moved to _gmail_intent_map)."""
+        assert "list" in loop._gmail_intent_map
+        assert "search" in loop._gmail_intent_map
+        assert "read" in loop._gmail_intent_map
+        assert "send" in loop._gmail_intent_map
     
     def test_system_mappings_exist(self, loop):
         """Verify all system intent mappings."""
@@ -447,14 +452,14 @@ class TestLowConfidenceToolForcing:
     
     def test_low_confidence_calendar_query_not_forced(self, loop):
         """
-        Calendar query with confidence < 0.7 should NOT force tools.
-        Router cleared tool_plan due to low confidence - respect that decision.
+        Calendar query with confidence < 0.4 should NOT force tools.
+        Issue #682: Threshold lowered from 0.7 to 0.4 for 3B models.
         """
         output = OrchestratorOutput(
             route="calendar",
             calendar_intent="query",
             slots={},
-            confidence=0.5,  # ❌ Low confidence
+            confidence=0.3,  # ❌ Low confidence (below 0.4 threshold)
             tool_plan=[],
             assistant_reply="",
         )
@@ -463,15 +468,16 @@ class TestLowConfidenceToolForcing:
         
         # Should NOT force tools - confidence too low
         assert result.tool_plan == []
-        assert result.confidence == 0.5
+        assert result.confidence == 0.3
     
     def test_low_confidence_gmail_list_not_forced(self, loop):
-        """Gmail list with confidence < 0.7 should NOT force tools."""
+        """Gmail list with confidence < 0.4 should NOT force tools."""
         output = OrchestratorOutput(
             route="gmail",
-            calendar_intent="list",
+            calendar_intent="none",
+            gmail_intent="list",  # Issue #897
             slots={},
-            confidence=0.6,  # ❌ Low confidence
+            confidence=0.3,  # ❌ Low confidence (below 0.4 threshold)
             tool_plan=[],
             assistant_reply="",
         )
@@ -556,17 +562,16 @@ class TestLowConfidenceToolForcing:
     def test_confidence_threshold_documentation(self, loop):
         """
         Document the confidence threshold value used.
-        This is the same as router's confidence threshold.
+        Issue #682: Threshold lowered from 0.7 to 0.4 for 3B models.
         """
-        # Threshold is 0.7 (documented in _force_tool_plan docstring)
-        # Test boundary conditions
+        # Threshold is 0.4 (lowered from 0.7 in Issue #682)
         
         # Below threshold
         output_low = OrchestratorOutput(
             route="calendar",
             calendar_intent="query",
             slots={},
-            confidence=0.69,
+            confidence=0.39,
             tool_plan=[],
             assistant_reply="",
         )
@@ -578,7 +583,7 @@ class TestLowConfidenceToolForcing:
             route="calendar",
             calendar_intent="query",
             slots={},
-            confidence=0.7,
+            confidence=0.4,
             tool_plan=[],
             assistant_reply="",
         )
@@ -590,7 +595,7 @@ class TestLowConfidenceToolForcing:
             route="calendar",
             calendar_intent="query",
             slots={},
-            confidence=0.71,
+            confidence=0.5,
             tool_plan=[],
             assistant_reply="",
         )
