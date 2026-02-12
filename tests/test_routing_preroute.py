@@ -834,3 +834,54 @@ class TestPreRouterE2E:
         assert "rule_hits" in stats
         assert "target_rate" in stats
         assert "on_target" in stats
+
+
+# =============================================================================
+# Issue #998: has_pending_confirmation scoping
+# =============================================================================
+
+
+class TestPendingConfirmationScope:
+    """Issue #998: has_pending_confirmation should only suppress
+    AFFIRMATIVE/NEGATIVE rules, not all rules."""
+
+    def test_confirmation_pending_blocks_affirmative(self):
+        """'evet' should NOT match when confirmation is pending."""
+        router = PreRouter()
+        result = router.route("evet", has_pending_confirmation=True)
+        # Should not match affirmative — let orchestrator handle it
+        assert not result.matched or result.intent != IntentCategory.AFFIRMATIVE
+
+    def test_confirmation_pending_blocks_negative(self):
+        """'hayır' should NOT match when confirmation is pending."""
+        router = PreRouter()
+        result = router.route("hayır", has_pending_confirmation=True)
+        assert not result.matched or result.intent != IntentCategory.NEGATIVE
+
+    def test_confirmation_pending_allows_greeting(self):
+        """'merhaba' should still match when confirmation is pending."""
+        router = PreRouter()
+        result = router.route("merhaba", has_pending_confirmation=True)
+        assert result.matched
+        assert result.intent == IntentCategory.GREETING
+
+    def test_confirmation_pending_allows_time_query(self):
+        """'saat kaç' should still match when confirmation is pending."""
+        router = PreRouter()
+        result = router.route("saat kaç", has_pending_confirmation=True)
+        assert result.matched
+        assert result.intent == IntentCategory.TIME_QUERY
+
+    def test_confirmation_pending_allows_calendar_list(self):
+        """Calendar list queries should still work during confirmation."""
+        router = PreRouter()
+        result = router.route("bugünkü etkinlik göster", has_pending_confirmation=True)
+        assert result.matched
+        assert result.intent == IntentCategory.CALENDAR_LIST
+
+    def test_no_confirmation_still_matches_affirmative(self):
+        """Without pending confirmation, 'evet' should match normally."""
+        router = PreRouter()
+        result = router.route("evet", has_pending_confirmation=False)
+        assert result.matched
+        assert result.intent == IntentCategory.AFFIRMATIVE

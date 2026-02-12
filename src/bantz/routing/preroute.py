@@ -815,15 +815,24 @@ class PreRouter:
         if not text:
             return PreRouteMatch.no_match()
 
-        # Issue #940: When a destructive-action confirmation is pending,
-        # let the orchestrator handle affirmative/negative tokens.
-        if has_pending_confirmation:
-            return PreRouteMatch.no_match()
+        # Issue #998 (was #940): When a destructive-action confirmation is
+        # pending, skip only AFFIRMATIVE/NEGATIVE rules so the orchestrator's
+        # confirmation flow handles 'evet'/'hayır'.  Other rules (greeting,
+        # time, calendar, etc.) should still work — the user may ask a new
+        # question instead of confirming.
+        _CONFIRMATION_INTENTS = {
+            IntentCategory.AFFIRMATIVE,
+            IntentCategory.NEGATIVE,
+        }
         
         # Try each rule
         best_match: Optional[PreRouteMatch] = None
         
         for rule in self.rules:
+            # Skip affirmative/negative rules when confirmation is pending
+            if has_pending_confirmation and rule.intent in _CONFIRMATION_INTENTS:
+                continue
+
             result = rule.match(text)
             
             if result.matched:
