@@ -1853,11 +1853,20 @@ class OrchestratorLoop:
     # =========================================================================
     
     def _extract_user_intent(self, user_input: str, output: OrchestratorOutput) -> str:
-        """Extract concise user intent (1-3 words)."""
-        if output.route == "calendar":
-            return f"asked about {output.calendar_intent}"
-        elif output.route == "smalltalk":
-            # Check for common patterns
+        """Extract concise user intent (1-3 words).
+
+        Issue #944: Uses the generic `intent` property so all routes are covered.
+        """
+        route = (output.route or "").lower()
+        intent = output.intent  # generic accessor
+
+        if route == "calendar":
+            return f"asked about {intent}"
+        elif route == "gmail":
+            return f"email {intent}"
+        elif route == "system":
+            return f"system {intent}"
+        elif route == "smalltalk":
             if any(word in user_input.lower() for word in ["merhaba", "selam", "hey", "nasılsın"]):
                 return "greeted"
             elif any(word in user_input.lower() for word in ["kendini tanıt", "kimsin"]):
@@ -1865,7 +1874,7 @@ class OrchestratorLoop:
             else:
                 return "casual chat"
         else:
-            return "unclear request"
+            return f"request ({intent})"
     
     def _extract_action_taken(self, output: OrchestratorOutput) -> str:
         """Extract action taken (1-3 words)."""
