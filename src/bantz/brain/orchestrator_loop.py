@@ -460,9 +460,11 @@ class OrchestratorLoop:
             self.safety_guard = None
 
         # Issue #417: Session context cache (TTL 60s) — avoid rebuild every turn
+        # Issue #902: Per-session cache to prevent multi-user context leak.
         from bantz.brain.session_context_cache import SessionContextCache
 
-        self._session_ctx_cache = SessionContextCache(ttl_seconds=60.0)
+        self._session_ctx_caches: dict[str, SessionContextCache] = {}
+        self._session_ctx_ttl = 60.0
 
         # Issue #407: Pre-route rule engine — bypass LLM for obvious patterns
         self.prerouter = PreRouter()
@@ -694,8 +696,13 @@ class OrchestratorLoop:
         start_time = time.time()
 
         # Issue #417: Build session context once per turn (cached with TTL)
+        # Issue #902: Per-session cache keyed by state identity
         if not state.session_context:
-            state.session_context = self._session_ctx_cache.get_or_build()
+            sid = id(state)
+            if sid not in self._session_ctx_caches:
+                from bantz.brain.session_context_cache import SessionContextCache
+                self._session_ctx_caches[sid] = SessionContextCache(ttl_seconds=self._session_ctx_ttl)
+            state.session_context = self._session_ctx_caches[sid].get_or_build()
         
         # Emit turn start event
         self.event_bus.publish("turn.start", {"user_input": user_input})
@@ -1374,7 +1381,11 @@ class OrchestratorLoop:
         session_context = state.session_context
         if not session_context:
             # Fallback: build fresh if somehow missing (e.g. direct _llm_planning_phase call)
-            session_context = self._session_ctx_cache.get_or_build()
+            sid = id(state)
+            if sid not in self._session_ctx_caches:
+                from bantz.brain.session_context_cache import SessionContextCache
+                self._session_ctx_caches[sid] = SessionContextCache(ttl_seconds=self._session_ctx_ttl)
+            session_context = self._session_ctx_caches[sid].get_or_build()
             state.session_context = session_context
         
         # Issue #339: Add recent conversation for anaphora / multi-turn
