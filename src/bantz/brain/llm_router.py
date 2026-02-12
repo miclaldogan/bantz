@@ -65,25 +65,36 @@ class RepairTracker:
     # ---- metrics ------------------------------------------------------------
     @property
     def total_requests(self) -> int:
-        return self._total_requests
+        with self._lock:
+            return self._total_requests
 
     @property
     def repair_count(self) -> int:
-        return self._repair_count
+        with self._lock:
+            return self._repair_count
 
     @property
     def repairs_per_100(self) -> float:
-        """Repair rate per 100 requests."""
-        if self._total_requests == 0:
-            return 0.0
-        return (self._repair_count / self._total_requests) * 100.0
+        """Repair rate per 100 requests (thread-safe).
+
+        Issue #899: Reads under lock to prevent TOCTOU race between
+        the zero-check on ``_total_requests`` and the division.
+        """
+        with self._lock:
+            if self._total_requests == 0:
+                return 0.0
+            return (self._repair_count / self._total_requests) * 100.0
 
     def summary(self) -> dict[str, Any]:
         with self._lock:
+            rp100 = (
+                0.0 if self._total_requests == 0
+                else (self._repair_count / self._total_requests) * 100.0
+            )
             return {
                 "total_requests": self._total_requests,
                 "repair_count": self._repair_count,
-                "repairs_per_100": round(self.repairs_per_100, 2),
+                "repairs_per_100": round(rp100, 2),
                 "route_corrections": self._route_corrections,
                 "intent_corrections": self._intent_corrections,
             }
