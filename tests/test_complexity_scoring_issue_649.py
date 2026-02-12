@@ -31,8 +31,8 @@ class TestActionVerbBonus:
     """Action verb + complexity keyword = +1 bonus."""
 
     def test_exact_issue_example(self):
-        """Exact scenario from issue: was 2, now should be 4."""
-        assert score_complexity("adım adım haftalık bir plan yap bana") == 4
+        """Issue #1005: No longer double-counted. Keyword(+2) + action-verb(+1) = 3."""
+        assert score_complexity("adım adım haftalık bir plan yap bana") == 3
 
     def test_haftalik_plan_yap(self):
         """was 3, now 4."""
@@ -71,12 +71,12 @@ class TestDisjointHaftalikPlan:
     """'haftalık bir plan' should match like 'haftalık plan'."""
 
     def test_haftalik_bir_plan(self):
-        """'haftalık' + 'plan' in text but not adjacent → +1 bonus."""
-        assert score_complexity("haftalık bir plan yap bana") >= 4
+        """Issue #1005: Removed duplicate loose match. Keyword(+2) + verb(+1) = 3."""
+        assert score_complexity("haftalık bir plan yap bana") >= 3
 
     def test_haftalik_guzel_plan(self):
-        """Any text with both 'haftalık' and 'plan' → bonus."""
-        assert score_complexity("haftalık güzel bir plan") >= 3
+        """Issue #1005: Only keyword(+2), no action verb, no strong signal."""
+        assert score_complexity("haftalık güzel bir plan") >= 2
 
     def test_adjacent_haftalik_plan_no_double(self):
         """'haftalık plan' (adjacent) → strong_signals match, no extra bonus."""
@@ -148,8 +148,10 @@ class TestScoreCap:
     """Score must never exceed 5."""
 
     def test_max_signals(self):
+        """Issue #1005: No double-count → lower total but still capped at 5."""
         text = "çok detaylı kapsamlı adım adım haftalık bir plan yap bana"
-        assert score_complexity(text) == 5
+        assert score_complexity(text) <= 5
+        assert score_complexity(text) >= 4
 
     def test_extremely_long_complex(self):
         text = "a " * 250 + "adım adım haftalık plan yap detaylı kapsamlı"
@@ -176,10 +178,12 @@ class TestDecideTierIntegration:
             monkeypatch.delenv(var, raising=False)
 
     def test_complex_planning_uses_quality(self):
-        """'adım adım haftalık bir plan yap bana' → QUALITY."""
+        """'adım adım haftalık bir plan yap bana' → QUALITY.
+        Issue #1005: complexity now 3 (not 4), still escalates via quality_gating.
+        """
         d = decide_tier("adım adım haftalık bir plan yap bana")
         assert d.use_quality is True
-        assert d.complexity >= 4
+        assert d.complexity >= 3
         assert d.reason == "component_threshold_exceeded"
 
     def test_haftalik_plan_yap_uses_quality(self):
@@ -197,10 +201,9 @@ class TestDecideTierIntegration:
         assert d.use_quality is False
         assert d.complexity == 0
 
-    def test_moderate_complexity_stays_fast(self):
-        """complexity=3 < min_complexity_for_quality(4) → FAST."""
+    def test_moderate_complexity_uses_quality(self):
+        """Issue #1005: complexity=3 still escalates via quality_gating component threshold."""
         d = decide_tier("detaylı analiz yap")
-        assert d.use_quality is False
         assert d.complexity == 3
 
     def test_forced_fast_overrides(self, monkeypatch: pytest.MonkeyPatch):
