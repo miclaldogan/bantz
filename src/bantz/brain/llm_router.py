@@ -332,8 +332,13 @@ class JarvisLLMOrchestrator:
                 len(phantom), sorted(phantom),
             )
         cls._VALID_TOOLS = cls._VALID_TOOLS & registry_set
+        # Issue #943: Rebuild the class-level combined prompt so that
+        # any already-instantiated router that falls back to SYSTEM_PROMPT
+        # also picks up the narrowed tool list.
+        cls.SYSTEM_PROMPT = cls._build_system_prompt(cls._VALID_TOOLS)
         logger.info(
-            "[tool_validation] _VALID_TOOLS synced — %d tools accepted",
+            "[tool_validation] _VALID_TOOLS synced — %d tools accepted, "
+            "system prompt TOOLS line refreshed",
             len(cls._VALID_TOOLS),
         )
 
@@ -374,7 +379,7 @@ KURALLAR:
 9. title yoksa → ask_user=true. Asla title uydurma.
 10. Soru cümleleri (var mı, ne var, neler, planımız) → calendar_intent="query", tool=calendar.list_events.
 
-TOOLS: calendar.list_events, calendar.find_free_slots, calendar.create_event, gmail.list_messages, gmail.unread_count, gmail.get_message, gmail.smart_search, gmail.send, gmail.create_draft, gmail.list_drafts, gmail.update_draft, gmail.generate_reply, gmail.send_draft, gmail.delete_draft, gmail.download_attachment, gmail.query_from_nl, gmail.search_template_upsert, gmail.search_template_get, gmail.search_template_list, gmail.search_template_delete, gmail.list_labels, gmail.add_label, gmail.remove_label, gmail.mark_read, gmail.mark_unread, gmail.archive, gmail.batch_modify, gmail.send_to_contact, contacts.upsert, contacts.resolve, contacts.list, contacts.delete, time.now, system.status
+TOOLS: {{TOOLS}}
 
 SAAT: 1-6="sabah" yoksa PM (bir→13, iki→14, üç→15, dört→16, beş→17, altı→18). 7-12→context'e bak; belirsiz→sor."""
 
@@ -396,6 +401,19 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
+
+    @classmethod
+    def _build_system_prompt(cls, tool_names: frozenset[str] | None = None) -> str:
+        """Build system prompt with dynamic TOOLS list from registry.
+
+        Issue #943: The TOOLS line in the prompt is now generated from
+        ``_VALID_TOOLS`` (or the supplied *tool_names*) so prompt and
+        registry can never drift.
+        """
+        names = tool_names if tool_names is not None else cls._VALID_TOOLS
+        tools_csv = ", ".join(sorted(names))
+        core = cls._SYSTEM_PROMPT_CORE.replace("{{TOOLS}}", tools_csv)
+        return core + cls._SYSTEM_PROMPT_DETAIL + cls._SYSTEM_PROMPT_EXAMPLES
 
     def __init__(
         self,
@@ -419,7 +437,11 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
             raise TypeError("JarvisLLMOrchestrator requires `llm=` (or legacy `llm_client=`)")
 
         self._llm = effective_llm
-        self._system_prompt = (system_prompt if system_prompt is not None else self.SYSTEM_PROMPT)
+        # Issue #943: Build prompt with dynamic tool list instead of hardcoded
+        self._system_prompt = (
+            system_prompt if system_prompt is not None
+            else self._build_system_prompt()
+        )
         self._confidence_threshold = float(confidence_threshold)
         self._max_attempts = int(max_attempts)
 
