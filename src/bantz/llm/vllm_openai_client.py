@@ -79,14 +79,19 @@ class VLLMOpenAIClient(LLMClient):
     
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:8001",
-        model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ",
+        base_url: str = "",
+        model: str = "",
         timeout_seconds: float = 120.0,
         track_ttft: bool = True,
         ttft_phase: str = "router",
     ):
-        self.base_url = base_url.rstrip("/")
-        self.model = model.strip()
+        # Issue #1020: Read from env vars with sensible fallbacks
+        self.base_url = (
+            base_url or os.getenv("VLLM_BASE_URL", "http://127.0.0.1:8001")
+        ).rstrip("/")
+        self.model = (
+            model or os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct-AWQ")
+        ).strip()
         self.timeout_seconds = float(timeout_seconds)
         self.track_ttft = track_ttft
         self.ttft_phase = ttft_phase
