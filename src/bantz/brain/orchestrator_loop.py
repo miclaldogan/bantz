@@ -15,7 +15,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 from bantz.agent.tools import ToolRegistry
@@ -432,8 +432,7 @@ class OrchestratorLoop:
                             gen_result = mgr.generate_skill(gap)
                             if gen_result.success and gen_result.skill:
                                 skill = gen_result.skill
-                                from dataclasses import replace as _dc_replace
-                                orchestrator_output = _dc_replace(
+                                orchestrator_output = replace(
                                     orchestrator_output,
                                     assistant_reply=(
                                         f"Bu isteği karşılayacak bir yeteneğim yok, ama "

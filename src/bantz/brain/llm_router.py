@@ -21,7 +21,7 @@ import logging
 import os
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -1786,8 +1786,6 @@ class HybridJarvisLLMOrchestrator:
         if planned.ask_user and planned.question:
             # Prefer explicit clarifying question.
             if not planned.assistant_reply:
-                from dataclasses import replace
-
                 return replace(planned, assistant_reply=planned.question)
             return planned
 
@@ -1857,8 +1855,6 @@ class HybridJarvisLLMOrchestrator:
                 reply = self._finalizer.complete_text(prompt=finalizer_prompt)
             reply = str(reply or "").strip()
             if reply:
-                from dataclasses import replace
-
                 return replace(planned, assistant_reply=reply)
         except Exception as exc:
             logger.warning("[HYBRID] Finalizer error (swallowed): %s", exc)
