@@ -48,6 +48,7 @@ from bantz.brain.post_route_corrections import (
     extract_message_body_hint,
     post_route_correction_email_send,
 )
+from bantz.brain.plan_verifier import verify_plan
 from bantz.brain.tool_param_builder import build_tool_params
 
 logger = logging.getLogger(__name__)
@@ -1130,6 +1131,20 @@ class OrchestratorLoop:
 
         # Issue #870: Sanitize tool_plan — remap hallucinated/mismatched tools
         output = self._sanitize_tool_plan(output)
+
+        # Issue #907: Static plan verification
+        from bantz.brain.llm_router import _VALID_TOOLS
+        plan_ok, plan_errors = verify_plan(
+            output.__dict__ if hasattr(output, "__dict__") else vars(output),
+            user_input,
+            _VALID_TOOLS,
+        )
+        if not plan_ok:
+            logger.warning("[PLAN_VERIFIER] errors=%s — falling back to ask_user", plan_errors)
+            # For hard errors (unknown tool, missing slot) — ask user to clarify
+            hard = [e for e in plan_errors if not e.startswith("tool_plan_no_indicators")]
+            if hard:
+                output = replace(output, ask_user=True, question="Anlayamadım, tekrar eder misin?")
 
         return output
 
