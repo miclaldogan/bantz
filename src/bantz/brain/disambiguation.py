@@ -109,6 +109,8 @@ class DisambiguationDialog:
         self,
         tool_results: List[Dict[str, Any]],
         intent: str = "",
+        *,
+        max_items: int = 10,
     ) -> Optional[DisambiguationRequest]:
         """Check if tool results need disambiguation.
 
@@ -119,6 +121,7 @@ class DisambiguationDialog:
         Args:
             tool_results: List of tool result dicts from execution phase.
             intent: The detected intent (e.g. ``calendar_delete_event``).
+            max_items: Maximum items to extract for the reference table.
 
         Returns:
             DisambiguationRequest if disambiguation is needed, else None.
@@ -126,13 +129,22 @@ class DisambiguationDialog:
         if not tool_results:
             return None
 
-        ref_table = extract_references(tool_results, max_items=10)
-
-        if len(ref_table) < self._min_items:
+        # Issue #1008: Empty/unknown intent should NOT trigger disambiguation.
+        # An undetected intent needs re-route or clarification, not item selection.
+        if not intent:
             return None
 
         # Only trigger for intents that target a single item
-        if intent and intent not in DISAMBIGUATION_INTENTS:
+        if intent not in DISAMBIGUATION_INTENTS:
+            return None
+
+        try:
+            ref_table = extract_references(tool_results, max_items=max_items)
+        except (TypeError, AttributeError, KeyError) as exc:
+            logger.warning("[DISAMBIGUATION] extract_references failed: %s", exc)
+            return None
+
+        if len(ref_table) < self._min_items:
             return None
 
         question = self._build_question(ref_table, intent)
