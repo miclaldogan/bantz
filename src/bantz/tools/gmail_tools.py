@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # ── Issue #870: Türkçe hata mesajı çevirici ─────────────────────────
 _GMAIL_ERROR_TR_MAP: list[tuple[str, str]] = [
     ("Google client secret not found", "Google hesap bilgileri bulunamadı. Lütfen BANTZ_GOOGLE_CLIENT_SECRET ayarını yapın."),
-    ("Gmail dependencies are not installed", "Gmail bağımlılıkları yüklü değil. pip install -e '.[calendar]' ile yükleyin."),
+    ("Gmail dependencies are not installed", "Gmail bağımlılıkları yüklü değil. pip install -e '.[google]' ile yükleyin."),
     ("HttpError 401", "Gmail yetkilendirmesi başarısız. Lütfen tekrar giriş yapın."),
     ("HttpError 403", "Gmail erişim izni yok. Lütfen izinleri kontrol edin."),
     ("HttpError 404", "Belirtilen e-posta bulunamadı."),
