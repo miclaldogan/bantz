@@ -38,6 +38,7 @@ import logging
 import os
 import threading
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -142,7 +143,12 @@ def create_app(
     app.state.bantz_server = bantz_server
     app.state.event_bus = event_bus
     app.state.start_time = time.time()
-    app.state._lock = threading.Lock()
+    # Issue #884: session-scoped locks instead of single global lock.
+    # Each session gets its own lock so different sessions can run
+    # concurrently.  Same-session requests still serialize (required
+    # because brain_state is per-session, not thread-safe).
+    app.state._session_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)  # type: ignore[assignment]
+    app.state._session_locks_guard = threading.Lock()  # protects dict access
 
     # ── Exception handler ───────────────────────────────────────────
     @app.exception_handler(Exception)
@@ -204,13 +210,20 @@ def create_app(
     ) -> ChatResponse:
         """Chat endpoint — wraps BantzServer.handle_command()."""
         server = request.app.state.bantz_server
-        lock = request.app.state._lock
         executor = request.app.state._executor
+
+        # Issue #884: acquire a per-session lock so different sessions
+        # can proceed in parallel.  The guard lock only protects the
+        # defaultdict lookup (nanoseconds), not the command execution.
+        session_id = body.session or "default"
+        guard = request.app.state._session_locks_guard
+        with guard:
+            session_lock = request.app.state._session_locks[session_id]
 
         loop = asyncio.get_running_loop()
 
         def _run_command() -> dict:
-            with lock:
+            with session_lock:
                 return server.handle_command(body.message)
 
         result = await loop.run_in_executor(executor, _run_command)
