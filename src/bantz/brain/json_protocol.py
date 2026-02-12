@@ -611,7 +611,7 @@ ORCHESTRATOR_OUTPUT_SCHEMA: dict[str, Any] = {
     "properties": {
         "route": {
             "type": "string",
-            "enum": ["calendar", "gmail", "smalltalk", "system", "unknown"],
+            "enum": ["calendar", "gmail", "smalltalk", "system", "wiki", "chat", "unknown"],
             "description": "Primary route classification",
         },
         "calendar_intent": {
@@ -733,7 +733,7 @@ def validate_orchestrator_output(
     # Validate route enum
     route = parsed.get("route")
     if route is not None:
-        valid_routes = {"calendar", "gmail", "smalltalk", "system", "unknown"}
+        valid_routes = {"calendar", "gmail", "smalltalk", "system", "wiki", "chat", "unknown"}
         if str(route).lower() not in valid_routes:
             errors.append(f"invalid_route:{route}")
     
@@ -791,7 +791,7 @@ def apply_orchestrator_defaults(
     # Normalize route
     if "route" in result:
         route = str(result["route"]).lower().strip()
-        if route not in {"calendar", "gmail", "smalltalk", "system", "unknown"}:
+        if route not in {"calendar", "gmail", "smalltalk", "system", "wiki", "chat", "unknown"}:
             route = "unknown"
         result["route"] = route
     
