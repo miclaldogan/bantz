@@ -176,8 +176,13 @@ class VLLMOpenAIClient(LLMClient):
             return False
         
         try:
-            # base_url already includes /v1, so just append /models
-            health_url = f"{self.base_url.rstrip('/')}/models"
+            # Issue #996: self.base_url is the raw URL (e.g. http://localhost:8001).
+            # vLLM serves /v1/models, not /models.  Must mirror _get_client()'s
+            # /v1 suffix logic.
+            _api_base = self.base_url.rstrip("/")
+            if not _api_base.endswith("/v1"):
+                _api_base = f"{_api_base}/v1"
+            health_url = f"{_api_base}/models"
             r = requests.get(
                 health_url,
                 timeout=float(timeout_seconds),
