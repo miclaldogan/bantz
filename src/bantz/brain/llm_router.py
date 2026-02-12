@@ -1,8 +1,9 @@
 """LLM Router: Single entry point for all user inputs.
 
 Provides:
-- Route classification (calendar | smalltalk | unknown)
+- Route classification (calendar | gmail | system | smalltalk | unknown)
 - Intent extraction (create | modify | cancel | query)
+- Gmail intent extraction (list | search | read | send | reply | none)
 - Slot extraction (date, time, duration, title, window_hint)
 - Confidence scoring
 - Tool planning
@@ -25,9 +26,10 @@ logger = logging.getLogger(__name__)
 class RouterOutput:
     """LLM Router decision output."""
 
-    route: str  # calendar | smalltalk | unknown
+    route: str  # calendar | gmail | system | smalltalk | unknown
     calendar_intent: str  # create | modify | cancel | query | none
-    slots: dict[str, Any]  # {date?, time?, duration?, title?, window_hint?}
+    gmail_intent: str  # list | search | read | send | reply | none
+    slots: dict[str, Any]  # {date?, time?, duration?, title?, window_hint?, query?, to?, subject?, body?}
     confidence: float  # 0.0-1.0
     tool_plan: list[str]  # ["calendar.list_events", ...]
     assistant_reply: str  # Chat/response text
@@ -64,14 +66,19 @@ Görev: Her kullanıcı mesajını şu şemaya göre sınıflandır:
 
 OUTPUT SCHEMA (zorunlu):
 {
-  "route": "calendar | smalltalk | unknown",
+  "route": "calendar | gmail | system | smalltalk | unknown",
   "calendar_intent": "create | modify | cancel | query | none",
+  "gmail_intent": "list | search | read | send | reply | none",
   "slots": {
     "date": "YYYY-MM-DD veya null",
     "time": "HH:MM veya null",
     "duration": "süre (dk) veya null",
     "title": "etkinlik başlığı veya null",
-    "window_hint": "evening|tomorrow|morning|today|week veya null"
+    "window_hint": "evening|tomorrow|morning|today|week veya null",
+    "query": "arama sorgusu veya null",
+    "to": "e-posta alıcı veya null",
+    "subject": "e-posta konusu veya null",
+    "body": "e-posta içeriği veya null"
   },
   "confidence": 0.0-1.0,
   "tool_plan": ["tool_name", ...],
@@ -87,20 +94,39 @@ KURALLAR (kritik):
 
 ROUTE KURALLARI:
 - "calendar": takvim sorgusu veya değişikliği
+- "gmail": e-posta/mail okuma, gönderme, arama, listeleme
+- "system": sistem bilgisi (CPU, RAM, disk), saat sorma, ekran görüntüsü
 - "smalltalk": sohbet, selam, durum sorma
 - "unknown": belirsiz veya başka kategoriler
 
-CALENDAR_INTENT:
+CALENDAR_INTENT (sadece route=calendar ise anlamlı):
 - "query": takvimi oku/sorgula
 - "create": yeni etkinlik ekle
 - "modify": mevcut etkinliği değiştir
 - "cancel": etkinliği sil
 - "none": takvim değil
 
+GMAIL_INTENT (sadece route=gmail ise anlamlı):
+- "list": gelen kutusu/mailleri listele
+- "search": mail ara
+- "read": belirli bir maili oku
+- "send": mail gönder
+- "reply": maile cevap yaz
+- "none": mail değil
+
 TOOL_PLAN:
 - "calendar.list_events": takvim sorgusu
 - "calendar.find_free_slots": boş slot ara
 - "calendar.create_event": etkinlik oluştur
+- "gmail.list_messages": mailleri listele
+- "gmail.smart_search": mail ara
+- "gmail.get_message": mail oku
+- "gmail.send": mail gönder
+- "gmail.generate_reply": maile cevap yaz
+- "gmail.unread_count": okunmamış mail sayısı
+- "system.info": sistem bilgisi (CPU, RAM, disk)
+- "system.screenshot": ekran görüntüsü
+- "time.now": şu anki saat/tarih
 - Birden fazla tool sıralı çağrılabilir.
 
 TIME AWARENESS:
@@ -145,9 +171,65 @@ USER: bu akşam neler yapacağız
 → {
   "route": "calendar",
   "calendar_intent": "query",
+  "gmail_intent": "none",
   "slots": {"window_hint": "evening"},
   "confidence": 0.9,
   "tool_plan": ["calendar.list_events"],
+  "assistant_reply": ""
+}
+
+USER: maillerimi göster
+→ {
+  "route": "gmail",
+  "calendar_intent": "none",
+  "gmail_intent": "list",
+  "slots": {},
+  "confidence": 0.9,
+  "tool_plan": ["gmail.list_messages"],
+  "assistant_reply": ""
+}
+
+USER: ali@test.com adresine toplantı hakkında mail gönder
+→ {
+  "route": "gmail",
+  "calendar_intent": "none",
+  "gmail_intent": "send",
+  "slots": {"to": "ali@test.com", "subject": "toplantı"},
+  "confidence": 0.8,
+  "tool_plan": ["gmail.send"],
+  "assistant_reply": ""
+}
+
+USER: okunmamış kaç mailim var
+→ {
+  "route": "gmail",
+  "calendar_intent": "none",
+  "gmail_intent": "list",
+  "slots": {},
+  "confidence": 0.95,
+  "tool_plan": ["gmail.unread_count"],
+  "assistant_reply": ""
+}
+
+USER: saat kaç
+→ {
+  "route": "system",
+  "calendar_intent": "none",
+  "gmail_intent": "none",
+  "slots": {},
+  "confidence": 0.95,
+  "tool_plan": ["time.now"],
+  "assistant_reply": ""
+}
+
+USER: sistemin durumu nasıl
+→ {
+  "route": "system",
+  "calendar_intent": "none",
+  "gmail_intent": "none",
+  "slots": {},
+  "confidence": 0.9,
+  "tool_plan": ["system.info"],
   "assistant_reply": ""
 }
 """
@@ -259,12 +341,16 @@ USER: bu akşam neler yapacağız
     def _extract_output(self, parsed: dict[str, Any], raw_text: str) -> RouterOutput:
         """Extract RouterOutput from parsed JSON."""
         route = str(parsed.get("route") or "unknown").strip().lower()
-        if route not in {"calendar", "smalltalk", "unknown"}:
+        if route not in {"calendar", "gmail", "system", "smalltalk", "unknown"}:
             route = "unknown"
 
         calendar_intent = str(parsed.get("calendar_intent") or "none").strip().lower()
         if calendar_intent not in {"create", "modify", "cancel", "query", "none"}:
             calendar_intent = "none"
+
+        gmail_intent = str(parsed.get("gmail_intent") or "none").strip().lower()
+        if gmail_intent not in {"list", "search", "read", "send", "reply", "none"}:
+            gmail_intent = "none"
 
         slots = parsed.get("slots") or {}
         if not isinstance(slots, dict):
@@ -287,6 +373,7 @@ USER: bu akşam neler yapacağız
         return RouterOutput(
             route=route,
             calendar_intent=calendar_intent,
+            gmail_intent=gmail_intent,
             slots=slots,
             confidence=confidence,
             tool_plan=tool_plan,
@@ -300,6 +387,7 @@ USER: bu akşam neler yapacağız
         return RouterOutput(
             route="unknown",
             calendar_intent="none",
+            gmail_intent="none",
             slots={},
             confidence=0.0,
             tool_plan=[],

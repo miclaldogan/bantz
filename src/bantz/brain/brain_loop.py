@@ -724,6 +724,8 @@ _ROUTE_CALENDAR_QUERY = "calendar_query"
 _ROUTE_CALENDAR_MODIFY = "calendar_modify"
 _ROUTE_CALENDAR_CREATE = "calendar_create"
 _ROUTE_CALENDAR_CANCEL = "calendar_cancel"
+_ROUTE_GMAIL = "gmail"
+_ROUTE_SYSTEM = "system"
 _ROUTE_SMALLTALK = "smalltalk"
 _ROUTE_UNKNOWN = "unknown"
 
@@ -1115,6 +1117,24 @@ def _detect_route(
         if has_create:
             return _ROUTE_CALENDAR_CREATE
         return _ROUTE_CALENDAR_QUERY
+
+    # ── Gmail deterministic triggers ──────────────────────────────
+    gmail_nouns = {"mail", "e-posta", "eposta", "email", "gmail", "gelen kutusu", "inbox"}
+    gmail_verbs = {"oku", "gonder", "gönder", "yanıtla", "yanitla", "cevapla", "ilet"}
+    has_gmail_noun = any(w in nt for w in gmail_nouns)
+    has_gmail_verb = any(w in nt for w in gmail_verbs)
+    if has_gmail_noun or has_gmail_verb:
+        return _ROUTE_GMAIL
+
+    # ── System deterministic triggers ─────────────────────────────
+    system_nouns = {"cpu", "ram", "disk", "bellek", "hafiza", "sistem", "pil", "batarya"}
+    time_nouns = {"saat", "tarih", "gun", "gün"}
+    system_verbs = {"ekran goruntusu", "screenshot"}
+    has_system = any(w in nt for w in system_nouns)
+    has_time_query = any(w in nt for w in time_nouns) and not has_calendar_context
+    has_system_verb = any(w in nt for w in system_verbs)
+    if has_system or has_time_query or has_system_verb:
+        return _ROUTE_SYSTEM
 
     return _ROUTE_UNKNOWN
 
@@ -1508,8 +1528,9 @@ class BrainLoop:
             """Return (route, calendar_intent, confidence) using the LLM."""
 
             schema = {
-                "route": "calendar|smalltalk|unknown",
+                "route": "calendar|gmail|system|smalltalk|unknown",
                 "calendar_intent": "create|modify|cancel|query|none",
+                "gmail_intent": "list|search|read|send|reply|none",
                 "confidence": 0.0,
             }
             try:
@@ -1517,9 +1538,12 @@ class BrainLoop:
                     "Sen bir router sınıflandırıcısısın. SADECE şu JSON'u döndür:\n"
                     + json.dumps(schema, ensure_ascii=False)
                     + "\n\nKurallar:\n"
-                    + "- route sadece calendar|smalltalk|unknown\n"
+                    + "- route sadece calendar|gmail|system|smalltalk|unknown\n"
                     + "- calendar_intent sadece create|modify|cancel|query|none\n"
+                    + "- gmail_intent sadece list|search|read|send|reply|none\n"
                     + "- confidence 0.0-1.0 arası\n"
+                    + "- gmail: mail okuma, gönderme, arama, listeleme\n"
+                    + "- system: cpu/ram/disk bilgisi, saat sorma, ekran görüntüsü\n"
                     + "- Ek alan ekleme, açıklama yazma.\n"
                 )
                 raw = self._llm.complete_json(
@@ -1537,6 +1561,7 @@ class BrainLoop:
 
             route_out = str(raw.get("route") or "").strip().lower()
             intent_out = str(raw.get("calendar_intent") or "").strip().lower()
+            gmail_intent_out = str(raw.get("gmail_intent") or "").strip().lower()
             conf_raw = raw.get("confidence")
 
             try:
@@ -1545,11 +1570,17 @@ class BrainLoop:
                 conf = 0.0
             conf = max(0.0, min(1.0, conf))
 
-            if route_out not in {"calendar", "smalltalk", "unknown"}:
+            if route_out not in {"calendar", "gmail", "system", "smalltalk", "unknown"}:
                 route_out = "unknown"
             if intent_out not in {"create", "modify", "cancel", "query", "none"}:
                 intent_out = "none"
+            if gmail_intent_out not in {"list", "search", "read", "send", "reply", "none"}:
+                gmail_intent_out = "none"
 
+            if route_out == "gmail":
+                return _ROUTE_GMAIL, gmail_intent_out, conf
+            if route_out == "system":
+                return _ROUTE_SYSTEM, "none", conf
             if route_out == "smalltalk":
                 return _ROUTE_SMALLTALK, "none", conf
             if route_out == "unknown":
