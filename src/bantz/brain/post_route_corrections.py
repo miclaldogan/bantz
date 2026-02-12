@@ -73,9 +73,26 @@ def post_route_correction_email_send(
 ) -> OrchestratorOutput:
     """Correct obvious email-send intents that the router misclassifies.
 
-    Issue #607 / #945: Post-route correction for email sending.
+    Issue #607: Original post-route correction for email sending.
+    Issue #945: Only run when LLM route is unknown/smalltalk (misroute).
+    If LLM already returned route=gmail with gmail_intent=send, trust it.
     """
     if not looks_like_email_send_intent(user_input):
+        return output
+
+    # Issue #945: Trust the LLM when it already routed correctly.
+    # Only apply regex correction for likely misroutes.
+    _route = getattr(output, "route", "") or ""
+    _gmail_intent = getattr(output, "gmail_intent", "") or ""
+    if _route == "gmail" and _gmail_intent == "send":
+        # LLM got it right — do not override its (likely better) slot extraction
+        if debug:
+            logger.debug(
+                "[POST_ROUTE_CORRECTION] email_send: LLM already route=gmail/send, skipping override"
+            )
+        return output
+    if _route not in ("unknown", "smalltalk", ""):
+        # LLM routed to calendar/system/etc. — unlikely email, skip correction
         return output
 
     gmail_obj = dict(getattr(output, "gmail", None) or {})
