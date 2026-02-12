@@ -62,6 +62,64 @@ permissions:
     risk: "critical"
     decision: "deny"
 
+  # ── Browser (Issue #856) ───────────────────────────────────
+  - tool: "browser.info"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "browser.scan"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "browser.click"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "browser.type"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "browser.submit_form"
+    action: "execute"
+    risk: "high"
+    decision: "confirm"
+
+  - tool: "browser.*"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+
+  # ── PC / input (Issue #856) ────────────────────────────────
+  - tool: "pc.mouse_move"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.hotkey"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "pc.*"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+
+  # ── Clipboard (Issue #856) ─────────────────────────────────
+  - tool: "clipboard.get"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "clipboard.set"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"
