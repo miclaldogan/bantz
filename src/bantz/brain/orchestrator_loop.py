@@ -695,6 +695,59 @@ class OrchestratorLoop:
         self.event_bus.publish("turn.start", {"user_input": user_input})
         
         try:
+            # ── Issue #894 fix: Auto-detect affirmative input when a pending
+            # confirmation exists and set confirmed_tool automatically.
+            # Without this, process_turn (which has no confirmation_token
+            # parameter) could never resolve pending confirmations — the
+            # prerouter would intercept "evet" as AFFIRMATIVE/smalltalk and
+            # return "Tamam efendim" while the confirmed tool never executes.
+            _AFFIRMATIVE_TOKENS = frozenset({
+                "evet", "e", "yes", "y", "ok", "okay", "tamam", "olur",
+                "peki", "tabii", "tabi", "elbette", "onaylıyorum",
+            })
+            _NEGATIVE_TOKENS = frozenset({
+                "hayır", "h", "no", "n", "iptal", "vazgeç", "istemiyorum",
+            })
+            _user_stripped = user_input.strip().lower().rstrip(".!,?")
+            if (
+                state.has_pending_confirmation()
+                and not state.confirmed_tool
+                and _user_stripped in _AFFIRMATIVE_TOKENS
+            ):
+                pending = state.peek_pending_confirmation() or {}
+                pending_tool = str(pending.get("tool") or "").strip()
+                if pending_tool:
+                    state.confirmed_tool = pending_tool
+                    logger.info(
+                        "[CONFIRMATION] Auto-confirmed tool %s from "
+                        "affirmative input '%s'",
+                        pending_tool, user_input,
+                    )
+            elif (
+                state.has_pending_confirmation()
+                and not state.confirmed_tool
+                and _user_stripped in _NEGATIVE_TOKENS
+            ):
+                state.clear_pending_confirmation()
+                logger.info(
+                    "[CONFIRMATION] User rejected pending confirmation "
+                    "with '%s' — cleared.",
+                    user_input,
+                )
+                from bantz.brain.llm_router import OrchestratorOutput
+                return (
+                    OrchestratorOutput(
+                        route="smalltalk",
+                        calendar_intent="none",
+                        slots={},
+                        confidence=1.0,
+                        tool_plan=[],
+                        assistant_reply="Tamam, iptal ettim.",
+                        raw_output={"confirmation_rejected": True},
+                    ),
+                    state,
+                )
+
             # ── Issue #869 fix: When a confirmed_tool is set and there is a
             # pending confirmation, skip LLM planning entirely.  The prerouter
             # would otherwise intercept "evet" as AFFIRMATIVE/smalltalk and
