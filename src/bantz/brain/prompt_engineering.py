@@ -282,17 +282,22 @@ class PromptBuilder:
 
         # Issue #874: Use personality identity lines if available
         if personality_block:
-            # Personality block already contains identity, style, honorifics.
-            # Keep language and output format rules as non-negotiable.
+            # Personality block contains identity & style, but may omit
+            # the 'Efendim' honorific.  Issue #1019: Add it as a fallback
+            # line if the personality block doesn't already mention it.
+            honorific_line = ""
+            if "efendim" not in personality_block.lower():
+                honorific_line = "- 'Efendim' hitabını kullan."
             return "\n".join(
-                [
+                filter(None, [
                     "Kimlik / Roller:",
                     personality_block,
+                    honorific_line,
                     "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
                     f"- Ton: {style}.",
                     "- Çıktı: Sadece kullanıcıya söyleyeceğin metin. JSON/Markdown yok.",
                     extra,
-                ]
+                ])
             ).strip()
 
         return "\n".join(
