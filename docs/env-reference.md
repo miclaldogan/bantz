@@ -9,7 +9,7 @@ Env dosyası: `~/.config/bantz/env` (veya `BANTZ_ENV_FILE` ile override)
 | Değişken | Varsayılan | Açıklama |
 |----------|-----------|----------|
 | `BANTZ_VLLM_URL` | `http://localhost:8001` | vLLM API endpoint |
-| `BANTZ_VLLM_MODEL` | `Qwen/Qwen2.5-3B-Instruct-AWQ` | Router modeli |
+| `BANTZ_VLLM_MODEL` | `Qwen/Qwen2.5-3B-Instruct-AWQ` | Router modeli. 7B upgrade için: `Qwen/Qwen2.5-7B-Instruct-AWQ` (bkz. `config/model-settings.yaml` → `router_7b`) |
 | `BANTZ_ROUTER_CONTEXT_LEN` | (otomatik algılama, fallback 8192) | Router context window boyutu |
 | `GEMINI_API_KEY` | — | Gemini API anahtarı (quality tier için) |
 | `BANTZ_GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model adı |
