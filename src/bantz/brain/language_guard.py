@@ -151,6 +151,21 @@ def has_cjk(text: str, threshold: int = 2) -> bool:
     return False
 
 
+def has_arabic_hebrew(text: str, threshold: int = 2) -> bool:
+    """Return True if text contains ≥ *threshold* Arabic/Hebrew chars.
+
+    Issue #1017: Dedicated fast-path detection for Arabic/Hebrew script,
+    mirroring the existing ``has_cjk`` function pattern.
+    """
+    count = 0
+    for ch in text:
+        if _in_ranges(ch, _ARABIC_HEBREW_RANGES):
+            count += 1
+            if count >= threshold:
+                return True
+    return False
+
+
 def cjk_ratio(text: str) -> float:
     """Fraction of non-whitespace characters that are CJK/J/K."""
     non_ws = [ch for ch in text if not ch.isspace()]
@@ -233,6 +248,7 @@ def detect_language_issue(text: str) -> Optional[str]:
     Possible return values:
     - ``"cjk_detected"``  — Chinese/Japanese/Korean characters found
     - ``"cyrillic_detected"`` — Cyrillic script detected
+    - ``"arabic_hebrew_detected"`` — Arabic/Hebrew script detected
     - ``"low_turkish_confidence"`` — text is likely non-Turkish
     - ``None`` — text appears Turkish or is too short to judge
     """
@@ -243,14 +259,14 @@ def detect_language_issue(text: str) -> Optional[str]:
     if has_cjk(text, threshold=2):
         return "cjk_detected"
 
+    # --- Issue #1017: Arabic/Hebrew fast path (before full char scan) ---
+    if has_arabic_hebrew(text, threshold=2):
+        return "arabic_hebrew_detected"
+
     # --- Cyrillic detection ---
     counts = count_language_chars(text)
     if counts.get("cyrillic", 0) >= 3:
         return "cyrillic_detected"
-
-    # --- Issue #999: Arabic/Hebrew detection ---
-    if counts.get("arabic_hebrew", 0) >= 3:
-        return "arabic_hebrew_detected"
 
     # --- Turkish confidence check ---
     # Only flag if text is long enough and has letters
