@@ -63,7 +63,10 @@ class TestConfidenceScorerWeights:
     
     def test_expected_factors_present(self):
         """Expected factors are in weights."""
-        expected = ["source_count", "source_reliability", "recency", "agreement", "coverage"]
+        expected = [
+            "source_count", "source_reliability", "recency",
+            "agreement", "coverage", "cross_reference", "bias",
+        ]
         for factor in expected:
             assert factor in ConfidenceScorer.WEIGHTS
 
@@ -223,7 +226,7 @@ class TestConfidenceScorerRecency:
         assert score == 1.0
     
     def test_month_old_sources_medium_score(self):
-        """Sources within 30 days get medium score."""
+        """Sources within 30 days get medium-high score (per-source aging)."""
         reference = datetime(2024, 1, 30)
         scorer = ConfidenceScorer(reference_date=reference)
         
@@ -232,14 +235,15 @@ class TestConfidenceScorerRecency:
                 url="https://a.com",
                 title="A",
                 snippet="",
-                date=datetime(2024, 1, 10)  # ~20 days ago
+                date=datetime(2024, 1, 10),  # ~20 days ago
+                reliability_score=0.8,
             )
         ]
         score = scorer._score_recency(sources)
-        assert score == 0.7
+        assert score == 0.8  # Per-source: ≤30 days → 0.8
     
     def test_old_sources_low_score(self):
-        """Sources over 90 days get low score."""
+        """Sources over 365 days get low score (per-source aging)."""
         reference = datetime(2024, 6, 1)
         scorer = ConfidenceScorer(reference_date=reference)
         
@@ -248,11 +252,12 @@ class TestConfidenceScorerRecency:
                 url="https://a.com",
                 title="A",
                 snippet="",
-                date=datetime(2024, 1, 1)  # ~150 days ago
+                date=datetime(2024, 1, 1),  # ~150 days ago
+                reliability_score=0.8,
             )
         ]
         score = scorer._score_recency(sources)
-        assert score == 0.3
+        assert score == 0.6  # Per-source: ≤90 days → 0.6
     
     def test_no_dated_sources_neutral(self):
         """Sources without dates get neutral score."""
@@ -390,3 +395,114 @@ class TestConfidenceScorerFullScore:
         
         assert result.explanation != ""
         assert len(result.explanation) > 10
+
+
+class TestConfidenceScorerCrossReference:
+    """Test cross-reference scoring (#863)."""
+
+    @pytest.fixture
+    def scorer(self):
+        return ConfidenceScorer()
+
+    def test_single_source_low(self, scorer):
+        """Single source cannot cross-reference."""
+        sources = [Source(url="https://a.com", title="A", snippet="hello world")]
+        assert scorer._score_cross_reference(sources) == 0.3
+
+    def test_different_domains_overlapping_keywords(self, scorer):
+        """Two sources from different domains with overlapping keywords."""
+        s1 = Source(url="https://a.com", title="A", snippet="python released major update today",
+                    domain="a.com")
+        s2 = Source(url="https://b.com", title="B", snippet="python released major version today",
+                    domain="b.com")
+        score = scorer._score_cross_reference([s1, s2])
+        assert score >= 0.6
+
+    def test_same_domain_no_cross_ref(self, scorer):
+        """Same domain does not count as cross-reference."""
+        s1 = Source(url="https://a.com/1", title="A1",
+                    snippet="python released major update", domain="a.com")
+        s2 = Source(url="https://a.com/2", title="A2",
+                    snippet="python released major update", domain="a.com")
+        score = scorer._score_cross_reference([s1, s2])
+        assert score == 0.3
+
+    def test_no_overlap_low(self, scorer):
+        """Different domains with no keyword overlap → low."""
+        s1 = Source(url="https://a.com", title="A",
+                    snippet="ekonomi büyüme oranı", domain="a.com")
+        s2 = Source(url="https://b.com", title="B",
+                    snippet="futbol maçı sonucu", domain="b.com")
+        score = scorer._score_cross_reference([s1, s2])
+        assert score == 0.3
+
+
+class TestConfidenceScorerBias:
+    """Test bias / domain-concentration scoring (#863)."""
+
+    @pytest.fixture
+    def scorer(self):
+        return ConfidenceScorer()
+
+    def test_all_same_domain(self, scorer):
+        """All sources from the same domain → max penalty."""
+        sources = [
+            Source(url="https://a.com/1", title="A1", snippet="", domain="a.com"),
+            Source(url="https://a.com/2", title="A2", snippet="", domain="a.com"),
+            Source(url="https://a.com/3", title="A3", snippet="", domain="a.com"),
+        ]
+        assert scorer._score_bias(sources) == 0.2
+
+    def test_well_distributed(self, scorer):
+        """Sources from many different domains → no penalty."""
+        sources = [
+            Source(url="https://a.com", title="A", snippet="", domain="a.com"),
+            Source(url="https://b.com", title="B", snippet="", domain="b.com"),
+            Source(url="https://c.com", title="C", snippet="", domain="c.com"),
+            Source(url="https://d.com", title="D", snippet="", domain="d.com"),
+        ]
+        assert scorer._score_bias(sources) == 1.0
+
+    def test_high_concentration(self, scorer):
+        """≥75% from one domain → penalty."""
+        sources = [
+            Source(url="https://a.com/1", title="A1", snippet="", domain="a.com"),
+            Source(url="https://a.com/2", title="A2", snippet="", domain="a.com"),
+            Source(url="https://a.com/3", title="A3", snippet="", domain="a.com"),
+            Source(url="https://b.com", title="B", snippet="", domain="b.com"),
+        ]
+        assert scorer._score_bias(sources) == 0.4
+
+    def test_single_source_neutral(self, scorer):
+        """Single source → neutral (count factor handles it)."""
+        sources = [Source(url="https://a.com", title="A", snippet="", domain="a.com")]
+        assert scorer._score_bias(sources) == 0.5
+
+
+class TestConfidenceScorerPerSourceRecency:
+    """Test per-source recency aging (#863)."""
+
+    def test_mixed_age_sources(self):
+        """Average of old + new should be between their individual scores."""
+        ref = datetime(2024, 6, 1)
+        scorer = ConfidenceScorer(reference_date=ref)
+        recent = Source(url="https://a.com", title="A", snippet="",
+                        date=datetime(2024, 5, 30), reliability_score=0.8)
+        old = Source(url="https://b.com", title="B", snippet="",
+                     date=datetime(2023, 1, 1), reliability_score=0.8)
+        score = scorer._score_recency([recent, old])
+        # Recent=1.0, Old(>365d)=0.25 → average ≈ 0.625
+        assert 0.5 < score < 0.8
+
+    def test_all_old_sources_low(self):
+        """All sources over 1 year → low recency."""
+        ref = datetime(2024, 6, 1)
+        scorer = ConfidenceScorer(reference_date=ref)
+        sources = [
+            Source(url="https://a.com", title="A", snippet="",
+                   date=datetime(2022, 1, 1), reliability_score=0.8),
+            Source(url="https://b.com", title="B", snippet="",
+                   date=datetime(2022, 6, 1), reliability_score=0.8),
+        ]
+        score = scorer._score_recency(sources)
+        assert score <= 0.3
