@@ -536,14 +536,14 @@ class OrchestratorLoop:
             Updated output with forced tool_plan if needed
         """
         # Issue #347: Skip if confidence is too low - router wants clarification
-        # Issue #682: Lowered from 0.7 to 0.4 — 3B models typically produce
-        # 0.5-0.65 confidence for clear tool queries.  The old 0.7 gate
-        # blocked almost all forced tool injection.
+        # Issue #935: Aligned threshold to 0.5 — matches prompt rule and
+        # router confidence_threshold.  3B models give 0.5-0.65 for clear
+        # queries; 0.4 was too permissive, 0.7 was too strict.
         #
         # Issue #607: Gmail send intents should not get stuck tool-less just
         # because confidence is low.
         gmail_intent = (getattr(output, "gmail_intent", None) or "").strip().lower()
-        if output.confidence < 0.4 and not (
+        if output.confidence < 0.5 and not (
             output.route == "gmail" and gmail_intent == "send" and not output.ask_user
         ):
             return output
@@ -801,7 +801,7 @@ class OrchestratorLoop:
             if (
                 orchestrator_output.route == "unknown"
                 and not orchestrator_output.ask_user
-                and orchestrator_output.confidence < 0.4
+                and orchestrator_output.confidence < 0.5
             ):
                 try:
                     from bantz.skills.declarative.generator import get_self_evolving_manager
