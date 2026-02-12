@@ -126,15 +126,18 @@ class SQLiteMemoryStore:
     Thread-safe via ``check_same_thread=False`` and WAL journal mode.
     """
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, *, auto_prune: int = 50):
         """Initialize store and create schema.
 
         Args:
             db_path: Path to SQLite database file. ``~`` is expanded.
                      Parent directories are created automatically.
+            auto_prune: Automatically prune sessions beyond this limit
+                        on startup.  Set to ``0`` to disable.
         """
         self._db_path = str(Path(db_path).expanduser())
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._closed = False
 
         self._conn = sqlite3.connect(
             self._db_path,
@@ -146,6 +149,13 @@ class SQLiteMemoryStore:
         self._conn.executescript(_SCHEMA_SQL)
         self._conn.commit()
         logger.info("[MEMORY_STORE] Opened SQLite store at %s", self._db_path)
+
+        # Auto-prune stale sessions on startup
+        if auto_prune > 0:
+            try:
+                self.prune_old_sessions(keep_sessions=auto_prune)
+            except Exception:  # noqa: BLE001 — best-effort
+                logger.warning("[MEMORY_STORE] Auto-prune failed", exc_info=True)
 
     @classmethod
     def from_config(cls, config: MemoryStoreConfig) -> "SQLiteMemoryStore":
@@ -403,10 +413,25 @@ class SQLiteMemoryStore:
     # ---- cleanup ------------------------------------------------------
 
     def close(self) -> None:
-        """Close the database connection."""
+        """Close the database connection (idempotent)."""
+        if self._closed:
+            return
+        self._closed = True
         if self._conn:
-            self._conn.close()
+            try:
+                self._conn.close()
+            except Exception:  # noqa: BLE001
+                logger.warning("[MEMORY_STORE] Error closing connection", exc_info=True)
+            finally:
+                self._conn = None
             logger.info("[MEMORY_STORE] Closed SQLite store")
+
+    def __del__(self) -> None:
+        """Safety-net destructor — close if caller forgot."""
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001 — prevent __del__ exceptions
+            pass
 
     def __enter__(self) -> "SQLiteMemoryStore":
         return self
@@ -541,15 +566,28 @@ class PersistentDialogSummaryManager:
         self._store.end_session(self._session_id)
 
     def close(self) -> None:
-        """End session and close store."""
-        self.end_session()
+        """End session and close store (idempotent)."""
+        if self._store is None:
+            return
+        try:
+            self.end_session()
+        except Exception:  # noqa: BLE001
+            pass
         self._store.close()
+        self._store = None
 
     def __len__(self) -> int:
         return len(self._manager)
 
     def __str__(self) -> str:
         return self._manager.to_prompt_block()
+
+    def __del__(self) -> None:
+        """Safety-net destructor."""
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     def __enter__(self) -> "PersistentDialogSummaryManager":
         return self
