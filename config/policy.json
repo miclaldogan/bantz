@@ -6,9 +6,10 @@
     "\\bshutdown\\b",
     "\\breboot\\b",
     "\\bpoweroff\\b",
-    "curl\\s+.*\\|\\s*sh",
-    "\\|",
-    ";"
+    "curl\\s+.*\\|\\s*(?:ba)?sh",
+    "wget\\s+.*\\|\\s*(?:ba)?sh",
+    "curl\\s+.*\\|\\s*python",
+    "wget\\s+.*\\|\\s*python"
   ],
   "confirm_patterns": [
     "\\bsudo\\b",
@@ -24,7 +25,11 @@
     "&"
   ],
   "deny_even_if_confirmed_patterns": [
-    "\\bsudo\\b"
+    "\\bsudo\\b",
+    "\\bsu\\b",
+    "\\bdoas\\b",
+    "\\bpkexec\\b",
+    "\\bnsenter\\b"
   ],
   "intent_levels": {
     "open_browser": "allow",
