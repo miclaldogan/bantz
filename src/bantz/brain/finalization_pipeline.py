@@ -19,6 +19,7 @@ Factory helpers:
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import os
@@ -197,14 +198,16 @@ class QualityFinalizer:
         *,
         finalizer_llm: LLMCompletionProtocol,
         guard: Optional[NoNewFactsGuard] = None,
+        timeout: float = 10.0,
     ):
         self._llm = finalizer_llm
         self._guard = guard
+        self._timeout = timeout
 
     def finalize(self, ctx: FinalizationContext) -> Optional[str]:
         """Build a prompt, call the quality LLM, apply guard, return text or ``None``."""
         finalizer_prompt = self._build_prompt(ctx)
-        text = _safe_complete(self._llm, finalizer_prompt)
+        text = _safe_complete(self._llm, finalizer_prompt, timeout=self._timeout)
 
         if not text:
             return None
@@ -342,14 +345,15 @@ class QualityFinalizer:
 class FastFinalizer:
     """Generate a user-facing reply using the local planner (3B) model."""
 
-    def __init__(self, *, planner_llm: LLMCompletionProtocol):
+    def __init__(self, *, planner_llm: LLMCompletionProtocol, timeout: float = 5.0):
         self._llm = planner_llm
+        self._timeout = timeout
 
     def finalize(self, ctx: FinalizationContext) -> Optional[str]:
         """Build a fast prompt, call the planner LLM, return text or ``None``."""
         try:
             prompt = self._build_prompt(ctx)
-            return _safe_complete(self._llm, prompt)
+            return _safe_complete(self._llm, prompt, timeout=self._timeout)
         except Exception:
             return None
 
@@ -922,23 +926,41 @@ def _tool_first_guard_message(*, route: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _safe_complete(
-    llm: LLMCompletionProtocol, prompt: str, **kwargs: Any
+    llm: LLMCompletionProtocol, prompt: str, *, timeout: float = 0, **kwargs: Any
 ) -> Optional[str]:
     """Call ``complete_text`` with a TypeError fallback for simple mocks.
 
     Issue #601: When TypeError is caught (e.g. mock or API signature mismatch),
     we now log a warning so that dropped kwargs (temperature, max_tokens) are
     visible in production logs instead of being silently swallowed.
+
+    Issue #947: When *timeout* > 0, the call is wrapped in a ThreadPoolExecutor
+    so a hung Gemini API does not block the entire turn indefinitely.
     """
+    def _do_complete() -> str:
+        try:
+            return llm.complete_text(prompt=prompt, **kwargs)
+        except TypeError as e:
+            logger.warning(
+                "[FINALIZER] LLM client TypeError — kwargs dropped %s: %s",
+                list(kwargs.keys()),
+                e,
+            )
+            return llm.complete_text(prompt=prompt)
+
     try:
-        text = llm.complete_text(prompt=prompt, **kwargs)
-    except TypeError as e:
-        logger.warning(
-            "[FINALIZER] LLM client TypeError — kwargs dropped %s: %s",
-            list(kwargs.keys()),
-            e,
-        )
-        text = llm.complete_text(prompt=prompt)
+        if timeout > 0:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="finalizer") as pool:
+                future = pool.submit(_do_complete)
+                text = future.result(timeout=timeout)
+        else:
+            text = _do_complete()
+    except concurrent.futures.TimeoutError:
+        logger.error("[FINALIZER] LLM call timed out after %.1fs", timeout)
+        return None
+    except Exception as exc:
+        logger.warning("[FINALIZER] LLM call failed: %s", exc)
+        return None
     return str(text or "").strip() or None
 
 
@@ -1052,17 +1074,19 @@ def create_pipeline(
     finalizer_llm: Any = None,
     planner_llm: Any = None,
     event_bus: Any = None,
+    quality_timeout: float = 10.0,
+    fast_timeout: float = 5.0,
 ) -> FinalizationPipeline:
     """Create a ``FinalizationPipeline`` from LLM instances."""
     guard = (
         NoNewFactsGuard(finalizer_llm=finalizer_llm) if finalizer_llm else None
     )
     quality = (
-        QualityFinalizer(finalizer_llm=finalizer_llm, guard=guard)
+        QualityFinalizer(finalizer_llm=finalizer_llm, guard=guard, timeout=quality_timeout)
         if finalizer_llm
         else None
     )
-    fast = FastFinalizer(planner_llm=planner_llm) if planner_llm else None
+    fast = FastFinalizer(planner_llm=planner_llm, timeout=fast_timeout) if planner_llm else None
     return FinalizationPipeline(
         quality=quality, fast=fast, event_bus=event_bus
     )
