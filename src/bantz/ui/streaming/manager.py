@@ -371,7 +371,7 @@ class StreamingManager:
         """
         try:
             self._event_queue.put_nowait(event)
-        except:
+        except Exception:
             pass  # Queue full, drop event
     
     def on_event(self, event_type: EventType, callback: Callable[[ActionEvent], None]):
