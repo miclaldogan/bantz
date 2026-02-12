@@ -1,7 +1,6 @@
-autoawq>=0.2.6
+# Core runtime dependencies (lightweight).
+# For ML/LLM deps (torch, vllm, autoawq) see requirements-llm.txt
+# or install via:  pip install -e ".[llm]"
 openai>=1.40.0
 requests>=2.31.0
-torch>=2.4.0
-transformers>=4.45.0
-vllm>=0.6.0
 websockets>=11.0.0
