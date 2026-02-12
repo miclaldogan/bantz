@@ -104,6 +104,9 @@ class PIIFilter:
     TR_PATTERNS = {
         # TC Kimlik: exactly 11 digits at word boundary
         # (must start with non-zero, exactly 11 digits)
+        # Issue #892: Regex-only matching causes false positives on event IDs,
+        # timestamps, phone numbers etc. Actual redaction uses _is_valid_tc()
+        # checksum validation (see filter() method).
         "tc_kimlik": r'\b[1-9]\d{10}\b',
         # TR Phone: +90 5xx or 05xx with various separators
         "tr_phone": r'(?:\+90[\s.-]?|0)5\d{2}[\s.-]?\d{3}[\s.-]?\d{2}[\s.-]?\d{2}\b',
@@ -121,6 +124,32 @@ class PIIFilter:
         "plaka": r'(?<![-/])\b(?:0[1-9]|[1-7]\d|8[01])\s?[A-Z]{1,3}\s?\d{1,4}\b',
     }
     
+    @staticmethod
+    def _is_valid_tc(num_str: str) -> bool:
+        """Validate a TC Kimlik number using the official checksum algorithm.
+
+        Issue #892: The 11-digit regex alone matches event IDs, Unix
+        timestamps and phone numbers.  The TC Kimlik checksum narrows
+        matches to plausible national-ID numbers only.
+
+        Rules:
+        - First digit != 0
+        - 10th digit = (sum_of_odd_positions * 7 - sum_of_even_positions) % 10
+        - 11th digit = sum_of_first_10_digits % 10
+        """
+        if len(num_str) != 11 or not num_str.isdigit():
+            return False
+        digits = [int(d) for d in num_str]
+        if digits[0] == 0:
+            return False
+        odd_sum = sum(digits[i] for i in range(0, 9, 2))   # 1st,3rd,5th,7th,9th
+        even_sum = sum(digits[i] for i in range(1, 8, 2))   # 2nd,4th,6th,8th
+        if (odd_sum * 7 - even_sum) % 10 != digits[9]:
+            return False
+        if sum(digits[:10]) % 10 != digits[10]:
+            return False
+        return True
+
     @classmethod
     def filter(cls, text: str, enabled: bool = True, *, locale: str = "auto") -> str:
         """Replace PII with placeholders.
@@ -141,7 +170,15 @@ class PIIFilter:
         # Apply Turkish patterns FIRST (IBAN before credit_card to avoid partial matches)
         if locale in ("tr", "auto"):
             for pii_type, pattern in cls.TR_PATTERNS.items():
-                filtered = re.sub(pattern, f"<{pii_type.upper()}>", filtered)
+                if pii_type == "tc_kimlik":
+                    # Issue #892: Use checksum validation to avoid false positives
+                    filtered = re.sub(
+                        pattern,
+                        lambda m: "<TC_KIMLIK>" if cls._is_valid_tc(m.group()) else m.group(),
+                        filtered,
+                    )
+                else:
+                    filtered = re.sub(pattern, f"<{pii_type.upper()}>", filtered)
 
         # Then apply international patterns
         for pii_type, pattern in cls.PATTERNS.items():
