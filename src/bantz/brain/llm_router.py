@@ -263,6 +263,28 @@ class OrchestratorOutput:
     raw_output: dict[str, Any] = field(default_factory=dict)  # Full LLM response for debugging
     finalizer_model: str = ""  # Issue #517: which model generated assistant_reply
 
+    @property
+    def intent(self) -> str:
+        """Generic intent accessor across all routes.
+
+        Issue #944: calendar_intent is semantically wrong for non-calendar
+        routes. This property returns the route-appropriate intent:
+        - calendar → calendar_intent (create/modify/cancel/query/none)
+        - gmail → gmail_intent (list/search/read/send/none)
+        - system → calendar_intent (overloaded: time/status/query)
+        - smalltalk → "chat"
+        - unknown → "unknown"
+        """
+        route = (self.route or "").lower()
+        if route == "gmail":
+            return self.gmail_intent or "none"
+        if route == "smalltalk":
+            return "chat"
+        if route == "unknown":
+            return "unknown"
+        # calendar / system — use calendar_intent (backward compat)
+        return self.calendar_intent or "none"
+
 
 # Legacy alias for backward compatibility
 RouterOutput = OrchestratorOutput
