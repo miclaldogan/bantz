@@ -194,8 +194,14 @@ def turkish_confidence(text: str) -> float:
     cjk_letters = counts.get("cjk", 0) + counts.get("japanese", 0) + counts.get("korean", 0)
     foreign_letters = counts.get("cyrillic", 0) + counts.get("arabic_hebrew", 0)
 
-    # Start at 0.5
-    score = 0.5
+    # Issue #999: Pure ASCII text (only latin letters, no Turkish-specific
+    # chars) starts at a lower base score so that English text without any
+    # Turkish markers is correctly flagged as non-Turkish.
+    if turkish_letters == 0 and foreign_letters == 0 and cjk_letters == 0:
+        # Pure ASCII latin — likely English
+        score = 0.3
+    else:
+        score = 0.5
 
     # Turkish specific chars strongly boost
     if turkish_letters > 0:
@@ -242,6 +248,10 @@ def detect_language_issue(text: str) -> Optional[str]:
     if counts.get("cyrillic", 0) >= 3:
         return "cyrillic_detected"
 
+    # --- Issue #999: Arabic/Hebrew detection ---
+    if counts.get("arabic_hebrew", 0) >= 3:
+        return "arabic_hebrew_detected"
+
     # --- Turkish confidence check ---
     # Only flag if text is long enough and has letters
     total_letters = (
@@ -249,9 +259,21 @@ def detect_language_issue(text: str) -> Optional[str]:
         + counts.get("turkish_latin", 0)
     )
     if total_letters >= 10:
+        # Issue #999: Skip confidence check for URLs and code-like strings
+        # — these are technical content, not human language to translate.
+        _url_or_code = (
+            "://" in text
+            or text.strip().startswith("http")
+            or "(" in text and ")" in text  # function call pattern
+        )
+        if _url_or_code:
+            return None
+
         conf = turkish_confidence(text)
-        # Very low confidence AND no Turkish markers → likely English
-        if conf < 0.35 and not _TURKISH_MARKERS.search(text):
+        # Issue #999: Raised threshold from 0.35 to 0.45 and lowered
+        # base score for pure-ASCII text so that English sentences
+        # like "Please schedule a meeting" are correctly detected.
+        if conf < 0.45 and not _TURKISH_MARKERS.search(text):
             return "low_turkish_confidence"
 
     return None
