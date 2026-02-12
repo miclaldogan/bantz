@@ -1,9 +1,15 @@
 """Unified Finalizer Strategy (Issue #356).
 
-This module provides the shared finalizer implementation for OrchestratorLoop,
-ensuring consistent quality in response generation.
+.. deprecated::
+    This module is superseded by ``bantz.brain.finalization_pipeline``
+    which is the **active** finalization implementation used by
+    ``OrchestratorLoop``.  No production code imports this module.
 
-Key Features:
+    It is retained temporarily for backward-compatible test imports
+    and will be removed in a future release.  New code should use
+    ``bantz.brain.finalization_pipeline`` instead.
+
+Legacy features (no longer on the active path):
 - Unified prompt building with tool results support
 - Smart truncation for large tool results (max 2000 tokens)
 - No-new-facts guard to prevent hallucination
@@ -15,10 +21,19 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
+
+# Issue #904: Emit a DeprecationWarning so users/devs know to migrate.
+warnings.warn(
+    "bantz.brain.finalizer is deprecated and will be removed. "
+    "Use bantz.brain.finalization_pipeline instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 class LLMClientProtocol(Protocol):

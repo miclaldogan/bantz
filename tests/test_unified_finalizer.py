@@ -16,13 +16,16 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock
 
-from bantz.brain.finalizer import (
-    finalize,
-    FinalizerConfig,
-    FinalizerResult,
-    _prepare_tool_results_for_finalizer,
-    _build_finalizer_prompt,
-)
+import warnings
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
+    from bantz.brain.finalizer import (
+        finalize,
+        FinalizerConfig,
+        FinalizerResult,
+        _prepare_tool_results_for_finalizer,
+        _build_finalizer_prompt,
+    )
 
 
 # ============================================================================
