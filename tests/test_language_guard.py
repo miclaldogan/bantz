@@ -341,3 +341,53 @@ class TestIssue653FinalizationIntegration:
         text = "캘린더 이벤트가 생성되었습니다"
         result = _validate_reply_language(text)
         assert result != text
+
+
+# =============================================================================
+# Issue #999: English pass-through & Arabic/Hebrew detection
+# =============================================================================
+
+
+class TestIssue999EnglishAndArabicDetection:
+    """Issue #999: Pure English text was passing through the language guard
+    because base score (0.5) exceeded the threshold (0.35)."""
+
+    def test_pure_english_sentence_detected(self):
+        """Plain English sentence should be flagged."""
+        result = detect_language_issue("Please schedule a meeting for tomorrow at three pm")
+        assert result == "low_turkish_confidence"
+
+    def test_english_short_phrase_detected(self):
+        """Shorter English phrases should also be flagged."""
+        result = detect_language_issue("Hello world how are you doing today")
+        assert result == "low_turkish_confidence"
+
+    def test_turkish_with_markers_not_flagged(self):
+        """Turkish text with markers should NOT be flagged."""
+        result = detect_language_issue("Merhaba, bu toplantıyı oluşturdum")
+        assert result is None
+
+    def test_turkish_special_chars_not_flagged(self):
+        """Text with Turkish-specific chars (ğ,ş,ç,ö,ü,ı) should pass."""
+        result = detect_language_issue("Görevlerinizi şimdi tamamlayın")
+        assert result is None
+
+    def test_arabic_text_detected(self):
+        """Arabic script should be detected."""
+        result = detect_language_issue("مرحبا كيف حالك اليوم")
+        assert result == "arabic_hebrew_detected"
+
+    def test_hebrew_text_detected(self):
+        """Hebrew script should be detected."""
+        result = detect_language_issue("שלום מה שלומך היום")
+        assert result == "arabic_hebrew_detected"
+
+    def test_url_not_flagged(self):
+        """URLs should not be flagged as non-Turkish."""
+        result = detect_language_issue("https://www.youtube.com/watch?v=abc123")
+        assert result is None
+
+    def test_code_not_flagged(self):
+        """Code snippets should not be flagged."""
+        result = detect_language_issue("print('hello')")
+        assert result is None
