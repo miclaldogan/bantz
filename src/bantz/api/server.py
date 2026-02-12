@@ -128,9 +128,11 @@ def create_app(
     )
 
     # ── CORS ────────────────────────────────────────────────────────
+    origins, origin_regex = _get_cors_config()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_get_allowed_origins(),
+        allow_origins=origins,
+        allow_origin_regex=origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -273,21 +275,38 @@ def create_app(
 # Helper functions
 # ─────────────────────────────────────────────────────────────
 
-def _get_allowed_origins() -> list[str]:
-    """Get CORS allowed origins from env."""
+def _get_cors_config() -> tuple[list[str], str | None]:
+    """Get CORS config: (explicit origins, optional origin regex).
+
+    Issue #885: Starlette CORSMiddleware does NOT support glob
+    patterns like ``http://localhost:*``.  We use:
+    - ``allow_origins`` for exact matches (explicit ports)
+    - ``allow_origin_regex`` for localhost/127.0.0.1 on any port
+
+    Env:
+        BANTZ_CORS_ORIGINS  – comma-separated explicit origins (overrides defaults)
+    """
     import os
 
     origins_str = os.getenv("BANTZ_CORS_ORIGINS", "").strip()
     if origins_str:
-        return [o.strip() for o in origins_str.split(",") if o.strip()]
-    # Default: allow localhost variants for dev
-    return [
-        "http://localhost:*",
-        "http://127.0.0.1:*",
+        origins = [o.strip() for o in origins_str.split(",") if o.strip()]
+        return origins, None
+
+    # Default (dev): explicit common ports + regex for any localhost port
+    explicit = [
         "http://localhost:3000",
-        "http://localhost:8080",
         "http://localhost:5173",
+        "http://localhost:8080",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8080",
+        "http://127.0.0.1:8000",
     ]
+    # Regex covers ANY port on localhost / 127.0.0.1
+    regex = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    return explicit, regex
 
 
 def _check_components(server: Any) -> list[ComponentHealth]:
