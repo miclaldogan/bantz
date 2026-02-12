@@ -25,7 +25,7 @@ import threading
 from typing import Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 
-from bantz.router.nlu import Parsed, parse_intent as legacy_parse_intent
+from bantz.router.nlu import Parsed
 from bantz.nlu.types import IntentResult, NLUContext
 from bantz.nlu.hybrid import HybridNLU, HybridConfig
 
@@ -125,8 +125,9 @@ def parse_intent_hybrid(
         
     except Exception as e:
         if fallback_to_legacy:
-            # Fall back to legacy parser
-            return legacy_parse_intent(text)
+            # Fall back to regex parser
+            from bantz.router.nlu import parse_intent as _regex_parse
+            return _regex_parse(text)
         raise
 
 
@@ -206,7 +207,8 @@ def parse_intent_adaptive(text: str) -> Parsed:
     if _use_hybrid:
         return parse_intent_hybrid(text, fallback_to_legacy=True)
     else:
-        return legacy_parse_intent(text)
+        from bantz.router.nlu import parse_intent as _regex_parse
+        return _regex_parse(text)
 
 
 # ============================================================================
@@ -351,22 +353,23 @@ def compare_parsers(text: str) -> Dict[str, Any]:
     Returns:
         Comparison results
     """
-    # Legacy result
-    legacy = legacy_parse_intent(text)
+    # Regex result
+    from bantz.router.nlu import parse_intent as _regex_parse
+    regex_result = _regex_parse(text)
     
     # Hybrid result
     nlu = get_nlu()
     hybrid = nlu.parse(text)
     
     # Compare
-    intent_match = legacy.intent == hybrid.intent
-    slots_match = dict(legacy.slots) == dict(hybrid.slots)
+    intent_match = regex_result.intent == hybrid.intent
+    slots_match = dict(regex_result.slots) == dict(hybrid.slots)
     
     return {
         "text": text,
-        "legacy": {
-            "intent": legacy.intent,
-            "slots": dict(legacy.slots),
+        "regex": {
+            "intent": regex_result.intent,
+            "slots": dict(regex_result.slots),
         },
         "hybrid": {
             "intent": hybrid.intent,

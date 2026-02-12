@@ -433,34 +433,20 @@ class BantzServer:
         self._running = False
         self._browser_initialized = False
 
-        # Issue #567: Brain is now DEFAULT (was opt-in via BANTZ_USE_BRAIN=1).
-        # Legacy Router is the fallback only when brain is disabled
-        # or when BANTZ_USE_LEGACY=1 is explicitly set.
+        # Brain is the default runtime (Issue #567 → #851: legacy path removed).
         self._brain = None
         self._brain_state = None
-        _use_legacy = os.getenv("BANTZ_USE_LEGACY", "").strip().lower() in ("1", "true", "yes")
-        _brain_enabled = not _use_legacy  # brain on by default unless legacy forced
-        if _brain_enabled:
-            try:
-                from bantz.brain.runtime_factory import create_runtime
-                from bantz.brain.orchestrator_state import OrchestratorState
+        try:
+            from bantz.brain.runtime_factory import create_runtime
+            from bantz.brain.orchestrator_state import OrchestratorState
 
-                self._brain = create_runtime()
-                self._brain_state = OrchestratorState()
-                # Banner is printed by create_runtime() (Issue #588)
-            except Exception as e:
-                logging.getLogger(__name__).warning(
-                    "Brain init failed, falling back to legacy Router: %s", e
-                )
-                _brain_enabled = False
-
-        if not _brain_enabled:
-            from bantz.brain.runtime_banner import RuntimeBanner, format_banner
-
-            legacy_banner = RuntimeBanner(active_path="legacy", mode="router")
-            banner_text = format_banner(legacy_banner)
-            print(banner_text, flush=True)
-            logging.getLogger(__name__).info("\n%s", banner_text)
+            self._brain = create_runtime()
+            self._brain_state = OrchestratorState()
+            # Banner is printed by create_runtime() (Issue #588)
+        except Exception as e:
+            logging.getLogger(__name__).error(
+                "Brain init failed: %s", e
+            )
 
         # Proactive inbox (FIFO) for bantz_message events
         self._inbox = InboxStore(maxlen=200)
@@ -621,8 +607,7 @@ class BantzServer:
         if overlay._client and overlay._client.connected:
             overlay.thinking_sync("Anlıyorum...")
 
-        # Issue #567: Brain is the default handler for non-browser commands.
-        # Legacy Router is only used when brain is unavailable or for browser_* intents.
+        # Brain handles all non-browser commands (Issue #851: legacy Router path removed).
         if self._brain is not None and not parsed.intent.startswith("browser_"):
             try:
                 # ── Issue #869: Handle pending confirmation from previous turn ──
@@ -729,10 +714,15 @@ class BantzServer:
                     ),
                 }
             except Exception as e:
-                logging.getLogger(__name__).warning("Brain handler failed: %s", e)
-                # Fall through to legacy Router
+                logging.getLogger(__name__).error("Brain handler failed: %s", e)
+                return {
+                    "ok": False,
+                    "text": f"İşlem sırasında hata oluştu: {e}",
+                    "brain": True,
+                    "route": "error",
+                }
 
-        # Route command (legacy Router path)
+        # Route command (Router path — browser_* intents or brain unavailable)
         router = self._get_router()
         result = router.handle(text=command, ctx=self.ctx)
 
@@ -947,12 +937,7 @@ class BantzServer:
 
     @staticmethod
     def _recv_framed(sock: socket.socket) -> bytes:
-        """Read a length-prefixed frame.
-
-        Falls back to legacy single-recv mode when the first 4 bytes
-        are **not** a plausible length header (allows old clients to
-        keep working during the migration window).
-        """
+        """Read a length-prefixed frame."""
         # Read the first 4 bytes (length header)
         header = b""
         while len(header) < 4:
@@ -965,10 +950,7 @@ class BantzServer:
 
         # Sanity check: a realistic JSON payload < 64 MB
         if length > 67_108_864:
-            # Likely a legacy (unframed) client — treat header as data start
-            # and read the rest with a single recv.
-            rest = sock.recv(65536)
-            return header + rest
+            raise ValueError(f"Frame too large: {length} bytes")
 
         # Read exactly *length* bytes
         data = bytearray()
