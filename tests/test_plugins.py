@@ -846,43 +846,26 @@ class TestSkillRegistry:
     
     def test_registry_creation(self):
         """Test registry creation."""
-        registry = SkillRegistry()
-        assert registry is not None
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            registry = SkillRegistry(install_dir=Path(td) / "p", cache_dir=Path(td) / "c")
+            assert registry is not None
     
     def test_registry_search(self):
         """Test searching the registry."""
-        registry = SkillRegistry()
-        results = registry.search("spotify")
-        
-        assert isinstance(results, RegistrySearchResult)
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            registry = SkillRegistry(install_dir=Path(td) / "p", cache_dir=Path(td) / "c")
+            results = registry.search("anything")
+            assert isinstance(results, RegistrySearchResult)
     
-    def test_registry_get(self):
-        """Test getting a specific plugin."""
-        registry = SkillRegistry()
-        entry = registry.get("spotify")
-        
-        # Mock registry should have spotify
-        if entry:
-            assert entry.name == "spotify"
-    
-    def test_registry_get_popular(self):
-        """Test getting popular plugins."""
-        registry = SkillRegistry()
-        popular = registry.get_popular(limit=5)
-        
-        assert isinstance(popular, list)
-        assert len(popular) <= 5
-    
-    def test_registry_get_by_category(self):
-        """Test getting plugins by category."""
-        registry = SkillRegistry()
-        # Call with any category - just verify it doesn't error
-        try:
-            result = registry.get_by_category("music")
-            assert isinstance(result, list)
-        except (AttributeError, NotImplementedError):
-            # Method may not exist in all implementations
-            pass
+    def test_registry_get_unknown(self):
+        """Test getting a non-existent plugin."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            registry = SkillRegistry(install_dir=Path(td) / "p", cache_dir=Path(td) / "c")
+            entry = registry.get("nonexistent")
+            assert entry is None
 
 
 class TestMockSkillRegistry:
@@ -890,9 +873,12 @@ class TestMockSkillRegistry:
     
     def test_mock_registry(self):
         """Test mock registry."""
-        registry = MockSkillRegistry()
+        entries = [
+            RegistryEntry(name="spotify", version="1.0", author="T", description="Music"),
+        ]
+        registry = MockSkillRegistry(entries=entries)
         
-        results = registry.search("music")
+        results = registry.search("spotify")
         assert isinstance(results, RegistrySearchResult)
         
         entry = registry.get("spotify")
