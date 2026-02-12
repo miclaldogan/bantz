@@ -66,8 +66,13 @@ router:
   max_tokens: 256   # Issue #418: increased from 128 to avoid JSON truncation with slim schema
   top_p: 1.0
   stop_sequences:
-    - "}"
-    - "\n\n"
+    # IMPORTANT: Never use "}" alone as a stop sequence — it truncates JSON
+    # at the first nested closing brace instead of the root object's.
+    # The actual stop tokens are hardcoded in llm_router.py for safety.
+    # These are kept here for documentation only.
+    - "\nUSER:"
+    - "\n\nUSER:"
+    - "\n---"
   
   # Prompt budget
   max_system_prompt_tokens: 500

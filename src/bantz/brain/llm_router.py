@@ -1037,6 +1037,7 @@ USER: saat 8e toplantı ekle
             repair_common_json_issues,
             validate_orchestrator_output,
             apply_orchestrator_defaults,
+            balance_truncated_json,
         )
 
         # Issue #594: schema-level repair/validation (field-by-field)
@@ -1081,7 +1082,38 @@ USER: saat 8e toplantı ekle
                 "reason": self._extract_json_error_reason(e),
                 "phase": "first_parse",
             })
-        
+
+        # ── Issue #898: brace-balancing guard for truncated LLM output ──
+        # When max_tokens cuts the JSON mid-stream the output has unclosed
+        # braces/brackets.  Append the minimal closing chars and retry.
+        try:
+            balanced = balance_truncated_json(text)
+            if balanced != text:
+                parsed = extract_first_json_object(balanced, strict=False)
+                is_valid, errors = validate_orchestrator_output(parsed, strict=False)
+                if errors:
+                    logger.debug("[router_json] balanced_validation_issues: %s", errors)
+                self._publish_json_event("json_balanced", {
+                    "phase": "balance_parse",
+                    "chars_appended": len(balanced) - len(text),
+                })
+                try:
+                    repaired_schema, report = repair_router_output(parsed)
+                    if report.needed_repair:
+                        self._publish_json_event("schema_repaired", {
+                            "phase": "balance_parse",
+                            "fields_missing": report.fields_missing,
+                            "fields_invalid": report.fields_invalid,
+                            "fields_repaired": report.fields_repaired,
+                            "valid_after": report.is_valid_after,
+                        })
+                    parsed = repaired_schema
+                except Exception as exc:
+                    logger.debug("[router_json] schema_repair_failed (balanced): %s", str(exc)[:120])
+                return parsed, True
+        except Exception as e:
+            logger.debug("[router_json] balance_parse_failed: %s", str(e)[:100])
+
         # Second attempt: repair common issues and retry
         try:
             repaired = repair_common_json_issues(text)
