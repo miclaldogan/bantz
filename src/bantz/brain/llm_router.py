@@ -1524,13 +1524,31 @@ USER: saat 8e toplantı ekle
         # 3B model often gives correct route+intent but low/unreliable confidence.
         # Instead of blindly blocking on confidence < 0.7, boost confidence
         # when the route+intent make sense for the user input.
+        #
+        # Issue #889: Guard-rail — only boost when original confidence is above
+        # a minimum floor.  Very low values (< 0.3) indicate the model is
+        # genuinely confused and we should ask the user to clarify.
+        _BOOST_FLOOR = 0.3  # below this, never auto-boost
         if confidence < self._confidence_threshold:
             # Check if route+intent are actually valid and meaningful
             _route_valid = route in ("calendar", "gmail", "system")
             _has_intent = calendar_intent not in ("none", "")
             _has_tools = bool(tool_plan)
-            
-            if _route_valid and (_has_intent or _has_tools):
+
+            if confidence < _BOOST_FLOOR:
+                # Issue #889: confidence is too low to trust even a valid route
+                logger.info(
+                    "[confidence_guard] confidence %.2f < floor %.2f — refusing boost (route=%s intent=%s)",
+                    confidence, _BOOST_FLOOR, route, calendar_intent,
+                )
+                tool_plan = []
+                tool_plan_with_args = []
+                if not assistant_reply:
+                    assistant_reply = "Efendim, tam anlayamadım. Tekrar eder misiniz?"
+                ask_user = True
+                if not question:
+                    question = assistant_reply
+            elif _route_valid and (_has_intent or _has_tools):
                 # Route is valid with intent or tools → trust the model's decision,
                 # boost confidence to just above threshold
                 old_conf = confidence
