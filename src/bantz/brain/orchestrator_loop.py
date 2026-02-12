@@ -26,311 +26,33 @@ from bantz.brain.memory_lite import DialogSummaryManager, CompactSummary
 from bantz.core.events import EventBus, EventType
 from bantz.routing.preroute import PreRouter, IntentCategory, LocalResponseGenerator
 
+# Issue #941: Extracted modules — keep backward-compat re-exports
+from bantz.brain.tool_result_summarizer import (  # noqa: F401
+    _summarize_tool_result,
+    _prepare_tool_results_for_finalizer,
+    _build_tool_success_summary,
+    _count_items,
+    _extract_count,
+    _extract_field,
+)
+from bantz.brain.tool_plan_sanitizer import (
+    TOOL_REMAP,
+    force_tool_plan as _force_tool_plan_fn,
+    sanitize_tool_plan as _sanitize_tool_plan_fn,
+)
+from bantz.brain.post_route_corrections import (
+    looks_like_email_send_intent,
+    extract_first_email,
+    extract_recipient_name,
+    extract_message_body_hint,
+    post_route_correction_email_send,
+)
+from bantz.brain.tool_param_builder import build_tool_params
+
 logger = logging.getLogger(__name__)
 
-
-def _summarize_tool_result(result: Any, max_items: int = 5, max_chars: int = 500) -> str:
-    """Smart summarization of tool results that preserves structure.
-    
-    Issue #353: Avoid naive string truncation that breaks JSON and loses
-    structured data. Instead, intelligently summarize based on type.
-    
-    Args:
-        result: Tool result (dict, list, string, or other)
-        max_items: Maximum number of items to show for lists
-        max_chars: Maximum characters for final summary
-        
-    Returns:
-        Human-readable summary string
-    """
-    try:
-        if result is None:
-            return "None"
-            
-        # Handle lists: show total count + first N items
-        if isinstance(result, list):
-            total = len(result)
-            if total == 0:
-                return "[]"
-            preview = result[:max_items]
-            preview_json = json.dumps(preview, ensure_ascii=False)
-            if len(preview_json) > max_chars:
-                preview_json = preview_json[:max_chars] + "..."
-            if total > max_items:
-                return f"[{total} items, showing first {len(preview)}] {preview_json}"
-            return preview_json
-            
-        # Handle dicts: show keys + truncated JSON
-        if isinstance(result, dict):
-            if not result:
-                return "{}"
-            keys = list(result.keys())
-            result_json = json.dumps(result, ensure_ascii=False)
-            if len(result_json) > max_chars:
-                result_json = result_json[:max_chars] + "..."
-            return f"{{keys: {keys}}} {result_json}"
-            
-        # Handle strings: smart truncation
-        if isinstance(result, str):
-            if len(result) > max_chars:
-                return result[:max_chars] + f"... ({len(result)} chars total)"
-            return result
-            
-        # Other types: convert to string with length limit
-        result_str = str(result)
-        if len(result_str) > max_chars:
-            return result_str[:max_chars] + "..."
-        return result_str
-        
-    except Exception as e:
-        # Fallback: safe string conversion
-        try:
-            s = str(result)
-            return s[:max_chars] if len(s) > max_chars else s
-        except Exception:
-            return f"<error serializing result: {e}>"
-
-
-def _prepare_tool_results_for_finalizer(
-    tool_results: list[dict[str, Any]],
-    max_tokens: int = 2000,
-) -> tuple[list[dict[str, Any]], bool]:
-    """Prepare tool results for finalizer prompt with token budget control.
-    
-    Issue #354: Finalizer prompts can overflow context when tool results are large.
-    This function intelligently truncates/summarizes results to fit within budget.
-    
-    Strategy:
-    1. Try full raw_result for each tool (best quality)
-    2. If budget exceeded, use result_summary instead (smart truncation)
-    3. If still too large, truncate summaries further
-    4. Return warning flag if truncation occurred
-    
-    Args:
-        tool_results: List of tool result dicts with raw_result and result_summary
-        max_tokens: Maximum tokens to allocate for tool results section
-        
-    Returns:
-        Tuple of (processed_results, was_truncated)
-    """
-    if not tool_results:
-        return [], False
-    
-    from bantz.llm.token_utils import estimate_tokens_json
-    
-    # Step 1: Try using raw_result for all tools (best quality)
-    finalizer_results = []
-    for r in tool_results:
-        finalizer_r = {
-            "tool": r.get("tool"),
-            "success": r.get("success"),
-            "result": r.get("raw_result"),  # Full structured data
-            "error": r.get("error"),
-        }
-        finalizer_results.append(finalizer_r)
-    
-    tokens = estimate_tokens_json(finalizer_results)
-    if tokens <= max_tokens:
-        # Fits within budget, use raw results
-        return finalizer_results, False
-    
-    # Step 2: Budget exceeded, use result_summary instead
-    logger.warning(
-        f"[FINALIZER] Tool results ({tokens} tokens) exceed budget ({max_tokens}), "
-        f"using summaries instead of raw data"
-    )
-    
-    finalizer_results = []
-    for r in tool_results:
-        finalizer_r = {
-            "tool": r.get("tool"),
-            "success": r.get("success"),
-            "result": r.get("result_summary", ""),  # Use summary
-            "error": r.get("error"),
-        }
-        finalizer_results.append(finalizer_r)
-    
-    tokens = estimate_tokens_json(finalizer_results)
-    if tokens <= max_tokens:
-        # Summaries fit within budget
-        return finalizer_results, True
-    
-    # Step 3: Even summaries are too large, truncate aggressively
-    logger.warning(
-        f"[FINALIZER] Tool result summaries ({tokens} tokens) still exceed budget, "
-        f"truncating to first 3 tools"
-    )
-    
-    # Keep only first 3 tools and truncate their summaries
-    truncated_results = []
-    for r in finalizer_results[:3]:
-        summary = str(r.get("result", ""))
-        if len(summary) > 200:
-            summary = summary[:200] + "..."
-        
-        truncated_r = {
-            "tool": r.get("tool"),
-            "success": r.get("success"),
-            "result": summary,
-            "error": r.get("error"),
-        }
-        truncated_results.append(truncated_r)
-    
-    return truncated_results, True
-
-
-def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
-    """Build a tool-aware success summary instead of generic 'Tamamlandı efendim'.
-    
-    Issue #370: When assistant_reply is empty after successful tool execution,
-    generate a meaningful summary from tool results instead of a generic message.
-    
-    Heuristics:
-    - list/query tools → count items found
-    - create tools → confirm what was created  
-    - send tools → confirm what was sent
-    - Multiple tools → summarize each
-    
-    Args:
-        tool_results: List of tool result dicts with tool name, success, raw_result
-        
-    Returns:
-        User-friendly Turkish summary of tool results
-    """
-    if not tool_results:
-        return "Tamamlandı efendim."
-
-    parts: list[str] = []
-    
-    for r in tool_results:
-        tool_name = str(r.get("tool") or "")
-        raw = r.get("raw_result")
-        success = r.get("success", False)
-        
-        if not success:
-            continue
-        
-        # Calendar query tools: count events
-        if tool_name in ("calendar.list_events", "calendar.find_free_slots"):
-            count = _count_items(raw)
-            if tool_name == "calendar.list_events":
-                if count == 0:
-                    parts.append("Takvimde etkinlik bulunamadı efendim.")
-                elif count == 1:
-                    parts.append("1 etkinlik bulundu efendim.")
-                else:
-                    parts.append(f"{count} etkinlik bulundu efendim.")
-            else:
-                if count == 0:
-                    parts.append("Uygun boş zaman dilimi bulunamadı efendim.")
-                else:
-                    parts.append(f"{count} uygun zaman dilimi bulundu efendim.")
-        
-        # Calendar create
-        elif tool_name == "calendar.create_event":
-            title = _extract_field(raw, "title", "summary")
-            if title:
-                parts.append(f"'{title}' etkinliği oluşturuldu efendim.")
-            else:
-                parts.append("Etkinlik oluşturuldu efendim.")
-        
-        # Gmail list/search
-        elif tool_name in ("gmail.list_messages", "gmail.smart_search"):
-            count = _count_items(raw)
-            if count == 0:
-                parts.append("Mesaj bulunamadı efendim.")
-            elif count == 1:
-                parts.append("1 mesaj bulundu efendim.")
-            else:
-                parts.append(f"{count} mesaj bulundu efendim.")
-        
-        # Gmail unread count
-        elif tool_name == "gmail.unread_count":
-            count = _extract_count(raw)
-            if count is not None:
-                if count == 0:
-                    parts.append("Okunmamış mesajınız yok efendim.")
-                else:
-                    parts.append(f"{count} okunmamış mesajınız var efendim.")
-            else:
-                parts.append("Okunmamış mesaj sayısı alındı efendim.")
-        
-        # Gmail send
-        elif tool_name in ("gmail.send", "gmail.send_to_contact", "gmail.send_draft"):
-            parts.append("Mail gönderildi efendim.")
-        
-        # Gmail read
-        elif tool_name == "gmail.get_message":
-            parts.append("Mesaj getirildi efendim.")
-        
-        # Gmail draft
-        elif tool_name == "gmail.create_draft":
-            parts.append("Taslak oluşturuldu efendim.")
-        
-        # Contacts
-        elif tool_name == "contacts.list":
-            count = _count_items(raw)
-            parts.append(f"{count} kişi listelendi efendim." if count > 0 else "Kayıtlı kişi bulunamadı efendim.")
-        
-        elif tool_name == "contacts.resolve":
-            parts.append("Kişi bilgisi çözümlendi efendim.")
-        
-        # Generic fallback for unknown tools
-        else:
-            tool_short = tool_name.split(".")[-1] if "." in tool_name else tool_name
-            parts.append(f"{tool_short} tamamlandı efendim.")
-    
-    if not parts:
-        # All tools either failed or unrecognized
-        if len(tool_results) > 1:
-            return f"{len(tool_results)} işlem tamamlandı efendim."
-        return "Tamamlandı efendim."
-    
-    if len(parts) == 1:
-        return parts[0]
-    
-    # Multiple tool summaries: join with newlines
-    return "\n".join(parts)
-
-
-def _count_items(raw: Any) -> int:
-    """Count items from a tool result (list, dict with items/events, or count field)."""
-    if isinstance(raw, list):
-        return len(raw)
-    if isinstance(raw, dict):
-        # Check for nested lists
-        for key in ("events", "items", "messages", "results", "data", "contacts", "slots"):
-            val = raw.get(key)
-            if isinstance(val, list):
-                return len(val)
-        # Check for count fields
-        for key in ("count", "total", "total_count"):
-            val = raw.get(key)
-            if isinstance(val, (int, float)):
-                return int(val)
-    return 0
-
-
-def _extract_count(raw: Any) -> int | None:
-    """Extract a count value from a tool result."""
-    if isinstance(raw, (int, float)):
-        return int(raw)
-    if isinstance(raw, dict):
-        for key in ("count", "total", "unread_count", "value"):
-            val = raw.get(key)
-            if isinstance(val, (int, float)):
-                return int(val)
-    return None
-
-
-def _extract_field(raw: Any, *field_names: str) -> str | None:
-    """Extract a string field from a tool result dict."""
-    if isinstance(raw, dict):
-        for name in field_names:
-            val = raw.get(name)
-            if isinstance(val, str) and val.strip():
-                return val.strip()
-    return None
+# Issue #941: Module-level helpers moved to bantz.brain.tool_result_summarizer
+# Re-exported above for backward compatibility.
 
 
 @dataclass
@@ -524,161 +246,23 @@ class OrchestratorLoop:
             self._finalization_pipeline_key = key
         return self._finalization_pipeline
     
+    # Issue #941: _force_tool_plan, _TOOL_REMAP, _sanitize_tool_plan
+    # extracted to bantz.brain.tool_plan_sanitizer.  Thin wrappers kept
+    # so existing callers inside this class continue to work.
+
+    _TOOL_REMAP = TOOL_REMAP  # backward-compat alias
+
     def _force_tool_plan(self, output: OrchestratorOutput) -> OrchestratorOutput:
-        """Force mandatory tools based on route+intent (Issue #282).
-        
-        Prevents LLM hallucination by ensuring queries always have tool_plan.
-        If LLM returns empty tool_plan but route+intent requires tools,
-        we inject the mandatory tools.
-        
-        Issue #347: Respects router's confidence threshold. If router cleared
-        tool_plan due to low confidence, we honor that decision instead of
-        forcing tools back in. Only force tools when confidence is adequate.
-        
-        Args:
-            output: Original LLM output
-            
-        Returns:
-            Updated output with forced tool_plan if needed
-        """
-        # Issue #936: ask_user guard MUST be the first check.
-        # When the router (or post-route-correction) sets ask_user=true,
-        # we unconditionally respect it — no confidence gate or gmail
-        # exemption should override the decision to ask the user.
-        if output.ask_user:
-            return output
-
-        # Issue #347: Skip if confidence is too low - router wants clarification
-        # Issue #935: Aligned threshold to 0.5 — matches prompt rule and
-        # router confidence_threshold.  3B models give 0.5-0.65 for clear
-        # queries; 0.4 was too permissive, 0.7 was too strict.
-        #
-        # Issue #607: Gmail send intents should not get stuck tool-less just
-        # because confidence is low.
-        gmail_intent = (getattr(output, "gmail_intent", None) or "").strip().lower()
-        if output.confidence < 0.5 and not (
-            output.route == "gmail" and gmail_intent == "send"
-        ):
-            return output
-        
-        # Skip if tool_plan already populated
-        if output.tool_plan:
-            return output
-        
-        # Skip for smalltalk/unknown - no tools needed
-        if output.route in ("smalltalk", "unknown"):
-            return output
-        
-        # Issue #317: Check gmail_intent first for gmail route
-        if output.route == "gmail" and gmail_intent and gmail_intent != "none":
-            mandatory_tools = self._gmail_intent_map.get(gmail_intent)
-            if mandatory_tools:
-                if self.config.debug:
-                    logger.debug(f"[FORCE_TOOL_PLAN] Gmail intent '{gmail_intent}', forcing: {mandatory_tools}")
-                from dataclasses import replace
-                return replace(output, tool_plan=mandatory_tools)
-        
-        # Skip if intent is "none" - no action needed (e.g., email drafting)
-        if output.calendar_intent in ("none", ""):
-            # For gmail without gmail_intent, try fallback based on route
-            if output.route == "gmail":
-                mandatory_tools = ["gmail.list_messages"]
-                if self.config.debug:
-                    logger.debug(f"[FORCE_TOOL_PLAN] Gmail fallback, forcing: {mandatory_tools}")
-                from dataclasses import replace
-                return replace(output, tool_plan=mandatory_tools)
-            return output
-        
-        # Issue #897: For gmail routes, use gmail_intent as the lookup key
-        # instead of calendar_intent (which is semantically wrong for gmail).
-        if output.route == "gmail":
-            mandatory_tools = self._gmail_intent_map.get(gmail_intent)
-            if not mandatory_tools:
-                mandatory_tools = ["gmail.list_messages"]  # safe fallback
-        else:
-            key = (output.route, output.calendar_intent)
-            mandatory_tools = self._mandatory_tool_map.get(key)
-        
-        if not mandatory_tools:
-            # Route-only fallback for system route
-            if output.route == "system":
-                mandatory_tools = ["time.now"]
-            else:
-                return output
-        
-        if self.config.debug:
-            logger.debug(f"[FORCE_TOOL_PLAN] Empty tool_plan for {key}, forcing: {mandatory_tools}")
-        
-        # Create new output with forced tool_plan
-        # We use dataclass replace pattern
-        from dataclasses import replace
-        updated_output = replace(output, tool_plan=mandatory_tools)
-        
-        return updated_output
-
-    # -- Issue #870: Tool-plan sanitization / LLM hallucination remap ------
-
-    # Map of known LLM-hallucinated or mismatched tool names to correct tools.
-    # Key: (tool_name, gmail_intent or "*") → replacement tool name.
-    _TOOL_REMAP: dict[tuple[str, str], str] = {
-        # "maillerimi kontrol et" → LLM picks gmail.list_drafts with intent=list,
-        # but user wants inbox listing, not drafts.
-        ("gmail.list_drafts", "list"): "gmail.list_messages",
-        # Phantom tool names the LLM sometimes hallucinates
-        ("gmail.list_all", "*"): "gmail.list_messages",
-        ("gmail.search_messages", "*"): "gmail.smart_search",
-        ("gmail.check_inbox", "*"): "gmail.list_messages",
-        ("gmail.get_unread", "*"): "gmail.unread_count",
-        ("gmail.inbox", "*"): "gmail.list_messages",
-        ("gmail.read_mail", "*"): "gmail.get_message",
-        ("calendar.get_events", "*"): "calendar.list_events",
-        ("calendar.add_event", "*"): "calendar.create_event",
-        ("calendar.remove_event", "*"): "calendar.delete_event",
-    }
+        return _force_tool_plan_fn(
+            output,
+            self._mandatory_tool_map,
+            self._gmail_intent_map,
+            debug=self.config.debug,
+        )
 
     def _sanitize_tool_plan(self, output: OrchestratorOutput) -> OrchestratorOutput:
-        """Remap hallucinated or intent-mismatched tool names (Issue #870).
+        return _sanitize_tool_plan_fn(output, self._TOOL_REMAP)
 
-        Two cases:
-        1. LLM emits a phantom tool name not in the registry → remap to a
-           known tool via ``_TOOL_REMAP``.
-        2. LLM emits a valid tool but it contradicts the gmail_intent
-           (e.g. gmail.list_drafts with intent=list → gmail.list_messages).
-
-        Only touches tools that have an entry in ``_TOOL_REMAP``; unknown
-        tools pass through and will be caught by ``_execute_tools_phase``.
-        """
-        if not output.tool_plan:
-            return output
-
-        gmail_intent = (getattr(output, "gmail_intent", None) or "").strip().lower()
-        calendar_intent = (output.calendar_intent or "").strip().lower()
-        intent_key = gmail_intent or calendar_intent or "*"
-
-        changed = False
-        new_plan: list[str] = []
-        for tool_name in output.tool_plan:
-            # Try (tool, intent) first, then (tool, "*") wildcard
-            replacement = self._TOOL_REMAP.get((tool_name, intent_key))
-            if replacement is None:
-                replacement = self._TOOL_REMAP.get((tool_name, "*"))
-
-            if replacement and replacement != tool_name:
-                logger.info(
-                    "[SANITIZE] Remapping tool '%s' → '%s' (intent=%s)",
-                    tool_name, replacement, intent_key,
-                )
-                new_plan.append(replacement)
-                changed = True
-            else:
-                new_plan.append(tool_name)
-
-        if not changed:
-            return output
-
-        from dataclasses import replace
-        return replace(output, tool_plan=new_plan)
-    
     def process_turn(
         self,
         user_input: str,
@@ -1480,147 +1064,22 @@ class OrchestratorLoop:
 
         return output
 
-    @staticmethod
-    def _looks_like_email_send_intent(text: str) -> bool:
-        t = (text or "").strip().lower()
-        if not t:
-            return False
-        # Strong-ish patterns to avoid triggering on "mail oku" / "mailleri ara".
-        return bool(
-            re.search(r"\b(mail|e-?posta)\b\s*(gönder|at|yaz|yolla|ilet)\b", t)
-            or re.search(r"\b(mail|e-?posta)\b.*\b(gönder|at|yaz|yolla|ilet)\b", t)
-        )
+    # Issue #941: Static email helpers and _post_route_correction_email_send
+    # extracted to bantz.brain.post_route_corrections.  Thin wrappers kept.
 
-    @staticmethod
-    def _extract_first_email(text: str) -> str | None:
-        m = re.search(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", text or "")
-        return str(m.group(0)).strip() if m else None
-
-    @staticmethod
-    def _extract_recipient_name(text: str) -> str | None:
-        # Heuristic: "Ali'ye mail ..." or "Ahmet Bey'e eposta ..."
-        t = text or ""
-        m = re.search(
-            r"\b([A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]+(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]+)*)\s*'?\s*(?:ye|ya)\s+(?:bir\s+)?(?:mail|e-?posta)\b",
-            t,
-            flags=re.IGNORECASE,
-        )
-        if not m:
-            return None
-        name = str(m.group(1) or "").strip()
-        return name or None
-
-    @staticmethod
-    def _extract_message_body_hint(text: str) -> str | None:
-        # Heuristic: everything after "mail at/gönder/yaz".
-        t = (text or "").strip()
-        m = re.search(
-            r"\b(?:mail|e-?posta)\b\s*(?:gönder|at|yaz|yolla|ilet)\b\s*(.+)$",
-            t,
-            flags=re.IGNORECASE,
-        )
-        if not m:
-            return None
-        body = str(m.group(1) or "").strip()
-
-        # Common phrasing: "mail at test@example.com" (recipient only, no body).
-        # If the captured remainder is just an email (or starts with one), strip it.
-        email_in_body = re.search(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", body)
-        if email_in_body and email_in_body.start() == 0:
-            body = body[email_in_body.end():].strip(" \t\n\r,;:-")
-
-        return body or None
+    _looks_like_email_send_intent = staticmethod(looks_like_email_send_intent)
+    _extract_first_email = staticmethod(extract_first_email)
+    _extract_recipient_name = staticmethod(extract_recipient_name)
+    _extract_message_body_hint = staticmethod(extract_message_body_hint)
 
     def _post_route_correction_email_send(
         self,
         user_input: str,
         output: OrchestratorOutput,
     ) -> OrchestratorOutput:
-        """Correct obvious email-send intents that the router misclassifies."""
-        if not self._looks_like_email_send_intent(user_input):
-            return output
-
-        from dataclasses import replace
-
-        # Build/augment gmail fields from output + heuristics.
-        gmail_obj = dict(getattr(output, "gmail", None) or {})
-        slots = dict(getattr(output, "slots", None) or {})
-
-        # Ensure defaults so tool param building doesn't miss required keys.
-        gmail_obj.setdefault("subject", "")
-
-        if not gmail_obj.get("to"):
-            email = self._extract_first_email(user_input)
-            if email:
-                gmail_obj["to"] = email
-            else:
-                name = self._extract_recipient_name(user_input)
-                if name:
-                    gmail_obj["to"] = name
-
-        if not gmail_obj.get("body"):
-            body_hint = self._extract_message_body_hint(user_input)
-            if body_hint:
-                gmail_obj["body"] = body_hint
-
-        # Decide whether we can proceed or need clarification.
-        to_val = str(gmail_obj.get("to") or "").strip()
-        body_val = str(gmail_obj.get("body") or "").strip()
-
-        ask_user = bool(getattr(output, "ask_user", False))
-        question = str(getattr(output, "question", "") or "")
-        tool_plan: list[str] = list(getattr(output, "tool_plan", None) or [])
-
-        if not to_val:
-            ask_user = True
-            question = "Kime göndermek istiyorsunuz efendim? (e-posta adresi veya kayıtlı kişi adı)"
-            tool_plan = []
-        elif not body_val:
-            ask_user = True
-            question = "Mailde ne yazmamı istersiniz efendim?"
-            tool_plan = []
-        else:
-            # Prefer send_to_contact when recipient isn't an email address.
-            if "@" in to_val:
-                tool_plan = tool_plan or ["gmail.send"]
-            else:
-                gmail_obj.setdefault("name", to_val)
-                tool_plan = tool_plan or ["gmail.send_to_contact"]
-
-        # Mirror key fields into slots for deterministic confirmation prompts.
-        if "to" not in slots and to_val:
-            slots["to"] = to_val
-        if "subject" not in slots and gmail_obj.get("subject") is not None:
-            slots["subject"] = str(gmail_obj.get("subject") or "")
-        if "name" not in slots and gmail_obj.get("name"):
-            slots["name"] = str(gmail_obj.get("name") or "")
-
-        corrected = replace(
-            output,
-            route="gmail",
-            calendar_intent="none",
-            gmail_intent="send",
-            gmail=gmail_obj,
-            slots=slots,
-            ask_user=ask_user,
-            question=question,
-            tool_plan=tool_plan,
+        return post_route_correction_email_send(
+            user_input, output, debug=self.config.debug,
         )
-
-        if self.config.debug and (
-            corrected.route != output.route
-            or corrected.gmail_intent != getattr(output, "gmail_intent", "none")
-        ):
-            logger.debug(
-                "[POST_ROUTE_CORRECTION] email_send: route=%s->%s gmail_intent=%s tool_plan=%s ask_user=%s",
-                output.route,
-                corrected.route,
-                corrected.gmail_intent,
-                corrected.tool_plan,
-                corrected.ask_user,
-            )
-
-        return corrected
 
     def _verify_results_phase(
         self,
@@ -2145,98 +1604,14 @@ class OrchestratorLoop:
         
         return tool_results
     
+    # Issue #941: _build_tool_params extracted to bantz.brain.tool_param_builder
     def _build_tool_params(
         self,
         tool_name: str,
         slots: dict[str, Any],
         output: Optional["OrchestratorOutput"] = None,
     ) -> dict[str, Any]:
-        """Build tool parameters from orchestrator slots.
-        
-        This maps orchestrator slots to tool-specific parameters.
-        Handles nested objects like gmail: {to, subject, body}.
-        
-        Issue #340: Applies field aliasing for common LLM variations
-        (recipient → to, email → to, address → to, etc.)
-        
-        Args:
-            tool_name: Name of the tool to build params for
-            slots: Calendar/system slots dict
-            output: Full orchestrator output (for gmail params)
-        """
-        params: dict[str, Any] = {}
-        
-        # Gmail tools: whitelist gmail params only (Issue #365)
-        if tool_name.startswith("gmail."):
-            gmail_valid_params = {
-                "to",
-                "name",
-                "subject",
-                "body",
-                "cc",
-                "bcc",
-                "label",
-                "category",
-                "query",
-                "search_term",
-                "natural_query",
-                "message_id",
-                "max_results",
-                "unread_only",
-                "prefer_unread",
-            }
-
-            # First check slots.gmail (legacy)
-            gmail_params = slots.get("gmail")
-            if isinstance(gmail_params, dict):
-                for key, val in gmail_params.items():
-                    if key in gmail_valid_params and val is not None:
-                        params[key] = val
-
-            # Issue #903: Check top-level slots for gmail params.
-            # _post_route_correction_email_send puts to/subject/name
-            # directly into slots (not nested under slots.gmail).
-            for key, val in slots.items():
-                if key in gmail_valid_params and val is not None and key not in params:
-                    params[key] = val
-            
-            # Then check output.gmail (Issue #317) — highest priority
-            if output is not None:
-                gmail_obj = getattr(output, "gmail", None) or {}
-                if isinstance(gmail_obj, dict):
-                    for key, val in gmail_obj.items():
-                        if key in gmail_valid_params and val is not None:
-                            params[key] = val
-            
-            # Issue #340: Apply field aliasing for gmail.send
-            # LLM often uses alternative field names (recipient, email, address, etc.)
-            if tool_name == "gmail.send":
-                # Alias: recipient/email/address/emails → to
-                for alias in ["recipient", "email", "address", "emails", "to_address"]:
-                    if alias in params and "to" not in params:
-                        params["to"] = params.pop(alias)
-                        break
-                
-                # Alias: message/text/content → body
-                for alias in ["message", "text", "content", "message_body"]:
-                    if alias in params and "body" not in params:
-                        params["body"] = params.pop(alias)
-                        break
-                
-                # Alias: title → subject
-                if "title" in params and "subject" not in params:
-                    params["subject"] = params.pop("title")
-
-            # Minimal aliasing for gmail.send_to_contact
-            if tool_name == "gmail.send_to_contact":
-                if "name" not in params and "to" in params:
-                    params["name"] = params.get("to")
-        
-        else:
-            # Calendar/system tools: use slots directly (already flat)
-            params = dict(slots)
-        
-        return params
+        return build_tool_params(tool_name, slots, output)
     
     def _llm_finalization_phase(
         self,
