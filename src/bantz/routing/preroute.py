@@ -480,9 +480,61 @@ def create_date_rule() -> PreRouteRule:
     )
 
 
+class CalendarListRule(PatternRule):
+    """Calendar list rule with Turkish time/date slot extraction.
+
+    Issue #948: Extends PatternRule to also extract date/window_hint
+    from the matched text using nlu/slots.py's Turkish time parser.
+    """
+
+    # Static map from Turkish day words to window_hint values
+    _WINDOW_HINTS: list[tuple[re.Pattern, str]] = [
+        (re.compile(r"\bbugün\b", re.IGNORECASE), "today"),
+        (re.compile(r"\byarın\b", re.IGNORECASE), "tomorrow"),
+        (re.compile(r"\bbu\s+hafta\b", re.IGNORECASE), "week"),
+        (re.compile(r"\bbu\s+ay\b", re.IGNORECASE), "month"),
+        (re.compile(r"\bakşam\b", re.IGNORECASE), "evening"),
+        (re.compile(r"\bsabah\b", re.IGNORECASE), "morning"),
+        (re.compile(r"\böğleden\s+sonra\b", re.IGNORECASE), "afternoon"),
+    ]
+
+    def match(self, text: str) -> PreRouteMatch:
+        """Match against patterns and extract date/time slots."""
+        base = super().match(text)
+        if not base.matched:
+            return base
+
+        extracted = dict(base.extracted)
+
+        # Extract window_hint from Turkish temporal words
+        for pattern, hint in self._WINDOW_HINTS:
+            if pattern.search(text):
+                extracted["window_hint"] = hint
+                break
+
+        # Extract concrete date using nlu/slots.py Turkish time parser
+        try:
+            from bantz.nlu.slots import extract_time as _extract_time
+
+            time_slot = _extract_time(text)
+            if time_slot is not None:
+                extracted["date"] = time_slot.value.strftime("%Y-%m-%d")
+                if not time_slot.is_relative or time_slot.value.hour != 0:
+                    extracted["time"] = time_slot.value.strftime("%H:%M")
+        except Exception:
+            pass
+
+        return PreRouteMatch.create(
+            intent=base.intent,
+            confidence=base.confidence,
+            rule_name=base.rule_name,
+            extracted=extracted,
+        )
+
+
 def create_calendar_list_rule() -> PreRouteRule:
-    """Create calendar list detection rule."""
-    return PatternRule(
+    """Create calendar list detection rule with slot extraction."""
+    return CalendarListRule(
         name="calendar_list",
         intent=IntentCategory.CALENDAR_LIST,
         patterns=[
