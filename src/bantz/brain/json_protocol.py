@@ -689,7 +689,9 @@ ORCHESTRATOR_OUTPUT_SCHEMA: dict[str, Any] = {
 ORCHESTRATOR_FALLBACK_DEFAULTS: dict[str, Any] = {
     "route": "smalltalk",
     "calendar_intent": "none",
+    "gmail_intent": "none",
     "slots": {},
+    "gmail": {},
     "confidence": 0.0,
     "tool_plan": [],
     "assistant_reply": "",
