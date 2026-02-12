@@ -25,6 +25,7 @@ from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
 from bantz.brain.memory_lite import DialogSummaryManager, CompactSummary
 from bantz.core.events import EventBus, EventType
 from bantz.routing.preroute import PreRouter, IntentCategory, LocalResponseGenerator
+from bantz.nlu.slots import SlotExtractor
 
 # Issue #941: Extracted modules — keep backward-compat re-exports
 from bantz.brain.tool_result_summarizer import (  # noqa: F401
@@ -197,6 +198,9 @@ class OrchestratorLoop:
         # Issue #407: Pre-route rule engine — bypass LLM for obvious patterns
         self.prerouter = PreRouter()
         self._local_responder = LocalResponseGenerator()
+
+        # Issue #938: Wire NLU slot extraction into brain pipeline
+        self._slot_extractor = SlotExtractor()
 
         # Issue #900: Sync router _VALID_TOOLS with actual ToolRegistry
         try:
@@ -1010,12 +1014,52 @@ class OrchestratorLoop:
         if _preroute_hint:
             session_context["preroute_hint"] = _preroute_hint
 
+        # Issue #938: Run NLU slot extraction BEFORE LLM router
+        # Extracts Turkish time/date, URLs, app names, queries, positions
+        # and injects them as pre-parsed hints so the 3B model doesn't hallucinate.
+        try:
+            _nlu_slots = self._slot_extractor.extract_all(user_input)
+            if _nlu_slots:
+                _flat_slots = self._slot_extractor.to_flat_dict(_nlu_slots)
+                # Serialize datetime objects to ISO strings for JSON compat
+                _serialized: dict[str, Any] = {}
+                for _sk, _sv in _flat_slots.items():
+                    if hasattr(_sv, "isoformat"):
+                        _serialized[_sk] = _sv.isoformat()
+                    elif hasattr(_sv, "__str__") and not isinstance(_sv, (str, int, float, bool)):
+                        _serialized[_sk] = str(_sv)
+                    else:
+                        _serialized[_sk] = _sv
+                session_context["nlu_slots"] = _serialized
+                self.event_bus.publish("nlu.slots_extracted", {
+                    "slots": _serialized,
+                    "source": "nlu/slots.py",
+                })
+                logger.info(
+                    "[NLU] Pre-extracted slots: %s",
+                    ", ".join(f"{k}={v}" for k, v in _serialized.items()),
+                )
+        except Exception as _slot_exc:
+            logger.debug("[NLU] Slot extraction failed (non-fatal): %s", _slot_exc)
+
         # Call orchestrator with enhanced summary + session context
         output = self.orchestrator.route(
             user_input=user_input,
             dialog_summary=enhanced_summary,
             session_context=session_context,
         )
+
+        # Issue #938: Merge NLU pre-extracted slots into LLM output
+        # NLU slots (Turkish time parser etc.) are authoritative — LLM slots
+        # are overridden only for keys that NLU confidently extracted.
+        _nlu_merged = session_context.get("nlu_slots") or {}
+        if _nlu_merged and output.slots is not None:
+            for _nk, _nv in _nlu_merged.items():
+                if _nk not in output.slots or not output.slots[_nk]:
+                    output.slots[_nk] = _nv
+            if "time" in _nlu_merged:
+                # Time from NLU's Turkish parser is more reliable than LLM guess
+                output.slots["time"] = _nlu_merged["time"]
 
         # Issue #607: Post-route correction for email sending.
         # The 3B router can misroute send-intents to smalltalk/unknown.
