@@ -1168,8 +1168,8 @@ USER: saat 8e toplantı ekle
     _TOOL_LOOKUP: dict[tuple[str, str], str] = {
         ("calendar", "create"): "calendar.create_event",
         ("calendar", "query"): "calendar.list_events",
-        ("calendar", "modify"): "calendar.create_event",
-        ("calendar", "cancel"): "calendar.list_events",
+        ("calendar", "modify"): "calendar.update_event",
+        ("calendar", "cancel"): "calendar.delete_event",
         ("calendar", "list"): "calendar.list_events",
         ("calendar", "none"): "calendar.list_events",
         ("gmail", "search"): "gmail.smart_search",
@@ -1251,10 +1251,11 @@ USER: saat 8e toplantı ekle
         # 3B model sometimes picks a valid-but-wrong route (e.g. "system"
         # for "bugün ne yapıyoruz" which is clearly calendar query).
         # Check if keyword-based detection disagrees with model's route.
+        # Issue #890/#891: Also catch misrouted gmail and system intents.
         _route_was_overridden = False
         if route in ("system", "smalltalk", "unknown") and user_input:
             keyword_route = self._detect_route_from_input(user_input)
-            if keyword_route == "calendar":
+            if keyword_route in ("calendar", "gmail", "system") and keyword_route != route:
                 logger.info(
                     "[route_override] model=%s but keywords=%s for '%s'",
                     route, keyword_route, user_input[:40],
