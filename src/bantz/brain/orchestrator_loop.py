@@ -679,7 +679,10 @@ class OrchestratorLoop:
         _preroute_hint = None
 
         if self.config.enable_preroute:
-            preroute_match = self.prerouter.route(user_input)
+            preroute_match = self.prerouter.route(
+                user_input,
+                has_pending_confirmation=state.has_pending_confirmation(),
+            )
         else:
             from bantz.routing.preroute import PreRouteMatch
             preroute_match = PreRouteMatch.no_match()

@@ -667,11 +667,15 @@ class PreRouter:
                 return True
         return False
     
-    def route(self, text: str) -> PreRouteMatch:
+    def route(self, text: str, *, has_pending_confirmation: bool = False) -> PreRouteMatch:
         """Try to pre-route the text.
         
         Args:
             text: User input text.
+            has_pending_confirmation: If True, skip AFFIRMATIVE/NEGATIVE
+                matching so the orchestrator's confirmation flow handles
+                'evet'/'hayır' instead of returning a local smalltalk
+                response.  (Issue #940)
         
         Returns:
             Match result with intent if detected.
@@ -680,6 +684,11 @@ class PreRouter:
         
         text = text.strip()
         if not text:
+            return PreRouteMatch.no_match()
+
+        # Issue #940: When a destructive-action confirmation is pending,
+        # let the orchestrator handle affirmative/negative tokens.
+        if has_pending_confirmation:
             return PreRouteMatch.no_match()
         
         # Try each rule
