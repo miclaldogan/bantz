@@ -123,13 +123,13 @@ VALID_GMAIL_INTENTS = frozenset({"list", "search", "read", "send", "none"})
 
 
 # ---------------------------------------------------------------------------
-# PromptBudgetConfig: Deterministic budget allocation for 1024-ctx models
-# (Issue #227)
+# PromptBudgetConfig: Deterministic budget allocation for LLM context
+# (Issue #227, Issue #1000)
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class PromptBudgetConfig:
-    """Deterministic prompt budget allocation for small-context models.
+    """Deterministic prompt budget allocation for LLM-based routing.
     
     Budget allocation is priority-based:
     1. SYSTEM prompt (fixed, may be compacted if needed)
@@ -139,6 +139,10 @@ class PromptBudgetConfig:
     
     The allocation ensures we never exceed context limits, with clear
     per-section budgets and trim order.
+    
+    Issue #1000: Supports both 3B (4096 ctx) and 7B/8B (8192-32768 ctx)
+    models. Context length is auto-detected from the model or set via
+    BANTZ_ROUTER_CONTEXT_LEN.
     """
     
     context_length: int = 4096  # Issue #937: aligned to vLLM start_3b.sh default
@@ -153,7 +157,11 @@ class PromptBudgetConfig:
     
     @classmethod
     def for_context(cls, context_length: int) -> "PromptBudgetConfig":
-        """Create budget config scaled to context size."""
+        """Create budget config scaled to context size.
+        
+        Issue #1000: Scales completion reserve for larger models.
+        3B (4096) → 768, 7B (8192) → 1024, 8B+ (32768) → 1536.
+        """
         ctx = max(256, int(context_length))
         
         # Scale completion reserve with context
@@ -161,8 +169,12 @@ class PromptBudgetConfig:
             completion = 256
         elif ctx <= 2048:
             completion = 512
-        else:
+        elif ctx <= 4096:
             completion = 768
+        elif ctx <= 8192:
+            completion = 1024
+        else:
+            completion = 1536
             
         return cls(
             context_length=ctx,
@@ -1004,11 +1016,17 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
                 ctx = None
 
         if ctx is None or ctx < 256:
-            ctx = 8192
+            # Issue #1000: Read from BANTZ_VLLM_MODEL to infer context.
+            # 7B models default to 8192, 3B to 4096.
+            model_name = str(os.getenv("BANTZ_VLLM_MODEL", "")).lower()
+            if "7b" in model_name or "8b" in model_name:
+                ctx = 8192
+            else:
+                ctx = 4096
             logger.warning(
-                "Could not detect model context length, using fallback %d. "
-                "Set BANTZ_ROUTER_CONTEXT_LEN to override.",
-                ctx,
+                "Could not detect model context length, using fallback %d "
+                "(model=%s). Set BANTZ_ROUTER_CONTEXT_LEN to override.",
+                ctx, model_name or "unknown",
             )
 
         self._cached_context_len = int(ctx)
