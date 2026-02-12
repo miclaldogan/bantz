@@ -214,6 +214,14 @@ def create_app(
             )
         )
 
+    @app.get("/mobile", response_class=HTMLResponse, include_in_schema=False)
+    async def mobile_pwa() -> HTMLResponse:
+        """Serve the mobile PWA client (Issue #847)."""
+        mobile_path = _static_dir / "mobile.html"
+        if mobile_path.exists():
+            return HTMLResponse(content=mobile_path.read_text(encoding="utf-8"))
+        return HTMLResponse(content="<html><body>Mobile client not found.</body></html>", status_code=404)
+
     # ── Core endpoints ──────────────────────────────────────────────
 
     @app.post(

@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0f0f23">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Bantz</title>
+<link rel="manifest" href="/static/manifest.json">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f0f23;--surface:#1a1a2e;--border:#2d2d44;
+  --text:#e0e0e0;--muted:#888;--accent:#6c63ff;
+  --accent-glow:rgba(108,99,255,.25);--success:#2ecc71;
+  --danger:#e74c3c;--me:#1e3a5f;--bot:#1a1a2e;
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}
+
+/* ── Layout ────────────────────── */
+#app{display:flex;flex-direction:column;height:100%;padding-top:var(--safe-top);padding-bottom:var(--safe-bottom)}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);min-height:56px;flex-shrink:0}
+header h1{font-size:18px;font-weight:600}
+#status{width:10px;height:10px;border-radius:50%;background:var(--danger);transition:background .3s}
+#status.online{background:var(--success)}
+#status.connecting{background:orange;animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.4}}
+
+/* ── Chat Area ─────────────────── */
+#messages{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px;-webkit-overflow-scrolling:touch}
+.msg{max-width:85%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap;animation:fadeIn .2s}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.msg.user{align-self:flex-end;background:var(--me);border-bottom-right-radius:4px}
+.msg.bot{align-self:flex-start;background:var(--bot);border:1px solid var(--border);border-bottom-left-radius:4px}
+.msg.bot .streaming-cursor{display:inline-block;width:2px;height:1em;background:var(--accent);animation:blink .7s infinite;vertical-align:text-bottom;margin-left:2px}
+@keyframes blink{50%{opacity:0}}
+.msg.system{align-self:center;background:transparent;color:var(--muted);font-size:13px;padding:4px 8px}
+.typing{align-self:flex-start;color:var(--muted);font-size:13px;padding:4px 0}
+.typing span{animation:dot 1.4s infinite;animation-fill-mode:both}
+.typing span:nth-child(2){animation-delay:.2s}
+.typing span:nth-child(3){animation-delay:.4s}
+@keyframes dot{0%,80%,100%{opacity:.2}40%{opacity:1}}
+
+/* ── Confirmation Modal ────────── */
+#confirm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center;padding:20px}
+#confirm-overlay.active{display:flex}
+#confirm-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;max-width:340px;width:100%}
+#confirm-box h3{font-size:16px;margin-bottom:8px}
+#confirm-box p{font-size:14px;color:var(--muted);margin-bottom:16px;line-height:1.5}
+#confirm-actions{display:flex;gap:10px}
+#confirm-actions button{flex:1;padding:10px;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer}
+#btn-approve{background:var(--accent);color:#fff}
+#btn-deny{background:var(--border);color:var(--text)}
+
+/* ── Input Bar ─────────────────── */
+#input-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0}
+#input-bar textarea{flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:20px;padding:10px 16px;font-size:15px;resize:none;max-height:120px;line-height:1.4;outline:none;font-family:inherit}
+#input-bar textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
+#send-btn{width:40px;height:40px;border-radius:50%;background:var(--accent);border:none;color:#fff;font-size:18px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+#send-btn:disabled{opacity:.4;cursor:default}
+
+/* ── Settings Panel ────────────── */
+#settings{display:none;position:fixed;inset:0;background:var(--bg);z-index:50;padding:var(--safe-top) 16px var(--safe-bottom);overflow-y:auto}
+#settings.active{display:block}
+#settings h2{padding:16px 0 8px;font-size:20px}
+.setting-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--border)}
+.setting-row label{font-size:15px}
+.setting-row input{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:14px;width:200px}
+.btn-back{background:none;border:none;color:var(--accent);font-size:15px;cursor:pointer;padding:8px 0}
+
+/* ── QR Panel ──────────────────── */
+#qr-panel{display:none;position:fixed;inset:0;background:var(--bg);z-index:60;padding:var(--safe-top) 16px var(--safe-bottom);text-align:center}
+#qr-panel.active{display:flex;flex-direction:column;align-items:center;justify-content:center}
+#qr-panel img{max-width:240px;border-radius:12px;margin:16px 0}
+#qr-panel .url-text{color:var(--muted);font-size:13px;word-break:break-all;padding:0 20px}
+
+/* ── Offline Banner ────────────── */
+#offline-banner{display:none;background:var(--danger);color:#fff;text-align:center;padding:6px;font-size:13px}
+#offline-banner.active{display:block}
+
+/* scrollbar */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="offline-banner">Çevrimdışı — bağlantı bekleniyor…</div>
+  <header>
+    <h1>🧠 Bantz</h1>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div id="status" title="Bağlantı durumu"></div>
+      <button onclick="openSettings()" style="background:none;border:none;color:var(--text);font-size:20px;cursor:pointer">⚙️</button>
+    </div>
+  </header>
+
+  <div id="messages"></div>
+
+  <div id="input-bar">
+    <textarea id="input" rows="1" placeholder="Mesajınızı yazın…" autocomplete="off"></textarea>
+    <button id="send-btn" onclick="sendMessage()" disabled>➤</button>
+  </div>
+</div>
+
+<!-- Confirmation modal -->
+<div id="confirm-overlay">
+  <div id="confirm-box">
+    <h3 id="confirm-title">Onay gerekiyor</h3>
+    <p id="confirm-body"></p>
+    <div id="confirm-actions">
+      <button id="btn-deny" onclick="respondConfirm(false)">Reddet</button>
+      <button id="btn-approve" onclick="respondConfirm(true)">Onayla</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings panel -->
+<div id="settings">
+  <button class="btn-back" onclick="closeSettings()">← Geri</button>
+  <h2>Ayarlar</h2>
+  <div class="setting-row">
+    <label>Sunucu URL</label>
+    <input id="cfg-url" type="url" placeholder="http://192.168.1.x:7778">
+  </div>
+  <div class="setting-row">
+    <label>API Token</label>
+    <input id="cfg-token" type="password" placeholder="Bearer token">
+  </div>
+  <div class="setting-row">
+    <label>QR ile Bağlan</label>
+    <button onclick="openQR()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">QR Tara</button>
+  </div>
+  <div class="setting-row">
+    <label>Bildirimler</label>
+    <button id="btn-notif" onclick="requestNotifPermission()" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 16px;cursor:pointer">İzin Ver</button>
+  </div>
+  <div style="padding:20px 0;text-align:center;color:var(--muted);font-size:13px">
+    Bantz PWA v1.0 — Issue #847
+  </div>
+</div>
+
+<!-- QR Panel -->
+<div id="qr-panel">
+  <button class="btn-back" onclick="closeQR()" style="position:absolute;top:calc(var(--safe-top) + 12px);left:16px">← Geri</button>
+  <h2>QR ile Bağlan</h2>
+  <p style="color:var(--muted);font-size:14px;margin:8px 0">Bilgisayardaki Bantz panelinden QR'ı taratın</p>
+  <img id="qr-img" src="" alt="QR Code">
+  <p class="url-text" id="qr-url"></p>
+</div>
+
+<script>
+/* ── State ───────────────────────────────────────── */
+let ws = null;
+let reconnectTimer = null;
+let reconnectDelay = 1000;
+let pendingConfirmId = null;
+let isStreaming = false;
+const MAX_RECONNECT = 30000;
+
+/* ── Storage helpers ─────────────────────────────── */
+const store = {
+  get(k, d) { try { return localStorage.getItem("bantz_" + k) || d } catch { return d } },
+  set(k, v) { try { localStorage.setItem("bantz_" + k, v) } catch {} },
+};
+
+function getBaseURL() {
+  const saved = store.get("url", "");
+  if (saved) return saved.replace(/\/+$/, "");
+  return window.location.origin;
+}
+function getToken() { return store.get("token", ""); }
+
+/* ── DOM refs ────────────────────────────────────── */
+const $messages = document.getElementById("messages");
+const $input = document.getElementById("input");
+const $sendBtn = document.getElementById("send-btn");
+const $status = document.getElementById("status");
+const $offline = document.getElementById("offline-banner");
+
+/* ── Auto-resize textarea ────────────────────────── */
+$input.addEventListener("input", () => {
+  $input.style.height = "auto";
+  $input.style.height = Math.min($input.scrollHeight, 120) + "px";
+  $sendBtn.disabled = !$input.value.trim();
+});
+$input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+/* ── Message rendering ───────────────────────────── */
+function addMsg(role, text, opts = {}) {
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  if (opts.id) div.id = opts.id;
+  div.textContent = text;
+  if (opts.streaming) {
+    const cursor = document.createElement("span");
+    cursor.className = "streaming-cursor";
+    div.appendChild(cursor);
+  }
+  $messages.appendChild(div);
+  $messages.scrollTop = $messages.scrollHeight;
+  return div;
+}
+
+function updateStreamMsg(id, text, done) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  if (!done) {
+    const cursor = document.createElement("span");
+    cursor.className = "streaming-cursor";
+    el.appendChild(cursor);
+  }
+}
+
+function showTyping() {
+  const t = document.createElement("div");
+  t.className = "typing";
+  t.id = "typing-indicator";
+  t.innerHTML = "<span>.</span><span>.</span><span>.</span>";
+  $messages.appendChild(t);
+  $messages.scrollTop = $messages.scrollHeight;
+}
+function hideTyping() {
+  const t = document.getElementById("typing-indicator");
+  if (t) t.remove();
+}
+
+/* ── Send message ────────────────────────────────── */
+function sendMessage() {
+  const text = $input.value.trim();
+  if (!text) return;
+
+  addMsg("user", text);
+  $input.value = "";
+  $input.style.height = "auto";
+  $sendBtn.disabled = true;
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "chat", text }));
+    showTyping();
+  } else {
+    sendHTTP(text);
+  }
+}
+
+/* ── HTTP fallback ───────────────────────────────── */
+async function sendHTTP(text) {
+  showTyping();
+  try {
+    const headers = { "Content-Type": "application/json" };
+    const token = getToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+
+    const res = await fetch(getBaseURL() + "/api/v1/chat", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message: text }),
+    });
+    hideTyping();
+    const data = await res.json();
+    addMsg("bot", data.response || data.text || JSON.stringify(data));
+  } catch (err) {
+    hideTyping();
+    addMsg("system", "Bağlantı hatası: " + err.message);
+  }
+}
+
+/* ── WebSocket ───────────────────────────────────── */
+function connectWS() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+  const base = getBaseURL().replace(/^http/, "ws");
+  const url = base + "/ws/chat";
+  setStatus("connecting");
+
+  try {
+    ws = new WebSocket(url);
+  } catch {
+    scheduleReconnect();
+    return;
+  }
+
+  ws.onopen = () => {
+    setStatus("online");
+    reconnectDelay = 1000;
+    const token = getToken();
+    if (token) ws.send(JSON.stringify({ type: "auth", token }));
+  };
+
+  ws.onmessage = (e) => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+
+    switch (data.type) {
+      case "response":
+        hideTyping();
+        if (isStreaming) { isStreaming = false; }
+        addMsg("bot", data.text || "");
+        break;
+
+      case "stream_start":
+        hideTyping();
+        isStreaming = true;
+        addMsg("bot", "", { id: "stream-msg", streaming: true });
+        break;
+
+      case "stream_chunk":
+        if (isStreaming) updateStreamMsg("stream-msg", (document.getElementById("stream-msg")?.textContent || "") + (data.text || ""), false);
+        break;
+
+      case "stream_end":
+        isStreaming = false;
+        updateStreamMsg("stream-msg", document.getElementById("stream-msg")?.textContent || "", true);
+        break;
+
+      case "confirm":
+        showConfirm(data);
+        break;
+
+      case "notification":
+        showNotification(data);
+        break;
+
+      case "pong":
+        break;
+
+      default:
+        if (data.text) { hideTyping(); addMsg("bot", data.text); }
+    }
+  };
+
+  ws.onclose = () => {
+    setStatus("offline");
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => {
+    setStatus("offline");
+  };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT);
+    connectWS();
+  }, reconnectDelay);
+}
+
+/* Heartbeat */
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "ping" }));
+  }
+}, 25000);
+
+/* ── Status indicator ────────────────────────────── */
+function setStatus(s) {
+  $status.className = s;
+  $offline.className = s === "offline" ? "active" : "";
+}
+
+/* ── Confirmation ────────────────────────────────── */
+function showConfirm(data) {
+  pendingConfirmId = data.confirm_id || data.id || null;
+  document.getElementById("confirm-title").textContent = data.title || "Onay gerekiyor";
+  document.getElementById("confirm-body").textContent = data.description || data.text || "";
+  document.getElementById("confirm-overlay").classList.add("active");
+}
+
+function respondConfirm(approved) {
+  document.getElementById("confirm-overlay").classList.remove("active");
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "confirm", confirm_id: pendingConfirmId, approved }));
+  }
+  pendingConfirmId = null;
+  addMsg("system", approved ? "✓ Onaylandı" : "✗ Reddedildi");
+}
+
+/* ── Notifications ───────────────────────────────── */
+function showNotification(data) {
+  addMsg("system", "🔔 " + (data.text || data.body || ""));
+  if (Notification.permission === "granted" && document.hidden) {
+    new Notification("Bantz", { body: data.text || data.body || "" });
+  }
+}
+
+async function requestNotifPermission() {
+  if (!("Notification" in window)) { alert("Bildirimler desteklenmiyor"); return; }
+  const perm = await Notification.requestPermission();
+  document.getElementById("btn-notif").textContent = perm === "granted" ? "✓ Aktif" : "Reddedildi";
+}
+
+/* ── Settings ────────────────────────────────────── */
+function openSettings() {
+  document.getElementById("cfg-url").value = store.get("url", "");
+  document.getElementById("cfg-token").value = store.get("token", "");
+  document.getElementById("settings").classList.add("active");
+}
+
+function closeSettings() {
+  store.set("url", document.getElementById("cfg-url").value.trim());
+  store.set("token", document.getElementById("cfg-token").value.trim());
+  document.getElementById("settings").classList.remove("active");
+  if (ws) { ws.close(); ws = null; }
+  connectWS();
+}
+
+/* ── QR Pairing ──────────────────────────────────── */
+async function openQR() {
+  document.getElementById("settings").classList.remove("active");
+  document.getElementById("qr-panel").classList.add("active");
+  try {
+    const res = await fetch(getBaseURL() + "/api/v1/settings/qr");
+    const data = await res.json();
+    document.getElementById("qr-img").src = data.qr_data_uri || "";
+    document.getElementById("qr-url").textContent = data.url || getBaseURL();
+  } catch {
+    document.getElementById("qr-url").textContent = "QR yüklenemedi — URL'yi elle girin";
+  }
+}
+
+function closeQR() {
+  document.getElementById("qr-panel").classList.remove("active");
+  document.getElementById("settings").classList.add("active");
+}
+
+/* ── Offline detection ───────────────────────────── */
+window.addEventListener("online", () => { connectWS(); });
+window.addEventListener("offline", () => { setStatus("offline"); });
+
+/* ── Service Worker ──────────────────────────────── */
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/static/sw.js").catch(() => {});
+}
+
+/* ── Boot ────────────────────────────────────────── */
+connectWS();
+addMsg("system", "Bantz'a hoş geldiniz 👋");
+</script>
+</body>
+</html>
