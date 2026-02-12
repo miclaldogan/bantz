@@ -222,6 +222,52 @@ class ReminderManager:
         except Exception as e:
             print(f"Event publish error: {e}")
 
+    # Issue #1018: Recurring reminder interval parser
+    _INTERVAL_MAP: dict[str, timedelta] = {
+        "hourly": timedelta(hours=1),
+        "saatlik": timedelta(hours=1),
+        "daily": timedelta(days=1),
+        "günlük": timedelta(days=1),
+        "weekly": timedelta(weeks=1),
+        "haftalık": timedelta(weeks=1),
+        "monthly": timedelta(days=30),
+        "aylık": timedelta(days=30),
+    }
+
+    @classmethod
+    def _compute_next_occurrence(
+        cls, last_fire: datetime, interval: str
+    ) -> Optional[datetime]:
+        """Compute the next fire time for a recurring reminder.
+
+        Args:
+            last_fire: The time the reminder last fired.
+            interval: One of 'hourly', 'daily', 'weekly', 'monthly'
+                      (Turkish equivalents also accepted), or a string
+                      like '2h', '30m', '3d'.
+
+        Returns:
+            The next ``datetime``, or ``None`` if *interval* is not recognised.
+        """
+        key = (interval or "").strip().lower()
+        if key in cls._INTERVAL_MAP:
+            return last_fire + cls._INTERVAL_MAP[key]
+
+        # Try shorthand: '2h', '30m', '3d', '1w'
+        m = re.match(r"^(\d+)\s*([mhdw])$", key)
+        if m:
+            amount = int(m.group(1))
+            unit = m.group(2)
+            deltas = {
+                "m": timedelta(minutes=amount),
+                "h": timedelta(hours=amount),
+                "d": timedelta(days=amount),
+                "w": timedelta(weeks=amount),
+            }
+            return last_fire + deltas[unit]
+
+        return None
+
     def _check_reminders(self) -> None:
         """Check and trigger due reminders."""
         now = datetime.now()
@@ -245,8 +291,21 @@ class ReminderManager:
                 
                 # Mark as done (or reschedule if repeat)
                 if row['repeat_interval']:
-                    # TODO: Implement repeat logic
-                    pass
+                    # Issue #1018: Reschedule recurring reminders
+                    next_time = self._compute_next_occurrence(
+                        remind_at, row['repeat_interval']
+                    )
+                    if next_time is not None:
+                        conn.execute(
+                            "UPDATE reminders SET remind_at = ?, status = 'pending' WHERE id = ?",
+                            (next_time.isoformat(), row['id']),
+                        )
+                    else:
+                        # Unrecognised interval — mark done, log warning
+                        conn.execute(
+                            "UPDATE reminders SET status = 'done' WHERE id = ?",
+                            (row['id'],),
+                        )
                 else:
                     conn.execute(
                         "UPDATE reminders SET status = 'done' WHERE id = ?",
