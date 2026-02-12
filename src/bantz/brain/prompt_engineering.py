@@ -14,6 +14,33 @@ PromptVariant = Literal["A", "B"]
 
 
 @dataclass(frozen=True)
+class PromptLimits:
+    """Configurable char/token limits for prompt assembly and trimming.
+
+    All ``max_*`` values are in **characters** (not tokens).
+    ``token_budget`` is an estimated **token** cap.
+
+    Issue #1022: Extracted from formerly hardcoded magic numbers so that
+    callers (or config files) can override them.
+    """
+
+    # --- assembly limits ---------------------------------------------------
+    session_context: int = 1200
+    dialog_summary: int = 6000
+    planner_decision: int = 4000
+    tool_results: int = 12000
+
+    # --- aggressive trim limits (used when over budget) --------------------
+    tool_results_trim: int = 700
+    dialog_summary_trim: int = 450
+    planner_decision_trim: int = 600
+    user_input_trim: int = 500
+
+    # --- token budget ------------------------------------------------------
+    token_budget: int = 3500
+
+
+@dataclass(frozen=True)
 class PromptBuildResult:
     prompt: str
     variant: PromptVariant
@@ -95,10 +122,25 @@ class PromptBuilder:
     def __init__(
         self,
         *,
-        token_budget: int = 3500,
+        token_budget: int = 0,
         experiment: str = "brain_prompt_v1",
+        limits: Optional[PromptLimits] = None,
     ):
-        self._token_budget = int(token_budget)
+        self._limits = limits or PromptLimits()
+        # Legacy param: if token_budget was explicitly passed, override limits.
+        if token_budget > 0:
+            self._limits = PromptLimits(
+                session_context=self._limits.session_context,
+                dialog_summary=self._limits.dialog_summary,
+                planner_decision=self._limits.planner_decision,
+                tool_results=self._limits.tool_results,
+                tool_results_trim=self._limits.tool_results_trim,
+                dialog_summary_trim=self._limits.dialog_summary_trim,
+                planner_decision_trim=self._limits.planner_decision_trim,
+                user_input_trim=self._limits.user_input_trim,
+                token_budget=int(token_budget),
+            )
+        self._token_budget = self._limits.token_budget
         self._experiment = str(experiment or "brain_prompt_v1")
 
     def build_finalizer_prompt(
@@ -137,17 +179,17 @@ class PromptBuilder:
             blocks.append(("PERSONALITY", personality_block))
 
         if session_context:
-            blocks.append(("SESSION_CONTEXT", _json_dumps_compact(session_context, max_chars=1200)))
+            blocks.append(("SESSION_CONTEXT", _json_dumps_compact(session_context, max_chars=self._limits.session_context)))
 
         if dialog_summary:
             # Keep larger by default; trimming will enforce budgets.
-            blocks.append(("DIALOG_SUMMARY", _truncate(dialog_summary, max_chars=6000)))
+            blocks.append(("DIALOG_SUMMARY", _truncate(dialog_summary, max_chars=self._limits.dialog_summary)))
 
-        blocks.append(("PLANNER_DECISION", _json_dumps_compact(planner_decision, max_chars=4000)))
+        blocks.append(("PLANNER_DECISION", _json_dumps_compact(planner_decision, max_chars=self._limits.planner_decision)))
 
         if tool_results:
             # Tool results can be large; allow bigger and rely on trimming.
-            blocks.append(("TOOL_RESULTS", _json_dumps_compact(tool_results, max_chars=12000)))
+            blocks.append(("TOOL_RESULTS", _json_dumps_compact(tool_results, max_chars=self._limits.tool_results)))
 
         if recent_turns:
             # Keep at most last 2 turns initially.
@@ -223,7 +265,7 @@ class PromptBuilder:
         # 1) Aggressively truncate TOOL_RESULTS
         for i, (name, content) in enumerate(b):
             if name == "TOOL_RESULTS":
-                b[i] = (name, _truncate(content, max_chars=700))
+                b[i] = (name, _truncate(content, max_chars=self._limits.tool_results_trim))
 
         if estimate_tokens(render()) <= self._token_budget:
             return render()
@@ -242,7 +284,7 @@ class PromptBuilder:
         # 3) Truncate dialog summary
         for i, (name, content) in enumerate(b):
             if name == "DIALOG_SUMMARY":
-                b[i] = (name, _truncate(content, max_chars=450))
+                b[i] = (name, _truncate(content, max_chars=self._limits.dialog_summary_trim))
 
         if estimate_tokens(render()) <= self._token_budget:
             return render()
@@ -250,7 +292,7 @@ class PromptBuilder:
         # 4) Truncate planner decision
         for i, (name, content) in enumerate(b):
             if name == "PLANNER_DECISION":
-                b[i] = (name, _truncate(content, max_chars=600))
+                b[i] = (name, _truncate(content, max_chars=self._limits.planner_decision_trim))
 
         if estimate_tokens(render()) <= self._token_budget:
             return render()
@@ -272,7 +314,7 @@ class PromptBuilder:
             return render()
 
         # 6) Last resort: truncate user input
-        truncated_user = _truncate(user_input, max_chars=500)
+        truncated_user = _truncate(user_input, max_chars=self._limits.user_input_trim)
         return self._assemble(system=system, template=template, blocks=b, user_input=truncated_user)
 
     def _build_system_prompt(self, *, variant: PromptVariant, writing: int, personality_block: Optional[str] = None) -> str:
