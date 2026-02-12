@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 🔒 Güvenlik Açığı Bildirimi
+  - name: 🔒 Security Vulnerability Report
     url: https://github.com/miclaldogan/bantz/blob/dev/SECURITY.md
-    about: Güvenlik açıklarını bu yol ile özel olarak bildirin
-  - name: 💬 Soru & Tartışma
+    about: Report security vulnerabilities privately through this channel
+  - name: 💬 Questions & Discussions
     url: https://github.com/miclaldogan/bantz/discussions
-    about: Soru sormak veya fikir paylaşmak için
+    about: Ask questions or share ideas

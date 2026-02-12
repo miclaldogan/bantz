@@ -1,49 +1,49 @@
-## Açıklama
+## Description
 
-<!-- Bu PR ne yapıyor? Hangi sorunu çözüyor? -->
+<!-- What does this PR do? What problem does it solve? -->
 
-## İlgili Issue
+## Related Issue
 
-<!-- "Closes #123" formatında yazın — merge olunca issue otomatik kapanır -->
+<!-- Write in "Closes #123" format — issue auto-closes on merge -->
 Closes #
 
-## Değişiklik Tipi
+## Change Type
 
-<!-- İlgili kutuyu [x] ile işaretle -->
+<!-- Check the relevant box with [x] -->
 
-- [ ] 🐛 Bug fix (mevcut davranışı düzelten, kırılma yapmayan değişiklik)
-- [ ] ✨ Yeni özellik (kırılma yapmayan yeni fonksiyon)
-- [ ] 💥 Breaking change (mevcut davranışı değiştiren/kıran değişiklik)
-- [ ] ♻️ Refactor (davranış değiştirmeyen kod iyileştirmesi)
-- [ ] 🧪 Test (yeni test ekleme veya mevcut test düzeltme)
-- [ ] 📝 Dokümantasyon
-- [ ] 🔧 Chore (CI/CD, bağımlılık, yapılandırma)
+- [ ] 🐛 Bug fix (non-breaking change that fixes existing behavior)
+- [ ] ✨ New feature (non-breaking new functionality)
+- [ ] 💥 Breaking change (change that modifies/breaks existing behavior)
+- [ ] ♻️ Refactor (code improvement without behavior change)
+- [ ] 🧪 Test (adding or fixing tests)
+- [ ] 📝 Documentation
+- [ ] 🔧 Chore (CI/CD, dependencies, configuration)
 
-## Yapılan Değişiklikler
+## Changes Made
 
-<!-- Değişiklikleri madde madde listele -->
+<!-- List changes as bullet points -->
 
 - 
 
-## Test
+## Testing
 
-<!-- Testlerin nasıl çalıştırıldığını belirt -->
+<!-- Describe how tests were run -->
 
 ```bash
 pytest tests/test_XXXXX.py -v
 ```
 
-- [ ] Mevcut testler geçiyor
-- [ ] Yeni testler eklendi (varsa)
-- [ ] Manuel test yapıldı (varsa)
+- [ ] Existing tests pass
+- [ ] New tests added (if applicable)
+- [ ] Manual testing done (if applicable)
 
-## Kontrol Listesi
+## Checklist
 
-- [ ] Kodum projenin stil kurallarına uygun
-- [ ] Commit mesajlarım [Conventional Commits](https://www.conventionalcommits.org/) formatında
-- [ ] Gerekli docstring/yorum ekledim
-- [ ] Kırılma (breaking change) varsa açıklama yazdım
+- [ ] Code follows project style guidelines
+- [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) format
+- [ ] Necessary docstrings/comments added
+- [ ] Breaking changes documented (if any)
 
-## Ekran Görüntüsü / Log (opsiyonel)
+## Screenshots / Logs (optional)
 
-<!-- UI değişikliği veya log çıktısı varsa buraya ekle -->
+<!-- Add screenshots or log output if relevant -->

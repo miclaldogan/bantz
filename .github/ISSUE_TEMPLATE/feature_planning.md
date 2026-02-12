@@ -1,64 +1,64 @@
 ---
-name: Özellik Talebi
-about: Yeni bir özellik veya iyileştirme öner
+name: Feature Request
+about: Suggest a new feature or improvement
 title: '[Feature] '
 labels: 'type:feature, priority:P2'
 assignees: ''
 
 ---
 
-## Hedef
+## Goal
 
 <!--
-Bu özelliğin ana amacı nedir?
+What is the main purpose of this feature?
 -->
 
-## Arka Plan
+## Background
 
 <!--
-Neden gerekli? Hangi sorunu çözüyor?
+Why is it needed? What problem does it solve?
 -->
 
-## Kapsam
+## Scope
 
-### Dahil
+### In Scope
 
 <!--
-Ne yapılacak?
-- Madde 1
-- Madde 2
+What will be done?
+- Item 1
+- Item 2
 -->
 
-### Hariç
+### Out of Scope
 
 <!--
-Bu issue'da ne YAPILMAYACAK?
+What will NOT be done in this issue?
 -->
 
-## Kabul Kriterleri
+## Acceptance Criteria
 
 <!--
-Bu özellik ne zaman "bitti" sayılır?
+When is this feature considered "done"?
 -->
 
 - [ ] 
 - [ ] 
-- [ ] Test yazıldı
+- [ ] Tests added
 
-## Nasıl Test Edilir
+## How to Test
 
 <!--
-Reviewer bu özelliği nasıl doğrulayabilir?
+How can a reviewer verify this feature?
 -->
 
-## Bağımlılıklar
+## Dependencies
 
 <!--
-Önce tamamlanması gereken issue veya gerekli kütüphane var mı?
+Are there issues or libraries that need to be completed/installed first?
 -->
 
-## Notlar
+## Notes
 
 <!--
-Ek bağlam, tasarım kararları veya açık sorular.
+Additional context, design decisions, or open questions.
 -->

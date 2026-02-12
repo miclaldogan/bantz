@@ -1,45 +1,45 @@
 ---
-name: İyileştirme / Refactor
-about: Kod kalitesi, performans veya teknik borç iyileştirmesi öner
+name: Improvement / Refactor
+about: Suggest code quality, performance, or tech debt improvements
 title: '[Improvement] '
 labels: 'type:improvement'
 assignees: ''
 
 ---
 
-## Mevcut Durum
+## Current State
 
 <!--
-Şu anda kod nasıl çalışıyor? Sorun ne?
-Dosya yolu ve satır numarası verin.
+How does the code currently work? What is the problem?
+Provide file paths and line numbers.
 -->
 
-## Önerilen İyileştirme
+## Proposed Improvement
 
 <!--
-Ne yapılmalı? Neden daha iyi?
+What should be done? Why is it better?
 -->
 
-## Etkilenen Dosyalar
+## Affected Files
 
 <!--
-Değişecek dosyaları listeleyin:
+List files that will change:
 - `src/bantz/...`
 - `tests/...`
 -->
 
-## Kabul Kriterleri
+## Acceptance Criteria
 
 <!--
-Bu issue ne zaman "bitti" sayılır?
+When is this issue considered "done"?
 -->
 
 - [ ] 
 - [ ] 
-- [ ] Mevcut testler kırılmıyor
+- [ ] Existing tests still pass
 
-## Ek Bağlam
+## Additional Context
 
 <!--
-İlgili issue, benchmark sonucu veya referans.
+Related issues, benchmark results, or references.
 -->
