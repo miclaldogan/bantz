@@ -70,6 +70,8 @@ class OrchestratorConfig:
     memory_pii_filter: bool = True  # Memory-lite PII filtering (Issue #368)
     tool_timeout_seconds: float = 30.0  # Per-tool execution timeout (Issue #431)
     enable_preroute: bool = True  # Issue #407: Rule-based pre-route bypass
+    finalizer_timeout_seconds: float = 10.0  # Issue #947: Finalizer LLM timeout (quality)
+    fast_finalizer_timeout_seconds: float = 5.0  # Issue #947: Fast finalizer LLM timeout
     
     def __post_init__(self):
         if self.require_confirmation_for is None:
@@ -246,6 +248,8 @@ class OrchestratorLoop:
                 finalizer_llm=self.finalizer_llm,
                 planner_llm=planner_llm,
                 event_bus=self.event_bus,
+                quality_timeout=self.config.finalizer_timeout_seconds,
+                fast_timeout=self.config.fast_finalizer_timeout_seconds,
             )
             self._finalization_pipeline_key = key
         return self._finalization_pipeline
