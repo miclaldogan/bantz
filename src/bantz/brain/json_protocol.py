@@ -62,6 +62,71 @@ class JsonParseError(Exception):
         }
 
 
+def balance_truncated_json(text: str) -> str:
+    """Close unclosed braces/brackets in truncated LLM JSON output.
+
+    When the LLM hits max_tokens or a stop sequence mid-JSON, the output
+    is syntactically incomplete.  This function appends the minimal closing
+    characters (``"``, ``]``, ``}``) so that ``json.loads`` has a chance of
+    succeeding.
+
+    The function is intentionally conservative – it only *appends* characters
+    and never removes or reorders existing content.
+
+    Returns:
+        The original text if already balanced, otherwise the text with
+        closing characters appended.
+    """
+    start = text.find("{")
+    if start < 0:
+        return text
+
+    depth_brace = 0
+    depth_bracket = 0
+    in_string = False
+    escape = False
+
+    for ch in text[start:]:
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth_brace += 1
+        elif ch == "}":
+            depth_brace -= 1
+        elif ch == "[":
+            depth_bracket += 1
+        elif ch == "]":
+            depth_bracket -= 1
+
+    # Already balanced – nothing to do
+    if depth_brace <= 0 and depth_bracket <= 0 and not in_string:
+        return text
+
+    suffix = ""
+    if in_string:
+        suffix += '"'
+    suffix += "]" * max(0, depth_bracket)
+    suffix += "}" * max(0, depth_brace)
+
+    logger.debug(
+        "[json_protocol] balance_truncated_json: appended %r (braces=%d, brackets=%d, in_string=%s)",
+        suffix,
+        depth_brace,
+        depth_bracket,
+        in_string,
+    )
+    return text + suffix
+
+
 def extract_first_json_object(text: str, *, strict: bool = False) -> dict[str, Any]:
     """Extract the first JSON object from arbitrary text.
 
