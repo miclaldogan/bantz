@@ -56,12 +56,44 @@ class VerifyConfig:
         Whether to retry tools that return success=False.
     timeout_seconds:
         Per-tool retry timeout (uses same as original if None).
+    retryable_tools:
+        Whitelist of tool names safe to retry.  Only these tools
+        will be retried; all others are left as-is.  Issue #939:
+        replaces blacklisting destructive tools with an explicit
+        whitelist of idempotent, non-destructive tools.
+    valid_empty_tools:
+        Tools for which an empty result (e.g. ``[]``) is a valid
+        "no data found" response rather than a failure.  Issue #939.
     """
 
     max_retries: int = 1
     retry_empty: bool = True
     retry_errors: bool = True
     timeout_seconds: Optional[float] = None
+    retryable_tools: frozenset[str] = frozenset({
+        "calendar.list_events",
+        "calendar.find_free_slots",
+        "gmail.list_messages",
+        "gmail.unread_count",
+        "gmail.get_message",
+        "gmail.smart_search",
+        "gmail.list_drafts",
+        "gmail.list_labels",
+        "gmail.query_from_nl",
+        "contacts.list",
+        "contacts.resolve",
+        "time.now",
+        "system.status",
+    })
+    valid_empty_tools: frozenset[str] = frozenset({
+        "calendar.list_events",
+        "calendar.find_free_slots",
+        "gmail.list_messages",
+        "gmail.smart_search",
+        "gmail.list_drafts",
+        "gmail.list_labels",
+        "contacts.list",
+    })
 
 
 # ── Single tool verification result ──────────────────────────
@@ -131,6 +163,22 @@ def _is_empty_result(result: Dict[str, Any]) -> bool:
     return False
 
 
+def _is_safety_rejected(result: Dict[str, Any]) -> bool:
+    """Check whether a tool result was rejected by the safety guard.
+
+    Issue #939: Checks multiple key patterns so changes to the safety
+    guard's rejection format don't silently bypass the check.
+    """
+    if result.get("safety_rejected"):
+        return True
+    if result.get("blocked"):
+        return True
+    error = str(result.get("error") or "")
+    if "safety" in error.lower() or "blocked" in error.lower():
+        return True
+    return False
+
+
 def _is_error_result(result: Dict[str, Any]) -> bool:
     """Check whether a tool result indicates an error."""
     if result.get("success") is False:
@@ -181,11 +229,30 @@ def verify_tool_results(
         tv.is_error = error
         tv.original_success = not error
 
+        # Issue #939: Empty is valid for query tools ("no events today" = valid)
+        if empty and tool_name in cfg.valid_empty_tools:
+            tv.final_success = True
+            verified.append(result)
+            ok += 1
+            verifications.append(tv)
+            continue
+
+        # Issue #939: Safety-rejected results must never be retried
+        if _is_safety_rejected(result):
+            tv.final_success = False
+            tv.error_message = "safety_rejected — not retriable"
+            verified.append(result)
+            failed += 1
+            verifications.append(tv)
+            continue
+
+        # Issue #939: Only retry tools on the retryable whitelist
         needs_retry = (
             (empty and cfg.retry_empty) or (error and cfg.retry_errors)
         ) and cfg.max_retries > 0 and retry_fn is not None
+        can_retry = tool_name in cfg.retryable_tools
 
-        if needs_retry:
+        if needs_retry and can_retry:
             tv.retried = True
             retried += 1
             try:
