@@ -51,6 +51,7 @@ from bantz.brain.post_route_corrections import (
 from bantz.brain.plan_verifier import verify_plan
 from bantz.brain.tool_param_builder import build_tool_params
 from bantz.brain.misroute_integration import record_turn_misroute
+from bantz.brain.context_builder import ContextBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -194,10 +195,14 @@ class OrchestratorLoop:
         self._session_ctx_ttl = 60.0
 
         # Issue #942: Caches to avoid redundant work in _llm_planning_phase
-        self._cached_pii_summary: str | None = None
-        self._cached_pii_summary_key: int | None = None       # hash of raw summary
-        self._cached_personality_block: str | None = None
-        self._personality_block_built: bool = False
+        # Issue #1010: Context assembly extracted to ContextBuilder
+        self._context_builder = ContextBuilder(
+            memory=self.memory,
+            user_memory=self.user_memory,
+            personality_injector=getattr(self, "personality_injector", None),
+            pii_filter=self.config.memory_pii_filter,
+            memory_max_tokens=self.config.memory_max_tokens,
+        )
 
         # Issue #407: Pre-route rule engine — bypass LLM for obvious patterns
         self.prerouter = PreRouter()
@@ -840,165 +845,22 @@ class OrchestratorLoop:
         conversation_history = context.get("recent_conversation", [])
         tool_results = context.get("last_tool_results", [])
 
-        if getattr(self, "_memory_tracer", None) is not None:
-            try:
-                self._memory_tracer.begin_turn(int(state.turn_count) + 1)
-            except Exception:
-                pass
-        
-        # Use memory-lite summary instead of rolling_summary from state (Issue #141)
-        dialog_summary = self.memory.to_prompt_block()
-
-        # Issue #599: PII redaction + rough token budget enforcement for injected memory block
-        # Issue #942: Cache PII-redacted summary — only re-redact when content changes
-        turns_count = len(self.memory) if hasattr(self.memory, "__len__") else 0
-        _raw_hash = hash(dialog_summary) if dialog_summary else None
-        if self.config.memory_pii_filter and dialog_summary:
-            if _raw_hash == self._cached_pii_summary_key and self._cached_pii_summary is not None:
-                dialog_summary = self._cached_pii_summary
-            else:
-                try:
-                    from bantz.privacy.redaction import redact_pii
-                    dialog_summary = redact_pii(dialog_summary)
-                    self._cached_pii_summary = dialog_summary
-                    self._cached_pii_summary_key = _raw_hash
-                except Exception:
-                    pass
-
-        from bantz.llm.token_utils import estimate_tokens as _estimate_tokens
-
-        try:
-            budget_tokens = int(getattr(getattr(self, "_memory_tracer", None), "budget", None).max_tokens)  # type: ignore[union-attr]
-        except Exception:
-            budget_tokens = int(self.config.memory_max_tokens)
-
-        budget_tokens = max(1, int(budget_tokens))
-        original_tokens = _estimate_tokens(dialog_summary or "")
-        if dialog_summary and original_tokens > budget_tokens:
-            budget_chars = budget_tokens * 4
-            trimmed = (dialog_summary or "")[-budget_chars:]
-            nl = trimmed.find("\n")
-            if nl > 0 and nl < 80:
-                trimmed = trimmed[nl + 1 :]
-            after_tokens = _estimate_tokens(trimmed)
-            if getattr(self, "_memory_tracer", None) is not None:
-                try:
-                    self._memory_tracer.record_trim(original_tokens, after_tokens, reason="token_budget")
-                except Exception:
-                    pass
-            dialog_summary = trimmed
-
-        if getattr(self, "_memory_tracer", None) is not None:
-            try:
-                self._memory_tracer.record_injection(dialog_summary or "", turns_count, token_estimator=_estimate_tokens)
-            except Exception:
-                pass
-        
-        # Issue #339: Include conversation history and tool results in context
-        # Build enhanced context block
-        context_parts = []
-        
-        if dialog_summary:
-            context_parts.append(dialog_summary)
-
-        # Issue #873: Inject persistent user profile context
-        # Issue #942: Skip user_memory lookup for smalltalk (prerouter detected)
-        _um_facts: dict[str, str] = {}
-        _um_prefs: dict = {}
+        # Issue #1010: Context assembly delegated to ContextBuilder
         _is_smalltalk_preroute = (
             preroute_match is not None
             and preroute_match.matched
             and preroute_match.intent.handler_type == "local"
         )
-        if getattr(self, "user_memory", None) is not None and not _is_smalltalk_preroute:
-            try:
-                _um_result = self.user_memory.on_turn_start(user_input)
-                _profile_ctx = _um_result.get("profile_context", "")
-                _um_facts = _um_result.get("facts", {})
-                if _profile_ctx:
-                    context_parts.append(f"USER_PROFILE:\n{_profile_ctx}")
-                _memory_snippets = _um_result.get("memories", [])
-                if _memory_snippets:
-                    _mem_block = "LONG_TERM_MEMORY:\n" + "\n".join(
-                        f"  - {s}" for s in _memory_snippets[:5]
-                    )
-                    context_parts.append(_mem_block)
-                # Update personality injector with user name from profile
-                if getattr(self, "personality_injector", None) is not None:
-                    _pname = _um_facts.get("name", "")
-                    if _pname:
-                        self.personality_injector.update_user_name(_pname)
-            except Exception as _um_exc:
-                logger.debug("[ORCHESTRATOR] user_memory.on_turn_start failed: %s", _um_exc)
-
-        # Issue #874: Inject personality block (Jarvis/Friday/Alfred)
-        # Issue #942: Cache personality block — it is static per session
-        if getattr(self, "personality_injector", None) is not None:
-            try:
-                if not self._personality_block_built:
-                    _pi_block = self.personality_injector.build_router_block(
-                        facts=_um_facts,
-                        preferences=_um_prefs,
-                    )
-                    self._cached_personality_block = _pi_block
-                    self._personality_block_built = True
-                else:
-                    _pi_block = self._cached_personality_block
-                if _pi_block:
-                    context_parts.append(f"PERSONALITY:\n{_pi_block}")
-            except Exception as _pi_exc:
-                logger.debug("[ORCHESTRATOR] personality injection failed: %s", _pi_exc)
-        
-        # Add recent conversation (last 2 turns)
-        if conversation_history:
-            conv_lines = ["RECENT_CONVERSATION:"]
-            for turn in conversation_history[-2:]:
-                user_text = str(turn.get("user", ""))[:100]
-                asst_text = str(turn.get("assistant", ""))[:150]
-                if self.config.memory_pii_filter:
-                    try:
-                        from bantz.privacy.redaction import redact_pii
-
-                        user_text = redact_pii(user_text)
-                        asst_text = redact_pii(asst_text)
-                    except Exception:
-                        pass
-                conv_lines.append(f"  U: {user_text}")
-                conv_lines.append(f"  A: {asst_text}")
-            context_parts.append("\n".join(conv_lines))
-        
-        # Add recent tool results (for context continuity)
-        if tool_results:
-            result_lines = ["LAST_TOOL_RESULTS:"]
-            for tr in tool_results[-2:]:
-                tool_name = str(tr.get("tool", ""))
-                # Issue #353: Use result_summary instead of truncated result
-                result_str = str(tr.get("result_summary", ""))[:200]
-                if self.config.memory_pii_filter:
-                    try:
-                        from bantz.privacy.redaction import redact_pii
-
-                        result_str = redact_pii(result_str)
-                    except Exception:
-                        pass
-                success = tr.get("success", True)
-                status = "ok" if success else "fail"
-                result_lines.append(f"  {tool_name} ({status}): {result_str}")
-            context_parts.append("\n".join(result_lines))
-
-        # Issue #416: Inject REFERENCE_TABLE for anaphora resolution
-        # Enables 3B router to resolve "ilkini", "sonuncusu", "#2" etc.
-        if tool_results:
-            from bantz.brain.anaphora import ReferenceTable
-
-            ref_table = ReferenceTable.from_tool_results(tool_results)
-            ref_block = ref_table.to_prompt_block()
-            if ref_block:
-                context_parts.append(ref_block)
-                # Store reference table in state for later use
-                state.reference_table = ref_table
-        
-        enhanced_summary = "\n\n".join(context_parts) if context_parts else None
+        _ctx_result = self._context_builder.build(
+            user_input=user_input,
+            conversation_history=conversation_history,
+            tool_results=tool_results,
+            state=state,
+            is_smalltalk=_is_smalltalk_preroute,
+            memory_tracer=getattr(self, "_memory_tracer", None),
+        )
+        enhanced_summary = _ctx_result.enhanced_summary
+        dialog_summary = _ctx_result.dialog_summary
 
         # Issue #599: Publish memory injection diagnostics and store in trace
         if getattr(self, "_memory_tracer", None) is not None:

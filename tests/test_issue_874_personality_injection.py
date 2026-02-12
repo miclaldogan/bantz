@@ -631,9 +631,13 @@ class TestOrchestratorWiring(unittest.TestCase):
         self.assertIn("PersonalityInjector", self._source)
 
     def test_personality_block_in_phase1(self):
-        """Phase 1 should inject PERSONALITY block."""
-        self.assertIn("PERSONALITY:", self._source)
-        self.assertIn("build_router_block", self._source)
+        """Phase 1 should inject PERSONALITY block.
+
+        Issue #1010: Context building extracted to ContextBuilder.
+        """
+        cb_source = (_SRC / "brain" / "context_builder.py").read_text("utf-8")
+        self.assertIn("PERSONALITY:", cb_source)
+        self.assertIn("build_router_block", cb_source)
 
     def test_personality_block_in_phase3(self):
         """Phase 3 should pass personality_block to build_finalization_context."""
