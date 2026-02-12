@@ -43,10 +43,12 @@ class IntentCategory(Enum):
     CALENDAR_DELETE = "calendar_delete"
     CALENDAR_UPDATE = "calendar_update"
 
-    # Email - hint only (do not bypass router)
+    # Email - hint only for send (destructive), bypass for read/list
     EMAIL_SEND = "email_send"
+    GMAIL_LIST = "gmail_list"
     
     # System - bypass router, use system handler
+    SYSTEM_STATUS = "system_status"
     VOLUME_CONTROL = "volume_control"
     BRIGHTNESS = "brightness"
     APP_LAUNCH = "app_launch"
@@ -90,6 +92,8 @@ class IntentCategory(Enum):
             IntentCategory.TIME_QUERY,
             IntentCategory.DATE_QUERY,
             IntentCategory.CALENDAR_LIST,
+            IntentCategory.GMAIL_LIST,
+            IntentCategory.SYSTEM_STATUS,
             IntentCategory.VOLUME_CONTROL,
             IntentCategory.BRIGHTNESS,
             IntentCategory.APP_LAUNCH,
@@ -113,6 +117,8 @@ class IntentCategory(Enum):
             IntentCategory.CALENDAR_DELETE: "calendar",
             IntentCategory.CALENDAR_UPDATE: "calendar",
             IntentCategory.EMAIL_SEND: "router",
+            IntentCategory.GMAIL_LIST: "gmail",
+            IntentCategory.SYSTEM_STATUS: "system",
             IntentCategory.VOLUME_CONTROL: "system",
             IntentCategory.BRIGHTNESS: "system",
             IntentCategory.APP_LAUNCH: "system",
@@ -629,6 +635,75 @@ def create_screenshot_rule() -> PreRouteRule:
     )
 
 
+class ThresholdRule(PreRouteRule):
+    """Keyword + pattern scoring with threshold.
+
+    Issue #906: deterministic routing for high-confidence keyword clusters.
+    A match is produced only when ``(keyword_hits + pattern_hits) >= threshold``.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        intent: IntentCategory,
+        keywords: list[str],
+        patterns: list[str],
+        threshold: int = 2,
+        confidence: float = 0.90,
+    ) -> None:
+        super().__init__(name=name, intent=intent)
+        self.keywords = [kw.lower() for kw in keywords]
+        self.patterns = [re.compile(p, re.IGNORECASE) for p in patterns]
+        self.threshold = threshold
+        self.confidence = confidence
+
+    def match(self, text: str) -> PreRouteMatch:
+        lower = text.lower()
+        hits = sum(1 for kw in self.keywords if kw in lower)
+        hits += sum(1 for pat in self.patterns if pat.search(text))
+        if hits >= self.threshold:
+            return PreRouteMatch.create(
+                intent=self.intent,
+                confidence=self.confidence,
+                rule_name=self.name,
+                extracted={"threshold_hits": hits},
+            )
+        return PreRouteMatch.no_match()
+
+
+def create_gmail_keyword_rule() -> PreRouteRule:
+    """Gmail read/list keyword rule (Issue #906)."""
+    return ThresholdRule(
+        name="gmail_keyword",
+        intent=IntentCategory.GMAIL_LIST,
+        keywords=["mail", "e-posta", "eposta", "mesaj", "okunmamış", "inbox", "gelen kutusu"],
+        patterns=[
+            r"okunmamış\s+mail",
+            r"mail(?:ler)?(?:im)?(?:i)?\s+(?:göster|listele|oku|aç|bak)",
+            r"gelen\s+kutu(?:su|m)",
+            r"son\s+mail",
+        ],
+        threshold=2,
+        confidence=0.90,
+    )
+
+
+def create_system_keyword_rule() -> PreRouteRule:
+    """System status keyword rule (Issue #906)."""
+    return ThresholdRule(
+        name="system_keyword",
+        intent=IntentCategory.SYSTEM_STATUS,
+        keywords=["cpu", "ram", "disk", "bellek", "pil", "batarya", "memory"],
+        patterns=[
+            r"sistem\s+durum",
+            r"ne\s+kadar\s+(?:ram|disk|bellek|pil)",
+            r"(?:cpu|ram|disk)\s+(?:kullanım|usage)",
+        ],
+        threshold=1,
+        confidence=0.92,
+    )
+
+
 def create_smalltalk_rule() -> PreRouteRule:
     """Create smalltalk detection rule."""
     return PatternRule(
@@ -702,6 +777,8 @@ class PreRouter:
             create_calendar_create_rule(),
             create_calendar_delete_rule(),
             create_email_send_rule(),
+            create_gmail_keyword_rule(),
+            create_system_keyword_rule(),
             create_volume_rule(),
             create_screenshot_rule(),
             create_smalltalk_rule(),
