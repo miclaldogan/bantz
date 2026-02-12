@@ -1104,18 +1104,8 @@ class OrchestratorLoop:
             return tool_results
 
         def _retry_fn(tool_name: str, original: dict[str, Any]) -> dict[str, Any]:
+            """Retry callback — safety/whitelist checks in verify_results."""
             try:
-                from bantz.tools.metadata import is_destructive, get_tool_risk
-
-                if is_destructive(tool_name):
-                    return original
-
-                # Safety-rejected results should never be retried: the args
-                # failed validation and retrying with empty/same params would
-                # bypass the safety guard.
-                if original.get("safety_rejected"):
-                    return original
-
                 tool = self.tools.get(tool_name)
                 if tool is None or tool.function is None:
                     return original
