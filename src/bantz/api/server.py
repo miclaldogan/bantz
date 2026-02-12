@@ -150,6 +150,27 @@ def create_app(
     app.state._session_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)  # type: ignore[assignment]
     app.state._session_locks_guard = threading.Lock()  # protects dict access
 
+    # Issue #901: IP-based rate limiter for /api/v1/chat
+    # Sliding-window counter — lightweight, no external deps.
+    _rate_limit_max = int(os.getenv("BANTZ_RATE_LIMIT_RPM", "30"))  # requests per minute
+    _rate_buckets: dict[str, list[float]] = defaultdict(list)
+    _rate_lock = threading.Lock()
+
+    def _check_rate_limit(client_ip: str) -> bool:
+        """Return True if request is within rate limit, False if exceeded."""
+        now = time.time()
+        window = 60.0  # 1 minute
+        with _rate_lock:
+            bucket = _rate_buckets[client_ip]
+            # Prune entries older than window
+            cutoff = now - window
+            while bucket and bucket[0] < cutoff:
+                bucket.pop(0)
+            if len(bucket) >= _rate_limit_max:
+                return False
+            bucket.append(now)
+            return True
+
     # ── Exception handler ───────────────────────────────────────────
     @app.exception_handler(Exception)
     async def _global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -209,6 +230,19 @@ def create_app(
         _token: Optional[str] = Depends(require_auth),
     ) -> ChatResponse:
         """Chat endpoint — wraps BantzServer.handle_command()."""
+        # Issue #901: Rate limiting
+        client_ip = request.client.host if request.client else "unknown"
+        if not _check_rate_limit(client_ip):
+            logger.warning("[RATE_LIMIT] %s exceeded %d req/min", client_ip, _rate_limit_max)
+            return JSONResponse(
+                status_code=429,
+                content=ErrorResponse(
+                    error="Çok fazla istek — lütfen biraz bekleyin efendim.",
+                    code="rate_limited",
+                ).model_dump(),
+                headers={"Retry-After": "60"},
+            )
+
         server = request.app.state.bantz_server
         executor = request.app.state._executor
 
