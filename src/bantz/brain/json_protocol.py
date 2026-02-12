@@ -128,6 +128,13 @@ def balance_truncated_json(text: str) -> str:
 
     suffix = ""
     if in_string:
+        # Issue #1004: If we're inside a string and the last character is a
+        # backslash, we have a truncated escape sequence (e.g. `"test\`).
+        # Remove the dangling backslash before closing the quote so that
+        # json.loads doesn't choke on an invalid escape.
+        stripped = text.rstrip()
+        if stripped.endswith("\\"):
+            text = stripped[:-1]
         suffix += '"'
     suffix += "]" * max(0, depth_bracket)
     suffix += "}" * max(0, depth_brace)
@@ -143,10 +150,14 @@ def balance_truncated_json(text: str) -> str:
 
 
 def extract_first_json_object(text: str, *, strict: bool = False) -> dict[str, Any]:
-    """Extract the first JSON object from arbitrary text.
+    """Extract the best JSON object from arbitrary text.
 
     Uses balanced-braces scanning to find valid JSON objects even when
     surrounded by markdown, explanations, or other noise.
+
+    Issue #1004: If the LLM emits a small error/empty object *before* the
+    real routing output, we now prefer the first object that contains a
+    ``route`` key.  Falls back to the largest object if none has ``route``.
     
     Args:
         text: Input text containing JSON (may have leading/trailing content)
@@ -172,6 +183,24 @@ def extract_first_json_object(text: str, *, strict: bool = False) -> dict[str, A
     text = (text or "").strip()
     if not text:
         raise JsonParseError("empty_output", raw_text=text)
+
+    # Issue #1004: Handle array-wrapped output — ``[{...}]``
+    # If the text is a JSON array with a single object containing "route",
+    # extract the inner object instead of failing.
+    text_for_array = text.lstrip()
+    if text_for_array.startswith("["):
+        try:
+            arr = json.loads(text_for_array)
+            if isinstance(arr, list) and len(arr) >= 1:
+                for item in arr:
+                    if isinstance(item, dict) and "route" in item:
+                        return item
+                # No route key found, return first dict
+                for item in arr:
+                    if isinstance(item, dict):
+                        return item
+        except (json.JSONDecodeError, TypeError):
+            pass  # Fall through to brace scanner
     
     # Strict mode: no leading/trailing content allowed
     if strict and not text.startswith("{"):
@@ -191,66 +220,70 @@ def extract_first_json_object(text: str, *, strict: bool = False) -> dict[str, A
             f"JSON object found at position {start} (large preamble may indicate LLM confusion)"
         )
 
-    depth = 0
-    in_string = False
-    escape = False
+    # Issue #1004: Collect all top-level JSON objects, prefer one with "route"
+    candidates: list[dict[str, Any]] = []
+    scan_pos = start
 
-    for idx in range(start, len(text)):
-        ch = text[idx]
+    while scan_pos < len(text):
+        brace_start = text.find("{", scan_pos)
+        if brace_start < 0:
+            break
 
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-            continue
+        depth = 0
+        in_string = False
+        escape = False
 
-        if ch == '"':
-            in_string = True
-            continue
+        for idx in range(brace_start, len(text)):
+            ch = text[idx]
 
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                candidate = text[start : idx + 1]
-                try:
-                    obj = json.loads(candidate)
-                except json.JSONDecodeError as e:
-                    raise JsonParseError(
-                        "json_decode_error",
-                        raw_text=candidate,
-                        position=e.pos if hasattr(e, 'pos') else None,
-                        context={"json_error": str(e)}
-                    ) from e
-                
-                if not isinstance(obj, dict):
-                    raise JsonParseError(
-                        "json_not_object",
-                        raw_text=candidate,
-                        context={"actual_type": type(obj).__name__}
-                    )
-                
-                # Strict mode: check for trailing content
-                if strict and idx + 1 < len(text):
-                    trailing = text[idx + 1:].strip()
-                    if trailing and not trailing.startswith("```"):  # Allow markdown close
-                        raise JsonParseError(
-                            "strict_mode_violation",
-                            raw_text=text,
-                            context={"trailing_content": trailing[:100]}
-                        )
-                
-                return obj
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
 
-    raise JsonParseError(
-        "unbalanced_json",
-        raw_text=text,
-        context={"start_position": start, "depth_at_end": depth}
-    )
+            if ch == '"':
+                in_string = True
+                continue
+
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate_str = text[brace_start : idx + 1]
+                    try:
+                        obj = json.loads(candidate_str)
+                        if isinstance(obj, dict):
+                            candidates.append(obj)
+                    except json.JSONDecodeError:
+                        pass
+                    scan_pos = idx + 1
+                    break
+        else:
+            # Ran off the end — unbalanced
+            break
+
+        if depth != 0:
+            break
+
+    if not candidates:
+        raise JsonParseError(
+            "unbalanced_json",
+            raw_text=text,
+            context={"start_position": start}
+        )
+
+    # Prefer objects with a "route" key (the real router output)
+    for c in candidates:
+        if "route" in c:
+            return c
+
+    # Fall back to the largest object (most likely the real output)
+    return max(candidates, key=len)
 
 
 class ValidationError(Exception):
@@ -854,8 +887,10 @@ def repair_common_json_issues(text: str) -> str:
     # IMPORTANT: Exclude JSON literals true, false, null — wrapping them in
     # quotes corrupts semantics (e.g. true → "true" becomes a truthy string
     # instead of a boolean).  See Issue #886.
+    # Issue #1004: Include Turkish characters (ıİğĞüÜşŞöÖçÇ) so unquoted
+    # Turkish values like  takvim  can be repaired.
     text = re.sub(
-        r':\s*(?!(true|false|null)\s*[,}])([a-zA-Z_][a-zA-Z0-9_]*)\s*([,}])',
+        r':\s*(?!(true|false|null)\s*[,}])([a-zA-ZıİğĞüÜşŞöÖçÇ_][a-zA-Z0-9ıİğĞüÜşŞöÖçÇ_]*)\s*([,}])',
         r': "\2"\3',
         text,
     )
