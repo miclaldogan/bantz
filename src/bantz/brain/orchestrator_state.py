@@ -12,6 +12,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from bantz.brain.anaphora import ReferenceTable
+    from bantz.brain.disambiguation import DisambiguationRequest
 
 
 @dataclass
@@ -49,6 +50,9 @@ class OrchestratorState:
 
     # Issue #416: Last reference table for anaphora resolution
     reference_table: Optional[ReferenceTable] = field(default=None)
+
+    # Issue #875: Pending disambiguation request
+    disambiguation_pending: Optional[DisambiguationRequest] = field(default=None)
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue).
@@ -216,3 +220,4 @@ class OrchestratorState:
         self.turn_count = 0
         self.session_context = None
         self.reference_table = None
+        self.disambiguation_pending = None
