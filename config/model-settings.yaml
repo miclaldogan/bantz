@@ -4,8 +4,10 @@
 # - Local: vLLM 3B on port 8001 for fast routing/planning/tool selection
 # - Quality writing: Gemini (cloud) when enabled via env (see docs/setup/vllm.md)
 #
-# Note: Local 7B/8B is intentionally NOT part of the default workflow
-# due to typical laptop VRAM constraints.
+# To use a 7B/8B router instead of the default 3B, set:
+#   BANTZ_VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ
+# and launch vLLM with the router_7b settings below.
+# See also: docs/env-reference.md
 #
 # Startup Scripts:
 #   ./scripts/vllm/start_3b.sh   # Start 3B router (baseline)
@@ -57,6 +59,29 @@ single_model:
   endpoint: "http://localhost:8001/v1"
   context_window: 4096
   quantization: "awq_marlin"
+
+# =============================================================================
+# 7B/8B Router Upgrade (Issue #905)
+# =============================================================================
+# Optional higher-capacity router for improved Turkish routing accuracy.
+# Set BANTZ_VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ in your env to activate.
+# VRAM-friendly settings for RTX 4050/4060 (6-8 GB):
+#   --gpu-memory-utilization 0.50   (leaves room for OS/display)
+#   --max-num-seqs 4                (router handles one request at a time)
+#   --max-model-len 4096            (same context window as 3B)
+router_7b:
+  name: "Qwen/Qwen2.5-7B-Instruct-AWQ"
+  provider: "vllm"
+  context_window: 4096
+  endpoint: "http://localhost:8001/v1"
+  port: 8001
+  quantization: "awq_marlin"
+  max_model_len: 4096
+  gpu_memory_utilization: 0.50
+  max_num_seqs: 4
+  vram_usage_gb: 5.2
+  role: "routing, planning, tool selection (upgraded)"
+  enabled: false   # Flip to true when using BANTZ_VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ
 
 # =============================================================================
 # Router Configuration
