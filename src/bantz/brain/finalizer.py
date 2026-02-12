@@ -102,10 +102,12 @@ def _prepare_tool_results_for_finalizer(
 
     .. deprecated::
         This is a thin wrapper around the canonical implementation in
-        ``orchestrator_loop._prepare_tool_results_for_finalizer``.
+        ``bantz.brain.tool_result_summarizer``.
         New code should import directly from there.
     """
-    from bantz.brain.orchestrator_loop import (
+    # Issue #1014: Import from tool_result_summarizer directly to avoid
+    # circular dependency risk through orchestrator_loop.
+    from bantz.brain.tool_result_summarizer import (
         _prepare_tool_results_for_finalizer as _canonical,
     )
     return _canonical(tool_results, max_tokens=max_tokens)
