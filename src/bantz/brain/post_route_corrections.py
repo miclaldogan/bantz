@@ -33,17 +33,76 @@ def extract_first_email(text: str) -> str | None:
 
 
 def extract_recipient_name(text: str) -> str | None:
-    """Extract recipient name from Turkish email patterns (e.g. Ali'ye mail)."""
+    """Extract recipient name from Turkish email patterns.
+
+    Issue #1006: Now handles both apostrophe and non-apostrophe forms:
+    - "Ali'ye mail gönder"  (apostrophe dative)
+    - "Aliye mail gönder"   (no apostrophe, fused dative)
+    - "Ahmet Bey'e bir mail at" (multi-word + apostrophe)
+    """
     t = text or ""
+    _NAME = r"[A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]+"
+    _MULTI = rf"{_NAME}(?:\s+{_NAME})*"
+    _MAIL = r"(?:bir\s+)?(?:mail|e-?posta)\b"
+
+    # Pattern 1: Name + apostrophe + dative + mail keyword
+    # "Ali'ye mail gönder", "Ahmet'e mail at", "Ahmet Bey'e bir mail at"
     m = re.search(
-        r"\b([A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]+(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]+)*)\s*'?\s*(?:ye|ya)\s+(?:bir\s+)?(?:mail|e-?posta)\b",
+        rf"\b({_MULTI})\s*'\s*[yY]?[eEaA]\s+{_MAIL}",
         t,
         flags=re.IGNORECASE,
     )
-    if not m:
-        return None
-    name = str(m.group(1) or "").strip()
-    return name or None
+    if m:
+        return m.group(1).strip() or None
+
+    # Pattern 2: Name (vowel-ending) + fused dative (ye/ya) + mail keyword
+    # "Aliye mail gönder" → name ends in vowel, buffer-y + vowel follows
+    _VOWELS = "aeıioöuüAEIİOÖUÜ"
+    m = re.search(
+        rf"\b([A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]*[{_VOWELS}])[yY][eEaA]\s+{_MAIL}",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip() or None
+
+    # Pattern 3: mail keyword + name ("mail gönder Ahmet'e")
+    m = re.search(
+        rf"\b(?:mail|e-?posta)\b.*?\b({_NAME})\s*'?\s*[yY]?[eEaA]\b",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip() or None
+
+    return None
+
+
+def extract_subject_hint(text: str) -> str | None:
+    """Extract potential subject from user input.
+
+    Issue #1006: Looks for 'hakkında', 'konulu', 'ile ilgili' patterns.
+    """
+    t = (text or "").strip()
+    # "toplantı hakkında mail gönder" → subject = "toplantı"
+    m = re.search(
+        r"\b(.{2,60})\s+(?:hakkında|konulu|ile\s+ilgili|konusunda)\s+(?:bir\s+)?(?:mail|e-?posta)\b",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return str(m.group(1)).strip()
+
+    # "mail gönder konu: proje güncellemesi"
+    m2 = re.search(
+        r"\bkonu\s*:\s*(.{2,80})$",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m2:
+        return str(m2.group(1)).strip()
+
+    return None
 
 
 def extract_message_body_hint(text: str) -> str | None:
@@ -58,9 +117,8 @@ def extract_message_body_hint(text: str) -> str | None:
         return None
     body = str(m.group(1) or "").strip()
 
-    email_in_body = re.search(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", body)
-    if email_in_body and email_in_body.start() == 0:
-        body = body[email_in_body.end():].strip(" \t\n\r,;:-")
+    # Issue #1006: Strip email addresses anywhere in the body, not just at pos 0
+    body = re.sub(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", "", body).strip(" \t\n\r,;:-")
 
     return body or None
 
@@ -91,14 +149,16 @@ def post_route_correction_email_send(
                 "[POST_ROUTE_CORRECTION] email_send: LLM already route=gmail/send, skipping override"
             )
         return output
-    if _route not in ("unknown", "smalltalk", ""):
-        # LLM routed to calendar/system/etc. — unlikely email, skip correction
+    if _route not in ("unknown", "smalltalk", "calendar", "system", ""):
+        # Issue #1006: Also catch calendar/system misroutes for email-send
         return output
 
     gmail_obj = dict(getattr(output, "gmail", None) or {})
     slots = dict(getattr(output, "slots", None) or {})
 
-    gmail_obj.setdefault("subject", "")
+    # Issue #1006: Extract subject from user input instead of empty default
+    subject_hint = extract_subject_hint(user_input)
+    gmail_obj.setdefault("subject", subject_hint or "")
 
     if not gmail_obj.get("to"):
         email = extract_first_email(user_input)
