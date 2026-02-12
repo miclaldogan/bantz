@@ -204,6 +204,11 @@ class OrchestratorLoop:
         # Issue #938: Wire NLU slot extraction into brain pipeline
         self._slot_extractor = SlotExtractor()
 
+        # Issue #946: Shared executor for tool calls — avoids per-tool ThreadPoolExecutor churn
+        self._tool_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="bantz-tool",
+        )
+
         # Issue #900: Sync router _VALID_TOOLS with actual ToolRegistry
         try:
             JarvisLLMOrchestrator.sync_valid_tools(self.tools.names())
@@ -235,6 +240,16 @@ class OrchestratorLoop:
             "read": ["gmail.get_message"],
             "send": ["gmail.send"],
         }
+
+    def close(self) -> None:
+        """Shut down the shared tool executor. Safe to call multiple times."""
+        try:
+            self._tool_executor.shutdown(wait=False)
+        except Exception:
+            pass
+
+    def __del__(self) -> None:
+        self.close()
 
     def _get_finalization_pipeline(self) -> Any:
         from bantz.brain.finalization_pipeline import create_pipeline
@@ -1169,9 +1184,8 @@ class OrchestratorLoop:
                 timeout = self.config.tool_timeout_seconds
 
                 try:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(tool.function, **params)
-                        result = future.result(timeout=timeout)
+                    future = self._tool_executor.submit(tool.function, **params)
+                    result = future.result(timeout=timeout)
                 except concurrent.futures.TimeoutError:
                     return {
                         **original,
@@ -1532,9 +1546,8 @@ class OrchestratorLoop:
                 timeout = self.config.tool_timeout_seconds
                 try:
                     exec_start = time.time()
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(tool.function, **params)
-                        result = future.result(timeout=timeout)
+                    future = self._tool_executor.submit(tool.function, **params)
+                    result = future.result(timeout=timeout)
                     elapsed_ms = int((time.time() - exec_start) * 1000)
                 except concurrent.futures.TimeoutError:
                     elapsed_ms = int((time.time() - exec_start) * 1000) if "exec_start" in locals() else 0
