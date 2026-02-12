@@ -390,6 +390,8 @@ class VLLMOpenAIClient(LLMClient):
         ttft_measured = False
         ttft_ms = None
         total_tokens = 0
+        total_content_chars = 0  # Issue #1013: accumulate content length
+        chunk_count = 0
         
         try:
             # Call OpenAI-compatible streaming API
@@ -420,7 +422,14 @@ class VLLMOpenAIClient(LLMClient):
                             )
                         except Exception as e:
                             logger.debug(f"TTFT tracking failed: {e}")
-                
+
+                # Issue #1013: Try to extract usage from final chunk (vLLM sends
+                # usage stats in the last streaming chunk when available)
+                if hasattr(chunk_data, "usage") and chunk_data.usage:
+                    usage = chunk_data.usage
+                    if hasattr(usage, "completion_tokens") and usage.completion_tokens:
+                        total_tokens = int(usage.completion_tokens)
+
                 # Extract content
                 if not chunk_data.choices:
                     continue
@@ -432,17 +441,23 @@ class VLLMOpenAIClient(LLMClient):
                 finish_reason = choice.finish_reason
                 
                 if content:
-                    total_tokens += 1
+                    chunk_count += 1
+                    total_content_chars += len(content)
                     
                     yield StreamChunk(
                         content=content,
-                        is_first_token=(total_tokens == 1),
-                        ttft_ms=ttft_ms if total_tokens == 1 else None,
+                        is_first_token=(chunk_count == 1),
+                        ttft_ms=ttft_ms if chunk_count == 1 else None,
                         finish_reason=finish_reason,
                     )
                 
                 if finish_reason:
                     break
+
+            # Issue #1013: If usage stats weren't available from stream,
+            # estimate tokens from accumulated content length (chars/4)
+            if total_tokens == 0 and total_content_chars > 0:
+                total_tokens = max(1, total_content_chars // 4)
             
             # Log final metrics
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
