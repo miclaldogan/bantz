@@ -17,11 +17,11 @@ models:
   router:
     name: "Qwen/Qwen2.5-3B-Instruct-AWQ"
     provider: "vllm"
-    context_window: 2048
+    context_window: 4096
     endpoint: "http://localhost:8001/v1"
     port: 8001
     quantization: "awq_marlin"
-    max_model_len: 2048
+    max_model_len: 4096
     gpu_memory_utilization: 0.70
     vram_usage_gb: 3.0
     ttft_ms: 41  # Validated (vllm_validation_report.md)
@@ -33,7 +33,7 @@ models:
     provider: "vllm"
     endpoint: "http://localhost:8001/v1"  # Same as router (single 3B server)
     port: 8001
-    context_window: 2048
+    context_window: 4096
     quantization: "awq_marlin"
     
   chat:
@@ -41,9 +41,9 @@ models:
     provider: "vllm"
     endpoint: "http://localhost:8001/v1"
     port: 8001
-    context_window: 2048
+    context_window: 4096
     quantization: "awq_marlin"
-    max_model_len: 2048
+    max_model_len: 4096
     gpu_memory_utilization: 0.70
     vram_usage_gb: 3.0
     ttft_ms: 41  # Same server as router
@@ -55,7 +55,7 @@ single_model:
   name: "Qwen/Qwen2.5-3B-Instruct-AWQ"
   provider: "vllm"
   endpoint: "http://localhost:8001/v1"
-  context_window: 2048
+  context_window: 4096
   quantization: "awq_marlin"
 
 # =============================================================================
