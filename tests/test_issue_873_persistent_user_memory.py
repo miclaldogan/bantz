@@ -247,10 +247,14 @@ class TestOrchestratorWiring(unittest.TestCase):
         self.assertIn("UserMemoryBridge", source)
 
     def test_phase1_injects_profile_context(self):
-        """_llm_planning_phase should inject USER_PROFILE into context_parts."""
-        source = (_SRC / "brain" / "orchestrator_loop.py").read_text("utf-8")
-        self.assertIn("USER_PROFILE:", source)
-        self.assertIn("on_turn_start", source)
+        """_llm_planning_phase should inject USER_PROFILE into context_parts.
+
+        Issue #1010: Context building extracted to ContextBuilder, so
+        the literal 'USER_PROFILE:' string now lives in context_builder.py.
+        """
+        cb_source = (_SRC / "brain" / "context_builder.py").read_text("utf-8")
+        self.assertIn("USER_PROFILE:", cb_source)
+        self.assertIn("on_turn_start", cb_source)
 
     def test_phase4_calls_on_turn_end(self):
         """_update_state_phase should call user_memory.on_turn_end."""
@@ -258,9 +262,12 @@ class TestOrchestratorWiring(unittest.TestCase):
         self.assertIn("on_turn_end", source)
 
     def test_phase1_injects_long_term_memory(self):
-        """_llm_planning_phase should inject LONG_TERM_MEMORY block."""
-        source = (_SRC / "brain" / "orchestrator_loop.py").read_text("utf-8")
-        self.assertIn("LONG_TERM_MEMORY:", source)
+        """_llm_planning_phase should inject LONG_TERM_MEMORY block.
+
+        Issue #1010: Context building extracted to ContextBuilder.
+        """
+        cb_source = (_SRC / "brain" / "context_builder.py").read_text("utf-8")
+        self.assertIn("LONG_TERM_MEMORY:", cb_source)
 
     def test_user_memory_init_is_best_effort(self):
         """user_memory init should be wrapped in try/except."""
