@@ -383,12 +383,16 @@ class CompositeRule(PreRouteRule):
 # =============================================================================
 
 def create_greeting_rule() -> PreRouteRule:
-    """Create greeting detection rule."""
+    """Create greeting detection rule.
+    
+    Issue #1001: Removed 'hi' — it matches Turkish words like 'hiç', 'hiçbir',
+    'hile', 'hikaye'. Use 'hello' for English greetings instead.
+    """
     return KeywordRule(
         name="greeting",
         intent=IntentCategory.GREETING,
         keywords=[
-            "merhaba", "selam", "selamlar", "hey", "hi", "hello",
+            "merhaba", "selam", "selamlar", "hey", "hello",
             "günaydın", "iyi günler", "iyi akşamlar",
             "hayırlı günler", "hayırlı sabahlar",
         ],
@@ -689,7 +693,11 @@ def create_gmail_keyword_rule() -> PreRouteRule:
 
 
 def create_system_keyword_rule() -> PreRouteRule:
-    """System status keyword rule (Issue #906)."""
+    """System status keyword rule (Issue #906, #1001).
+    
+    Issue #1001: Raised threshold from 1 to 2 to prevent single-keyword
+    false positives (e.g. 'disk' in 'diskoteka', 'ram' in 'ramazan').
+    """
     return ThresholdRule(
         name="system_keyword",
         intent=IntentCategory.SYSTEM_STATUS,
@@ -699,7 +707,7 @@ def create_system_keyword_rule() -> PreRouteRule:
             r"ne\s+kadar\s+(?:ram|disk|bellek|pil)",
             r"(?:cpu|ram|disk)\s+(?:kullanım|usage)",
         ],
-        threshold=1,
+        threshold=2,
         confidence=0.92,
     )
 

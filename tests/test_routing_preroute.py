@@ -397,7 +397,10 @@ class TestDefaultRuleFactories:
         assert rule.match("Merhaba!").matched is True
         assert rule.match("Selam").matched is True
         assert rule.match("Günaydın").matched is True
-        assert rule.match("Hi").matched is True
+        assert rule.match("Hello").matched is True
+        # Issue #1001: "hi" removed — matches Turkish "hiç", "hikaye" etc.
+        assert rule.match("Hi").matched is False
+        assert rule.match("hiç sorun yok").matched is False
     
     def test_farewell_rule(self) -> None:
         """Test farewell rule."""
