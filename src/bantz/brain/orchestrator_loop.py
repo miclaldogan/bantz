@@ -784,6 +784,10 @@ class OrchestratorLoop:
                 "preroute_confidence": round(preroute_match.confidence, 2),
                 "preroute_rule": preroute_match.rule_name,
             }
+            # Issue #948: Inject extracted slots from PreRouter into hint
+            # CalendarListRule extracts date/time/window_hint via nlu/slots.py
+            if preroute_match.extracted:
+                _preroute_hint["extracted"] = preroute_match.extracted
             self.event_bus.publish("preroute.hint", {
                 "intent": preroute_match.intent.value,
                 "confidence": preroute_match.confidence,
