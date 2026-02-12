@@ -18,19 +18,50 @@ Default weights (configurable):
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Protocol, Sequence
 
 from bantz.memory.models import MemoryItem, MemoryItemType
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "RankedMemory",
     "RankingWeights",
     "HybridRanker",
+    "EmbeddingProvider",
     "TURKISH_STOPWORDS",
+    "cosine_similarity",
 ]
+
+
+# ── Embedding provider protocol ──────────────────────────────────────
+
+class EmbeddingProvider(Protocol):
+    """Pluggable embedding provider for semantic scoring.
+
+    Implement this protocol to wire in sentence-transformers, Gemini,
+    OpenAI, or any other embedding backend.
+    """
+
+    def embed(self, text: str) -> List[float]:
+        """Return a dense vector for *text*."""
+        ...
+
+
+def cosine_similarity(a: List[float], b: List[float]) -> float:
+    """Cosine similarity between two vectors.  Returns 0.0 on degenerate inputs."""
+    if len(a) != len(b) or not a:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 # ── Turkish stop-words ────────────────────────────────────────────────
 TURKISH_STOPWORDS: frozenset[str] = frozenset(
@@ -98,9 +129,11 @@ class HybridRanker:
         self,
         weights: Optional[RankingWeights] = None,
         stopwords: Optional[frozenset[str]] = None,
+        embedding_provider: Optional[EmbeddingProvider] = None,
     ) -> None:
         self.weights = weights or RankingWeights()
         self._stopwords = stopwords if stopwords is not None else TURKISH_STOPWORDS
+        self._embed = embedding_provider
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -136,6 +169,14 @@ class HybridRanker:
         # Build IDF over the item corpus
         idf = self._build_idf(items)
 
+        # Issue #850: Pre-compute query embedding once
+        query_embedding: Optional[List[float]] = None
+        if self._embed is not None:
+            try:
+                query_embedding = self._embed.embed(query)
+            except Exception as exc:
+                logger.debug("[RANKING] Embedding failed for query: %s", exc)
+
         candidates: List[RankedMemory] = []
         for item in items:
             # Apply filters
@@ -145,7 +186,7 @@ class HybridRanker:
                 continue
 
             kw_score = self._keyword_score(query_tokens, item.content, idf)
-            sem_score = self._semantic_score(query, item)
+            sem_score = self._semantic_score(query, item, query_embedding)
             rec_boost = self._recency_boost(item, now)
             imp_score = item.importance
 
@@ -246,15 +287,31 @@ class HybridRanker:
 
     # ── semantic scoring ─────────────────────────────────────────────
 
-    @staticmethod
-    def _semantic_score(query: str, item: MemoryItem) -> float:  # noqa: ARG004
-        """Cosine similarity between query embedding and item embedding.
+    def _semantic_score(
+        self,
+        query: str,
+        item: MemoryItem,
+        query_embedding: Optional[List[float]] = None,
+    ) -> float:
+        """Cosine similarity between query and item embeddings (Issue #850).
 
-        Phase-1: always returns 0.0 (embedding support is optional).
-        When an embedding provider is wired in, this will compute the
-        actual cosine similarity.
+        Uses pre-computed ``query_embedding`` (from the embedding provider)
+        and ``item.embedding_vector`` when both are available.  Falls back
+        to ``0.0`` gracefully when either is missing.
         """
-        # TODO(#450): integrate embedding provider (sentence-transformers / Gemini)
+        item_vec = item.embedding_vector
+        if query_embedding and item_vec:
+            return max(0.0, cosine_similarity(query_embedding, item_vec))
+
+        # If provider is available but item has no pre-stored embedding,
+        # compute on the fly (expensive but correct).
+        if self._embed is not None and query_embedding and not item_vec:
+            try:
+                item_vec = self._embed.embed(item.content)
+                return max(0.0, cosine_similarity(query_embedding, item_vec))
+            except Exception:
+                pass
+
         return 0.0
 
     # ── recency boost ────────────────────────────────────────────────
