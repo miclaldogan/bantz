@@ -45,9 +45,9 @@ __all__ = [
 
 # ── Constants ─────────────────────────────────────────────────
 
-VALID_ROUTES: Set[str] = {"calendar", "gmail", "smalltalk", "system", "unknown"}
-VALID_CALENDAR_INTENTS: Set[str] = {"create", "modify", "cancel", "query", "none"}
-VALID_GMAIL_INTENTS: Set[str] = {"list", "search", "read", "send", "none"}
+VALID_ROUTES: Set[str] = {"calendar", "gmail", "smalltalk", "system", "wiki", "chat", "unknown"}
+VALID_CALENDAR_INTENTS: Set[str] = {"create", "modify", "cancel", "delete", "query", "none"}
+VALID_GMAIL_INTENTS: Set[str] = {"list", "search", "read", "send", "reply", "forward", "delete", "mark_read", "none"}
 
 REQUIRED_FIELDS: List[str] = [
     "route",
@@ -337,6 +337,18 @@ def _repair_slots(value: Any) -> Dict[str, Any]:
     return {}
 
 
+def _repair_gmail_intent(value: Any) -> str:
+    """Fuzzy-repair invalid gmail_intent values."""
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in VALID_GMAIL_INTENTS:
+            return normalized
+        matches = get_close_matches(normalized, list(VALID_GMAIL_INTENTS), n=1, cutoff=0.6)
+        if matches:
+            return matches[0]
+    return "none"
+
+
 def repair_router_output(
     parsed: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], RepairReport]:
@@ -391,6 +403,8 @@ def repair_router_output(
             repaired["tool_plan"] = _repair_tool_plan(original)
         elif fv.field_name == "slots":
             repaired["slots"] = _repair_slots(original)
+        elif fv.field_name == "gmail_intent":
+            repaired["gmail_intent"] = _repair_gmail_intent(original)
         else:
             repaired[fv.field_name] = FIELD_DEFAULTS.get(fv.field_name, "")
 
