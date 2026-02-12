@@ -117,15 +117,16 @@ class TestResearchSummarizer:
     @pytest.mark.asyncio
     async def test_fallback_includes_sources(self):
         s = ResearchSummarizer()
+        domain = "newsportal.example"
         # No LLM → fallback
         with patch.object(s, "_get_llm_client", side_effect=RuntimeError):
             result = await s.summarize(
                 query="q",
-                sources=[_source(title="NewsX", snippet="content here", domain="news.com")],
+                sources=[_source(title="NewsX", snippet="content here", domain=domain)],
             )
         assert result.method == "fallback"
         assert "NewsX" in result.text
-        assert "news.com" in result.text
+        assert domain in result.text
 
     @pytest.mark.asyncio
     async def test_fallback_contradiction_warning(self):
