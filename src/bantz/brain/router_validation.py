@@ -219,6 +219,42 @@ def _validate_gmail_intent(value: Any) -> FieldValidation:
     return fv
 
 
+def _validate_ask_user(value: Any) -> FieldValidation:
+    """Issue #1011: validate ask_user is bool-like."""
+    fv = FieldValidation(field_name="ask_user", original_value=value)
+    if not isinstance(value, (bool, int)):
+        fv.valid = False
+        fv.error = f"not a bool: {type(value).__name__}"
+    return fv
+
+
+def _validate_question(value: Any) -> FieldValidation:
+    """Issue #1011: validate question is a string."""
+    fv = FieldValidation(field_name="question", original_value=value)
+    if not isinstance(value, str):
+        fv.valid = False
+        fv.error = f"not a string: {type(value).__name__}"
+    return fv
+
+
+def _validate_requires_confirmation(value: Any) -> FieldValidation:
+    """Issue #1011: validate requires_confirmation is bool-like."""
+    fv = FieldValidation(field_name="requires_confirmation", original_value=value)
+    if not isinstance(value, (bool, int)):
+        fv.valid = False
+        fv.error = f"not a bool: {type(value).__name__}"
+    return fv
+
+
+def _validate_gmail(value: Any) -> FieldValidation:
+    """Issue #1011: validate gmail is a dict."""
+    fv = FieldValidation(field_name="gmail", original_value=value)
+    if not isinstance(value, dict):
+        fv.valid = False
+        fv.error = f"not a dict: {type(value).__name__}"
+    return fv
+
+
 _FIELD_VALIDATORS = {
     "route": _validate_route,
     "calendar_intent": _validate_calendar_intent,
@@ -227,6 +263,10 @@ _FIELD_VALIDATORS = {
     "assistant_reply": _validate_assistant_reply,
     "slots": _validate_slots,
     "gmail_intent": _validate_gmail_intent,
+    "ask_user": _validate_ask_user,
+    "question": _validate_question,
+    "requires_confirmation": _validate_requires_confirmation,
+    "gmail": _validate_gmail,
 }
 
 
@@ -258,7 +298,8 @@ def validate_router_output(parsed: Dict[str, Any]) -> Tuple[bool, List[FieldVali
                 all_valid = False
 
     # Validate optional fields if present
-    for fname in ["slots", "gmail_intent"]:
+    for fname in ["slots", "gmail_intent", "ask_user", "question",
+                  "requires_confirmation", "gmail"]:
         if fname in parsed and fname not in [v.field_name for v in validations]:
             validator = _FIELD_VALIDATORS.get(fname)
             if validator:
@@ -349,6 +390,53 @@ def _repair_gmail_intent(value: Any) -> str:
     return "none"
 
 
+def _repair_assistant_reply(value: Any) -> str:
+    """Issue #1011: coerce assistant_reply to string."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _repair_ask_user(value: Any) -> bool:
+    """Issue #1011: coerce ask_user to bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "evet")
+    return False
+
+
+def _repair_question(value: Any) -> str:
+    """Issue #1011: coerce question to string."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _repair_requires_confirmation(value: Any) -> bool:
+    """Issue #1011: coerce requires_confirmation to bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "evet")
+    return False
+
+
+def _repair_gmail(value: Any) -> dict:
+    """Issue #1011: coerce gmail to dict."""
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
 def repair_router_output(
     parsed: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], RepairReport]:
@@ -375,8 +463,26 @@ def repair_router_output(
         return dict(parsed), report
 
     # Repair
+    # Issue #1011: Don't blindly copy ALL parsed values — invalid ones would
+    # overwrite good defaults.  Instead, only copy VALID parsed values.
     repaired = dict(FIELD_DEFAULTS)
-    repaired.update(parsed)
+    validated_names = {fv.field_name for fv in validations}
+    for fv in validations:
+        if fv.valid and fv.field_name in parsed:
+            repaired[fv.field_name] = parsed[fv.field_name]
+
+    # Copy unvalidated parsed fields with type-safe check against defaults
+    for key, value in parsed.items():
+        if key in validated_names:
+            continue  # Handled above (valid) or below (repair)
+        if key in FIELD_DEFAULTS:
+            default = FIELD_DEFAULTS[key]
+            if isinstance(value, type(default)):
+                repaired[key] = value
+            # else: keep safer default
+        else:
+            # Unknown extra field — pass through
+            repaired[key] = value
 
     for fv in validations:
         if fv.valid:
@@ -405,6 +511,16 @@ def repair_router_output(
             repaired["slots"] = _repair_slots(original)
         elif fv.field_name == "gmail_intent":
             repaired["gmail_intent"] = _repair_gmail_intent(original)
+        elif fv.field_name == "assistant_reply":
+            repaired["assistant_reply"] = _repair_assistant_reply(original)
+        elif fv.field_name == "ask_user":
+            repaired["ask_user"] = _repair_ask_user(original)
+        elif fv.field_name == "question":
+            repaired["question"] = _repair_question(original)
+        elif fv.field_name == "requires_confirmation":
+            repaired["requires_confirmation"] = _repair_requires_confirmation(original)
+        elif fv.field_name == "gmail":
+            repaired["gmail"] = _repair_gmail(original)
         else:
             repaired[fv.field_name] = FIELD_DEFAULTS.get(fv.field_name, "")
 

@@ -74,7 +74,7 @@ class TestValidateRouterOutput:
         """Geçersiz takvim intent'i → invalid."""
         parsed = {
             "route": "calendar",
-            "calendar_intent": "delete",
+            "calendar_intent": "explode",
             "confidence": 0.9,
             "tool_plan": [],
             "assistant_reply": "test",
@@ -163,7 +163,7 @@ class TestValidateRouterOutput:
             "confidence": 0.9,
             "tool_plan": [],
             "assistant_reply": "test",
-            "gmail_intent": "delete",
+            "gmail_intent": "explode",
         }
         is_valid, _ = validate_router_output(parsed)
         assert is_valid is False
@@ -632,13 +632,13 @@ class TestConstants:
     """Doğru constant kümelerini kontrol et."""
 
     def test_valid_routes(self) -> None:
-        assert VALID_ROUTES == {"calendar", "gmail", "smalltalk", "system", "unknown"}
+        assert VALID_ROUTES == {"calendar", "gmail", "smalltalk", "system", "unknown", "wiki", "chat"}
 
     def test_valid_calendar_intents(self) -> None:
-        assert VALID_CALENDAR_INTENTS == {"create", "modify", "cancel", "query", "none"}
+        assert VALID_CALENDAR_INTENTS == {"create", "modify", "cancel", "delete", "query", "none"}
 
     def test_valid_gmail_intents(self) -> None:
-        assert VALID_GMAIL_INTENTS == {"list", "search", "read", "send", "none"}
+        assert VALID_GMAIL_INTENTS == {"list", "search", "read", "send", "reply", "forward", "delete", "mark_read", "none"}
 
     def test_required_fields(self) -> None:
         assert "route" in REQUIRED_FIELDS
