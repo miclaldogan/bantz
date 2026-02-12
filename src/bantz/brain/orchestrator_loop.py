@@ -2165,8 +2165,15 @@ class OrchestratorLoop:
                 for key, val in gmail_params.items():
                     if key in gmail_valid_params and val is not None:
                         params[key] = val
+
+            # Issue #903: Check top-level slots for gmail params.
+            # _post_route_correction_email_send puts to/subject/name
+            # directly into slots (not nested under slots.gmail).
+            for key, val in slots.items():
+                if key in gmail_valid_params and val is not None and key not in params:
+                    params[key] = val
             
-            # Then check output.gmail (Issue #317)
+            # Then check output.gmail (Issue #317) — highest priority
             if output is not None:
                 gmail_obj = getattr(output, "gmail", None) or {}
                 if isinstance(gmail_obj, dict):
