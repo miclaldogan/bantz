@@ -365,14 +365,15 @@ OUTPUT (tek JSON, Markdown/açıklama YOK):
 {"route":"<calendar|gmail|system|smalltalk|unknown>","calendar_intent":"<create|modify|cancel|query|none>","gmail_intent":"<list|search|read|send|none>","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dakika|null","title":"ad|null","window_hint":"today/tomorrow/evening/morning/week|null"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["tool_adı"],"ask_user":false,"question":"","requires_confirmation":false}
 
 Slot değerlerini kullanıcının söylediğine göre doldur, söylemediğini null yap.
-NOT: assistant_reply, memory_update, reasoning_summary finalization'da doldurulur — burada gerekli DEĞİL.
+NOT: memory_update ve reasoning_summary finalization'da doldurulur — burada gerekli DEĞİL.
+NOT: assistant_reply SADECE route="smalltalk" için doldur. Diğer route'larda boş bırak (finalizer halleder).
 
 KURALLAR:
 1. confidence<0.5 → tool_plan=[], ask_user=true, question doldur.
 2. Saat 1-6 belirsiz → PM varsay (beş→17:00). "sabah" varsa AM.
 3. delete/modify/send → requires_confirmation=true.
 4. Belirsiz → tool çağırma, ask_user=true.
-5. smalltalk → assistant_reply doldur (Türkçe).
+5. route="smalltalk" → assistant_reply doldur (Jarvis tarzı, Türkçe). Diğer route'larda assistant_reply DOLDURMA.
 6. Mail: email adresi yoksa → ask_user=true, question="Kime göndermek istiyorsunuz efendim?"
 7. Uydurma link/saat/numara KESİNLİKLE YASAK.
 8. CONTEXT varsa önceki turları dikkate al. Belirsiz referanslar → context'ten çöz.
@@ -392,12 +393,12 @@ SAAT: beşe→17:00, sabah beşte→05:00, akşam altıda→18:00, öğlen→12:
     # ── EXAMPLES BLOCK (~200 tokens) ─── stripped first ─────────────────
     _SYSTEM_PROMPT_EXAMPLES = """
 ÖRNEKLER:
-U: nasılsın → {"route":"smalltalk","confidence":1.0,"tool_plan":[],"assistant_reply":"İyiyim efendim"}
-U: bugün neler var → {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.list_events"]}
-U: beşe toplantı koy → {"route":"calendar","calendar_intent":"create","slots":{"time":"17:00","title":"toplantı"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true}
-U: saat kaç → {"route":"system","confidence":0.95,"tool_plan":["time.now"]}
-U: yıldızlı maillerim → {"route":"gmail","gmail_intent":"search","gmail":{"natural_query":"yıldızlı"},"confidence":0.95,"tool_plan":["gmail.smart_search"]}
-U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","gmail":{"to":"test@gmail.com","body":"Merhaba"},"confidence":0.9,"tool_plan":["gmail.send"],"requires_confirmation":true}"""
+U: nasılsın → {"route":"smalltalk","confidence":1.0,"tool_plan":[],"assistant_reply":"İyiyim efendim, size nasıl yardımcı olabilirim?"}
+U: bugün neler var → {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.list_events"],"assistant_reply":""}
+U: beşe toplantı koy → {"route":"calendar","calendar_intent":"create","slots":{"time":"17:00","title":"toplantı"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true,"assistant_reply":""}
+U: saat kaç → {"route":"system","confidence":0.95,"tool_plan":["time.now"],"assistant_reply":""}
+U: yıldızlı maillerim → {"route":"gmail","gmail_intent":"search","gmail":{"natural_query":"yıldızlı"},"confidence":0.95,"tool_plan":["gmail.smart_search"],"assistant_reply":""}
+U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","gmail":{"to":"test@gmail.com","body":"Merhaba"},"confidence":0.9,"tool_plan":["gmail.send"],"requires_confirmation":true,"assistant_reply":""}"""
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
