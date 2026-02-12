@@ -129,9 +129,9 @@ def score_complexity(text: str) -> int:
     elif n >= 120:
         score += 1
 
-    # Issue #573: merged into a single keyword group to prevent double-counting.
-    # "roadmap", "adım adım" etc. were in two lists, each adding +2 → false escalation.
-    if _contains_any(
+    # Issue #573 / #1005: Single keyword group, matched once.
+    # Use a flag to avoid double-counting when action verb bonus checks.
+    complexity_matched = _contains_any(
         t,
         [
             "adım adım",
@@ -149,10 +149,11 @@ def score_complexity(text: str) -> int:
             "analiz",
             "gerekçelendir",
         ],
-    ):
+    )
+    if complexity_matched:
         score += 2
 
-    # Strong signal BONUS: explicit N-step or weekly plan (only if not already matched above)
+    # Strong signal BONUS: explicit N-step or weekly plan
     strong_signals = [
         "3 adım", "4 adım", "5 adım",
         "haftalık plan",
@@ -160,23 +161,13 @@ def score_complexity(text: str) -> int:
     if _contains_any(t, strong_signals):
         score += 1  # bonus, not a full +2
 
-    # Issue #649: "haftalık bir plan yap" gibi arada sözcük olan kalıpları yakala.
-    # "haftalık plan" substring match ile bulunamaz ama ikisi de metinde geçiyorsa
-    # aynı strong signal'dır.
-    if "haftalık" in t and "plan" in t and not _contains_any(t, ["haftalık plan"]):
-        score += 1  # same bonus as strong_signals
+    # Issue #1005: Removed standalone haftalık+plan loose match.
+    # It was double-counting with the main keyword group above.
+    # "haftalık plan" as a strong signal is already handled above.
 
-    # Issue #649: Action verb bonus — planlama/analiz keyword'leri ile birlikte
-    # "yap", "oluştur", "hazırla" gibi action verb'ler geldiğinde complexity artar.
+    # Issue #649 / #1005: Action verb bonus — only if complexity keywords
+    # matched above (reuses the flag, no second keyword scan).
     action_verbs = ["yap", "oluştur", "hazırla", "çıkar", "üret", "belirle"]
-    complexity_matched = _contains_any(
-        t,
-        [
-            "adım adım", "roadmap", "plan", "planla", "gün gün",
-            "haftalık", "strateji", "kıyasla", "tradeoff", "alternatif",
-            "detaylı", "derinlemesine", "analiz", "gerekçelendir",
-        ],
-    )
     if complexity_matched and _contains_any(t, action_verbs):
         score += 1  # complexity keyword + action verb = stronger signal
 
@@ -298,9 +289,14 @@ def score_risk(
         lowered = {str(x or "").strip().lower() for x in tool_names}
         if any("delete" in x or "sil" in x for x in lowered):
             risk = max(risk, 5)
-        if any("update" in x or "modify" in x for x in lowered):
+        if any("update" in x or "modify" in x or "güncelle" in x for x in lowered):
             risk = max(risk, 4)
-        if any("create_event" in x or "create" in x for x in lowered):
+        if any("create_event" in x or "create" in x or "oluştur" in x for x in lowered):
+            risk = max(risk, 3)
+        # Issue #1005: Turkish verbs in tool names (gönder, iptal)
+        if any("gönder" in x or "send" in x for x in lowered):
+            risk = max(risk, 3)
+        if any("iptal" in x or "cancel" in x for x in lowered):
             risk = max(risk, 3)
 
     if _contains_any(t, ["gönder", "sil", "paylaş", "iptal et", "sıfırla", "delete"]):
@@ -388,14 +384,21 @@ def decide_tier(
 def get_client_for_text(
     text: str,
     *,
-    fast_timeout: float = 120.0,
-    quality_timeout: float = 240.0,
+    fast_timeout: Optional[float] = None,
+    quality_timeout: Optional[float] = None,
 ) -> tuple[LLMClientProtocol, TierDecision]:
-    """Return (client, decision) for a given user text."""
+    """Return (client, decision) for a given user text.
+
+    Issue #1005: Timeouts now default to QoS env values instead of
+    hardcoded 120/240.  The env cascade via ``get_qos()`` is respected.
+    """
     decision = decide_tier(text)
+    qos = get_qos(use_quality=bool(decision.use_quality))
     if decision.use_quality:
-        return create_quality_client(timeout=quality_timeout), decision
-    return create_fast_client(timeout=fast_timeout), decision
+        timeout = quality_timeout if quality_timeout is not None else qos.timeout_s
+        return create_quality_client(timeout=timeout), decision
+    timeout = fast_timeout if fast_timeout is not None else qos.timeout_s
+    return create_fast_client(timeout=timeout), decision
 
 
 def get_client_and_qos_for_text(
