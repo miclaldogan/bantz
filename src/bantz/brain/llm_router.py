@@ -1196,11 +1196,27 @@ USER: saat 8e toplantı ekle
     }
 
     def _detect_route_from_input(self, user_input: str) -> str:
-        """Detect route from Turkish user input using keyword matching."""
+        """Detect route from Turkish user input using token-based matching.
+
+        Issue #896: Previous ``kw in text`` substring check produced false
+        positives for Turkish words (e.g. "ekosistem" matched "sistem").
+        Now the input is tokenised on whitespace / punctuation and each
+        keyword is compared against whole tokens only.
+        """
         text = (user_input or "").lower()
+        # Tokenise: split on anything that isn't a Turkish-alphabet character.
+        tokens = set(re.split(r"[^a-zçğıöşü]+", text))
         scores: dict[str, int] = {}
         for route, keywords in self._ROUTE_KEYWORDS.items():
-            score = sum(1 for kw in keywords if kw in text)
+            score = 0
+            for kw in keywords:
+                # Multi-word keywords (e.g. "gelen kutusu") — check original text
+                if " " in kw:
+                    if kw in text:
+                        score += 1
+                else:
+                    if kw in tokens:
+                        score += 1
             if score > 0:
                 scores[route] = score
         if scores:
