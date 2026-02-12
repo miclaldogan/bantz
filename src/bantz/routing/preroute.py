@@ -769,6 +769,7 @@ class PreRouter:
         # Stats tracking
         self._total_queries = 0
         self._bypassed_queries = 0
+        self._destructive_matches = 0
         self._rule_hits: dict[str, int] = {}
     
     def _default_rules(self) -> list[PreRouteRule]:
@@ -804,7 +805,13 @@ class PreRouter:
                 return True
         return False
     
-    def route(self, text: str, *, has_pending_confirmation: bool = False) -> PreRouteMatch:
+    def route(
+        self,
+        text: str,
+        *,
+        has_pending_confirmation: bool = False,
+        _track_stats: bool = True,
+    ) -> PreRouteMatch:
         """Try to pre-route the text.
         
         Args:
@@ -813,11 +820,14 @@ class PreRouter:
                 matching so the orchestrator's confirmation flow handles
                 'evet'/'hayır' instead of returning a local smalltalk
                 response.  (Issue #940)
+            _track_stats: Internal flag. When False, stats are not updated.
+                Used by :meth:`should_bypass` to avoid double-counting.
         
         Returns:
             Match result with intent if detected.
         """
-        self._total_queries += 1
+        if _track_stats:
+            self._total_queries += 1
         
         text = text.strip()
         if not text:
@@ -848,15 +858,30 @@ class PreRouter:
                     best_match = result
         
         if best_match and best_match.should_bypass(self.min_confidence):
-            self._bypassed_queries += 1
-            self._rule_hits[best_match.rule_name] = (
-                self._rule_hits.get(best_match.rule_name, 0) + 1
-            )
+            if _track_stats:
+                self._bypassed_queries += 1
+                self._rule_hits[best_match.rule_name] = (
+                    self._rule_hits.get(best_match.rule_name, 0) + 1
+                )
+        elif (
+            best_match
+            and best_match.matched
+            and best_match.intent.is_destructive
+            and _track_stats
+        ):
+            # Issue #1021: Destructive matches are correctly detected but
+            # never bypass by design.  Track them separately so they don't
+            # deflate the bypass-rate denominator.
+            self._destructive_matches += 1
         
         return best_match or PreRouteMatch.no_match()
     
     def should_bypass(self, text: str) -> bool:
         """Quick check if text should bypass router.
+        
+        Note: This calls :meth:`route` with ``_track_stats=False`` to
+        avoid double-incrementing ``_total_queries``.  The caller is
+        expected to rely on :meth:`route` directly for stat tracking.
         
         Args:
             text: User input text.
@@ -864,20 +889,27 @@ class PreRouter:
         Returns:
             True if router should be bypassed.
         """
-        result = self.route(text)
+        result = self.route(text, _track_stats=False)
         return result.should_bypass(self.min_confidence)
     
     def get_bypass_rate(self) -> float:
-        """Get the bypass rate (0.0-1.0)."""
-        if self._total_queries == 0:
+        """Get the bypass rate (0.0-1.0).
+
+        Issue #1021: Destructive matches are excluded from the denominator
+        because they are *designed* to never be bypassed — counting them
+        would artificially deflate the metric.
+        """
+        effective = self._total_queries - self._destructive_matches
+        if effective <= 0:
             return 0.0
-        return self._bypassed_queries / self._total_queries
+        return self._bypassed_queries / effective
     
     def get_stats(self) -> dict[str, Any]:
         """Get routing statistics."""
         return {
             "total_queries": self._total_queries,
             "bypassed_queries": self._bypassed_queries,
+            "destructive_matches": self._destructive_matches,
             "bypass_rate": self.get_bypass_rate(),
             "bypass_rate_percent": f"{self.get_bypass_rate():.1%}",
             "rule_hits": dict(self._rule_hits),
@@ -889,6 +921,7 @@ class PreRouter:
         """Reset statistics."""
         self._total_queries = 0
         self._bypassed_queries = 0
+        self._destructive_matches = 0
         self._rule_hits.clear()
 
 
