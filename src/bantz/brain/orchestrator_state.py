@@ -51,26 +51,85 @@ class OrchestratorState:
     reference_table: Optional[ReferenceTable] = field(default=None)
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
-        """Add a tool result to state (FIFO queue)."""
-        # JSON-safe serialisation preserves structure for the finalizer
+        """Add a tool result to state (FIFO queue).
+
+        Issue #893 – smart truncation:
+        * ``result_raw``    – the original Python object (list / dict / str)
+        * ``result``        – JSON-serialised string (max *max_chars*)
+        * ``result_summary``– short human-readable summary for the LLM prompt
+        """
+        max_chars = 1500
+        max_list_items = 5  # keep first N items for list results
+
+        # ── raw storage (structured) ──
+        result_raw = result
+
+        # ── JSON string ──
         try:
             result_str = json.dumps(result, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
             result_str = str(result)
 
-        max_chars = 1500
         if len(result_str) > max_chars:
             result_str = result_str[:max_chars] + "… [truncated]"
+
+        # ── smart summary for LLM prompt context ──
+        result_summary = self._build_result_summary(
+            tool_name, result_raw, max_list_items, max_chars=400,
+        )
 
         self.last_tool_results.append({
             "tool": tool_name,
             "result": result_str,
+            "result_raw": result_raw,
+            "result_summary": result_summary,
             "success": success,
         })
-        
+
         # Keep only last N results
         if len(self.last_tool_results) > self.max_tool_results:
             self.last_tool_results = self.last_tool_results[-self.max_tool_results:]
+
+    # ── helpers ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_result_summary(
+        tool_name: str,
+        result: Any,
+        max_items: int = 5,
+        max_chars: int = 400,
+    ) -> str:
+        """Build a concise summary of a tool result for LLM context.
+
+        Lists are truncated to *max_items* entries (with a count note).
+        Dicts are serialised compactly.  Everything is capped at *max_chars*.
+        """
+        if isinstance(result, list):
+            total = len(result)
+            items = result[:max_items]
+            try:
+                summary = json.dumps(items, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                summary = str(items)
+            if total > max_items:
+                summary += f" … (+{total - max_items} more, {total} total)"
+            if len(summary) > max_chars:
+                summary = summary[:max_chars] + "…"
+            return summary
+
+        if isinstance(result, dict):
+            try:
+                summary = json.dumps(result, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                summary = str(result)
+            if len(summary) > max_chars:
+                summary = summary[:max_chars] + "…"
+            return summary
+
+        summary = str(result)
+        if len(summary) > max_chars:
+            summary = summary[:max_chars] + "…"
+        return summary
     
     def add_conversation_turn(self, user_input: str, assistant_reply: str) -> None:
         """Add a conversation turn to history (FIFO queue)."""
