@@ -77,107 +77,23 @@ def _estimate_tokens(text: str) -> int:
     return estimate_tokens(text)
 
 
+# Issue #888: canonical implementation lives in orchestrator_loop.py.
+# Re-export here for backward compatibility (tests import from finalizer).
 def _prepare_tool_results_for_finalizer(
     tool_results: list[dict[str, Any]],
     max_tokens: int = 2000,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Prepare tool results for finalizer with token budget control.
-    
-    Strategy (3-tier fallback):
-    1. Try full raw_result for each tool
-    2. If too large, use result_summary instead
-    3. If still too large, keep only first 3 tools with aggressive truncation
-    
-    Args:
-        tool_results: List of tool execution results
-        max_tokens: Maximum tokens allowed for tool results
-        
-    Returns:
-        Tuple of (prepared_results, was_truncated)
+
+    .. deprecated::
+        This is a thin wrapper around the canonical implementation in
+        ``orchestrator_loop._prepare_tool_results_for_finalizer``.
+        New code should import directly from there.
     """
-    if not tool_results:
-        return [], False
-    
-    # Tier 1: Try full raw_result
-    full_results = []
-    for result in tool_results:
-        result_copy = {
-            "tool": result.get("tool") or result.get("tool_name") or result.get("name") or "unknown",
-            "status": "success" if result.get("success", True) else "error",
-        }
-        
-        # Prefer raw_result if available (full detail)
-        if "raw_result" in result:
-            result_copy["result"] = result["raw_result"]
-        elif "result" in result:
-            result_copy["result"] = result["result"]
-        elif "error" in result:
-            result_copy["error"] = result["error"]
-            
-        full_results.append(result_copy)
-    
-    full_json = json.dumps(full_results, ensure_ascii=False)
-    full_tokens = _estimate_tokens(full_json)
-    
-    if full_tokens <= max_tokens:
-        return full_results, False
-    
-    # Tier 2: Use result_summary (medium detail)
-    summary_results = []
-    for result in tool_results:
-        result_copy = {
-            "tool": result.get("tool") or result.get("tool_name") or result.get("name") or "unknown",
-            "status": "success" if result.get("success", True) else "error",
-        }
-        
-        # Prefer result_summary if available
-        if "result_summary" in result:
-            result_copy["result"] = result["result_summary"]
-        elif "raw_result" in result:
-            # Truncate raw_result to 200 chars
-            raw = json.dumps(result["raw_result"], ensure_ascii=False)
-            if len(raw) > 200:
-                result_copy["result"] = raw[:200] + "..."
-            else:
-                result_copy["result"] = result["raw_result"]
-        elif "result" in result:
-            result_str = str(result["result"])
-            if len(result_str) > 200:
-                result_copy["result"] = result_str[:200] + "..."
-            else:
-                result_copy["result"] = result["result"]
-        elif "error" in result:
-            result_copy["error"] = str(result["error"])[:200]
-            
-        summary_results.append(result_copy)
-    
-    summary_json = json.dumps(summary_results, ensure_ascii=False)
-    summary_tokens = _estimate_tokens(summary_json)
-    
-    if summary_tokens <= max_tokens:
-        return summary_results, True
-    
-    # Tier 3: Aggressive truncation - first 3 tools only, 200 chars each
-    aggressive_results = []
-    for result in tool_results[:3]:  # Only first 3 tools
-        result_copy = {
-            "tool": result.get("tool") or result.get("tool_name") or result.get("name") or "unknown",
-            "status": "success" if result.get("success", True) else "error",
-        }
-        
-        if "result_summary" in result:
-            summary = str(result["result_summary"])
-            result_copy["result"] = summary[:200] + ("..." if len(summary) > 200 else "")
-        elif "result" in result or "raw_result" in result:
-            res = result.get("result") or result.get("raw_result")
-            res_str = json.dumps(res, ensure_ascii=False) if isinstance(res, (dict, list)) else str(res)
-            result_copy["result"] = res_str[:200] + ("..." if len(res_str) > 200 else "")
-        elif "error" in result:
-            result_copy["error"] = str(result["error"])[:200]
-            
-        aggressive_results.append(result_copy)
-    
-    return aggressive_results, True
+    from bantz.brain.orchestrator_loop import (
+        _prepare_tool_results_for_finalizer as _canonical,
+    )
+    return _canonical(tool_results, max_tokens=max_tokens)
 
 
 def _build_finalizer_prompt(

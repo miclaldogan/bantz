@@ -55,13 +55,13 @@ def test_prepare_tool_results_empty():
 def test_prepare_tool_results_small():
     """Small tool results should pass through unchanged."""
     tool_results = [
-        {"tool": "get_weather", "success": True, "result": {"temp": 72}}
+        {"tool": "get_weather", "success": True, "raw_result": {"temp": 72}}
     ]
     results, truncated = _prepare_tool_results_for_finalizer(tool_results, max_tokens=1000)
     
     assert len(results) == 1
     assert results[0]["tool"] == "get_weather"
-    assert results[0]["status"] == "success"
+    assert results[0]["success"] is True
     assert results[0]["result"] == {"temp": 72}
     assert truncated is False
 
@@ -93,7 +93,8 @@ def test_prepare_tool_results_aggressive_truncation():
         {
             "tool": f"tool_{i}",
             "success": True,
-            "result": {"data": "x" * 1000}  # Large data
+            "raw_result": {"data": "x" * 1000},  # Large raw data
+            "result_summary": "y" * 500,          # Large summary too
         }
         for i in range(10)  # 10 tools
     ]
@@ -140,7 +141,7 @@ def test_build_prompt_with_draft():
 
 def test_build_prompt_with_tool_results():
     """Build prompt with tool results."""
-    tool_results = [{"tool": "get_weather", "status": "success", "result": {"temp": 72}}]
+    tool_results = [{"tool": "get_weather", "success": True, "result": {"temp": 72}}]
     
     prompt = _build_finalizer_prompt(
         user_input="Hava nasıl?",
