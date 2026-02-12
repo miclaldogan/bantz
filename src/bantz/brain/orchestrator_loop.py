@@ -535,6 +535,13 @@ class OrchestratorLoop:
         Returns:
             Updated output with forced tool_plan if needed
         """
+        # Issue #936: ask_user guard MUST be the first check.
+        # When the router (or post-route-correction) sets ask_user=true,
+        # we unconditionally respect it — no confidence gate or gmail
+        # exemption should override the decision to ask the user.
+        if output.ask_user:
+            return output
+
         # Issue #347: Skip if confidence is too low - router wants clarification
         # Issue #935: Aligned threshold to 0.5 — matches prompt rule and
         # router confidence_threshold.  3B models give 0.5-0.65 for clear
@@ -544,16 +551,12 @@ class OrchestratorLoop:
         # because confidence is low.
         gmail_intent = (getattr(output, "gmail_intent", None) or "").strip().lower()
         if output.confidence < 0.5 and not (
-            output.route == "gmail" and gmail_intent == "send" and not output.ask_user
+            output.route == "gmail" and gmail_intent == "send"
         ):
             return output
         
         # Skip if tool_plan already populated
         if output.tool_plan:
-            return output
-        
-        # Skip if LLM is asking user for clarification (not ready to execute)
-        if output.ask_user:
             return output
         
         # Skip for smalltalk/unknown - no tools needed
