@@ -1,6 +1,8 @@
 # Core runtime dependencies (lightweight).
 # For ML/LLM deps (torch, vllm, autoawq) see requirements-llm.txt
 # or install via:  pip install -e ".[llm]"
+aiohttp>=3.9.0
 openai>=1.40.0
+pydantic>=2.0.0
 requests>=2.31.0
 websockets>=11.0.0
