@@ -827,6 +827,27 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
 
         # Add session context hints (priority: highest - trimmed last)
         session_budget = min(section_budgets.get("session", remaining), remaining)
+
+        # Issue #938: Extract and inject NLU slots as a dedicated block
+        # before session_context so the 3B model sees pre-parsed entities.
+        _nlu_slots = None
+        if session_context and "nlu_slots" in session_context:
+            _nlu_slots = session_context.pop("nlu_slots")
+            try:
+                slots_str = json.dumps(_nlu_slots, ensure_ascii=False)
+            except Exception:
+                slots_str = str(_nlu_slots)
+            slots_header = "PRE_EXTRACTED_SLOTS:\n"
+            slots_overhead = _estimate_tokens(slots_header) + 1
+            slots_allow = min(100, max(0, session_budget - slots_overhead))
+            slots_trimmed = _trim_to_tokens(slots_str, slots_allow)
+            if slots_trimmed:
+                lines.append(f"{slots_header}{slots_trimmed}\n")
+                used = slots_overhead + _estimate_tokens(slots_trimmed)
+                sections_used["nlu_slots"] = used
+                remaining = max(0, remaining - used)
+                session_budget = max(0, session_budget - used)
+
         if session_context and session_budget > 0:
             try:
                 ctx_str = json.dumps(session_context, ensure_ascii=False, indent=2)
@@ -893,6 +914,18 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
                 if ctx_compact:
                     rebuild_lines.append("SESSION_CONTEXT (truncated):")
                     rebuild_lines.append(ctx_compact)
+                    rebuild_lines.append("")
+                    remaining_for_context -= _estimate_tokens(ctx_compact) + 10
+
+            # Issue #938: Preserve NLU slots even in hard-guard path
+            if _nlu_slots and remaining_for_context > 30:
+                try:
+                    _s = json.dumps(_nlu_slots, ensure_ascii=False)
+                except Exception:
+                    _s = str(_nlu_slots)
+                _sc = _trim_to_tokens(_s, min(80, remaining_for_context))
+                if _sc:
+                    rebuild_lines.append(f"PRE_EXTRACTED_SLOTS:\n{_sc}")
                     rebuild_lines.append("")
             
             rebuild_lines.append(keep_tail)
