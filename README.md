@@ -191,7 +191,7 @@ See [docs/secrets-hygiene.md](docs/secrets-hygiene.md) for best practices.
 ### Pipeline Flow
 
 1. **Input** arrives from CLI, voice, or browser extension
-2. **BantzServer** routes through the brain pipeline (default) or legacy router (`BANTZ_USE_LEGACY=1`)
+2. **BantzServer** routes through the brain pipeline
 3. **PreRouter** classifies intent (smalltalk → fast path, tool-needed → planner)
 4. **LLM Router** (Qwen 3B via vLLM) generates a structured JSON plan: route, tools, slots
 5. **JSON Repair** fixes common 3B mistakes — wrong enums, string-instead-of-list, markdown wrapping
@@ -324,7 +324,6 @@ cp config/bantz-env.example ~/.config/bantz/env
 | `BANTZ_GEMINI_MODEL` | `gemini-2.0-flash` | Finalizer model (when cloud enabled) |
 | `BANTZ_CLOUD_ENABLED` | `false` | Enable Gemini cloud finalization |
 | `GEMINI_API_KEY` | — | Gemini API key (required if cloud enabled) |
-| `BANTZ_USE_LEGACY` | — | Set to `1` to bypass brain and use legacy router |
 
 ### Tiered Finalization
 

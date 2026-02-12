@@ -416,6 +416,5 @@ class VoiceStyle:
         return result
 
 
-# Convenience aliases
+# Convenience alias
 JARVIS = JarvisVoice
-JARVIS = VoiceStyle
