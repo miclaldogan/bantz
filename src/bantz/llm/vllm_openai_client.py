@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from typing import List, Optional, Iterator, Any
 from dataclasses import dataclass
@@ -93,6 +94,9 @@ class VLLMOpenAIClient(LLMClient):
         # Cache for /v1/models capabilities.
         self._cached_model_context_len: Optional[int] = None
         
+        # Issue #1016: Lock for thread-safe lazy init of _client and model auto-resolve.
+        self._lock = threading.Lock()
+        
         # Lazy-import OpenAI client
         self._client: Optional[object] = None
 
@@ -145,8 +149,12 @@ class VLLMOpenAIClient(LLMClient):
             return None
     
     def _get_client(self):
-        """Lazy-initialize OpenAI client."""
-        if self._client is None:
+        """Lazy-initialize OpenAI client (thread-safe)."""
+        if self._client is not None:
+            return self._client
+        with self._lock:
+            if self._client is not None:
+                return self._client
             try:
                 from openai import OpenAI
             except ModuleNotFoundError as e:
@@ -162,12 +170,31 @@ class VLLMOpenAIClient(LLMClient):
             
             self._client = OpenAI(
                 base_url=_api_base,
-                api_key="EMPTY",  # vLLM doesn't require API key for local usage
+                api_key=os.getenv("VLLM_API_KEY", "EMPTY"),
                 timeout=self.timeout_seconds,
             )
         
         return self._client
     
+    def _resolve_auto_model(self) -> None:
+        """Thread-safe auto-resolution of model name from /v1/models.
+
+        Issue #1016: Called when self.model == "auto". Uses a lock to
+        prevent concurrent threads from racing on the assignment.
+        """
+        if (self.model or "").strip().lower() != "auto":
+            return
+        with self._lock:
+            # Double-check after acquiring lock (another thread may have resolved).
+            if (self.model or "").strip().lower() != "auto":
+                return
+            models = self.list_available_models(timeout_seconds=2.0)
+            if not models:
+                raise LLMModelNotFoundError(
+                    f"vLLM ({self.base_url}) did not report any models via /v1/models"
+                )
+            self.model = str(models[0]).strip()
+
     def is_available(self, *, timeout_seconds: float = 1.5) -> bool:
         """Check if vLLM server is reachable."""
         try:
@@ -223,16 +250,8 @@ class VLLMOpenAIClient(LLMClient):
         """Chat completion with detailed metadata."""
         client = self._get_client()
 
-        # Allow "auto" model selection (use the first model reported by /v1/models).
-        # This is helpful when scripts pass --served-model-name or when the exact
-        # model id differs between machines.
-        if (self.model or "").strip().lower() == "auto":
-            models = self.list_available_models(timeout_seconds=2.0)
-            if not models:
-                raise LLMModelNotFoundError(
-                    f"vLLM ({self.base_url}) did not report any models via /v1/models"
-                )
-            self.model = str(models[0]).strip()
+        # Issue #1016: Thread-safe auto model resolution.
+        self._resolve_auto_model()
         
         # Convert to OpenAI message format
         openai_messages = [
@@ -371,14 +390,8 @@ class VLLMOpenAIClient(LLMClient):
         """
         client = self._get_client()
         
-        # Model auto-selection
-        if (self.model or "").strip().lower() == "auto":
-            models = self.list_available_models(timeout_seconds=2.0)
-            if not models:
-                raise LLMModelNotFoundError(
-                    f"vLLM ({self.base_url}) did not report any models via /v1/models"
-                )
-            self.model = str(models[0]).strip()
+        # Issue #1016: Thread-safe auto model resolution.
+        self._resolve_auto_model()
         
         # Convert to OpenAI message format
         openai_messages = [
