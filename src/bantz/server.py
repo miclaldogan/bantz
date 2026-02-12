@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import socket
+import struct
 import sys
 import threading
 import atexit
@@ -936,22 +937,65 @@ class BantzServer:
 
         print("\n👋 Bantz Server kapatıldı.")
 
+    # ── length-prefix framing helpers ─────────────────────────
+
+    @staticmethod
+    def _send_framed(sock: socket.socket, payload: bytes) -> None:
+        """Send *payload* prefixed with a 4-byte big-endian length header."""
+        header = struct.pack("!I", len(payload))
+        sock.sendall(header + payload)
+
+    @staticmethod
+    def _recv_framed(sock: socket.socket) -> bytes:
+        """Read a length-prefixed frame.
+
+        Falls back to legacy single-recv mode when the first 4 bytes
+        are **not** a plausible length header (allows old clients to
+        keep working during the migration window).
+        """
+        # Read the first 4 bytes (length header)
+        header = b""
+        while len(header) < 4:
+            chunk = sock.recv(4 - len(header))
+            if not chunk:
+                return b""
+            header += chunk
+
+        length = struct.unpack("!I", header)[0]
+
+        # Sanity check: a realistic JSON payload < 64 MB
+        if length > 67_108_864:
+            # Likely a legacy (unframed) client — treat header as data start
+            # and read the rest with a single recv.
+            rest = sock.recv(65536)
+            return header + rest
+
+        # Read exactly *length* bytes
+        data = bytearray()
+        while len(data) < length:
+            chunk = sock.recv(min(65536, length - len(data)))
+            if not chunk:
+                break
+            data += chunk
+        return bytes(data)
+
     def _handle_client(self, conn: socket.socket) -> None:
         """Handle a single client connection."""
         try:
-            data = conn.recv(65536).decode("utf-8")
-            if not data:
+            raw = self._recv_framed(conn)
+            if not raw:
                 return
 
+            data = raw.decode("utf-8")
             request = json.loads(data)
             command = request.get("command", "")
 
             response = self.handle_command(command)
-            conn.sendall(json.dumps(response).encode("utf-8"))
+            self._send_framed(conn, json.dumps(response).encode("utf-8"))
         except Exception as e:
             error_response = {"ok": False, "text": f"Server hatası: {e}"}
             try:
-                conn.sendall(json.dumps(error_response).encode("utf-8"))
+                self._send_framed(conn, json.dumps(error_response).encode("utf-8"))
             except:
                 pass
         finally:
@@ -971,12 +1015,33 @@ def send_to_server(command: str, session_name: str = DEFAULT_SESSION, timeout: f
         client.connect(str(socket_path))
 
         request = json.dumps({"command": command})
-        client.sendall(request.encode("utf-8"))
+        payload = request.encode("utf-8")
+        header = struct.pack("!I", len(payload))
+        client.sendall(header + payload)
 
-        response_data = client.recv(65536).decode("utf-8")
+        # Read length-prefixed response
+        resp_header = b""
+        while len(resp_header) < 4:
+            chunk = client.recv(4 - len(resp_header))
+            if not chunk:
+                break
+            resp_header += chunk
+
+        if len(resp_header) < 4:
+            client.close()
+            return {"ok": False, "text": "Server yanıt başlığı okunamadı."}
+
+        resp_length = struct.unpack("!I", resp_header)[0]
+        resp_data = bytearray()
+        while len(resp_data) < resp_length:
+            chunk = client.recv(min(65536, resp_length - len(resp_data)))
+            if not chunk:
+                break
+            resp_data += chunk
+
         client.close()
 
-        return json.loads(response_data)
+        return json.loads(resp_data.decode("utf-8"))
     except socket.timeout:
         return {"ok": False, "text": "Server yanıt vermedi (timeout)."}
     except ConnectionRefusedError:
