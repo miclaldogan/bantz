@@ -1345,6 +1345,33 @@ USER: saat 8e toplantı ekle
                 calendar_intent = "query"  # default for calendar route
             logger.info("[intent_inference] calendar intent inferred from input: '%s'", calendar_intent)
 
+        # ── Issue #891: Gmail intent inference from user input ────────────
+        # When route is gmail but gmail_intent is "none" (e.g. misrouted then overridden),
+        # infer the correct gmail intent from Turkish keywords so tool resolution picks the
+        # right tool (smart_search vs list_messages vs send etc.).
+        _raw_gmail_intent = str(normalized.get("gmail_intent") or "none").strip().lower()
+        if route == "gmail" and _raw_gmail_intent == "none" and user_input:
+            _input_lower = (user_input or "").lower()
+            _GMAIL_SEND_WORDS = ("gönder", "yolla", "ilet")
+            _GMAIL_SEARCH_WORDS = ("ara", "bul", "yıldızlı", "etiketli", "arama")
+            _GMAIL_READ_WORDS = ("oku", "aç", "incele", "içeriğ")
+            _GMAIL_LIST_WORDS = (
+                "listele", "göster", "okunmamış", "gelen kutusu", "inbox",
+                "mailleri", "maillere", "mesajları", "kaç mail", "kaç mesaj",
+            )
+
+            if any(w in _input_lower for w in _GMAIL_SEND_WORDS):
+                normalized["gmail_intent"] = "send"
+            elif any(w in _input_lower for w in _GMAIL_SEARCH_WORDS):
+                normalized["gmail_intent"] = "search"
+            elif any(w in _input_lower for w in _GMAIL_READ_WORDS):
+                normalized["gmail_intent"] = "read"
+            elif any(w in _input_lower for w in _GMAIL_LIST_WORDS):
+                normalized["gmail_intent"] = "list"
+            else:
+                normalized["gmail_intent"] = "list"  # default for gmail route
+            logger.info("[intent_inference] gmail intent inferred from input: '%s'", normalized["gmail_intent"])
+
         slots = normalized.get("slots") or {}
         if not isinstance(slots, dict):
             slots = {}
