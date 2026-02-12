@@ -255,7 +255,18 @@ class PromptBuilder:
         if estimate_tokens(render()) <= self._token_budget:
             return render()
 
-        # 5) Drop SESSION_CONTEXT if still too big
+        # 5) Drop RECENT_TURNS entirely — less important than date/time
+        b = [(n, c) for (n, c) in b if n != "RECENT_TURNS"]
+        if estimate_tokens(render()) <= self._token_budget:
+            return render()
+
+        # 6) Drop DIALOG_SUMMARY — still less critical than SESSION_CONTEXT
+        b = [(n, c) for (n, c) in b if n != "DIALOG_SUMMARY"]
+        if estimate_tokens(render()) <= self._token_budget:
+            return render()
+
+        # 7) Drop SESSION_CONTEXT last — contains current_datetime which is
+        # critical for calendar/scheduling accuracy (Issue #1007)
         b = [(n, c) for (n, c) in b if n != "SESSION_CONTEXT"]
         if estimate_tokens(render()) <= self._token_budget:
             return render()
