@@ -360,7 +360,7 @@ NOT: assistant_reply, memory_update, reasoning_summary alanları gerekli DEĞİL
 
 KURALLAR:
 1. Sadece tek JSON object; Markdown/açıklama YOK.
-2. confidence<0.7 → tool_plan=[], ask_user=true, question doldur.
+2. confidence<0.5 → tool_plan=[], ask_user=true, question doldur.
 3. Saat 1-6 belirsiz → PM varsay: "beş"→17:00, "üç"→15:00. "sabah" varsa AM.
 4. delete/modify/send → requires_confirmation=true.
 5. Belirsizlikte tool çağırma, ask_user=true.
@@ -462,7 +462,7 @@ USER: saat 8e toplantı ekle
         llm: Optional[LLMRouterProtocol] = None,
         llm_client: Optional[LLMRouterProtocol] = None,
         system_prompt: Optional[str] = None,
-        confidence_threshold: float = 0.7,
+        confidence_threshold: float = 0.5,
         max_attempts: int = 2,
     ):
         """Initialize router.
@@ -470,7 +470,7 @@ USER: saat 8e toplantı ekle
         Args:
             llm: LLM client implementing LLMRouterProtocol
             system_prompt: Override the default SYSTEM_PROMPT (useful for benchmarking)
-            confidence_threshold: Minimum confidence to execute tools (default 0.7)
+            confidence_threshold: Minimum confidence to execute tools (default 0.5)
             max_attempts: Max repair attempts for malformed JSON (default 2)
         """
         effective_llm = llm if llm is not None else llm_client
