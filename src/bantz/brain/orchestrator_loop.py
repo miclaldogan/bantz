@@ -378,18 +378,19 @@ class OrchestratorLoop:
                     user_input,
                 )
                 from bantz.brain.llm_router import OrchestratorOutput
-                return (
-                    OrchestratorOutput(
-                        route="smalltalk",
-                        calendar_intent="none",
-                        slots={},
-                        confidence=1.0,
-                        tool_plan=[],
-                        assistant_reply="Tamam, iptal ettim.",
-                        raw_output={"confirmation_rejected": True},
-                    ),
-                    state,
+                rejection_output = OrchestratorOutput(
+                    route="smalltalk",
+                    calendar_intent="none",
+                    slots={},
+                    confidence=1.0,
+                    tool_plan=[],
+                    assistant_reply="Tamam, iptal ettim.",
+                    raw_output={"confirmation_rejected": True},
                 )
+                # Issue #1088: Update state before early return so conversation
+                # history, turn count, and telemetry are not lost.
+                self._update_state_phase(user_input, rejection_output, [], state)
+                return (rejection_output, state)
 
             # ── Issue #869 fix: When a confirmed_tool is set and there is a
             # pending confirmation, skip LLM planning entirely.  The prerouter
