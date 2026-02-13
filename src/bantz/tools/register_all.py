@@ -125,7 +125,8 @@ def _register_browser(registry: "ToolRegistry") -> int:
               _obj(("selector", "string", "CSS selector filter (optional)")),
               browser_scan_tool)
     n += _reg(registry, "browser.click", "Click an element on the page.",
-              _obj(("selector", "string", "CSS selector or element index"), required=["selector"]),
+              _obj(("index", "integer", "Element index from browser.scan"),
+                   ("text", "string", "Text content to match")),
               browser_click_tool, risk="medium", confirm=True)
     n += _reg(registry, "browser.type", "Type text into an input field.",
               _obj(("selector", "string", "CSS selector"), ("text", "string", "Text to type"),
