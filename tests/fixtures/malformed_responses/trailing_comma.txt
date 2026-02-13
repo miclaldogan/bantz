@@ -1,0 +1,1 @@
+{"route": "calendar", "calendar_intent": "create", "confidence": 0.88, "tool_plan": ["calendar.create_event"], "assistant_reply": "Etkinlik oluşturuluyor.", "slots": {"date": "yarın", "time": "10:00"},}

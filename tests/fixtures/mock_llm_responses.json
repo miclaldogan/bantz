@@ -1,0 +1,46 @@
+{
+  "smalltalk": {
+    "input": "Nasılsın?",
+    "response": "İyiyim efendim, teşekkür ederim! Size nasıl yardımcı olabilirim?",
+    "tool_calls": [],
+    "tier": "fast"
+  },
+  "calendar_create": {
+    "input": "Yarın saat 3'te toplantı kur",
+    "response": "Toplantınızı yarın saat 15:00'e oluşturdum efendim.",
+    "tool_calls": [
+      {
+        "tool": "calendar.create_event",
+        "args": {
+          "summary": "Toplantı",
+          "start_time": "tomorrow 15:00",
+          "duration_minutes": 60
+        },
+        "result": {
+          "event_id": "mock-evt-001",
+          "status": "confirmed",
+          "summary": "Toplantı",
+          "start": "2025-01-02T15:00:00+03:00"
+        }
+      }
+    ],
+    "tier": "quality"
+  },
+  "system_info": {
+    "input": "Sistem durumu nedir?",
+    "response": "Sistem durumu: CPU %12, RAM %45, disk %60. Her şey normal efendim.",
+    "tool_calls": [
+      {
+        "tool": "system.info",
+        "args": {},
+        "result": {
+          "cpu_percent": 12,
+          "memory_percent": 45,
+          "disk_percent": 60,
+          "status": "healthy"
+        }
+      }
+    ],
+    "tier": "fast"
+  }
+}

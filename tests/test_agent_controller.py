@@ -292,73 +292,64 @@ class TestAgentControllerInit:
     def test_controller_with_defaults(self):
         """Controller should create default agent if none provided."""
         # This test is lighter - just checks instantiation
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController()
-            
-            assert controller.state == ControllerState.IDLE
-            assert controller.current_task is None
-            assert not controller.is_running
+        controller = AgentController()
+
+        assert controller.state == ControllerState.IDLE
+        assert controller.current_task is None
+        assert not controller.is_running
     
     def test_controller_with_custom_panel(self):
         from bantz.ui.jarvis_panel import MockJarvisPanelController
         
         panel = MockJarvisPanelController()
-        
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController(panel=panel)
-            
-            assert controller.panel == panel
+
+        controller = AgentController(panel=panel)
+        assert controller.panel == panel
     
     def test_controller_auto_confirm_mode(self):
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController(auto_confirm=True)
-            
-            assert controller.auto_confirm is True
+        controller = AgentController(auto_confirm=True)
+        assert controller.auto_confirm is True
 
 
 class TestAgentControllerControls:
     """Test AgentController control methods."""
     
     def test_cancel(self):
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController()
-            
-            assert controller._cancelled is False
-            controller.cancel()
-            assert controller._cancelled is True
+        controller = AgentController()
+
+        assert controller._cancelled is False
+        controller.cancel()
+        assert controller._cancelled is True
     
     def test_skip_current_step(self):
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController()
-            
-            assert controller._skip_current is False
-            controller.skip_current_step()
-            assert controller._skip_current is True
+        controller = AgentController()
+
+        assert controller._skip_current is False
+        controller.skip_current_step()
+        assert controller._skip_current is True
     
     def test_pause_and_resume(self):
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController()
-            
-            controller.pause()
-            assert controller._paused is True
-            assert controller._state == ControllerState.PAUSED
-            
-            controller.resume()
-            assert controller._paused is False
+        controller = AgentController()
+
+        controller.pause()
+        assert controller._paused is True
+        assert controller._state == ControllerState.PAUSED
+
+        controller.resume()
+        assert controller._paused is False
 
 
 class TestAgentControllerPlanDisplay:
     """Test AgentController plan display building."""
     
     def test_build_empty_plan_display(self):
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController()
-            
-            plan_display = controller._build_plan_display()
-            
-            assert plan_display.id == ""
-            assert plan_display.steps == []
-            assert plan_display.progress_percent == 0
+        controller = AgentController()
+
+        plan_display = controller._build_plan_display()
+
+        assert plan_display.id == ""
+        assert plan_display.steps == []
+        assert plan_display.progress_percent == 0
     
     def test_generate_summary(self):
         from bantz.agent.core import Task, Step
@@ -374,12 +365,11 @@ class TestAgentControllerPlanDisplay:
             current_step=3,
         )
         
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController()
-            
-            summary = controller._generate_summary(task)
-            
-            assert "2/3 adım tamamlandı" in summary
+        controller = AgentController()
+
+        summary = controller._generate_summary(task)
+
+        assert "2/3 adım tamamlandı" in summary
 
 
 class TestAgentControllerCriticalSteps:
@@ -390,30 +380,24 @@ class TestAgentControllerCriticalSteps:
         
         step = Step(id=1, action="payment", params={}, description="Payment")
         
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController()
-            
-            assert controller._is_critical_step(step) is True
+        controller = AgentController()
+        assert controller._is_critical_step(step) is True
     
     def test_delete_is_critical(self):
         from bantz.agent.core import Step
         
         step = Step(id=1, action="delete", params={}, description="Delete")
         
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController()
-            
-            assert controller._is_critical_step(step) is True
+        controller = AgentController()
+        assert controller._is_critical_step(step) is True
     
     def test_browser_open_is_not_critical(self):
         from bantz.agent.core import Step
         
         step = Step(id=1, action="browser_open", params={}, description="Open browser")
         
-        with patch('bantz.llm.ollama_client.OllamaClient'):
-            controller = AgentController()
-            
-            assert controller._is_critical_step(step) is False
+        controller = AgentController()
+        assert controller._is_critical_step(step) is False
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -657,10 +641,10 @@ class TestToolRegistry:
 class TestBuiltinTools:
     """Test builtin tools registry."""
     
-    def test_build_default_registry(self):
-        from bantz.agent.builtin_tools import build_default_registry
+    def test_build_planner_registry(self):
+        from bantz.agent.builtin_tools import build_planner_registry
         
-        registry = build_default_registry()
+        registry = build_planner_registry()
         
         # Check some expected tools exist
         assert registry.get("browser_open") is not None
@@ -669,9 +653,9 @@ class TestBuiltinTools:
         assert registry.get("browser_type") is not None
     
     def test_browser_open_tool_schema(self):
-        from bantz.agent.builtin_tools import build_default_registry
+        from bantz.agent.builtin_tools import build_planner_registry
         
-        registry = build_default_registry()
+        registry = build_planner_registry()
         tool = registry.get("browser_open")
         
         assert tool is not None

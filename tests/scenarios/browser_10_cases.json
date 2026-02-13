@@ -1,0 +1,156 @@
+{
+  "description": "Browser/web scenario test cases for benchmark suite (Issue #161)",
+  "version": "1.0",
+  "total_cases": 10,
+  "categories": {
+    "search": 4,
+    "open": 3,
+    "multi_step": 3
+  },
+  "cases": [
+    {
+      "id": "web_search_001",
+      "category": "search",
+      "difficulty": "easy",
+      "input": "python öğrenmek için kaynak ara",
+      "expected_route": "web",
+      "expected_intent": "web_search",
+      "expected_tools": ["web.search"],
+      "expected_slots": {
+        "query": "python öğrenmek kaynak"
+      },
+      "success_criteria": "Returns search results",
+      "quality_check": "Query properly translated/formatted"
+    },
+    {
+      "id": "web_search_002",
+      "category": "search",
+      "difficulty": "medium",
+      "input": "react vs vue karşılaştırması bul",
+      "expected_route": "web",
+      "expected_intent": "web_search",
+      "expected_tools": ["web.search"],
+      "expected_slots": {
+        "query": "react vs vue comparison"
+      },
+      "success_criteria": "Comparison results found",
+      "quality_check": "Understands comparison intent"
+    },
+    {
+      "id": "web_search_003",
+      "category": "search",
+      "difficulty": "hard",
+      "input": "typescript decorators nasıl kullanılır internette araştır",
+      "expected_route": "web",
+      "expected_intent": "web_search",
+      "expected_tools": ["web.search"],
+      "expected_slots": {
+        "query": "typescript decorators how to use"
+      },
+      "success_criteria": "Technical documentation found",
+      "quality_check": "Handles technical query"
+    },
+    {
+      "id": "web_search_004",
+      "category": "search",
+      "difficulty": "medium",
+      "input": "istanbul'da hava durumu araştır",
+      "expected_route": "web",
+      "expected_intent": "web_search",
+      "expected_tools": ["web.search"],
+      "expected_slots": {
+        "query": "istanbul weather"
+      },
+      "success_criteria": "Weather search results",
+      "quality_check": "Location query handled"
+    },
+    {
+      "id": "web_open_001",
+      "category": "open",
+      "difficulty": "easy",
+      "input": "github.com/microsoft/vscode aç",
+      "expected_route": "browser",
+      "expected_intent": "open_url",
+      "expected_tools": ["web.open"],
+      "expected_slots": {
+        "url": "https://github.com/microsoft/vscode"
+      },
+      "success_criteria": "Opens URL",
+      "quality_check": "URL normalized correctly"
+    },
+    {
+      "id": "web_open_002",
+      "category": "open",
+      "difficulty": "medium",
+      "input": "youtube'da python eğitim videosu aç",
+      "expected_route": "browser",
+      "expected_intent": "open_url",
+      "expected_tools": ["web.search", "web.open"],
+      "expected_slots": {
+        "query": "youtube python tutorial"
+      },
+      "success_criteria": "Searches then opens first result",
+      "quality_check": "Two-step flow handled"
+    },
+    {
+      "id": "web_open_003",
+      "category": "open",
+      "difficulty": "hard",
+      "input": "stackoverflow'da typescript hata mesajımı ara ve ilk cevabı göster",
+      "expected_route": "browser",
+      "expected_intent": "web_search",
+      "expected_tools": ["web.search", "web.open"],
+      "expected_slots": {
+        "site": "stackoverflow.com",
+        "query": "typescript error"
+      },
+      "success_criteria": "Site-specific search + open",
+      "quality_check": "Site scoping works"
+    },
+    {
+      "id": "web_multi_001",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "input": "react hooks ara, ilk makaleyi oku ve özetle",
+      "expected_route": "browser",
+      "expected_intent": "web_search",
+      "expected_tools": ["web.search", "web.open"],
+      "expected_slots": {
+        "query": "react hooks"
+      },
+      "success_criteria": "Search → Open → Summarize flow",
+      "quality_check": "Multi-step task understanding",
+      "notes": "May require LLM to summarize content"
+    },
+    {
+      "id": "web_multi_002",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "input": "machine learning kursları bul ve en iyi 3 tanesini karşılaştır",
+      "expected_route": "browser",
+      "expected_intent": "web_search",
+      "expected_tools": ["web.search", "web.open"],
+      "expected_slots": {
+        "query": "machine learning courses"
+      },
+      "success_criteria": "Search → Open multiple → Compare",
+      "quality_check": "Comparison task handled",
+      "notes": "Complex multi-step reasoning"
+    },
+    {
+      "id": "web_multi_003",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "input": "python pandas dokümantasyonunu aç, dataframe filtering konusunu bul ve örnek göster",
+      "expected_route": "browser",
+      "expected_intent": "web_search",
+      "expected_tools": ["web.search", "web.open"],
+      "expected_slots": {
+        "query": "python pandas dataframe filtering"
+      },
+      "success_criteria": "Search → Navigate docs → Extract example",
+      "quality_check": "Documentation navigation",
+      "notes": "Requires content extraction"
+    }
+  ]
+}

@@ -27,91 +27,6 @@ from bantz.logs.logger import JsonlLogger
 from bantz.time_windows import evening_window
 
 
-def run_brainloop_demo_once(command: str) -> int:
-    """Minimal BrainLoop CLI demo with Jarvis-like event stream.
-
-    Issue #103 scope: render ACK/PROGRESS/FOUND/SUMMARIZING/RESULT in-order.
-    This is intentionally a deterministic, dependency-light demo.
-    """
-
-    from datetime import timedelta
-
-    from bantz.agent.tools import Tool, ToolRegistry
-    from bantz.brain.brain_loop import BrainLoop, BrainLoopConfig
-    from bantz.core.events import Event, EventBus, EventType
-
-    class _FailingLLM:
-        def complete_json(self, *, messages, schema_hint):  # type: ignore[no-untyped-def]
-            raise AssertionError("LLM should not be called in brainloop demo")
-
-    # Deterministic windows (stable enough for CLI demo).
-    now = datetime.now().astimezone().replace(microsecond=0)
-    day_end = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0)
-    today_date = now.date()
-    tz = now.tzinfo
-    evening_start, evening_end = evening_window(today_date, tz) if tz else (None, None)
-    session_context = {
-        "deterministic_render": True,
-        "tz_name": "Europe/Istanbul",
-        "today_window": {"time_min": now.isoformat(), "time_max": day_end.isoformat()},
-    }
-    if evening_start and evening_end:
-        session_context["evening_window"] = {"time_min": evening_start, "time_max": evening_end}
-
-    tools = ToolRegistry()
-
-    def list_events(**params):
-        # Demo-friendly stub: empty calendar.
-        _ = params
-        return {"ok": True, "count": 0, "events": []}
-
-    tools.register(
-        Tool(
-            name="calendar.list_events",
-            description="list",
-            parameters={"type": "object", "properties": {}},
-            function=list_events,
-        )
-    )
-
-    bus = EventBus()
-
-    def on_event(ev: Event) -> None:
-        et = str(ev.event_type)
-        data = ev.data or {}
-
-        if et == EventType.ACK.value or et == EventType.PROGRESS.value:
-            msg = str(data.get("text") or data.get("message") or "").strip()
-            prefix = "Kontrol ediyorum efendim…"
-            if msg:
-                print(f"{Colors.DIM}{prefix}{Colors.RESET} {Colors.DIM}({msg}){Colors.RESET}")
-            else:
-                print(f"{Colors.DIM}{prefix}{Colors.RESET}")
-            return
-
-        if et == EventType.FOUND.value:
-            tool = str(data.get("tool") or data.get("name") or "").strip()
-            suffix = f" ({tool})" if tool else ""
-            print(f"{Colors.DIM}Buldum efendim…{suffix}{Colors.RESET}")
-            return
-
-        if et == EventType.SUMMARIZING.value:
-            status = str(data.get("status") or "").strip() or "started"
-            if status == "complete":
-                return
-            print(f"{Colors.DIM}Özetliyorum efendim…{Colors.RESET}")
-            return
-
-        if et == EventType.RESULT.value:
-            text = str(data.get("text") or data.get("summary") or "").strip()
-            print(text)
-            return
-
-    bus.subscribe_all(on_event)
-
-    loop = BrainLoop(llm=_FailingLLM(), tools=tools, event_bus=bus, config=BrainLoopConfig(max_steps=2, debug=False))
-    _ = loop.run(turn_input=command, session_context=session_context, policy=None, context={"session_id": "cli-demo"})
-    return 0
 
 
 # ANSI colors
@@ -136,7 +51,7 @@ def get_terminal_size() -> tuple[int, int]:
     try:
         size = shutil.get_terminal_size()
         return size.columns, size.lines
-    except:
+    except Exception:
         return 80, 24
 
 
@@ -222,7 +137,15 @@ def clear_screen() -> None:
     os.system("clear" if os.name != "nt" else "cls")
 
 
-def run_interactive_with_server(session_name: str, policy_path: str, log_path: str) -> int:
+def run_interactive_with_server(
+    session_name: str,
+    policy_path: str,
+    log_path: str,
+    *,
+    http_enabled: bool = False,
+    http_host: str = "0.0.0.0",
+    http_port: int = 8088,
+) -> int:
     """Run interactive mode with integrated server (browser stays alive)."""
     from bantz.server import BantzServer, get_socket_path
     from bantz.core.events import get_event_bus, Event
@@ -250,6 +173,25 @@ def run_interactive_with_server(session_name: str, policy_path: str, log_path: s
     
     event_bus = get_event_bus()
     event_bus.subscribe("bantz_message", on_bantz_message)
+
+    # Start HTTP API server in background if requested (Issue #834)
+    _http_thread = None
+    if http_enabled:
+        try:
+            from bantz.api.server import start_http_server_background
+
+            _http_thread = start_http_server_background(
+                bantz_server=server,
+                host=http_host,
+                port=http_port,
+                event_bus=event_bus,
+            )
+            print(f"{Colors.GREEN}🌐 HTTP API:{Colors.RESET} http://{http_host}:{http_port} (docs: /docs)")
+        except ImportError as e:
+            print(f"{Colors.RED}✗ HTTP API başlatılamadı:{Colors.RESET} {e}")
+            print(f"  {Colors.DIM}pip install -r requirements-http.txt{Colors.RESET}")
+        except Exception as e:
+            print(f"{Colors.RED}✗ HTTP API hatası:{Colors.RESET} {e}")
 
     clear_screen()
     print_welcome()
@@ -447,7 +389,167 @@ def stop_session(session_name: str) -> int:
         return 1
 
 
+def run_http_only(
+    session_name: str,
+    policy_path: str,
+    log_path: str,
+    host: str = "0.0.0.0",
+    port: int = 8088,
+) -> int:
+    """Run HTTP-only mode (no interactive CLI) — Issue #834.
+
+    Starts a BantzServer and exposes it exclusively via FastAPI HTTP API.
+    Useful for headless deployments, Docker containers, and mobile/phone clients.
+    """
+    from bantz.server import BantzServer
+    from bantz.core.events import get_event_bus
+
+    server = BantzServer(session_name=session_name, policy_path=policy_path, log_path=log_path)
+    event_bus = get_event_bus()
+
+    try:
+        from bantz.api.server import run_http_server
+
+        run_http_server(
+            bantz_server=server,
+            host=host,
+            port=port,
+            event_bus=event_bus,
+        )
+    except ImportError as e:
+        print(f"{Colors.RED}✗ HTTP API başlatılamadı:{Colors.RESET} {e}")
+        print(f"  {Colors.DIM}pip install -r requirements-http.txt{Colors.RESET}")
+        return 1
+    except KeyboardInterrupt:
+        print(f"\n{Colors.DIM}👋 HTTP API kapatılıyor...{Colors.RESET}")
+
+    return 0
+
+
+def run_overnight(
+    session_name: str,
+    policy_path: str,
+    log_path: str,
+    tasks: list[str],
+) -> int:
+    """Run overnight mode — otonom gece modu (Issue #836).
+
+    Executes tasks sequentially, checkpoints after each task,
+    generates a morning report, and exits.
+    """
+    from bantz.server import BantzServer
+    from bantz.automation.overnight import (
+        OvernightRunner,
+        OvernightState,
+    )
+
+    if not tasks:
+        print(f"{Colors.RED}✗ Gece modu için en az bir görev gerekli.{Colors.RESET}")
+        print(f"  Örnek: bantz --overnight 'AI konferanslarını araştır' 'Haber özetini hazırla'")
+        return 1
+
+    server = BantzServer(session_name=session_name, policy_path=policy_path, log_path=log_path)
+
+    runner = OvernightRunner(bantz_server=server)
+    runner.add_tasks(tasks)
+
+    try:
+        state = runner.run()
+    except KeyboardInterrupt:
+        print(f"\n{Colors.YELLOW}⚠️ Gece modu iptal edildi — checkpoint kaydedildi.{Colors.RESET}")
+        return 130
+
+    if state.morning_report:
+        print()
+        print(state.morning_report)
+
+    return 0 if state.failed_count == 0 else 1
+
+
+def run_overnight_resume(
+    session_name: str,
+    policy_path: str,
+    log_path: str,
+) -> int:
+    """Resume overnight mode from checkpoint (Issue #836)."""
+    from bantz.server import BantzServer
+    from bantz.automation.overnight import resume_overnight
+
+    server = BantzServer(session_name=session_name, policy_path=policy_path, log_path=log_path)
+
+    try:
+        state = resume_overnight(bantz_server=server)
+    except KeyboardInterrupt:
+        print(f"\n{Colors.YELLOW}⚠️ Gece modu devam iptal edildi — checkpoint kaydedildi.{Colors.RESET}")
+        return 130
+
+    if state is None:
+        print(f"{Colors.YELLOW}⚠️ Checkpoint bulunamadı — devam edilecek oturum yok.{Colors.RESET}")
+        return 1
+
+    if state.morning_report:
+        print()
+        print(state.morning_report)
+
+    return 0 if state.failed_count == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Load env vars from .env / BANTZ_ENV_FILE (Issue #216).
+    # This enables setting secrets without putting them in shell history.
+    try:
+        from bantz.security.env_loader import load_env
+
+        load_env()
+    except Exception:
+        # Never block CLI startup due to env loading.
+        pass
+
+    # Redact secrets from standard logging output (Issue #216).
+    try:
+        from bantz.security.secrets import install_secrets_redaction_filter
+
+        install_secrets_redaction_filter()
+    except Exception:
+        pass
+
+    if argv and argv[0] == "google":
+        from bantz.google.cli import main as google_main
+
+        return google_main(argv[1:])
+
+    # Proactive Engine CLI (Issue #835)
+    if argv and argv[0] == "proactive":
+        from bantz.proactive.cli import handle_proactive_command, add_proactive_subparser
+
+        proactive_p = argparse.ArgumentParser(prog="bantz")
+        proactive_subs = proactive_p.add_subparsers(dest="command")
+        add_proactive_subparser(proactive_subs)
+        proactive_args = proactive_p.parse_args(argv)
+        return handle_proactive_command(proactive_args)
+
+    # Declarative skill CLI (Issue #833)
+    if argv and argv[0] == "skill":
+        from bantz.skills.declarative.cli import handle_skill_command, add_skill_subparser
+
+        skill_parser = argparse.ArgumentParser(prog="bantz skill")
+        skill_sub = skill_parser.add_subparsers(dest="skill_action")
+        skill_sub.required = True
+        add_skill_subparser(
+            # We need a parent parser that delegates to skill subcommands
+            type("_FakeSubparsers", (), {"add_parser": lambda self, *a, **kw: skill_parser})()  # noqa: E501
+        )
+        # Re-parse with proper subparser
+        skill_p = argparse.ArgumentParser(prog="bantz")
+        skill_subs = skill_p.add_subparsers(dest="command")
+        from bantz.skills.declarative.cli import add_skill_subparser as _add_sp
+        _add_sp(skill_subs)
+        skill_args = skill_p.parse_args(argv)
+        return handle_skill_command(skill_args)
+
     parser = argparse.ArgumentParser(
         prog="bantz",
         description="Bantz v0.3 - Local voice assistant with live browser",
@@ -459,11 +561,14 @@ Kullanım örnekleri:
   bantz --session work --serve   # 'work' adlı oturum başlat
   bantz --session work --once "instagram aç"  # Çalışan oturuma komut gönder
   bantz --session work --stop    # Oturumu kapat
+  bantz --serve --http            # Interactive + HTTP API (port 8088)
+  bantz --serve --http --port 9000  # Farklı portta HTTP
+  bantz --http-only               # Sadece HTTP API (CLI yok)
   bantz --once "google aç"       # Tek seferlik (tarayıcı kalıcı değil)
 """,
     )
     parser.add_argument("--policy", default="config/policy.json", help="Policy dosyası yolu")
-    parser.add_argument("--log", default="bantz.log.jsonl", help="JSONL log dosyası")
+    parser.add_argument("--log", default="artifacts/logs/bantz.log.jsonl", help="JSONL log dosyası")
     parser.add_argument("--session", default="default", help="Session adı (default: 'default')")
     parser.add_argument("--serve", action="store_true", help="Interactive server modu başlat")
     parser.add_argument("--once", default=None, metavar="CMD", help="Tek seferlik komut")
@@ -484,13 +589,54 @@ Kullanım örnekleri:
         help="Overlay UI. (Not: tam overlay için orchestrator önerilir). (Uyumluluk)",
     )
 
+    # HTTP REST API (Issue #834)
+    parser.add_argument("--http", action="store_true", help="HTTP REST API sunucusu başlat (port 8088)")
+    parser.add_argument("--port", type=int, default=8088, help="HTTP API portu (default: 8088)")
+    parser.add_argument("--http-host", default="0.0.0.0", help="HTTP API bind adresi (default: 0.0.0.0)")
+    parser.add_argument("--http-only", action="store_true", help="Sadece HTTP (interactive CLI olmadan)")
+
+    # Overnight mode (Issue #836)
+    parser.add_argument(
+        "--overnight",
+        nargs="*",
+        metavar="TASK",
+        default=None,
+        help="Otonom gece modu — görevleri sıraya alır ve sabah raporu üretir. "
+             "Örnek: --overnight 'AI konferanslarını araştır' 'Haftalık haberleri özetle'",
+    )
+    parser.add_argument(
+        "--overnight-resume",
+        action="store_true",
+        help="Son kesilen gece modunu checkpoint'ten devam ettir",
+    )
+
+    # Compatibility flags (README/back-compat)
+    parser.add_argument("--text", action="store_true", help="Text mod (varsayılan). (Uyumluluk)")
+    parser.add_argument("--ptt", action="store_true", help="Push-to-talk alias'ı (== --voice). (Uyumluluk)")
+    parser.add_argument("--debug", action="store_true", help="Debug logları aç. (Uyumluluk)")
+    parser.add_argument(
+        "--overlay",
+        action="store_true",
+        help="Overlay UI. (Not: tam overlay için orchestrator önerilir). (Uyumluluk)",
+    )
+
     # Voice mode (PTT)
     parser.add_argument("--voice", action="store_true", help="Sesli mod (PTT: SPACE basılı tut)")
     parser.add_argument("--wake", action="store_true", help="Wake word modu ('Hey Jarvis' ile aktive)")
     parser.add_argument("--voice-warmup", action="store_true", help="ASR modelini önceden hazırla/indir (voice başlamaz)")
     parser.add_argument("--piper-model", default="", help="Piper .onnx model yolu (zorunlu: --voice)")
-    parser.add_argument("--ollama-url", default="http://127.0.0.1:11434", help="Ollama base URL")
-    parser.add_argument("--ollama-model", default="qwen2.5:3b-instruct", help="Ollama model adı")
+    parser.add_argument("--vllm-url", default="http://127.0.0.1:8001", help="vLLM (OpenAI-compatible) base URL")
+    parser.add_argument("--vllm-model", default="Qwen/Qwen2.5-3B-Instruct-AWQ", help="vLLM model adı")
+    parser.add_argument(
+        "--vllm-quality-url",
+        default="http://127.0.0.1:8002",
+        help="Quality vLLM base URL (bigger model; e.g. summaries/reasoning)",
+    )
+    parser.add_argument(
+        "--vllm-quality-model",
+        default="Qwen/Qwen2.5-7B-Instruct-AWQ",
+        help="Quality vLLM model adı (default: 7B AWQ)",
+    )
     parser.add_argument("--whisper-model", default="base", help="faster-whisper model adı (tiny/base/small/...)")
     parser.add_argument("--asr-cache-dir", default=os.path.expanduser("~/.cache/bantz/whisper"), help="Whisper model cache klasörü")
     parser.add_argument("--asr-allow-download", action="store_true", help="Whisper model indirmeye izin ver (ilk kurulumda)")
@@ -518,12 +664,17 @@ Kullanım örnekleri:
             file=sys.stderr,
         )
 
-    # Make Ollama settings available to all components (server thread, router, agent).
+    # Make vLLM settings available to all components (server thread, router, agent).
     # CLI flags should take precedence for this run.
-    if getattr(args, "ollama_url", None):
-        os.environ["BANTZ_OLLAMA_URL"] = str(args.ollama_url)
-    if getattr(args, "ollama_model", None):
-        os.environ["BANTZ_OLLAMA_MODEL"] = str(args.ollama_model)
+    if getattr(args, "vllm_url", None):
+        os.environ["BANTZ_VLLM_URL"] = str(args.vllm_url)
+    if getattr(args, "vllm_model", None):
+        os.environ["BANTZ_VLLM_MODEL"] = str(args.vllm_model)
+
+    if getattr(args, "vllm_quality_url", None):
+        os.environ["BANTZ_VLLM_QUALITY_URL"] = str(args.vllm_quality_url)
+    if getattr(args, "vllm_quality_model", None):
+        os.environ["BANTZ_VLLM_QUALITY_MODEL"] = str(args.vllm_quality_model)
 
     def _can_connect(host: str, port: int, timeout_s: float = 3.0) -> bool:
         try:
@@ -570,7 +721,13 @@ Kullanım örnekleri:
                 print("\n⚠️ Warmup iptal edildi.")
                 return 130
             except Exception as e:
-                print(f"❌ Warmup başarısız: {e}")
+                try:
+                    from bantz.security.secrets import mask_secrets
+
+                    msg = mask_secrets(str(e))
+                except Exception:
+                    msg = f"[{type(e).__name__}] (details redacted)"
+                print(f"❌ Warmup başarısız: {msg}")
                 return 1
             print("✅ Warmup tamam. Artık voice modunda indirmeye takılmaz.")
             return 0
@@ -584,8 +741,8 @@ Kullanım örnekleri:
             cfg = VoiceLoopConfig(
                 session=args.session,
                 piper_model_path=args.piper_model,
-                ollama_url=args.ollama_url,
-                ollama_model=args.ollama_model,
+                vllm_url=args.vllm_url,
+                vllm_model=args.vllm_model,
                 whisper_model=args.whisper_model,
                 enable_tts=not args.no_tts,
                 enable_llm_fallback=not args.no_llm,
@@ -607,8 +764,8 @@ Kullanım örnekleri:
         cfg = VoiceLoopConfig(
             session=args.session,
             piper_model_path=args.piper_model,
-            ollama_url=args.ollama_url,
-            ollama_model=args.ollama_model,
+            vllm_url=args.vllm_url,
+            vllm_model=args.vllm_model,
             whisper_model=args.whisper_model,
             enable_tts=not args.no_tts,
             enable_llm_fallback=not args.no_llm,
@@ -643,8 +800,24 @@ Kullanım örnekleri:
             pass
         return run_stateless_once(args.once, args.policy, args.log)
 
-    # Interactive mode (default or --serve)
-    return run_interactive_with_server(args.session, args.policy, args.log)
+    # HTTP-only mode: start FastAPI server without interactive CLI (Issue #834)
+    if args.http_only:
+        return run_http_only(args.session, args.policy, args.log, args.http_host, args.port)
+
+    # Overnight mode: autonomous task execution (Issue #836)
+    if args.overnight_resume:
+        return run_overnight_resume(args.session, args.policy, args.log)
+
+    if args.overnight is not None:
+        return run_overnight(args.session, args.policy, args.log, args.overnight)
+
+    # Interactive mode (default or --serve), optionally with HTTP API
+    return run_interactive_with_server(
+        args.session, args.policy, args.log,
+        http_enabled=getattr(args, "http", False),
+        http_host=getattr(args, "http_host", "0.0.0.0"),
+        http_port=getattr(args, "port", 8088),
+    )
 
 
 if __name__ == "__main__":

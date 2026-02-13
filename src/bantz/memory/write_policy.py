@@ -11,7 +11,9 @@ Protects user privacy by filtering sensitive data.
 
 from __future__ import annotations
 
+import hashlib
 import re
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Pattern, Tuple
@@ -150,6 +152,8 @@ class WritePolicy:
     - Redact sensitive parts and allow
     """
     
+    MAX_SEEN_HASHES: int = 5000
+    
     def __init__(
         self,
         patterns: Optional[List[SensitivePattern]] = None,
@@ -164,6 +168,22 @@ class WritePolicy:
         """
         self._patterns = patterns or DEFAULT_PATTERNS.copy()
         self._strict_mode = strict_mode
+        self._seen_hashes: OrderedDict[str, bool] = OrderedDict()
+    
+    def _content_hash(self, content: str) -> str:
+        """SHA-256 hash of content for dedup."""
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    
+    def _mark_seen(self, content: str) -> bool:
+        """Mark content as seen.  Returns True if already seen (duplicate)."""
+        h = self._content_hash(content)
+        if h in self._seen_hashes:
+            return True
+        self._seen_hashes[h] = True
+        # Evict oldest entries when over limit
+        while len(self._seen_hashes) > self.MAX_SEEN_HASHES:
+            self._seen_hashes.popitem(last=False)
+        return False
     
     def check(
         self,
@@ -184,6 +204,13 @@ class WritePolicy:
             return PolicyResult(
                 decision=WriteDecision.ALLOW,
                 reason="Empty content"
+            )
+        
+        # Dedup check — reject exact duplicates
+        if self._mark_seen(content):
+            return PolicyResult(
+                decision=WriteDecision.DENY,
+                reason="Duplicate content (already seen)"
             )
         
         matched_patterns: List[str] = []
@@ -238,6 +265,10 @@ class WritePolicy:
         """
         Redact all sensitive patterns from content.
         
+        All patterns are applied regardless of their decision type
+        (ALLOW, DENY, REDACT, ENCRYPT) — when redacting, the goal is
+        to strip every piece of sensitive data.
+        
         Args:
             content: Content to redact
             
@@ -247,8 +278,7 @@ class WritePolicy:
         result = content
         
         for pattern in self._patterns:
-            if pattern.decision != WriteDecision.DENY:
-                result = pattern.redact(result)
+            result = pattern.redact(result)
         
         return result
     

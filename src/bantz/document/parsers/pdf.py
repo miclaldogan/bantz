@@ -59,14 +59,14 @@ class PDFParser(DocumentParser):
             ValueError: If PDF cannot be parsed.
             ImportError: If no PDF library is available.
         """
+        if not self.can_parse(data):
+            raise ValueError("Data does not appear to be a valid PDF")
+
         if not self.is_available:
             raise ImportError(
                 "No PDF library available. Install pdfplumber or PyMuPDF: "
                 "pip install pdfplumber or pip install PyMuPDF"
             )
-        
-        if not self.can_parse(data):
-            raise ValueError("Data does not appear to be a valid PDF")
         
         if self._pdfplumber:
             return await self._parse_with_pdfplumber(data)

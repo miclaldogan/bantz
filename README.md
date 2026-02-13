@@ -1,772 +1,498 @@
 <p align="center">
-  <img src=".github/assets/bson.png" alt="Bantz Logo" width="200"/>
+  <img src="docs/bantz.png" alt="Bantz" width="900" />
 </p>
 
-<h1 align="center">🤖 Bantz</h1>
+<h1 align="center">Bantz</h1>
 
 <p align="center">
-  <strong>Your Local Iron Man Jarvis - Voice Assistant for Linux</strong>
-</p>
-
-<p align="center">
-  <a href="#features">Features</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#roadmap">Roadmap</a> •
-  <a href="#contributing">Contributing</a> •
-  <a href="#license">License</a>
+  <strong>Local-first AI assistant for Linux — CLI, voice, and browser.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0--alpha-blue" alt="Version"/>
-  <img src="https://img.shields.io/badge/python-3.10+-green" alt="Python"/>
-  <img src="https://img.shields.io/badge/platform-Linux-orange" alt="Platform"/>
-  <img src="https://img.shields.io/badge/license-Proprietary-red" alt="License"/>
+  <a href="#quickstart"><img src="https://img.shields.io/badge/-Quickstart-blue?style=for-the-badge" alt="Quickstart" /></a>
+  <a href="#architecture"><img src="https://img.shields.io/badge/-Architecture-purple?style=for-the-badge" alt="Architecture" /></a>
+  <a href="#voice-mode"><img src="https://img.shields.io/badge/-Voice-green?style=for-the-badge" alt="Voice" /></a>
+  <a href="#google-integrations"><img src="https://img.shields.io/badge/-Google-red?style=for-the-badge" alt="Google" /></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/-Contributing-orange?style=for-the-badge" alt="Contributing" /></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-≥3.10-3776AB?logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/LLM-Qwen2.5--3B--AWQ-FF6F00" alt="LLM" />
+  <img src="https://img.shields.io/badge/inference-vLLM-blueviolet" alt="vLLM" />
+  <img src="https://img.shields.io/badge/finalizer-Gemini%202.0%20Flash-4285F4?logo=google&logoColor=white" alt="Gemini" />
+  <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License" />
 </p>
 
 ---
 
-## What is Bantz?
+Bantz is a privacy-focused, local-first AI assistant that runs entirely on your machine. It routes requests through a fast 3B parameter model via [vLLM](https://github.com/vllm-project/vllm), executes tools (calendar, email, browser, system), and optionally polishes responses with Gemini for quality writing — all with sub-500ms time-to-first-token.
 
-Bantz is a **local-first, privacy-focused voice assistant** for Linux that aims to be your personal Jarvis. It combines voice recognition, browser automation, desktop control, and local LLM integration - all running on your machine without cloud dependencies.
+## Table of Contents
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│   👤 USER: "Hey Bantz, OpenAI'ın yeni modeli hakkında araştırma yap"       │
-│                                                                             │
-│   🤖 BANTZ: "Başlıyorum efendim..."                         [ACK < 0.2s]   │
-│                                                                             │
-│   🔍 [Google'da arama yapar]                                               │
-│   📰 [3 farklı kaynak bulur]                                [3-10s]        │
-│   📊 [Overlay panelde kaynakları gösterir]                                 │
-│                                                                             │
-│   🤖 BANTZ: "3 kaynak buldum efendim. İşte özet:                           │
-│              OpenAI, GPT-5 modelini duyurdu..."             [< 30s]        │
-│                                                                             │
-│   👤 USER: "2. kaynağı aç"                                                 │
-│   🤖 BANTZ: "Açıyorum efendim."                                            │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+- [Highlights](#highlights)
+- [Quickstart](#quickstart)
+- [Architecture](#architecture)
+- [Voice Mode](#voice-mode)
+- [Google Integrations](#google-integrations)
+- [Browser Extension](#browser-extension)
+- [Configuration](#configuration)
+- [Testing](#testing)
+- [Benchmarks](#benchmarks)
+- [Project Structure](#project-structure)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-## Features
-
-### 🎤 Voice Control
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                     VOICE PIPELINE                           │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐      │
-│  │  Wake Word  │ →  │     ASR     │ →  │     TTS     │      │
-│  │ "Hey Bantz" │    │   Whisper   │    │    Piper    │      │
-│  └─────────────┘    └─────────────┘    └─────────────┘      │
-│        │                  │                  │               │
-│        ▼                  ▼                  ▼               │
-│   OpenWakeWord     Faster-Whisper      Piper-TTS            │
-│   (Custom Model)   (Turkish, <1s)    (Turkish Voice)        │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
+## Highlights
 
 | Feature | Description |
-|---------|-------------|
-| **Wake Word** | "Hey Bantz" veya "Bantz" ile aktifleştir |
-| **Push-to-Talk** | Space tuşu ile konuş |
-| **Continuous Mode** | Konuşma modunda wake word gerekmez |
-| **Turkish ASR** | Faster-Whisper ile hızlı Türkçe tanıma (<1s) |
-| **TTS** | Piper ile doğal Türkçe sesli yanıt |
+|:--------|:------------|
+| 🧠 **Brain Pipeline** | Plan → Execute → Finalize loop with tool orchestration and JSON repair |
+| ⚡ **Sub-500ms TTFT** | 3B router at ~40ms, streaming responses, real-time latency monitoring |
+| 🎙️ **Voice Control** | Push-to-talk with Faster Whisper ASR, wake-word detection, Piper TTS |
+| 📅 **Google Calendar** | Create, query, modify, cancel events via OAuth2 — Turkish natural language |
+| 📧 **Gmail** | Read, search, and draft emails with quality finalization |
+| 🌐 **Browser Extension** | Chromium extension for web interaction and page context |
+| 🔒 **Privacy First** | Everything local by default; cloud (Gemini) is opt-in |
+| 🛡️ **Confirmation Firewall** | Destructive operations require explicit user approval |
+| 🔧 **Extensible Tools** | Plug-in architecture — calendar, email, web search, system info, and more |
+| 📊 **Observability** | Structured JSON logging, repair metrics, TTFT percentiles |
 
-### 🌐 Browser Automation
+---
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                   BROWSER CONTROL                            │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌─────────────────────────────────────────────────┐        │
-│  │                  Firefox + Extension             │        │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐         │        │
-│  │  │ Google  │  │ YouTube │  │ GitHub  │  ...    │        │
-│  │  └─────────┘  └─────────┘  └─────────┘         │        │
-│  └─────────────────────────────────────────────────┘        │
-│        │              │              │                       │
-│        ▼              ▼              ▼                       │
-│  ┌─────────┐    ┌─────────┐    ┌─────────┐                  │
-│  │ Search  │    │  Play   │    │ Browse  │                  │
-│  │ Analyze │    │ Control │    │  Repos  │                  │
-│  └─────────┘    └─────────┘    └─────────┘                  │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
+## Quickstart
 
-| Site | Supported Actions |
-|------|-------------------|
-| **Google** | Arama, sonuç tıklama, sayfa analizi |
-| **YouTube** | Video arama, oynatma, durdurma |
-| **GitHub** | Repo browse, code search |
-| **LinkedIn** | Profil görüntüleme |
-| **General** | Sayfa tarama, geri/ileri, yenileme |
+### Prerequisites
 
-### 🖥️ Desktop Control
+- Linux (Ubuntu 20.04+ recommended)
+- Python ≥ 3.10
+- NVIDIA GPU with ≥ 6 GB VRAM (for local vLLM inference)
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    DESKTOP SKILLS                            │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  PC Skills                    │  Browser Skills              │
-│  ────────────────────────────┼────────────────────────────  │
-│  • App Launcher              │  • Web Search                 │
-│  • File Manager              │  • Page Scanning              │
-│  • Notifications             │  • Navigation                 │
-│  • Window Management         │  • Tab Control                │
-│  • System Commands           │  • Content Extraction         │
-│                              │                               │
-│  Tools: xdotool, wmctrl      │  Tools: Firefox Extension    │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+### 1. Clone & Install
+
+```bash
+git clone https://github.com/miclaldogan/bantz.git
+cd bantz
+python -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -e ".[llm]"
 ```
 
-### 🧠 LLM Integration
+### 2. Start vLLM
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                      LLM PIPELINE                            │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  User Input                                                  │
-│      │                                                       │
-│      ▼                                                       │
-│  ┌─────────────────────────────────────────────┐            │
-│  │              ASR Rewriter                    │            │
-│  │   "gogle da ara" → "Google'da ara"          │            │
-│  └─────────────────────────────────────────────┘            │
-│      │                                                       │
-│      ▼                                                       │
-│  ┌─────────────────────────────────────────────┐            │
-│  │              Ollama (Local)                  │            │
-│  │         qwen2.5:3b-instruct                  │            │
-│  └─────────────────────────────────────────────┘            │
-│      │                                                       │
-│      ▼                                                       │
-│  Response / Action                                           │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+```bash
+# Recommended: 3B AWQ model on port 8001
+./scripts/vllm/start_3b.sh
 ```
 
-### 🎨 Overlay UI
+<details>
+<summary>Or via Docker</summary>
 
+```bash
+docker compose up -d
+curl http://127.0.0.1:8001/v1/models
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                     OVERLAY PANEL                            │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  🎤 Listening...                                        │ │
-│  │  ─────────────────────────────────────────────────────  │ │
-│  │                                                         │ │
-│  │  📰 Search Results                                      │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │ 1. OpenAI announces GPT-5                        │  │ │
-│  │  │    techcrunch.com • 2 hours ago                  │  │ │
-│  │  └──────────────────────────────────────────────────┘  │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │ 2. GPT-5: Everything we know                     │  │ │
-│  │  │    theverge.com • 5 hours ago                    │  │ │
-│  │  └──────────────────────────────────────────────────┘  │ │
-│  │                                                         │ │
-│  │  States: [IDLE] [LISTENING] [THINKING] [SPEAKING]       │ │
-│  │                                                         │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+
+</details>
+
+### 3. Configure
+
+```bash
+cp config/bantz-env.example ~/.config/bantz/env
 ```
+
+Minimum required variables:
+
+```bash
+export BANTZ_VLLM_URL="http://127.0.0.1:8001"
+export BANTZ_VLLM_MODEL="Qwen/Qwen2.5-3B-Instruct-AWQ"
+```
+
+### 4. Run
+
+```bash
+# Single command
+bantz --once "yarın saat 3'te toplantı kur"
+
+# Interactive daemon
+bantz --serve
+
+# Voice mode (push-to-talk)
+bantz --voice --piper-model /path/to/tr.onnx --asr-allow-download
+```
+
+<details>
+<summary>💡 Enable Gemini for quality writing (optional)</summary>
+
+For polished email drafts, long summaries, and better Turkish prose — add a Gemini API key:
+
+```bash
+# Add to ~/.config/bantz/env (never paste keys in shell history)
+BANTZ_CLOUD_ENABLED=true
+GEMINI_API_KEY=your_key_here
+BANTZ_GEMINI_MODEL=gemini-2.0-flash
+```
+
+See [docs/secrets-hygiene.md](docs/secrets-hygiene.md) for best practices.
+
+</details>
 
 ---
 
 ## Architecture
 
-### System Overview
+```
+┌────────────────────────────────────────────────────────────────┐
+│                          BANTZ                                 │
+│                                                                │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                 │
+│  │  Voice    │    │  CLI     │    │  Browser │                 │
+│  │  Loop     │    │  Client  │    │Extension │                 │
+│  └────┬─────┘    └────┬─────┘    └────┬─────┘                 │
+│       │               │               │                        │
+│       └───────────────┼───────────────┘                        │
+│                       ▼                                        │
+│              ┌────────────────┐                                │
+│              │  BantzServer   │  Unix socket daemon             │
+│              └───────┬────────┘                                │
+│                      ▼                                         │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                   Brain Pipeline                        │   │
+│  │                                                         │   │
+│  │  ┌───────────┐   ┌──────────────┐   ┌──────────────┐   │   │
+│  │  │ PreRouter  │──▶│  LLM Router  │──▶│  Tool        │   │   │
+│  │  │ (intent)   │   │  (3B, ~40ms) │   │  Executor    │   │   │
+│  │  └───────────┘   └──────────────┘   └──────┬───────┘   │   │
+│  │                                             │           │   │
+│  │                                             ▼           │   │
+│  │                                     ┌──────────────┐    │   │
+│  │                                     │  Finalizer   │    │   │
+│  │                                     │  (tiered)    │    │   │
+│  │                                     └──────────────┘    │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ Calendar │  │  Gmail   │  │  Web     │  │  System  │      │
+│  │  Tools   │  │  Tools   │  │  Tools   │  │  Tools   │      │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘      │
+└────────────────────────────────────────────────────────────────┘
+         │                                       │
+         ▼                                       ▼
+   ┌───────────┐                          ┌───────────┐
+   │   vLLM    │  Qwen2.5-3B-AWQ         │  Gemini   │  2.0 Flash
+   │  (local)  │  port 8001              │  (cloud)  │  (optional)
+   └───────────┘                          └───────────┘
+```
+
+### Pipeline Flow
+
+1. **Input** arrives from CLI, voice, or browser extension
+2. **BantzServer** routes through the brain pipeline
+3. **PreRouter** classifies intent (smalltalk → fast path, tool-needed → planner)
+4. **LLM Router** (Qwen 3B via vLLM) generates a structured JSON plan: route, tools, slots
+5. **JSON Repair** fixes common 3B mistakes — wrong enums, string-instead-of-list, markdown wrapping
+6. **Tool Executor** runs the planned tools (calendar, email, web, system)
+7. **Tiered Finalizer** decides quality vs. fast response:
+   - **Quality tier** → Gemini 2.0 Flash (polished Turkish prose)
+   - **Fast tier** → local 3B (sub-200ms, good enough for simple replies)
+   - **Draft tier** → deterministic template (no LLM call)
+
+### Key Design Decisions
+
+- **Brain is the default path** — all entry points (CLI, voice, browser) flow through the unified brain pipeline
+- **Tiered finalization** — complexity, writing need, and risk scores determine whether to use cloud or local
+- **Confirmation firewall** — destructive tools (delete, shutdown) require explicit user approval regardless of LLM output
+- **JSON repair at every layer** — deterministic repair for enums/types, LLM-based repair for structural failures
+
+---
+
+## Voice Mode
+
+Bantz supports full voice interaction with push-to-talk:
+
+```bash
+pip install -e ".[voice]"
+bantz --voice --piper-model /path/to/tr.onnx --asr-allow-download
+```
+
+| Component | Engine | Details |
+|:----------|:-------|:--------|
+| ASR | [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) | Local, Turkish-optimized |
+| TTS | [Piper](https://github.com/rhasspy/piper) | Local, ONNX models |
+| Wake Word | Vosk / OpenWakeWord | Configurable via `BANTZ_WAKE_ENGINE` |
+| Autocorrect | RapidFuzz | Fixes common ASR transcription errors |
+| VAD | Energy + Silero | Voice activity detection for clean segmentation |
+
+<details>
+<summary>Voice environment variables</summary>
+
+```bash
+BANTZ_WAKE_WORDS=hey bantz,bantz,jarvis
+BANTZ_WAKE_ENGINE=vosk
+BANTZ_WAKE_SENSITIVITY=0.5
+BANTZ_ACTIVE_LISTEN_TTL_S=90
+BANTZ_SILENCE_TO_WAKE_S=30
+```
+
+</details>
+
+---
+
+## Google Integrations
+
+### Calendar
+
+```bash
+pip install -e ".[calendar]"
+
+# Setup OAuth
+bantz google auth calendar --write
+
+# Use naturally
+bantz --once "yarın saat 5'te toplantı kur"
+bantz --once "bugün neler var?"
+bantz --once "cuma günkü toplantıyı iptal et"
+```
+
+### Gmail
+
+```bash
+# Authenticate
+bantz google auth gmail --scope readonly
+
+# Use naturally
+bantz --once "okunmamış maillerimi göster"
+bantz --once "Ahmet'e nazik bir mail yaz"
+```
+
+<details>
+<summary>OAuth setup details</summary>
+
+1. Place your Google Cloud OAuth client secret at:
+   ```
+   ~/.config/bantz/google/client_secret.json
+   ```
+   Or set `BANTZ_GOOGLE_CLIENT_SECRET` to a custom path.
+
+2. Mint tokens via CLI:
+   ```bash
+   bantz google env                          # show config paths
+   bantz google auth calendar --write        # calendar read+write
+   bantz google auth gmail --scope readonly  # gmail read-only
+   ```
+
+Full guide: [docs/setup/google-oauth.md](docs/setup/google-oauth.md)
+
+</details>
+
+---
+
+## Browser Extension
+
+A Chromium-based extension that connects Bantz to your browser:
+
+```bash
+pip install -e ".[browser]"
+```
+
+- Page context extraction for better answers
+- Tab management and navigation
+- Web search integration
+
+See [bantz-extension/](bantz-extension/) for the extension source.
+
+---
+
+## Configuration
+
+All configuration is via environment variables. Copy the example and customize:
+
+```bash
+cp config/bantz-env.example ~/.config/bantz/env
+```
+
+### Core Variables
+
+| Variable | Default | Description |
+|:---------|:--------|:------------|
+| `BANTZ_VLLM_URL` | `http://localhost:8001` | vLLM endpoint |
+| `BANTZ_VLLM_MODEL` | `Qwen/Qwen2.5-3B-Instruct-AWQ` | Router model |
+| `BANTZ_GEMINI_MODEL` | `gemini-2.0-flash` | Finalizer model (when cloud enabled) |
+| `BANTZ_CLOUD_ENABLED` | `false` | Enable Gemini cloud finalization |
+| `GEMINI_API_KEY` | — | Gemini API key (required if cloud enabled) |
+
+### Tiered Finalization
+
+| Variable | Default | Description |
+|:---------|:--------|:------------|
+| `BANTZ_TIERED_MODE` | `1` | Enable tiered quality/fast finalization |
+| `BANTZ_FORCE_FINALIZER_TIER` | — | Force `quality` or `fast` tier (debug/testing) |
+| `BANTZ_QOS_QUALITY_TIMEOUT_S` | `90` | Timeout for quality (Gemini) calls |
+| `BANTZ_QOS_FAST_TIMEOUT_S` | `20` | Timeout for fast (3B) calls |
+
+### Privacy & Security
+
+| Variable | Default | Description |
+|:---------|:--------|:------------|
+| `BANTZ_REDACT_PII` | `true` | Redact personally identifiable information |
+| `BANTZ_METRICS_ENABLED` | `true` | Enable structured metrics logging |
+| `BANTZ_LATENCY_BUDGET_MS` | `3000` | Max acceptable end-to-end latency |
+
+<details>
+<summary>All optional dependency groups</summary>
+
+```bash
+pip install -e ".[llm]"        # vLLM + torch + transformers
+pip install -e ".[calendar]"   # Google Calendar
+pip install -e ".[voice]"      # ASR + TTS + wake word
+pip install -e ".[browser]"    # WebSocket browser bridge
+pip install -e ".[vision]"     # Screenshot + OCR + PDF
+pip install -e ".[system]"     # D-Bus + system tray
+pip install -e ".[ui]"         # PyQt5 overlay UI
+pip install -e ".[security]"   # Cryptography
+pip install -e ".[dev]"        # pytest + dev tools
+pip install -e ".[all]"        # Everything
+```
+
+</details>
+
+---
+
+## Testing
+
+Bantz has a comprehensive test suite:
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run all unit tests
+pytest tests/ -v
+
+# Run specific test categories
+pytest tests/test_json_repair_golden.py -v     # JSON repair golden tests
+pytest tests/test_tiered_*.py -v               # Tiered scoring tests
+pytest tests/test_issue_520_banner.py -v       # Runtime banner tests
+
+# Integration tests (requires running vLLM)
+pytest tests/ -v --run-integration
+
+# Regression tests (requires benchmark results)
+pytest tests/ -v -m regression
+```
+
+### Test Coverage Highlights
+
+| Area | Tests | What's covered |
+|:-----|:------|:---------------|
+| JSON Repair | 58 golden tests | Markdown fencing, truncated output, wrong types/enums, Turkish unicode |
+| Tiered Scoring | Complexity, writing, risk | Turkish query scoring with read/write disambiguation |
+| Orchestrator | Multi-turn, tool execution | Error recovery, context carry, fallback paths |
+| Confirmation Firewall | Risk classification | Destructive operation blocking |
+| Gemini Client | Rate limiting, circuit breaker | Streaming, quota management |
+| Router Schemas | Pydantic validation | Enum repair, type coercion |
+
+---
+
+## Benchmarks
+
+```bash
+# Run performance benchmarks
+python scripts/bench_ttft_monitoring.py --num-tests 30
+
+# Compare 3B-only vs hybrid mode
+python scripts/bench_hybrid_vs_3b_only.py --mode both
+
+# Generate report
+python scripts/generate_benchmark_report.py
+```
+
+### Performance Targets
+
+| Metric | Target | Typical |
+|:-------|:-------|:--------|
+| Router TTFT (3B) | p95 < 300ms | ~40–50ms ✅ |
+| Finalizer TTFT (Gemini) | p95 < 500ms | Varies by network |
+| JSON validity | > 95% | ~99% with repair ✅ |
+| Route accuracy | > 90% | ~95% ✅ |
+| End-to-end latency | < 3000ms | ~500–1500ms ✅ |
+
+---
+
+## Project Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            BANTZ V2 ARCHITECTURE                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                         CONVERSATION LAYER                             │ │
-│  │                                                                        │ │
-│  │   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐            │ │
-│  │   │   ASR       │ ──▶ │    NLU      │ ──▶ │    TTS      │            │ │
-│  │   │  (Whisper)  │     │  (Router)   │     │   (Piper)   │            │ │
-│  │   └─────────────┘     └─────────────┘     └─────────────┘            │ │
-│  │          │                  │                   ▲                     │ │
-│  │          │                  ▼                   │                     │ │
-│  │          │     ┌─────────────────────────────────────────────┐       │ │
-│  │          │     │           Conversation FSM                   │       │ │
-│  │          └────▶│   IDLE ──▶ LISTENING ──▶ THINKING ──▶ SPEAKING      │ │
-│  │                │     ▲                                   │    │       │ │
-│  │                │     └───────────────────────────────────┘    │       │ │
-│  │                └─────────────────────────────────────────────┘       │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                      │                                      │
-│                                      ▼                                      │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                           AGENT LAYER                                  │ │
-│  │                                                                        │ │
-│  │   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐            │ │
-│  │   │   Planner   │ ──▶ │  Executor   │ ──▶ │  Verifier   │            │ │
-│  │   └─────────────┘     └─────────────┘     └─────────────┘            │ │
-│  │                              │                                        │ │
-│  │                              ▼                                        │ │
-│  │   ┌─────────────────────────────────────────────────────────────┐    │ │
-│  │   │                     Tool Runtime                             │    │ │
-│  │   │   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐    │    │ │
-│  │   │   │  retry  │   │ timeout │   │ circuit │   │  queue  │    │    │ │
-│  │   │   │         │   │         │   │ breaker │   │         │    │    │ │
-│  │   │   └─────────┘   └─────────┘   └─────────┘   └─────────┘    │    │ │
-│  │   └─────────────────────────────────────────────────────────────┘    │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                      │                                      │
-│                                      ▼                                      │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                          CORE SERVICES                                 │ │
-│  │                                                                        │ │
-│  │   ┌───────────────┐  ┌───────────────┐  ┌───────────────┐            │ │
-│  │   │   EventBus    │  │  JobManager   │  │InterruptMgr   │            │ │
-│  │   │               │  │               │  │               │            │ │
-│  │   │ • pub/sub     │  │ • state FSM   │  │ • barge-in    │            │ │
-│  │   │ • async       │  │ • priority    │  │ • auto-resume │            │ │
-│  │   │ • filtering   │  │ • parent/child│  │ • interrupt   │            │ │
-│  │   └───────────────┘  └───────────────┘  └───────────────┘            │ │
-│  │                                                                        │ │
-│  │   ┌───────────────┐  ┌───────────────┐  ┌───────────────┐            │ │
-│  │   │    Memory     │  │    Audit      │  │    Timing     │            │ │
-│  │   │               │  │               │  │               │            │ │
-│  │   │ • short-term  │  │ • JSONL logs  │  │ • ACK < 0.2s  │            │ │
-│  │   │ • long-term   │  │ • metrics     │  │ • SRC < 10s   │            │ │
-│  │   │ • context     │  │ • redaction   │  │ • SUM < 30s   │            │ │
-│  │   └───────────────┘  └───────────────┘  └───────────────┘            │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+bantz/
+├── src/bantz/                 # Main package (378 modules)
+│   ├── brain/                 # Brain pipeline: orchestrator, finalization, JSON repair
+│   ├── llm/                   # LLM clients: vLLM, Gemini, tiered scoring
+│   ├── router/                # Intent router: schemas, prompts, handlers
+│   ├── tools/                 # Tool registry: calendar, gmail, web, system
+│   ├── voice/                 # Voice loop: ASR, TTS, wake word, VAD
+│   ├── server.py              # Unix socket daemon (brain default)
+│   └── ...                    # 30+ subsystem modules
+├── tests/                     # 7,500+ tests across 277 test files
+│   ├── fixtures/              # Mock responses, golden traces
+│   └── scenarios/             # Benchmark test cases (50+ scenarios)
+├── scripts/                   # CLI tools, benchmarks, demos
+├── config/                    # Environment templates, model settings
+├── bantz-extension/           # Chromium browser extension
+├── docker/                    # vLLM Docker deployment
+├── docs/                      # Architecture docs, setup guides
+├── pyproject.toml             # Package config (hatchling)
+└── docker-compose.yml         # One-command vLLM deployment
 ```
 
 ---
 
-## Calendar (Google) Smoke Test
+## Documentation
 
-This repo includes a simple smoke test that validates **real OAuth + real event fetch**.
-
-### Setup
-
-- Install deps: `pip install -e '.[calendar]'`
-- Put your OAuth client secret JSON outside the repo (recommended):
-  - Default: `~/.config/bantz/google/client_secret.json`
-  - Or set: `export BANTZ_GOOGLE_CLIENT_SECRET=~/.config/bantz/google/client_secret.json`
-- Optional:
-  - `export BANTZ_GOOGLE_TOKEN_PATH=~/.config/bantz/google/token.json`
-  - `export BANTZ_GOOGLE_CALENDAR_ID=primary`
-
-### Run
-
-```bash
-python3 scripts/smoke_calendar_list_events.py --today --max-results 10 --debug
-```
-
-Create (write) smoke (dry-run):
-
-```bash
-python3 scripts/smoke_calendar_create_event.py --dry-run --debug
-```
-
-Example output:
-
-```
-18:00–19:00 | Meeting …
-20:00–21:00 | …
-(no events)
-```
-
-### Job State Machine
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           JOB STATE MACHINE                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│                              ┌───────────┐                                  │
-│                              │  CREATED  │                                  │
-│                              └─────┬─────┘                                  │
-│                                    │ start()                                │
-│                                    ▼                                        │
-│       ┌────────────────────────────────────────────────────────────┐       │
-│       │                                                            │       │
-│       │    pause()         ┌───────────┐         complete()        │       │
-│       │   ┌───────────────▶│  RUNNING  │◀───────────────┐          │       │
-│       │   │                └─────┬─────┘                │          │       │
-│       │   │                      │                      │          │       │
-│       │   │         ┌────────────┼────────────┐         │          │       │
-│       │   │         │            │            │         │          │       │
-│       │   │         ▼            ▼            ▼         │          │       │
-│       │ ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │       │
-│       │ │   PAUSED    │  │WAITING_USER │  │  VERIFYING  │         │       │
-│       │ └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │       │
-│       │        │                │                │                 │       │
-│       │        │ resume()       │ respond()      │ verify()       │       │
-│       │        │                │                │                 │       │
-│       │        └────────────────┴────────────────┘                 │       │
-│       │                         │                                  │       │
-│       └─────────────────────────┼──────────────────────────────────┘       │
-│                                 │                                           │
-│              ┌──────────────────┼──────────────────┐                       │
-│              │                  │                  │                       │
-│              ▼                  ▼                  ▼                       │
-│        ┌───────────┐      ┌───────────┐      ┌───────────┐                │
-│        │   DONE    │      │  FAILED   │      │ CANCELLED │                │
-│        └───────────┘      └───────────┘      └───────────┘                │
-│                                                                             │
-│  Legend:  ───▶ Allowed transition                                          │
-│           [DONE, FAILED, CANCELLED] = Final states (no transitions out)   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Event Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              EVENT FLOW                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  User: "Bantz, haber özetle"                                               │
-│     │                                                                       │
-│     ▼                                                                       │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  EventBus.emit("voice_input", text)                                 │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│     │                                                                       │
-│     ├──▶ [ACK Event] ──▶ TTS: "Başlıyorum efendim"          (< 0.2s)       │
-│     │                                                                       │
-│     ├──▶ [JOB_CREATED] ──▶ JobManager.create_job("haber özetle")           │
-│     │                                                                       │
-│     ├──▶ [JOB_STARTED] ──▶ JobManager.start_job(job_id)                    │
-│     │                                                                       │
-│     ├──▶ [PROGRESS] ──▶ "Aranıyor..."                                       │
-│     │                                                                       │
-│     ├──▶ [FOUND] ──▶ "3 kaynak bulundu"                     (3-10s)        │
-│     │                                                                       │
-│     ├──▶ [SUMMARIZING] ──▶ "Özetleniyor..."                                │
-│     │                                                                       │
-│     ├──▶ [RESULT] ──▶ "İşte özet: ..."                      (< 30s)        │
-│     │                                                                       │
-│     └──▶ [JOB_COMPLETED] ──▶ JobManager.complete_job(job_id, result)       │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Interrupt (Barge-in) Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           INTERRUPT FLOW                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Scenario: User interrupts while Bantz is summarizing                       │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  Parent Job: "haber özetle" [RUNNING]                               │   │
-│  │     │                                                                │   │
-│  │     │  User: "Dur, bekle"                                           │   │
-│  │     │     │                                                          │   │
-│  │     │     ▼                                                          │   │
-│  │     │  ┌─────────────────────────────────────────────────┐          │   │
-│  │     │  │  InterruptManager.interrupt(parent_id, "dur")   │          │   │
-│  │     │  └─────────────────────────────────────────────────┘          │   │
-│  │     │     │                                                          │   │
-│  │     ▼     ▼                                                          │   │
-│  │  [PAUSED] ◀────── Parent job paused                                 │   │
-│  │     │                                                                │   │
-│  │     │  Child Job: "dur" [CREATED] → [RUNNING]                       │   │
-│  │     │     │                                                          │   │
-│  │     │     ▼                                                          │   │
-│  │     │  TTS: "Durdurdum efendim"                                     │   │
-│  │     │     │                                                          │   │
-│  │     │     ▼                                                          │   │
-│  │     │  Child Job: [DONE]                                            │   │
-│  │     │     │                                                          │   │
-│  │     │     ▼                                                          │   │
-│  │     │  ┌─────────────────────────────────────────────────┐          │   │
-│  │     │  │  Auto-resume: InterruptManager resumes parent   │          │   │
-│  │     │  └─────────────────────────────────────────────────┘          │   │
-│  │     │     │                                                          │   │
-│  │     ▼     ▼                                                          │   │
-│  │  [RUNNING] ◀────── Parent job resumed                               │   │
-│  │                                                                      │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Module Structure
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            MODULE STRUCTURE                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  src/bantz/                                                                 │
-│  │                                                                          │
-│  ├── core/                    # Core Services                               │
-│  │   ├── events.py           # EventBus, Event, EventType                  │
-│  │   ├── job.py              # Job, JobState, TRANSITIONS                  │
-│  │   ├── job_manager.py      # JobManager                                  │
-│  │   ├── interrupt.py        # InterruptManager                            │
-│  │   └── timing.py           # TimingRequirements, metrics                 │
-│  │                                                                          │
-│  ├── router/                  # NLU & Intent Routing                        │
-│  │   ├── nlu.py              # parse_intent, pattern matching              │
-│  │   ├── engine.py           # Router engine                               │
-│  │   ├── types.py            # Intent types                                │
-│  │   └── policy.py           # Permission policy                           │
-│  │                                                                          │
-│  ├── voice/                   # Voice Pipeline                              │
-│  │   ├── asr.py              # Faster-Whisper ASR                          │
-│  │   ├── tts.py              # Piper TTS                                   │
-│  │   ├── wakeword.py         # OpenWakeWord                                │
-│  │   └── loop.py             # Voice loop controller                       │
-│  │                                                                          │
-│  ├── browser/                 # Browser Automation                          │
-│  │   ├── controller.py       # Browser controller                          │
-│  │   ├── skills.py           # Browser skills                              │
-│  │   ├── site_profiles.py    # Site-specific actions                       │
-│  │   └── extension_bridge.py # Firefox extension bridge                    │
-│  │                                                                          │
-│  ├── skills/                  # Skill Modules                               │
-│  │   ├── pc.py               # Desktop skills                              │
-│  │   └── daily.py            # Daily routines                              │
-│  │                                                                          │
-│  ├── llm/                     # LLM Integration                             │
-│  │   ├── ollama_client.py    # Ollama API client                           │
-│  │   └── rewriter.py         # ASR error correction                        │
-│  │                                                                          │
-│  ├── ui/                      # User Interface                              │
-│  │   └── overlay.py          # PyQt5 overlay panel                         │
-│  │                                                                          │
-│  ├── ipc/                     # Inter-Process Communication                 │
-│  │   ├── protocol.py         # IPC protocol                                │
-│  │   └── overlay_server.py   # Overlay IPC server                          │
-│  │                                                                          │
-│  └── logs/                    # Logging                                     │
-│      └── logger.py           # JSONL structured logging                    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+| Document | Description |
+|:---------|:------------|
+| [docs/setup/vllm.md](docs/setup/vllm.md) | vLLM installation and configuration |
+| [docs/setup/google-oauth.md](docs/setup/google-oauth.md) | Google Calendar & Gmail OAuth setup |
+| [docs/setup/boot-jarvis.md](docs/setup/boot-jarvis.md) | Systemd service and boot configuration |
+| [docs/setup/docker-vllm.md](docs/setup/docker-vllm.md) | Docker-based vLLM deployment |
+| [docs/setup/memory.md](docs/setup/memory.md) | Conversation memory configuration |
+| [docs/setup/google-vision.md](docs/setup/google-vision.md) | Vision and OCR setup |
+| [docs/gemini-hybrid-orchestrator.md](docs/gemini-hybrid-orchestrator.md) | Hybrid architecture deep-dive |
+| [docs/confirmation-firewall.md](docs/confirmation-firewall.md) | Security firewall documentation |
+| [docs/voice-pipeline-e2e.md](docs/voice-pipeline-e2e.md) | Voice pipeline end-to-end flow |
+| [docs/jarvis-roadmap-v2.md](docs/jarvis-roadmap-v2.md) | V2 roadmap and future plans |
+| [docs/acceptance-tests.md](docs/acceptance-tests.md) | Acceptance test plan and criteria |
+| [docs/acceptance-tests.md](docs/acceptance-tests.md) | Acceptance test criteria |
+| [docs/secrets-hygiene.md](docs/secrets-hygiene.md) | API key and secrets best practices |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
+| [SECURITY.md](SECURITY.md) | Security policy |
 
 ---
 
-## Installation
+## Contributing
 
-### Prerequisites
-
-```bash
-# System dependencies
-sudo apt install wmctrl xdotool libportaudio2 firefox
-
-# Ollama (for LLM)
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen2.5:3b-instruct
-```
-
-### Install Bantz
+We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a PR.
 
 ```bash
-# Clone repository
+# Development setup
 git clone https://github.com/miclaldogan/bantz.git
 cd bantz
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install with all features
+python -m venv .venv && source .venv/bin/activate
 pip install -e ".[all]"
 
-# Or install specific components
-pip install -e ".[voice]"    # Voice recognition
-pip install -e ".[browser]"  # Browser automation
-pip install -e ".[ui]"       # Overlay UI (PyQt5)
-pip install -e ".[llm]"      # LLM integration
-```
+# Run tests
+pytest tests/ -v
 
-### Firefox Extension
-
-```bash
-# Load extension in Firefox
-# 1. Go to about:debugging
-# 2. Click "This Firefox"
-# 3. Click "Load Temporary Add-on"
-# 4. Select bantz-extension/manifest.json
+# Create a feature branch
+git checkout -b feature/your-feature dev
 ```
 
 ---
 
-## Usage
+## License
 
-### Quick Start
+Proprietary. Copyright © 2024–2026 Mıcıl Aldoğan. All Rights Reserved.
 
-```bash
-# Text-first interactive mode (browser session stays alive)
-bantz
-
-# Stateless one-shot command
-bantz --once "google aç"
-
-# Voice mode (push-to-talk)
-bantz --voice --piper-model /path/to/tr.onnx
-
-# Voice mode (wake word)
-bantz --wake --piper-model /path/to/tr.onnx
-
-# Debug mode
-bantz --debug
-
-# Compatibility aliases
-bantz --ptt --piper-model /path/to/tr.onnx   # == --voice
-bantz --text --once "merhaba"               # == default text behavior
-```
-
-### Voice Commands
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                           VOICE COMMANDS                                   │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                            │
-│  CATEGORY          │ EXAMPLES                                              │
-│  ──────────────────┼─────────────────────────────────────────────────────  │
-│                    │                                                       │
-│  🔍 Web Search     │ "Google'da Python ara"                               │
-│                    │ "YouTube'da müzik ara"                                │
-│                    │ "Haber ara: OpenAI"                                   │
-│                    │                                                       │
-│  🌐 Navigation     │ "Google'ı aç"                                        │
-│                    │ "GitHub'a git"                                        │
-│                    │ "Geri dön", "Yenile"                                  │
-│                    │                                                       │
-│  📄 Page Actions   │ "Sayfayı tara"                                       │
-│                    │ "İçeriği özetle"                                      │
-│                    │ "3. linke tıkla"                                      │
-│                    │                                                       │
-│  💻 Desktop        │ "Terminal aç"                                        │
-│                    │ "btop aç"                                             │
-│                    │ "İndirilenler klasörünü aç"                           │
-│                    │                                                       │
-│  🤖 AI Chat        │ "ChatGPT'ye sor: Python nedir?"                      │
-│                    │ "Bana anlat: Machine learning"                        │
-│                    │                                                       │
-│  ⏸️ Job Control    │ "Bekle", "Dur", "Bir saniye"                         │
-│                    │ "Devam et", "Sürdür"                                  │
-│                    │ "İptal", "Vazgeç"                                     │
-│                    │ "Ne yapıyorsun?", "Durum"                             │
-│                    │                                                       │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
-### NLU Intent Map
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                              NLU INTENT MAP                                │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                            │
-│  Intent              │ Patterns (TR)               │ Action                │
-│  ────────────────────┼─────────────────────────────┼────────────────────  │
-│  web_search          │ "...da ara", "...de ara"    │ Browser search       │
-│  open_site           │ "...aç", "...git"           │ Navigate to site     │
-│  page_scan           │ "sayfayı tara"              │ Extract content      │
-│  browser_back        │ "geri", "geri dön"          │ History back         │
-│  browser_refresh     │ "yenile"                    │ Reload page          │
-│  open_app            │ "...aç" (app)               │ Launch application   │
-│  open_folder         │ "...klasörünü aç"           │ File manager         │
-│  job_pause           │ "bekle", "dur"              │ Pause current job    │
-│  job_resume          │ "devam", "sürdür"           │ Resume paused job    │
-│  job_cancel          │ "iptal", "vazgeç"           │ Cancel job           │
-│  job_status          │ "ne yapıyorsun", "durum"    │ Report status        │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Roadmap
-
-Full v2 roadmap: [docs/jarvis-roadmap-v2.md](docs/jarvis-roadmap-v2.md)
-
-Acceptance tests: [docs/acceptance-tests.md](docs/acceptance-tests.md)
-
-### V2 Milestones
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            V2 ROADMAP                                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Milestone │ Epic                    │ Status      │ Description            │
-│  ──────────┼─────────────────────────┼─────────────┼────────────────────── │
-│  V2-0      │ Product Definition      │ ✅ Done     │ MVP criteria, timing   │
-│  V2-1      │ Agent OS Core           │ ✅ Done     │ EventBus, JobManager   │
-│  V2-2      │ Tool Runtime            │ 📋 Planned  │ Retry, timeout, queue  │
-│  V2-3      │ Cite-first Research     │ 📋 Planned  │ Source finding, citing │
-│  V2-4      │ Memory System           │ 📋 Planned  │ Short/long-term memory │
-│  V2-5      │ Privacy & Security      │ 📋 Planned  │ Permissions, vault     │
-│  V2-6      │ Conversation Engine     │ 📋 Planned  │ Multi-turn, context    │
-│  V2-7      │ Document Pipeline       │ 📋 Planned  │ PDF, docs processing   │
-│  V2-8      │ Agentic Automation      │ 📋 Planned  │ Multi-step workflows   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Timing Requirements
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          TIMING REQUIREMENTS                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Metric                 │ Target      │ Description                         │
-│  ───────────────────────┼─────────────┼───────────────────────────────────  │
-│  ACK_MAX_MS             │ ≤ 200ms     │ Time to acknowledge user input      │
-│  FIRST_SOURCE_MIN_S     │ ≥ 3s        │ Minimum realistic source time       │
-│  FIRST_SOURCE_MAX_S     │ ≤ 10s       │ Maximum source finding time         │
-│  SUMMARY_MAX_S          │ ≤ 30s       │ Maximum summarization time          │
-│  RETRY_DELAYS           │ [1,2,4]s    │ Exponential backoff                 │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Development
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest tests/
-
-# Run specific test file
-pytest tests/test_job.py -v
-
-# Run with coverage
-pytest --cov=bantz tests/
-
-# Current test count: 103+ tests
-```
-
-### Test Coverage
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            TEST COVERAGE                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Test File              │ Tests │ Coverage                                  │
-│  ───────────────────────┼───────┼─────────────────────────────────────────  │
-│  test_job.py            │ 37    │ Job state machine, transitions           │
-│  test_job_manager.py    │ 28    │ JobManager lifecycle, queries            │
-│  test_interrupt.py      │ 18    │ InterruptManager, barge-in               │
-│  test_job_nlu.py        │ 20    │ NLU job control intents                  │
-│  test_product_def.py    │ 24    │ Timing, acceptance tests                 │
-│  test_pc_skills.py      │  -    │ Desktop skills                           │
-│                         │       │                                           │
-│  TOTAL                  │ 103+  │                                           │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Logging
-
-```bash
-# Check logs (JSONL format)
-tail -f bantz.log.jsonl | jq
-
-# Example log entry
-{
-  "timestamp": "2026-01-27T10:30:45.123Z",
-  "level": "INFO",
-  "event": "job_started",
-  "job_id": "abc123",
-  "request": "haber özetle"
-}
-```
-
----
-
-## ⚠️ Known Limitations
-
-- **X11 Only**: Desktop automation requires X11 (Wayland limited support)
-- **Firefox Only**: Browser automation works with Firefox
-- **Linux Only**: Designed for Linux desktop
-- **Alpha Stage**: Expect bugs and breaking changes
-
----
-
-## 🔒 Security
-
-- All processing is **local** (no cloud APIs)
-- Voice data never leaves your machine
-- LLM runs locally via Ollama
-- See [SECURITY.md](SECURITY.md) for vulnerability reporting
-
----
-
-## � Contributing
-
-**Bantz is currently a private/proprietary project**, but we welcome:
-
-- 🐛 **Bug Reports**: [Open a bug report](https://github.com/miclaldogan/bantz/issues/new?template=bug_report.md)
-- 💡 **Feature Suggestions**: [Open a feature planning issue](https://github.com/miclaldogan/bantz/issues/new?template=feature_planning.md)
-- 🔒 **Security Issues**: See [SECURITY.md](SECURITY.md)
-
-For more details, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
----
-
-## �📄 License
-
-**Proprietary - All Rights Reserved**
-
-This software is provided for **viewing and educational purposes only**.
-
-- ✅ View and study the code
-- ❌ Copy, modify, or distribute
-- ❌ Use in your own projects
-- ❌ Commercial use
-
-See [LICENSE](LICENSE) for full terms.
-
----
-
-## Acknowledgments
-
-- [Faster-Whisper](https://github.com/guillaumekln/faster-whisper) - ASR
-- [OpenWakeWord](https://github.com/dscripka/openWakeWord) - Wake word
-- [Piper](https://github.com/rhasspy/piper) - TTS
-- [Ollama](https://ollama.com/) - Local LLM
-
----
-
-<p align="center">
-  <strong>Built with ❤️ by <a href="https://github.com/miclaldogan">@miclaldogan</a></strong>
-</p>
-
-<p align="center">
-  <em>"Emrinize amadeyim, efendim." - Bantz</em>
-</p>
+See [LICENSE](LICENSE) for details.

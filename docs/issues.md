@@ -4,6 +4,36 @@
 
 ---
 
+## ⚡ vLLM Runtime Notice
+
+**Effective Date:** 2026-01-31
+
+Bantz uses **vLLM** for local LLM inference:
+- ✅ OpenAI API compatible (`/v1/chat/completions`)
+- ✅ Prefix caching + batching
+- ✅ Local baseline: 3B vLLM (speed-first) + quality tier via Gemini (cloud)
+
+---
+
+## P0 — Calendar Router & Menu Fallback (2026-02)
+
+Bu bölüm, "Takvim mi sohbet mi?" menüsünün **normal akışta asla görünmemesi** için gereken işleri takip eder.
+
+- P0: Router fallback menü çıkarmasın (parse fail/unknown → smalltalk fallback)
+	- Spec: [docs/issues/2026-02-router-no-menus.md](docs/issues/2026-02-router-no-menus.md)
+	- GitHub issue açmak için:
+		- `gh issue create --title "Router fallback: no user-facing menus" --body-file docs/issues/2026-02-router-no-menus.md`
+
+- P0: Router strict JSON + heuristics (temp=0, max_tokens küçük)
+	- Spec: [docs/issues/2026-02-router-strict-json.md](docs/issues/2026-02-router-strict-json.md)
+	- GitHub issue açmak için:
+		- `gh issue create --title "Router: strict JSON + heuristics" --body-file docs/issues/2026-02-router-strict-json.md`
+
+- P1: Tiered LLM demo (3B router + Gemini quality)
+	- Spec: [docs/issues/2026-02-tiered-gemini-demo.md](docs/issues/2026-02-tiered-gemini-demo.md)
+	- GitHub issue açmak için:
+		- `gh issue create --title "Tiered LLM demo: fast router + quality writing" --body-file docs/issues/2026-02-tiered-gemini-demo.md`
+
 ## Epic V2 — “Jarvis Seviye” Roadmap (Phases 0–8 + UI/Voice)
 
 Bu bölüm, v2 mimarisi için **faz bazlı** epic issue’ları takip etmek içindir. Detaylar roadmap dokümanında.

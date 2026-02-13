@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from bantz.llm.ollama_client import LLMMessage, OllamaClient
+from bantz.llm.base import LLMClientProtocol, LLMMessage, create_client
 
 from .tools import ToolRegistry
 
@@ -39,12 +39,14 @@ class Planner:
 
     def __init__(
         self,
-        llm: Optional[OllamaClient] = None,
+        llm: Optional[LLMClientProtocol] = None,
         *,
         temperature: float = 0.2,
         max_tokens: int = 600,
     ):
-        self._llm = llm or OllamaClient()
+        self._llm = llm or create_client(
+            "vllm",
+        )
         self._temperature = float(temperature)
         self._max_tokens = int(max_tokens)
 

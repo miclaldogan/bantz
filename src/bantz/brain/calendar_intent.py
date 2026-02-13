@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Any, Optional
+
+
+_FIXED_OFFSET_TZ_RE = re.compile(r"^(UTC|GMT)\s*([+-])\s*(\d{1,2})(?::(\d{2}))?$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,40 @@ def iso_from_date_hhmm(*, date_iso: str, hhmm: str, offset: str) -> str:
     return dt.isoformat()
 
 
+def _tzinfo_from_name(tz_name: str):
+    name = str(tz_name or "").strip()
+    if not name:
+        raise ValueError("timezone_name_required")
+
+    m = _FIXED_OFFSET_TZ_RE.match(name)
+    if m:
+        sign = 1 if m.group(2) == "+" else -1
+        hours = int(m.group(3))
+        minutes = int(m.group(4) or 0)
+        if hours > 23 or minutes > 59:
+            raise ValueError("invalid_utc_offset")
+        delta = timedelta(hours=hours, minutes=minutes) * sign
+        # Preserve a readable %Z in confirmations.
+        label = f"{m.group(1).upper()}{m.group(2)}{hours:02d}:{minutes:02d}"
+        return timezone(delta, name=label)
+
+    from zoneinfo import ZoneInfo
+
+    return ZoneInfo(name)
+
+
+def iso_from_date_hhmm_in_timezone(*, date_iso: str, hhmm: str, tz_name: str) -> str:
+    """Build an RFC3339 datetime string for a local wall-clock time in a timezone.
+
+    This is used for multi-timezone event creation (Issue #167).
+    """
+
+    base = datetime.fromisoformat(f"{date_iso}T{hhmm}:00")
+    tzinfo = _tzinfo_from_name(tz_name)
+    dt = base.replace(tzinfo=tzinfo).replace(microsecond=0)
+    return dt.isoformat()
+
+
 def add_minutes(iso_dt: str, minutes: int) -> str:
     dt = datetime.fromisoformat(iso_dt)
     return (dt + timedelta(minutes=int(minutes))).isoformat()
@@ -137,6 +174,24 @@ def add_minutes(iso_dt: str, minutes: int) -> str:
 def add_days_keep_time(iso_dt: str, days: int) -> str:
     dt = datetime.fromisoformat(iso_dt)
     return (dt + timedelta(days=int(days))).isoformat()
+
+
+def parse_hhmm_with_turkish(text: str) -> Optional[str]:
+    """Parse time from text: try numeric HH:MM first, then Turkish words.
+
+    Combines parse_hhmm (numeric) with parse_hhmm_turkish (word-based).
+    Turkish word parser applies PM default for hours 1-6 (Issue #419).
+    """
+    # Numeric first: "14:30", "09.00"
+    result = parse_hhmm(text)
+    if result:
+        return result
+    # Turkish word-based: "beşe", "saat beş", "altıda"
+    try:
+        from bantz.brain.turkish_clock import parse_hhmm_turkish
+        return parse_hhmm_turkish(text)
+    except ImportError:
+        return None
 
 
 def build_intent(user_text: str) -> CalendarIntent:
@@ -150,10 +205,20 @@ def build_intent(user_text: str) -> CalendarIntent:
     t = text.lower()
 
     day_hint = parse_day_hint(text)
-    hhmm = parse_hhmm(text)
+    hhmm = parse_hhmm_with_turkish(text)  # Issue #419: Turkish word fallback
     dur = parse_duration_minutes(text)
     offset = parse_offset_minutes(text)
     ref_idx = parse_hash_ref_index(text)
+
+    tz_name: Optional[str] = None
+    try:
+        from bantz.nlu.slots import extract_timezone
+
+        tz_slot = extract_timezone(text)
+        if tz_slot is not None:
+            tz_name = str(tz_slot.iana_name or "").strip() or None
+    except Exception:
+        tz_name = None
 
     is_cancel = any(k in t for k in ["iptal", "sil", "kaldır", "kaldirin", "kaldırın"])
     # Treat "#2 ... al" as move when there's an explicit event ref.
@@ -226,7 +291,7 @@ def build_intent(user_text: str) -> CalendarIntent:
             missing.append("summary")
         return CalendarIntent(
             type="create_event",
-            params={"day_hint": day_hint, "start_hhmm": hhmm, "duration_minutes": dur, "summary": summary},
+            params={"day_hint": day_hint, "start_hhmm": hhmm, "duration_minutes": dur, "summary": summary, "timezone": tz_name},
             confidence=0.9 if (hhmm and (dur is not None) and summary) else 0.6,
             missing=missing,
             source_text=text,

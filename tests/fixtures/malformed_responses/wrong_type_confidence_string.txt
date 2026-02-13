@@ -1,0 +1,1 @@
+{"route": "calendar", "calendar_intent": "create", "confidence": "yüksek", "tool_plan": "calendar.create_event", "assistant_reply": "Toplantıyı oluşturuyorum.", "slots": {"date": "2025-01-15"}}

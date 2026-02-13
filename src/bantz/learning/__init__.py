@@ -6,7 +6,8 @@ deneyim sunan akıllı öğrenme sistemi.
 """
 
 from bantz.learning.profile import (
-    UserProfile,
+    BehavioralProfile,
+    UserProfile,  # backward-compat alias for BehavioralProfile
     ProfileManager,
     create_profile_manager,
 )
@@ -51,7 +52,8 @@ from bantz.learning.storage import (
 
 __all__ = [
     # Profile
-    "UserProfile",
+    "BehavioralProfile",
+    "UserProfile",  # backward-compat alias
     "ProfileManager",
     "create_profile_manager",
     # Behavioral

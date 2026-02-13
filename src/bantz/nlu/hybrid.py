@@ -68,6 +68,7 @@ class HybridConfig:
     caching_enabled: bool = True
     cache_size: int = 1000
     stats_enabled: bool = True
+    max_contexts: int = 1000  # max session contexts in memory (Issue #652)
     
     # LLM config
     llm_model: str = "qwen2.5:3b-instruct"
@@ -144,6 +145,7 @@ class RegexPatterns:
         # Simple search: "X ara", "X'i ara"
         self.patterns.append((
             re.compile(
+                r"^(?!.*\b(?:takvim|calendar|etkinlik|randevu|meeting|gmail|e-?posta|email|mail|posta|mesaj|ileti)\b)"
                 r"(.+?)[''`]?(?:y[ıi]|[ıiuü])?\s*ara\s*$",
                 re.IGNORECASE,
             ),
@@ -334,13 +336,30 @@ class RegexPatterns:
     def _handle_simple_search(self, match: re.Match, text: str) -> IntentResult:
         """Handle simple search pattern."""
         query = match.group(1).strip()
+        q_lower = query.lower()
+        blocked = (
+            "takvim",
+            "calendar",
+            "etkinlik",
+            "randevu",
+            "meeting",
+            "gmail",
+            "e-posta",
+            "email",
+            "mail",
+            "posta",
+            "mesaj",
+            "ileti",
+        )
+        if any(term in q_lower for term in blocked):
+            return IntentResult.unknown(text, source="regex")
         # Remove common prefixes
         query = re.sub(r"^(?:bana\s+|google\s+)", "", query)
         return IntentResult.from_regex(
             "browser_search",
             {"query": query},
             text,
-            confidence=0.85,
+            confidence=0.75,
         )
     
     def _handle_app_open(self, match: re.Match, text: str) -> IntentResult:
@@ -707,16 +726,30 @@ class HybridNLU:
     
     def _get_context(self, session_id: str) -> NLUContext:
         """Get or create context for session.
-        
+
+        Enforces ``config.max_contexts`` — when the limit is reached
+        the oldest session (by timestamp) is evicted so memory stays
+        bounded in long-running server processes (Issue #652).
+
         Args:
             session_id: Session identifier
-        
+
         Returns:
             NLUContext for session
         """
         if session_id not in self._context:
+            # Evict oldest sessions when at capacity
+            while len(self._context) >= self.config.max_contexts:
+                self._evict_oldest_context()
             self._context[session_id] = NLUContext(session_id=session_id)
         return self._context[session_id]
+
+    def _evict_oldest_context(self) -> None:
+        """Evict the session context with the oldest timestamp."""
+        if not self._context:
+            return
+        oldest_sid = min(self._context, key=lambda s: self._context[s].timestamp)
+        del self._context[oldest_sid]
     
     # ========================================================================
     # Public Methods
@@ -788,35 +821,40 @@ class HybridNLU:
 
 def quick_parse(text: str) -> IntentResult:
     """Quick parse with default settings.
-    
+
+    Uses the canonical singleton from ``bridge.get_nlu()`` so that
+    session context is shared across all call-sites (Issue #651).
+
     Args:
         text: Text to parse
-    
+
     Returns:
         IntentResult
     """
-    nlu = HybridNLU()
-    return nlu.parse(text)
+    return get_nlu().parse(text)
 
 
 # ============================================================================
-# Singleton Instance
+# Singleton Instance — delegates to bridge.py (Issue #651)
 # ============================================================================
-
-
-_default_nlu: Optional[HybridNLU] = None
 
 
 def get_nlu() -> HybridNLU:
-    """Get the default HybridNLU instance.
-    
+    """Get the canonical HybridNLU singleton.
+
+    Delegates to ``bantz.nlu.bridge.get_nlu()`` so that *every*
+    import path — ``from bantz.nlu.hybrid import get_nlu`` **or**
+    ``from bantz.nlu.bridge import get_nlu`` — returns the *same*
+    ``HybridNLU`` instance.  This eliminates the dual-singleton
+    problem that caused silent session-context loss.
+
     Returns:
         Shared HybridNLU instance
     """
-    global _default_nlu
-    if _default_nlu is None:
-        _default_nlu = HybridNLU()
-    return _default_nlu
+    # Late import to avoid circular dependency
+    from bantz.nlu.bridge import get_nlu as _bridge_get_nlu  # noqa: F811
+
+    return _bridge_get_nlu()
 
 
 def parse(text: str, session_id: Optional[str] = None) -> IntentResult:

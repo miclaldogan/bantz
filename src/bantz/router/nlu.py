@@ -432,7 +432,8 @@ def parse_intent(text: str) -> Parsed:
         return Parsed(intent="queue_status", slots={})
 
     # Dev mode transitions
-    if re.search(r"\b(dev\s+mod(a|u)\s+ge(ç|c)|dev\s+mode\s+on|dev\s+mode\s+aktif|dev\s+mod\s+a(ç|c))\b", t):
+    # Issue #1107: Accept Turkish dative suffix -una/-üne → "dev moduna geç"
+    if re.search(r"\b(dev\s+mod(un?a|u)\s+ge(ç|c)|dev\s+mode\s+on|dev\s+mode\s+aktif|dev\s+mod\s+a(ç|c))\b", t):
         return Parsed(intent="enter_dev_mode", slots={})
     if re.search(
         r"\b(normal\s+mod(a|u)\s+d(ö|o)n|dev\s+moddan\s+c(ı|i)k|dev\s+moddan\s+ç(ı|i)k|dev\s+mode\s+off)\b",
@@ -653,7 +654,9 @@ def parse_intent(text: str) -> Parsed:
             return Parsed(intent="browser_search", slots={"query": query})
 
     # browser_open: "instagram'ı aç", "twitter aç", "github.com aç", "wikipedia aç", "duck aç"
-    m = re.search(r"\b(instagram|twitter|facebook|youtube|github|linkedin|reddit|twitch|spotify|netflix|whatsapp|telegram|discord|wikipedia|vikipedi|amazon|ebay|stackoverflow|stack\s*overflow|duck|duckduckgo|chatgpt|claude|gemini|perplexity)\b['\s]*(ı|i|'?y[ıi])?\s*(aç|başlat)?", t)
+    # Issue #1058: action verb (aç|başlat) is now REQUIRED — just mentioning
+    # a site name (e.g. "instagram güzel") must NOT trigger browser_open.
+    m = re.search(r"\b(instagram|twitter|facebook|youtube|github|linkedin|reddit|twitch|spotify|netflix|whatsapp|telegram|discord|wikipedia|vikipedi|amazon|ebay|stackoverflow|stack\s*overflow|duck|duckduckgo|chatgpt|claude|gemini|perplexity)\b['\s]*(ı|i|'?y[ıi])?\s*(aç|başlat)", t)
     if m:
         site = m.group(1).lower().replace(" ", "")
         urls = {
@@ -832,9 +835,12 @@ def parse_intent(text: str) -> Parsed:
         return Parsed(intent="page_question", slots={"question": question})
     
     # Direct questions: "CEO kim?", "Fiyatı ne?", "Kaç para?", "Ne zaman?"
+    # Guard: only match if the question references page/content context
+    # (bu/şu/sayfa/site/makale/içerik) to avoid hijacking calendar/gmail queries.
     if re.search(r"\b(kim|ne|neden|nas[ıi]l|nerede|ka[çc])\b.*\?$", t):
-        question = text.strip()
-        return Parsed(intent="page_question", slots={"question": question})
+        if re.search(r"\b(bu|şu|sayfa|site|makale|i[çc]erik|yaz[ıi]|paragraf)\b", t):
+            question = text.strip()
+            return Parsed(intent="page_question", slots={"question": question})
     
     # Detailed summarize: "detaylı anlat", "tam anlat", "daha detaylı özetle"
     if re.search(r"\b(tam|daha\s+)?(detayl[ıi]|uzun)\s*(anlat|[öo]zetle|a[çc][ıi]kla)\b", t):

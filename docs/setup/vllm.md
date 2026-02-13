@@ -1,0 +1,238 @@
+# vLLM Setup (Bantz)
+
+Bu repo **yalnızca vLLM** (OpenAI-compatible API) ile çalışır.
+
+## Hızlı Başlangıç (Önerilen)
+
+1) Python bağımlılıkları:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -e ".[llm]"
+```
+
+Not: Şu an bazı sistemlerde CUDA uyumluluğu nedeniyle **global Python** ile çalıştırmak daha stabil olabilir.
+Bu durumda `.venv` zorunlu değil; önemli olan `python3 -c 'import vllm'` çalışması.
+
+2) vLLM sunucusunu başlat:
+
+- 3B (hız / router / tool seçim):
+
+```bash
+./scripts/vllm/start_3b.sh
+```
+
+Not: 6GB VRAM cihazlarda **3B tek başına** en stabil moddur.
+"Quality" (uzun yazı / doküman / plan) için aşağıdaki **Gemini** entegrasyonunu öneriyoruz.
+
+3) Sunucu kontrol:
+
+```bash
+curl -s http://127.0.0.1:8001/v1/models
+```
+
+## Varsayılan Portlar
+
+- 8001: 3B (hız)
+
+Not: Kalite gereken işler için ikinci bir lokal model yerine Gemini (cloud) önerilir.
+
+## Hybrid Quality (Önerilen): 3B local + Gemini Flash
+
+Amaç:
+- Router / tool seçimi / hızlı cevaplar **3B (local)**
+- Mail / uzun yazı / PDF yönerge / 3+ adım plan gibi işler **Gemini (cloud)**
+
+Cloud çağrıları **varsayılan olarak kapalıdır**. Açmak için:
+
+```bash
+export BANTZ_CLOUD_MODE=cloud
+export QUALITY_PROVIDER=gemini
+export GEMINI_API_KEY="PASTE_YOUR_KEY_HERE"   # buraya yapıştır
+export QUALITY_MODEL="gemini-flash-latest"   # öneri (veya: gemini-2.0-flash)
+```
+
+Hızlı doğrulama (4 senaryo + metrics):
+
+```bash
+./scripts/validate_hybrid_quality.sh
+```
+
+Tek seferlik test için yukarıdaki `export` yeterli.
+Daemon/systemd ile çalıştırıyorsan kalıcı yapmak için `systemctl --user edit bantz.service` içine şu satırları ekle (commit'leme):
+
+```ini
+Environment=BANTZ_CLOUD_MODE=cloud
+Environment=QUALITY_PROVIDER=gemini
+Environment=GEMINI_API_KEY=PASTE_YOUR_KEY_HERE
+Environment=QUALITY_MODEL=gemini-flash-latest
+```
+
+Gizlilik/minimize:
+
+```bash
+export BANTZ_CLOUD_REDACT=1        # (varsayılan) email/token vb maskele
+export BANTZ_CLOUD_MAX_CHARS=12000 # outbound text limit
+export BANTZ_LOCAL_ONLY=1          # cloud'u tamamen kapat (override)
+```
+
+Kalite endpoint'i yoksa / cloud kapalıysa Bantz otomatik **fast** tier'a düşer.
+
+## Yönetim Komutları
+
+```bash
+./scripts/vllm_status.sh
+./scripts/vllm/test.sh 8001
+./scripts/vllm/stop.sh
+```
+
+## Watchdog'u servisleştir (systemd --user) ✅
+
+Amaç: terminal kapansa bile watchdog ayakta kalsın; vLLM düşerse otomatik ayağa kalksın.
+
+Kurulum (önerilen):
+
+```bash
+chmod +x ./scripts/systemd/install_watchdog_user_service.sh
+./scripts/systemd/install_watchdog_user_service.sh
+```
+
+Bu işlem şunu yapar:
+- `~/.config/systemd/user/bantz-vllm-watchdog.service` dosyasını üretir
+- `systemctl --user enable --now ...` ile autostart + immediate start yapar
+
+Durum / log:
+
+```bash
+systemctl --user status bantz-vllm-watchdog.service
+journalctl --user -u bantz-vllm-watchdog.service -f
+```
+
+Done testi (Issue #181):
+
+```bash
+pkill -f "vllm.entrypoints.openai.api_server.*8001" || true
+sleep 60
+curl -s http://127.0.0.1:8001/v1/models
+```
+
+Notlar:
+- Varsayılan unit `--port 8001` ile 3B server'ı hedefler.
+- Repo path'in `~/Desktop/Bantz` değilse installer otomatik doğru `WorkingDirectory` yazar.
+
+## Sorun Giderme
+
+- Port doluysa: `ss -ltnp | grep 8001` ve `pkill -f "vllm.entrypoints.openai.api_server"`
+- CUDA/driver uyumsuzluğu: `nvidia-smi` hata veriyorsa reboot gerekebilir.
+
+## Bantz tarafı (env)
+
+Bantz, vLLM endpoint’ine şu env’lerle bağlanır:
+
+```bash
+export BANTZ_VLLM_URL="http://127.0.0.1:8001"
+export BANTZ_VLLM_MODEL="Qwen/Qwen2.5-3B-Instruct-AWQ"
+```
+
+İpucu: model id’yi makineden makineye farklı tutuyorsan `auto` kullanabilirsin:
+
+```bash
+export BANTZ_VLLM_MODEL=auto
+export BANTZ_VLLM_QUALITY_MODEL=auto
+```
+
+## Tiered routing (3B → Gemini eskalasyon)
+
+Varsayılan davranış: Tiering **açık** gelir. Basit istekler 3B (fast) ile gider,
+karmaşık/yazım gerektiren istekler quality tier'a (Gemini) otomatik escalate olur.
+
+Kapatmak istersen:
+
+```bash
+export BANTZ_TIER_MODE=0       # Tiering'i kapat, her şey fast tier
+# veya legacy alias:
+export BANTZ_TIERED_MODE=0
+```
+
+İsteğe göre zorlamak için:
+
+```bash
+export BANTZ_LLM_TIER=fast     # her zaman 3B
+export BANTZ_LLM_TIER=quality  # her zaman quality provider (örn: Gemini)
+export BANTZ_LLM_TIER=auto     # (varsayılan) heuristic
+```
+
+Heuristic eşikleri:
+
+```bash
+export BANTZ_TIERED_MIN_COMPLEXITY=4
+export BANTZ_TIERED_MIN_WRITING=4
+```
+
+Kaliteye zorlayan keyword listesi (opsiyonel):
+
+```bash
+export BANTZ_TIERED_FORCE_QUALITY_KEYWORDS="mail,taslak,roadmap,detaylı"
+```
+
+## Auto-recovery (Issue #181): vLLM watchdog
+
+vLLM bazen OOM/driver sorunlarıyla düşebilir veya `/v1/models` cevap vermez hale gelebilir.
+Bu durumda otomatik restart için watchdog kullan:
+
+```bash
+python3 scripts/vllm/watchdog.py --port 8001
+```
+
+Önerilen ayarlar (3 ardışık hata → restart, 2dk cooldown):
+
+```bash
+python3 scripts/vllm/watchdog.py --port 8001 --interval 10 --timeout 3 --fail-threshold 3 --cooldown 120
+```
+
+Watchdog restart öncesi/sonrası debug çıktıları şu klasöre yazılır:
+`artifacts/logs/vllm/watchdog/`
+
+## QoS (router/voice vs quality)
+
+Amaç: fast path’in "takılmaması" (kısa timeout + kısa cevap), kalite işlerinde daha geniş limit.
+
+Env ile ayarlayabilirsin:
+
+```bash
+# Genel varsayılanlar
+export BANTZ_QOS_FAST_TIMEOUT_S=20
+export BANTZ_QOS_FAST_MAX_TOKENS=256
+export BANTZ_QOS_QUALITY_TIMEOUT_S=90
+export BANTZ_QOS_QUALITY_MAX_TOKENS=512
+
+# Profil bazlı override (örn: voice)
+export BANTZ_QOS_VOICE_FAST_TIMEOUT_S=15
+export BANTZ_QOS_VOICE_FAST_MAX_TOKENS=192
+export BANTZ_QOS_VOICE_QUALITY_TIMEOUT_S=60
+export BANTZ_QOS_VOICE_QUALITY_MAX_TOKENS=384
+```
+
+Şu an QoS profili voice fallback ve validation script’te aktif.
+
+## Tuning loop: benchmark profilleri
+
+Issue #180 benchmark’ını iki profille (router-like + generation-like) koşturmak için:
+
+```bash
+python3 scripts/tune_vllm.py
+```
+
+Baseline kaydet/yenile:
+
+```bash
+python3 scripts/tune_vllm.py --baseline-dir artifacts/results/baselines --write-baseline
+```
+
+Regression gate (örn: %10’dan fazla düşerse exit 2):
+
+```bash
+python3 scripts/tune_vllm.py --baseline-dir artifacts/results/baselines --fail-regression-pct 10
+```

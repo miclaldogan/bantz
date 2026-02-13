@@ -5,7 +5,12 @@ description = "Bantz - Local Jarvis (text-first)"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Bantz" }]
-dependencies = []
+dependencies = [
+	"requests>=2.31.0",
+	"openai>=1.40.0",
+	"pydantic>=2.0.0",
+	"aiohttp>=3.9.0",
+]
 
 [project.optional-dependencies]
 browser = [
@@ -21,6 +26,22 @@ input = [
 ]
 llm = [
 	"requests>=2.31.0",
+	"openai>=1.40.0",
+	"vllm>=0.6.0",
+	"torch>=2.4.0",
+	"transformers>=4.45.0",
+	"autoawq>=0.2.6",
+]
+
+calendar = [
+	"google-auth>=2.0.0",
+	"google-auth-oauthlib>=1.0.0",
+	"google-api-python-client>=2.0.0",
+]
+google = [
+	"google-auth>=2.0.0",
+	"google-auth-oauthlib>=1.0.0",
+	"google-api-python-client>=2.0.0",
 ]
 
 calendar = [
@@ -36,6 +57,7 @@ voice = [
 	"pynput>=1.7.6",
 	"rapidfuzz>=3.6.0",
 	"openwakeword>=0.6.0",
+	"vosk>=0.3.45",
 ]
 system = [
 	"dbus-next>=0.2.3",
@@ -54,6 +76,7 @@ vision = [
 	"mss>=9.0.0",
 	"PyMuPDF>=1.24.0",
 	"pytesseract>=0.3.10",
+	"google-auth>=2.0.0",
 ]
 security = [
 	"cryptography>=42.0.0",
@@ -61,16 +84,48 @@ security = [
 
 # Convenience meta extra for local dev installs.
 # Keep in sync with README.
+# NOTE: Avoid self-referential requirements like "bantz[llm]" here; pip treats
+# those poorly. Instead, we inline the union of all extras.
 all = [
-	"bantz[browser]",
-	"bantz[dev]",
-	"bantz[input]",
-	"bantz[llm]",
-	"bantz[calendar]",
-	"bantz[voice]",
-	"bantz[system]",
-	"bantz[vision]",
-	"bantz[security]",
+	# browser
+	"websockets>=11.0.0",
+	# dev
+	"pytest>=7.4.0",
+	"pytest-asyncio>=0.23.0",
+	"tomli>=2.0.1",
+	# input
+	"pyperclip>=1.8.2",
+	# llm
+	"requests>=2.31.0",
+	"openai>=1.40.0",
+	"vllm>=0.6.0",
+	"torch>=2.4.0",
+	"transformers>=4.45.0",
+	"autoawq>=0.2.6",
+	# calendar
+	"google-auth>=2.0.0",
+	"google-auth-oauthlib>=1.0.0",
+	"google-api-python-client>=2.0.0",
+	# voice
+	"numpy>=1.24.0",
+	"sounddevice>=0.4.6",
+	"faster-whisper>=1.0.0",
+	"pynput>=1.7.6",
+	"rapidfuzz>=3.6.0",
+	"openwakeword>=0.6.0",
+	"vosk>=0.3.45",
+	# system/ui/vision/security
+	"dbus-next>=0.2.3",
+	"PyQt5>=5.15.0",
+	"pystray>=0.19.0",
+	"Pillow>=10.0.0",
+	"mss>=9.0.0",
+	"PyMuPDF>=1.24.0",
+	"pytesseract>=0.3.10",
+	"google-auth>=2.0.0",
+	"cryptography>=42.0.0",
+	# async http
+	"aiohttp>=3.9.0",
 ]
 
 [project.scripts]

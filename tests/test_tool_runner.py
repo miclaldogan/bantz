@@ -386,7 +386,8 @@ class TestToolRunnerDomainExtraction:
         
         await runner.run(tool, {"url": "https://example.com/path"}, context)
         
-        assert "example.com" in circuit_breaker.domains
+        # Use exact match to avoid false positives (Security Alerts #16, #35)
+        assert any(domain == "example.com" for domain in circuit_breaker.domains)
     
     @pytest.mark.asyncio
     async def test_domain_fallback_to_tool_name(self, event_bus, context):

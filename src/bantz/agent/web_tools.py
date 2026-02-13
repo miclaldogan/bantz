@@ -67,8 +67,8 @@ class WebSearchTool(ToolBase):
                     source="web_search_tool"
                 )
             
-            # TODO: Implement actual Playwright search
-            # For now, return mock results for testing
+            # Issue #1015: Playwright search not yet implemented — will raise
+            # NotImplementedError and fall through to the except block.
             results = await self._search_with_playwright(query, max_results)
             
             duration_ms = (time.time() - start_time) * 1000
@@ -106,20 +106,12 @@ class WebSearchTool(ToolBase):
         
         Returns list of results with title, url, snippet.
         """
-        # TODO: Implement actual Playwright search
-        # This is a placeholder for testing
-        return [
-            {
-                "title": f"Result 1 for {query}",
-                "url": f"https://example.com/1?q={query}",
-                "snippet": f"This is a result about {query}..."
-            },
-            {
-                "title": f"Result 2 for {query}",
-                "url": f"https://example.com/2?q={query}",
-                "snippet": f"Another result about {query}..."
-            }
-        ][:max_results]
+        # Issue #1015: Explicit stub — raise so callers see the tool is unimplemented
+        # rather than silently receiving fake results.
+        raise NotImplementedError(
+            "WebSearchTool (Playwright) is not implemented yet. "
+            "Use web.search (bantz.tools.web_search) for DuckDuckGo scraping."
+        )
 
 
 class WebSearchRequestsTool(ToolBase):
@@ -157,8 +149,8 @@ class WebSearchRequestsTool(ToolBase):
         max_results = input.get("max_results", 5)
         
         try:
-            # TODO: Implement actual requests-based search
-            # For now, return mock results for testing
+            # Issue #1015: Requests search not yet implemented — will raise
+            # NotImplementedError and fall through to the except block.
             results = await self._search_with_requests(query, max_results)
             
             duration_ms = (time.time() - start_time) * 1000
@@ -184,15 +176,11 @@ class WebSearchRequestsTool(ToolBase):
         
         Returns list of results with title, url, snippet.
         """
-        # TODO: Implement actual requests-based search
-        # This is a placeholder for testing
-        return [
-            {
-                "title": f"Fallback Result for {query}",
-                "url": f"https://fallback.example.com?q={query}",
-                "snippet": f"Fallback result about {query}..."
-            }
-        ][:max_results]
+        # Issue #1015: Explicit stub — raise so callers see the tool is unimplemented
+        raise NotImplementedError(
+            "WebSearchRequestsTool is not implemented yet. "
+            "Use web.search (bantz.tools.web_search) for DuckDuckGo scraping."
+        )
 
 
 class PageReaderTool(ToolBase):
@@ -242,7 +230,8 @@ class PageReaderTool(ToolBase):
                     source="page_reader_tool"
                 )
             
-            # TODO: Implement actual page reading
+            # Issue #1015: Page reader not yet implemented — will raise
+            # NotImplementedError and fall through to the except block.
             content = await self._read_page(url, extract_mode)
             
             duration_ms = (time.time() - start_time) * 1000
@@ -271,9 +260,11 @@ class PageReaderTool(ToolBase):
         
         Returns extracted content as string.
         """
-        # TODO: Implement actual page reading with Playwright or requests
-        # This is a placeholder for testing
-        return f"Content from {url} (mode: {extract_mode})"
+        # Issue #1015: Explicit stub — raise so callers see the tool is unimplemented
+        raise NotImplementedError(
+            "PageReaderTool is not implemented yet. "
+            "Use web.open (bantz.tools.web_open) for URL content extraction."
+        )
 
 
 class FetchUrlTool(ToolBase):
@@ -310,7 +301,8 @@ class FetchUrlTool(ToolBase):
         headers = input.get("headers", {})
         
         try:
-            # TODO: Implement actual URL fetching
+            # Issue #1015: URL fetcher not yet implemented — will raise
+            # NotImplementedError and fall through to the except block.
             content = await self._fetch(url, headers)
             
             duration_ms = (time.time() - start_time) * 1000
@@ -334,8 +326,11 @@ class FetchUrlTool(ToolBase):
     
     async def _fetch(self, url: str, headers: dict) -> str:
         """Fetch URL content."""
-        # TODO: Implement actual fetching
-        return f"Fetched content from {url}"
+        # Issue #1015: Explicit stub — raise so callers see the tool is unimplemented
+        raise NotImplementedError(
+            "FetchUrlTool is not implemented yet. "
+            "Use web.open (bantz.tools.web_open) for URL content extraction."
+        )
 
 
 # Tool instances for easy access

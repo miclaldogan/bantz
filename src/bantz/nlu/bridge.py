@@ -20,32 +20,46 @@ Usage:
 
 from __future__ import annotations
 
+import os
+import threading
 from typing import Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 
-from bantz.router.nlu import Parsed, parse_intent as legacy_parse_intent
+from bantz.router.nlu import Parsed
 from bantz.nlu.types import IntentResult, NLUContext
 from bantz.nlu.hybrid import HybridNLU, HybridConfig
 
 
 # ============================================================================
-# Global NLU Instance
+# Global NLU Instance  (canonical singleton — Issue #651)
 # ============================================================================
 
 _nlu_instance: Optional[HybridNLU] = None
-_use_hybrid: bool = False  # Feature flag
+_nlu_lock = threading.Lock()
+
+# Hybrid NLU varsayılan AÇIK.  Env-var ile kapatılabilir:
+#   BANTZ_HYBRID_NLU=0  → legacy regex-only parse_intent
+_use_hybrid: bool = os.getenv("BANTZ_HYBRID_NLU", "1") not in ("0", "false", "False", "no")
 
 
 def get_nlu() -> HybridNLU:
-    """Get the global NLU instance."""
+    """Get the canonical global NLU instance.
+
+    This is the **single** HybridNLU singleton for the entire process.
+    ``hybrid.py:get_nlu()`` delegates here so that every call-site
+    — regardless of which module it imports from — shares the same
+    instance and therefore the same session context.
+    """
     global _nlu_instance
     if _nlu_instance is None:
-        config = HybridConfig(
-            llm_enabled=True,
-            clarification_enabled=True,
-            slot_extraction_enabled=True,
-        )
-        _nlu_instance = HybridNLU(config=config)
+        with _nlu_lock:
+            if _nlu_instance is None:
+                config = HybridConfig(
+                    llm_enabled=True,
+                    clarification_enabled=True,
+                    slot_extraction_enabled=True,
+                )
+                _nlu_instance = HybridNLU(config=config)
     return _nlu_instance
 
 
@@ -55,8 +69,18 @@ def set_nlu(nlu: HybridNLU):
     _nlu_instance = nlu
 
 
+def reset_nlu_instance():
+    """Reset the global NLU singleton (for testing only)."""
+    global _nlu_instance
+    _nlu_instance = None
+
+
 def enable_hybrid_nlu(enabled: bool = True):
-    """Enable or disable hybrid NLU."""
+    """Enable or disable hybrid NLU at runtime.
+
+    The default is read once from ``BANTZ_HYBRID_NLU`` env-var (default
+    ``"1"`` = enabled).  This function allows runtime overrides.
+    """
     global _use_hybrid
     _use_hybrid = enabled
 
@@ -101,8 +125,9 @@ def parse_intent_hybrid(
         
     except Exception as e:
         if fallback_to_legacy:
-            # Fall back to legacy parser
-            return legacy_parse_intent(text)
+            # Fall back to regex parser
+            from bantz.router.nlu import parse_intent as _regex_parse
+            return _regex_parse(text)
         raise
 
 
@@ -182,7 +207,8 @@ def parse_intent_adaptive(text: str) -> Parsed:
     if _use_hybrid:
         return parse_intent_hybrid(text, fallback_to_legacy=True)
     else:
-        return legacy_parse_intent(text)
+        from bantz.router.nlu import parse_intent as _regex_parse
+        return _regex_parse(text)
 
 
 # ============================================================================
@@ -327,22 +353,23 @@ def compare_parsers(text: str) -> Dict[str, Any]:
     Returns:
         Comparison results
     """
-    # Legacy result
-    legacy = legacy_parse_intent(text)
+    # Regex result
+    from bantz.router.nlu import parse_intent as _regex_parse
+    regex_result = _regex_parse(text)
     
     # Hybrid result
     nlu = get_nlu()
     hybrid = nlu.parse(text)
     
     # Compare
-    intent_match = legacy.intent == hybrid.intent
-    slots_match = dict(legacy.slots) == dict(hybrid.slots)
+    intent_match = regex_result.intent == hybrid.intent
+    slots_match = dict(regex_result.slots) == dict(hybrid.slots)
     
     return {
         "text": text,
-        "legacy": {
-            "intent": legacy.intent,
-            "slots": dict(legacy.slots),
+        "regex": {
+            "intent": regex_result.intent,
+            "slots": dict(regex_result.slots),
         },
         "hybrid": {
             "intent": hybrid.intent,

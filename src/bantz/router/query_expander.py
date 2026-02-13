@@ -4,11 +4,10 @@ Sorguları bağlama göre genişletir ve ilgili sorular önerir.
 """
 from __future__ import annotations
 
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
+from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
-if TYPE_CHECKING:
-    from bantz.llm.ollama_client import OllamaClient
+from bantz.llm.base import LLMClientProtocol, LLMMessage
 
 
 @dataclass
@@ -75,11 +74,11 @@ Sorgu: {query}
 
 Optimize edilmiş sorgu (tek satır):"""
 
-    def __init__(self, llm_client: Optional["OllamaClient"] = None):
+    def __init__(self, llm_client: Optional[LLMClientProtocol] = None):
         """Initialize expander.
         
         Args:
-            llm_client: OllamaClient instance (optional)
+            llm_client: LLM client instance (optional)
         """
         self._llm = llm_client
     
@@ -213,8 +212,6 @@ Optimize edilmiş sorgu (tek satır):"""
         )
         
         try:
-            from bantz.llm.ollama_client import LLMMessage
-            
             response = self._llm.chat(
                 [LLMMessage(role="user", content=prompt)],
                 max_tokens=50,
@@ -267,8 +264,6 @@ Optimize edilmiş sorgu (tek satır):"""
         prompt = self.SUGGEST_PROMPT.format(query=query)
         
         try:
-            from bantz.llm.ollama_client import LLMMessage
-            
             response = self._llm.chat(
                 [LLMMessage(role="user", content=prompt)],
                 max_tokens=100,
@@ -313,8 +308,6 @@ Optimize edilmiş sorgu (tek satır):"""
         prompt = self.OPTIMIZE_PROMPT.format(query=query)
         
         try:
-            from bantz.llm.ollama_client import LLMMessage
-            
             response = self._llm.chat(
                 [LLMMessage(role="user", content=prompt)],
                 max_tokens=50,
@@ -383,3 +376,4 @@ class MockQueryExpander:
     
     async def optimize(self, query: str) -> str:
         return self.optimize_simple(query)
+

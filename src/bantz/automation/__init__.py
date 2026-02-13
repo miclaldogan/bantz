@@ -47,6 +47,18 @@ from bantz.automation.orchestrator import (
     create_pev_orchestrator,
 )
 
+from bantz.automation.overnight import (
+    OvernightRunner,
+    OvernightState,
+    OvernightTask,
+    OvernightFailSafe,
+    ResourceMonitor,
+    is_overnight_request,
+    parse_overnight_tasks,
+    resume_overnight,
+    generate_morning_report,
+)
+
 __all__ = [
     # Plan
     "StepStatus",
@@ -76,4 +88,14 @@ __all__ = [
     # Orchestrator
     "PEVOrchestrator",
     "create_pev_orchestrator",
+    # Overnight (Issue #836)
+    "OvernightRunner",
+    "OvernightState",
+    "OvernightTask",
+    "OvernightFailSafe",
+    "ResourceMonitor",
+    "is_overnight_request",
+    "parse_overnight_tasks",
+    "resume_overnight",
+    "generate_morning_report",
 ]

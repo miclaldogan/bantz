@@ -18,7 +18,9 @@ from datetime import datetime
 from enum import Enum
 import logging
 import os
+import shlex
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -144,6 +146,20 @@ class Sandbox:
         # Run a command
         result = sandbox.execute_command(["python", "script.py"])
     """
+
+    # Issue #696: Environment variables that can bypass sandbox isolation.
+    # These enable library injection, module hijack, or PATH manipulation.
+    BLOCKED_ENV_VARS: Set[str] = {
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "NODE_OPTIONS",
+        "PERL5LIB",
+        "RUBYLIB",
+    }
     
     def __init__(self, config: Optional[SandboxConfig] = None):
         """
@@ -156,6 +172,21 @@ class Sandbox:
         self._temp_dir: Optional[Path] = None
         self._active = False
         self._lock = threading.Lock()
+
+    @classmethod
+    def _sanitize_env(cls, env: Dict[str, str]) -> Dict[str, str]:
+        """Return a copy of *env* with dangerous variables stripped.
+
+        Issue #696: Variables like LD_PRELOAD, PYTHONPATH etc. allow
+        sandbox escape via library/module injection.
+        """
+        clean: Dict[str, str] = {}
+        for key, value in env.items():
+            if key.upper() in cls.BLOCKED_ENV_VARS:
+                logger.warning("[SANDBOX] Blocked dangerous env var: %s", key)
+                continue
+            clean[key] = value
+        return clean
     
     @property
     def temp_dir(self) -> Path:
@@ -245,19 +276,25 @@ class Sandbox:
         Returns:
             SandboxResult
         """
+        # Issue #691: NEVER use shell=True — tokenize string commands
+        # with shlex.split to prevent command injection attacks.
         if isinstance(command, str):
-            shell = True
-        else:
-            shell = False
+            try:
+                command = shlex.split(command)
+            except ValueError as e:
+                return SandboxResult(
+                    success=False,
+                    error=f"Invalid command syntax: {e}",
+                )
         
         start_time = time.time()
         result = SandboxResult(success=False)
         
-        # Prepare environment
-        run_env = os.environ.copy()
-        run_env.update(self.config.environment)
+        # Prepare environment — filter dangerous variables
+        run_env = self._sanitize_env(os.environ)
+        run_env.update(self._sanitize_env(self.config.environment))
         if env:
-            run_env.update(env)
+            run_env.update(self._sanitize_env(env))
         
         # Working directory
         work_dir = cwd or self.temp_dir
@@ -268,7 +305,7 @@ class Sandbox:
             
             process = subprocess.Popen(
                 command,
-                shell=shell,
+                shell=False,
                 stdin=subprocess.PIPE if stdin else None,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -328,7 +365,7 @@ class Sandbox:
         
         try:
             result = self.execute_command(
-                ["python", str(script_path)],
+                [sys.executable, str(script_path)],
                 cwd=self.temp_dir,
             )
         finally:
@@ -346,11 +383,16 @@ class Sandbox:
             
         Returns:
             Path to created file
+            
+        Raises:
+            SandboxPermissionError: If name escapes temp directory
         """
-        path = self.temp_dir / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
-        return path
+        resolved = (self.temp_dir / name).resolve()
+        if not str(resolved).startswith(str(self.temp_dir.resolve())):
+            raise SandboxPermissionError(f"Path traversal blocked: {name}")
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(content)
+        return resolved
     
     def read_file(self, name: str) -> str:
         """
@@ -363,12 +405,15 @@ class Sandbox:
             File content
             
         Raises:
+            SandboxPermissionError: If name escapes temp directory
             FileNotFoundError: If file doesn't exist
         """
-        path = self.temp_dir / name
-        if not path.exists():
+        resolved = (self.temp_dir / name).resolve()
+        if not str(resolved).startswith(str(self.temp_dir.resolve())):
+            raise SandboxPermissionError(f"Path traversal blocked: {name}")
+        if not resolved.exists():
             raise FileNotFoundError(f"File not found in sandbox: {name}")
-        return path.read_text()
+        return resolved.read_text()
     
     def list_files(self) -> List[str]:
         """List files in sandbox temp directory."""
@@ -417,19 +462,124 @@ class RestrictedSandbox(Sandbox):
     
     Adds:
     - Path validation
+    - Deep command-tree inspection (chain, pipe, subshell, wrapper)
     - Import restrictions (future)
     - System call filtering (future)
     """
+    
+    # Shell metacharacters that indicate command chaining / piping
+    _CHAIN_OPERATORS = {";", "&&", "||", "|"}
+    
+    # Shells that can be used as wrappers to bypass the blocklist
+    _SHELL_WRAPPERS = {
+        "bash", "sh", "zsh", "dash", "csh", "tcsh", "fish", "ksh",
+        "env", "xargs", "nohup", "setsid", "strace", "ltrace",
+        "sudo", "su", "doas", "pkexec",
+    }
     
     def __init__(self, config: Optional[SandboxConfig] = None):
         config = config or SandboxConfig(isolation_level=IsolationLevel.RESTRICTED)
         super().__init__(config)
         
-        self._blocked_commands = {
+        self._blocked_commands: Set[str] = {
             "rm", "rmdir", "del", "format", "fdisk",
             "mkfs", "dd", "shutdown", "reboot", "halt",
             "poweroff", "init", "systemctl", "service",
         }
+    
+    # ----- private helpers -----
+    
+    @staticmethod
+    def _base_name(token: str) -> str:
+        """Extract the lowercase base name, stripping any directory path."""
+        return Path(token).name.lower()
+    
+    def _token_is_blocked(self, token: str) -> Optional[str]:
+        """Return the blocked base name if *token* resolves to one, else None."""
+        base = self._base_name(token)
+        if base in self._blocked_commands:
+            return base
+        return None
+    
+    def _scan_tokens(self, tokens: List[str]) -> Optional[str]:
+        """
+        Walk every token for blocked commands.
+        
+        Checks:
+        1. Direct invocation  (``rm``, ``/usr/bin/rm``)
+        2. Shell wrappers     (``bash -c "rm -rf /"``)
+        3. Chain / pipe split (``echo hi ; rm -rf /``)
+        
+        Returns the first blocked command name found, or ``None``.
+        """
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            base = self._base_name(tok)
+            
+            # 1. Direct blocked command (handles full paths too)
+            if base in self._blocked_commands:
+                return base
+            
+            # 2. Shell wrapper detection  — e.g. bash -c "rm …"
+            if base in self._SHELL_WRAPPERS:
+                # Scan the remaining args; any sub-command string may
+                # contain a blocked command.
+                for rest_tok in tokens[i + 1:]:
+                    # A "-c" arg's *value* is a mini-script → tokenise it
+                    try:
+                        sub_tokens = shlex.split(rest_tok)
+                    except ValueError:
+                        sub_tokens = rest_tok.split()
+                    for st in sub_tokens:
+                        found = self._token_is_blocked(st)
+                        if found:
+                            return found
+            
+            # 3. Chain / pipe operators — re-tokenise from right side
+            if tok in self._CHAIN_OPERATORS:
+                rest = tokens[i + 1:]
+                if rest:
+                    found = self._scan_tokens(rest)
+                    if found:
+                        return found
+                    # Already scanned everything after the operator
+                    return None
+            
+            i += 1
+        return None
+    
+    def _contains_blocked_command(self, cmd_str: str) -> Optional[str]:
+        """
+        Full inspection of a command string for any blocked command.
+        
+        Handles:
+        - Full-path bypass      ``/usr/bin/rm``
+        - Shell wrapper bypass  ``bash -c "rm -rf /"``
+        - Chain / pipe bypass   ``echo hi ; rm -rf /``
+        - Backtick / $()        ``echo `rm foo` ``
+        - Embedded newlines     ``echo\nrm -rf /``
+        
+        Returns the first blocked name found, or ``None``.
+        """
+        # Reject backtick and $() subshell patterns outright
+        if "`" in cmd_str or "$(" in cmd_str:
+            return "__subshell__"
+        
+        # Replace newlines with ; so multi-line tricks are caught
+        normalised = cmd_str.replace("\n", " ; ")
+        
+        try:
+            tokens = shlex.split(normalised)
+        except ValueError:
+            tokens = normalised.split()
+        
+        if not tokens:
+            return None
+        
+        return self._scan_tokens(tokens)
+    
+    # ----- public API -----
     
     def execute_command(
         self,
@@ -438,21 +588,28 @@ class RestrictedSandbox(Sandbox):
         cwd: Optional[Path] = None,
         env: Optional[Dict[str, str]] = None,
     ) -> SandboxResult:
-        """Execute with additional safety checks."""
+        """Execute with deep command-tree safety checks.
         
-        # Check for blocked commands
+        The blocklist is enforced by scanning the full command tree,
+        not just ``cmd[0]``.  This prevents bypass via full paths,
+        shell wrappers, chain operators, and subshell patterns.
+        """
         cmd_str = command if isinstance(command, str) else " ".join(command)
-        cmd_parts = cmd_str.split()
         
-        if cmd_parts:
-            base_cmd = Path(cmd_parts[0]).name.lower()
-            if base_cmd in self._blocked_commands:
-                return SandboxResult(
-                    success=False,
-                    error=f"Command '{base_cmd}' is not allowed in sandbox",
-                    terminated=True,
-                    termination_reason="blocked_command",
-                )
+        blocked = self._contains_blocked_command(cmd_str)
+        if blocked:
+            reason = (
+                "Subshell/backtick patterns are not allowed in sandbox"
+                if blocked == "__subshell__"
+                else f"Command '{blocked}' is not allowed in sandbox"
+            )
+            logger.warning("Blocked sandbox command: %s", cmd_str)
+            return SandboxResult(
+                success=False,
+                error=reason,
+                terminated=True,
+                termination_reason="blocked_command",
+            )
         
         return super().execute_command(command, stdin, cwd, env)
     

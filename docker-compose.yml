@@ -1,0 +1,81 @@
+version: "3.9"
+
+# Issue #190: vLLM Docker Deployment & GPU Passthrough
+#
+# Requirements:
+# - Docker Engine + docker compose plugin
+# - NVIDIA Container Toolkit for GPU support
+#
+# Usage:
+#   docker compose up -d
+#   curl http://127.0.0.1:8001/v1/models
+#
+services:
+  vllm-3b:
+    build:
+      context: .
+      dockerfile: docker/vllm/Dockerfile
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --model
+      - ${BANTZ_VLLM_3B_MODEL:-Qwen/Qwen2.5-3B-Instruct-AWQ}
+      - --max-model-len
+      - ${BANTZ_VLLM_3B_MAX_LEN:-4096}
+    ports:
+      - "8001:8001"
+    environment:
+      - HF_HOME=/data/hf
+    volumes:
+      - ./artifacts/logs:/logs
+      - vllm_hf_cache:/data/hf
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/v1/models"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    # GPU passthrough (compose v2)
+    device_requests:
+      - driver: nvidia
+        count: all
+        capabilities: [gpu]
+
+  vllm-7b:
+    profiles: ["legacy-local-quality"]
+    build:
+      context: .
+      dockerfile: docker/vllm/Dockerfile
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - --model
+      - ${BANTZ_VLLM_7B_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - --max-model-len
+      - ${BANTZ_VLLM_7B_MAX_LEN:-4096}
+    ports:
+      - "8002:8002"
+    environment:
+      - HF_HOME=/data/hf
+    volumes:
+      - ./artifacts/logs:/logs
+      - vllm_hf_cache:/data/hf
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8002/v1/models"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    device_requests:
+      - driver: nvidia
+        count: all
+        capabilities: [gpu]
+
+volumes:
+  vllm_hf_cache:

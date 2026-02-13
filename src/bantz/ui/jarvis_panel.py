@@ -875,7 +875,7 @@ class JarvisPanel(QWidget):
         self.hide()
         try:
             self.fade_animation.finished.disconnect(self._on_fade_out_done)
-        except:
+        except Exception:
             pass
     
     def _do_show(self):

@@ -133,16 +133,31 @@ class Planner:
         goal: str,
         context: dict,
     ) -> TaskPlan:
-        """Create a simple single-step plan."""
+        """Create a simple single-step plan when LLM is unavailable.
+
+        Issue #858: Use ``_infer_action`` to pick a valid action name
+        instead of the non-existent ``execute_goal`` handler.
+        If no action can be inferred, mark the step as ``notify_user``
+        so the runtime shows an informative error rather than silently failing.
+        """
         plan = create_task_plan(goal)
         plan.context = context
-        
-        plan.add_step(
-            action="execute_goal",
-            description=goal,
-            parameters={"goal": goal, **context},
-        )
-        
+
+        action = self._infer_action(goal)
+        if action == "generic_action":
+            # No valid handler could be inferred — tell user LLM is needed
+            plan.add_step(
+                action="notify_user",
+                description="LLM bağlantısı yok. Bu görevi planlamak için LLM gerekli.",
+                parameters={"goal": goal, "error": "llm_unavailable"},
+            )
+        else:
+            plan.add_step(
+                action=action,
+                description=goal,
+                parameters={"goal": goal, **context},
+            )
+
         return plan
     
     async def decompose_goal(self, goal: str) -> list[str]:

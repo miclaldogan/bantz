@@ -12,13 +12,86 @@ class JsonlLogger:
     path: str
 
     def log(self, request: str, result: dict[str, Any], **fields: Any) -> None:
-        record = {
+        record: dict[str, Any] = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "request": request,
             "result": result,
         }
         if fields:
             record.update(fields)
+
+        # Mandatory secret masking (Issue #216).
+        try:
+            from bantz.security.secrets import sanitize
+
+            record = sanitize(record)
+        except Exception:
+            # Sanitize unavailable — redact sensitive fields to prevent leaks
+            record["request"] = "[REDACTED]"
+            record["result"] = "[REDACTED]"
+
+        p = Path(self.path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if not p.exists():
+            p.write_text("", encoding="utf-8")
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    
+    def log_tool_execution(
+        self,
+        tool_name: str,
+        risk_level: str,
+        success: bool,
+        confirmed: bool = False,
+        error: str | None = None,
+        params: dict[str, Any] | None = None,
+        result: Any = None,
+        **extra_fields: Any,
+    ) -> None:
+        """Log tool execution with risk level and confirmation status (Issue #160).
+        
+        Args:
+            tool_name: Name of the tool executed
+            risk_level: Risk level (safe/moderate/destructive)
+            success: Whether execution succeeded
+            confirmed: Whether user confirmed (for destructive tools)
+            error: Error message if failed
+            params: Tool parameters
+            result: Tool result (truncated)
+            **extra_fields: Additional audit fields
+        """
+        record: dict[str, Any] = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "event_type": "tool_execution",
+            "tool_name": tool_name,
+            "risk_level": risk_level,
+            "success": success,
+            "confirmed": confirmed,
+        }
+        
+        if error:
+            record["error"] = error
+        if params:
+            record["params"] = params
+        if result:
+            # Truncate result to 500 chars for logging
+            result_str = str(result)
+            record["result"] = result_str[:500] + "..." if len(result_str) > 500 else result_str
+        
+        record.update(extra_fields)
+
+        # Mandatory secret masking (Issue #216).
+        try:
+            from bantz.security.secrets import sanitize
+
+            record = sanitize(record)
+        except Exception:
+            # Sanitize unavailable — redact sensitive fields to prevent leaks
+            record.pop("params", None)
+            record.pop("result", None)
+            if "error" in record:
+                record["error"] = "[REDACTED]"
+        
         p = Path(self.path)
         p.parent.mkdir(parents=True, exist_ok=True)
         if not p.exists():

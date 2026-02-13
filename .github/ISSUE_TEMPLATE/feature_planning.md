@@ -1,6 +1,6 @@
 ---
-name: Feature Planning
-about: Structured template for planning new features (Goal/Scope/AC/Tests/Deps)
+name: Feature Request
+about: Suggest a new feature or improvement
 title: '[Feature] '
 labels: 'type:feature, priority:P2'
 assignees: ''
@@ -9,75 +9,56 @@ assignees: ''
 
 ## Goal
 
-<!-- 
-What is the main objective of this feature?
-Example: "Make it easy to create high-quality planning issues with consistent structure"
+<!--
+What is the main purpose of this feature?
 -->
 
 ## Background
 
 <!--
-Why is this needed? What problem does it solve?
-Provide context for reviewers and future maintainers.
-Example: "Current planning issues lack consistent structure, making it hard to review and execute work."
+Why is it needed? What problem does it solve?
 -->
 
 ## Scope
 
 ### In Scope
+
 <!--
-What will be implemented?
-Example:
-- Add GitHub issue template
-- Include sections: Goal, Background, Scope, AC, Tests, Dependencies
-- Add example for Jarvis-Calendar features
+What will be done?
+- Item 1
+- Item 2
 -->
 
 ### Out of Scope
+
 <!--
-What will NOT be implemented in this issue?
-Example:
-- Automated issue validation
-- Multi-language templates
+What will NOT be done in this issue?
 -->
 
 ## Acceptance Criteria
 
 <!--
-Clear, testable conditions that must be met for this feature to be complete.
-Example:
-- [ ] New issues created via template include the above sections
-- [ ] Template encourages adding at least one test or explicit justification
-- [ ] Template is linked from README or CONTRIBUTING
+When is this feature considered "done"?
 -->
+
+- [ ] 
+- [ ] 
+- [ ] Tests added
 
 ## How to Test
 
 <!--
-How can reviewers verify this feature works correctly?
-Example:
-- Create a new issue using the template
-- Verify all sections are present
-- Check README links to template
+How can a reviewer verify this feature?
 -->
 
 ## Dependencies
 
 <!--
-List any dependencies or blockers:
-- Other issues that must be completed first
-- External libraries or tools needed
-- Team member availability
-Example:
-- Depends on #115, #116, #117
-- Requires GitHub template directory
+Are there issues or libraries that need to be completed/installed first?
 -->
 
 ## Notes
 
 <!--
-Any additional context, design decisions, or open questions.
-Example:
-- Consider adding automation in the future
-- Template structure inspired by [source]
+Additional context, design decisions, or open questions.
 -->

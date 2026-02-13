@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import socket
+import struct
 import sys
 import threading
 import atexit
@@ -40,7 +42,7 @@ _bg_server_errors: dict[str, str] = {}
 def start_server_in_background(
     session_name: str = DEFAULT_SESSION,
     policy_path: str = "config/policy.json",
-    log_path: str = "bantz.log.jsonl",
+    log_path: str = "artifacts/logs/bantz.log.jsonl",
 ) -> bool:
     """Start a server for the given session in a daemon thread.
 
@@ -79,7 +81,7 @@ def start_server_in_background(
 def ensure_server_running(
     session_name: str = DEFAULT_SESSION,
     policy_path: str = "config/policy.json",
-    log_path: str = "bantz.log.jsonl",
+    log_path: str = "artifacts/logs/bantz.log.jsonl",
     timeout_s: float = 8.0,
 ) -> tuple[bool, bool, str]:
     """Ensure a session server is running.
@@ -431,6 +433,21 @@ class BantzServer:
         self._running = False
         self._browser_initialized = False
 
+        # Brain is the default runtime (Issue #567 → #851: legacy path removed).
+        self._brain = None
+        self._brain_state = None
+        try:
+            from bantz.brain.runtime_factory import create_runtime
+            from bantz.brain.orchestrator_state import OrchestratorState
+
+            self._brain = create_runtime()
+            self._brain_state = OrchestratorState()
+            # Banner is printed by create_runtime() (Issue #588)
+        except Exception as e:
+            logging.getLogger(__name__).error(
+                "Brain init failed: %s", e
+            )
+
         # Proactive inbox (FIFO) for bantz_message events
         self._inbox = InboxStore(maxlen=200)
 
@@ -535,6 +552,50 @@ class BantzServer:
         if command.lower() in {"önceki", "previous", "prev", "geri"}:
             return self._paginate_prev()
 
+        # ─────────────────────────────────────────────────────────────
+        # Self-Evolving Agent — skill approval / rejection (Issue #837)
+        # ─────────────────────────────────────────────────────────────
+        try:
+            from bantz.skills.declarative.generator import get_self_evolving_manager
+            mgr = get_self_evolving_manager()
+            if mgr is not None and mgr.has_pending:
+                lower = command.strip().lower()
+                if lower in {"evet", "yes", "kur", "onayla", "approve", "evet kur"}:
+                    result = mgr.approve_pending()
+                    return {"ok": result.get("ok", False), "text": result.get("text", ""), "skill_approved": True}
+                elif lower in {"hayır", "no", "reddet", "reject", "iptal", "vazgeç"}:
+                    result = mgr.reject_pending()
+                    return {"ok": result.get("ok", False), "text": result.get("text", ""), "skill_rejected": True}
+        except ImportError:
+            pass
+
+        # ─────────────────────────────────────────────────────────────
+        # Overnight mode — "gece şunu yap" intent (Issue #836)
+        # ─────────────────────────────────────────────────────────────
+        try:
+            from bantz.automation.overnight import is_overnight_request, parse_overnight_tasks
+
+            if is_overnight_request(command):
+                tasks = parse_overnight_tasks(command)
+                if not tasks:
+                    return {"ok": False, "text": "Gece modu için görev belirtmelisin. Örnek: 'gece şunları yap: 1. X  2. Y'"}
+                from bantz.automation.overnight import OvernightRunner
+                runner = OvernightRunner(bantz_server=self)
+                runner.add_tasks(tasks)
+                import threading
+                t = threading.Thread(target=runner.run, daemon=True, name="overnight-runner")
+                t.start()
+                task_list = "\n".join(f"  {i+1}. {desc}" for i, desc in enumerate(tasks))
+                return {
+                    "ok": True,
+                    "text": f"🌙 Gece modu başlatıldı! {len(tasks)} görev sıraya alındı:\n{task_list}\n\nSabah raporu inbox'ınıza gelecek.",
+                    "overnight": True,
+                    "session_id": runner.state.session_id if runner.state else None,
+                    "task_count": len(tasks),
+                }
+        except ImportError:
+            pass
+
         # Browser commands need browser init
         from bantz.router.nlu import parse_intent
         parsed = parse_intent(command)
@@ -546,7 +607,122 @@ class BantzServer:
         if overlay._client and overlay._client.connected:
             overlay.thinking_sync("Anlıyorum...")
 
-        # Route command
+        # Brain handles all non-browser commands (Issue #851: legacy Router path removed).
+        if self._brain is not None and not parsed.intent.startswith("browser_"):
+            try:
+                # ── Issue #869: Handle pending confirmation from previous turn ──
+                if (
+                    self._brain_state is not None
+                    and self._brain_state.has_pending_confirmation()
+                ):
+                    from bantz.brain.orchestrator_state import OrchestratorState
+
+                    pending = self._brain_state.peek_pending_confirmation() or {}
+                    pending_tool = str(pending.get("tool") or "")
+                    prompt = str(pending.get("prompt") or "")
+                    lower = command.strip().lower()
+
+                    # Accept confirmation
+                    _yes_tokens = {
+                        "evet", "e", "ok", "tamam", "onay", "onaylıyorum",
+                        "kabul", "yes", "y", "olur", "peki", "ekle", "yap",
+                        "koy", "kaydet",
+                    }
+                    _no_tokens = {
+                        "hayır", "hayir", "h", "no", "n", "iptal", "vazgeç",
+                        "vazgec", "reddet", "istemiyorum", "olmaz", "yok",
+                    }
+                    first_word = lower.split()[0] if lower.split() else ""
+
+                    if lower in _yes_tokens or first_word in _yes_tokens:
+                        # User confirmed — set confirmed_tool and re-run
+                        self._brain_state.confirmed_tool = pending_tool
+                        output, self._brain_state = self._brain.process_turn(
+                            command, self._brain_state
+                        )
+                        # Safety net: if the confirmed tool was not consumed
+                        # (e.g. preroute intercepted "evet"), clear stale state
+                        # so the next query doesn't re-show the old prompt.
+                        if self._brain_state.confirmed_tool is not None:
+                            logging.getLogger(__name__).warning(
+                                "[CONFIRMATION] confirmed_tool '%s' was not consumed "
+                                "by process_turn — clearing stale confirmation state.",
+                                self._brain_state.confirmed_tool,
+                            )
+                            self._brain_state.clear_pending_confirmation()
+                        reply = str(getattr(output, "assistant_reply", "") or "").strip()
+                        return {
+                            "ok": True,
+                            "text": reply or "Tamamdır efendim.",
+                            "brain": True,
+                            "route": getattr(output, "route", "unknown"),
+                        }
+                    elif lower in _no_tokens or first_word in _no_tokens:
+                        # User rejected — clear pending
+                        self._brain_state.clear_pending_confirmation()
+                        return {
+                            "ok": True,
+                            "text": "Anlaşıldı efendim, iptal ettim.",
+                            "brain": True,
+                            "route": "cancelled",
+                        }
+                    else:
+                        # Unknown response — re-show confirmation prompt
+                        return {
+                            "ok": True,
+                            "text": prompt or "Efendim, devam etmek için 'evet' veya 'hayır' diyebilir misiniz?",
+                            "brain": True,
+                            "route": "confirmation",
+                            "needs_confirmation": True,
+                            "confirmation_prompt": prompt,
+                            "confirmation_tool": pending_tool,
+                        }
+
+                output, self._brain_state = self._brain.process_turn(
+                    command, self._brain_state
+                )
+                reply = str(getattr(output, "assistant_reply", "") or "").strip()
+                if not reply and getattr(output, "ask_user", False):
+                    reply = str(getattr(output, "question", "") or "").strip()
+
+                # ── Issue #869: Check if this turn created a pending confirmation ──
+                confirmation_pending = (
+                    self._brain_state is not None
+                    and self._brain_state.has_pending_confirmation()
+                )
+                if confirmation_pending:
+                    pending = self._brain_state.peek_pending_confirmation() or {}
+                    conf_prompt = str(pending.get("prompt") or "").strip()
+                    conf_tool = str(pending.get("tool") or "")
+                    # Use the confirmation prompt as the reply text
+                    if conf_prompt:
+                        reply = conf_prompt
+
+                return {
+                    "ok": True,
+                    "text": reply or "Anlayamadım efendim.",
+                    "brain": True,
+                    "route": getattr(output, "route", "unknown"),
+                    "needs_confirmation": confirmation_pending,
+                    "confirmation_prompt": (
+                        str((self._brain_state.peek_pending_confirmation() or {}).get("prompt", ""))
+                        if confirmation_pending else None
+                    ),
+                    "confirmation_tool": (
+                        str((self._brain_state.peek_pending_confirmation() or {}).get("tool", ""))
+                        if confirmation_pending else None
+                    ),
+                }
+            except Exception as e:
+                logging.getLogger(__name__).error("Brain handler failed: %s", e)
+                return {
+                    "ok": False,
+                    "text": f"İşlem sırasında hata oluştu: {e}",
+                    "brain": True,
+                    "route": "error",
+                }
+
+        # Route command (Router path — browser_* intents or brain unavailable)
         router = self._get_router()
         result = router.handle(text=command, ctx=self.ctx)
 
@@ -739,35 +915,70 @@ class BantzServer:
         try:
             reminder_manager = get_reminder_manager()
             reminder_manager.stop_scheduler()
-        except:
+        except Exception:
             pass
 
         # Close browser
         from bantz.browser.controller import get_controller
         try:
             get_controller().close()
-        except:
+        except Exception:
             pass
 
         print("\n👋 Bantz Server kapatıldı.")
 
+    # ── length-prefix framing helpers ─────────────────────────
+
+    @staticmethod
+    def _send_framed(sock: socket.socket, payload: bytes) -> None:
+        """Send *payload* prefixed with a 4-byte big-endian length header."""
+        header = struct.pack("!I", len(payload))
+        sock.sendall(header + payload)
+
+    @staticmethod
+    def _recv_framed(sock: socket.socket) -> bytes:
+        """Read a length-prefixed frame."""
+        # Read the first 4 bytes (length header)
+        header = b""
+        while len(header) < 4:
+            chunk = sock.recv(4 - len(header))
+            if not chunk:
+                return b""
+            header += chunk
+
+        length = struct.unpack("!I", header)[0]
+
+        # Sanity check: a realistic JSON payload < 64 MB
+        if length > 67_108_864:
+            raise ValueError(f"Frame too large: {length} bytes")
+
+        # Read exactly *length* bytes
+        data = bytearray()
+        while len(data) < length:
+            chunk = sock.recv(min(65536, length - len(data)))
+            if not chunk:
+                break
+            data += chunk
+        return bytes(data)
+
     def _handle_client(self, conn: socket.socket) -> None:
         """Handle a single client connection."""
         try:
-            data = conn.recv(65536).decode("utf-8")
-            if not data:
+            raw = self._recv_framed(conn)
+            if not raw:
                 return
 
+            data = raw.decode("utf-8")
             request = json.loads(data)
             command = request.get("command", "")
 
             response = self.handle_command(command)
-            conn.sendall(json.dumps(response).encode("utf-8"))
+            self._send_framed(conn, json.dumps(response).encode("utf-8"))
         except Exception as e:
             error_response = {"ok": False, "text": f"Server hatası: {e}"}
             try:
-                conn.sendall(json.dumps(error_response).encode("utf-8"))
-            except:
+                self._send_framed(conn, json.dumps(error_response).encode("utf-8"))
+            except Exception:
                 pass
         finally:
             conn.close()
@@ -786,12 +997,33 @@ def send_to_server(command: str, session_name: str = DEFAULT_SESSION, timeout: f
         client.connect(str(socket_path))
 
         request = json.dumps({"command": command})
-        client.sendall(request.encode("utf-8"))
+        payload = request.encode("utf-8")
+        header = struct.pack("!I", len(payload))
+        client.sendall(header + payload)
 
-        response_data = client.recv(65536).decode("utf-8")
+        # Read length-prefixed response
+        resp_header = b""
+        while len(resp_header) < 4:
+            chunk = client.recv(4 - len(resp_header))
+            if not chunk:
+                break
+            resp_header += chunk
+
+        if len(resp_header) < 4:
+            client.close()
+            return {"ok": False, "text": "Server yanıt başlığı okunamadı."}
+
+        resp_length = struct.unpack("!I", resp_header)[0]
+        resp_data = bytearray()
+        while len(resp_data) < resp_length:
+            chunk = client.recv(min(65536, resp_length - len(resp_data)))
+            if not chunk:
+                break
+            resp_data += chunk
+
         client.close()
 
-        return json.loads(response_data)
+        return json.loads(resp_data.decode("utf-8"))
     except socket.timeout:
         return {"ok": False, "text": "Server yanıt vermedi (timeout)."}
     except ConnectionRefusedError:
@@ -809,7 +1041,7 @@ def is_server_running(session_name: str = DEFAULT_SESSION) -> bool:
     try:
         response = send_to_server("__status__", session_name, timeout=2.0)
         return response.get("ok", False)
-    except:
+    except Exception:
         return False
 
 

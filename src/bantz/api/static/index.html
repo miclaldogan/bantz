@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f0f23">
+<title>Bantz — Personal AI Assistant</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+<link rel="manifest" href="/manifest.json">
+<style>
+/* ── Reset & Base ─────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f0f23;--bg2:#1a1a3e;--bg3:#252550;
+  --fg:#e2e2f0;--fg2:#8888aa;--fg3:#555577;
+  --accent:#7c3aed;--accent2:#a78bfa;--accent-glow:rgba(124,58,237,.25);
+  --green:#22c55e;--red:#ef4444;--yellow:#eab308;--cyan:#06b6d4;
+  --radius:12px;--radius-sm:8px;
+  --shadow:0 4px 24px rgba(0,0,0,.4);
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --mono:'SF Mono','Cascadia Code','Fira Code',monospace;
+}
+html{font-size:16px;-webkit-text-size-adjust:100%}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100dvh;overflow:hidden}
+a{color:var(--accent2);text-decoration:none}
+button{cursor:pointer;font-family:var(--font);border:none;outline:none}
+input,textarea{font-family:var(--font);outline:none}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--fg3);border-radius:3px}
+
+/* ── Layout ───────────────────────────────────────── */
+.app{display:flex;height:100dvh;width:100vw}
+.sidebar{width:280px;background:var(--bg2);border-right:1px solid var(--bg3);display:flex;flex-direction:column;flex-shrink:0;transition:transform .3s}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+
+/* ── Sidebar ──────────────────────────────────────── */
+.sidebar-header{padding:20px;border-bottom:1px solid var(--bg3);text-align:center}
+.sidebar-header h1{font-size:1.4rem;font-weight:700;background:linear-gradient(135deg,var(--accent2),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sidebar-header .subtitle{font-size:.75rem;color:var(--fg2);margin-top:4px}
+
+.sidebar-nav{flex:1;overflow-y:auto;padding:12px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--radius-sm);color:var(--fg2);font-size:.9rem;transition:all .15s;cursor:pointer}
+.nav-item:hover,.nav-item.active{background:var(--bg3);color:var(--fg)}
+.nav-item .icon{font-size:1.1rem;width:24px;text-align:center}
+.nav-badge{margin-left:auto;background:var(--accent);color:#fff;font-size:.7rem;padding:2px 7px;border-radius:10px;min-width:20px;text-align:center}
+
+.sidebar-footer{padding:16px;border-top:1px solid var(--bg3)}
+.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.status-item{display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--fg2)}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.status-dot.ok{background:var(--green)}
+.status-dot.degraded{background:var(--yellow)}
+.status-dot.down{background:var(--red)}
+.status-dot.unknown{background:var(--fg3)}
+
+/* ── Mobile Sidebar Toggle ────────────────────────── */
+.sidebar-toggle{display:none;position:fixed;top:12px;left:12px;z-index:100;background:var(--bg2);border:1px solid var(--bg3);border-radius:var(--radius-sm);padding:8px 12px;color:var(--fg);font-size:1.2rem}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:49}
+
+/* ── Chat Panel ───────────────────────────────────── */
+.chat-header{padding:16px 20px;border-bottom:1px solid var(--bg3);display:flex;align-items:center;gap:12px;background:var(--bg)}
+.chat-header h2{font-size:1.1rem;font-weight:600}
+.chat-header .route-badge{font-size:.7rem;background:var(--bg3);color:var(--fg2);padding:3px 8px;border-radius:6px}
+.conn-status{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--fg2)}
+
+.chat-messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:80%;padding:12px 16px;border-radius:var(--radius);font-size:.95rem;line-height:1.5;word-break:break-word;animation:msgIn .25s ease}
+@keyframes msgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.msg.user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.msg.assistant{align-self:flex-start;background:var(--bg2);border:1px solid var(--bg3);border-bottom-left-radius:4px}
+.msg .meta{font-size:.7rem;color:var(--fg3);margin-top:6px;display:flex;gap:8px}
+.msg.assistant .meta{color:var(--fg3)}
+.msg.user .meta{color:rgba(255,255,255,.6)}
+.msg.system{align-self:center;background:transparent;color:var(--fg2);font-size:.8rem;padding:6px;text-align:center}
+.msg pre{background:var(--bg);padding:8px 10px;border-radius:6px;overflow-x:auto;font-family:var(--mono);font-size:.85rem;margin-top:8px}
+.typing{align-self:flex-start;color:var(--fg2);font-size:.85rem;display:flex;align-items:center;gap:8px;padding:8px 16px}
+.typing-dots{display:flex;gap:4px}
+.typing-dots span{width:6px;height:6px;border-radius:50%;background:var(--fg3);animation:blink 1.4s infinite both}
+.typing-dots span:nth-child(2){animation-delay:.2s}
+.typing-dots span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.3}40%{opacity:1}}
+
+.chat-input{padding:16px 20px;border-top:1px solid var(--bg3);background:var(--bg)}
+.input-row{display:flex;gap:10px;align-items:flex-end}
+.input-row textarea{flex:1;background:var(--bg2);border:1px solid var(--bg3);border-radius:var(--radius);padding:12px 16px;color:var(--fg);font-size:.95rem;resize:none;min-height:44px;max-height:120px;transition:border-color .15s}
+.input-row textarea:focus{border-color:var(--accent)}
+.input-row textarea::placeholder{color:var(--fg3)}
+.send-btn{background:var(--accent);color:#fff;border-radius:var(--radius);padding:12px 20px;font-size:.95rem;font-weight:600;transition:all .15s;flex-shrink:0}
+.send-btn:hover{background:var(--accent2);transform:translateY(-1px)}
+.send-btn:active{transform:translateY(0)}
+.send-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+
+/* ── Settings Panel ───────────────────────────────── */
+.panel{display:none;flex:1;flex-direction:column;overflow-y:auto;padding:24px}
+.panel.active{display:flex}
+.panel-title{font-size:1.3rem;font-weight:700;margin-bottom:20px}
+.card{background:var(--bg2);border:1px solid var(--bg3);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.card-title{font-size:1rem;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.card-title .icon{font-size:1.2rem}
+
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:.85rem;color:var(--fg2);margin-bottom:6px}
+.form-group input[type=text],.form-group input[type=password]{width:100%;background:var(--bg);border:1px solid var(--bg3);border-radius:var(--radius-sm);padding:10px 14px;color:var(--fg);font-size:.9rem;transition:border-color .15s}
+.form-group input:focus{border-color:var(--accent)}
+.form-group .hint{font-size:.75rem;color:var(--fg3);margin-top:4px}
+
+.btn{padding:10px 20px;border-radius:var(--radius-sm);font-size:.9rem;font-weight:500;transition:all .15s}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent2)}
+.btn-danger{background:var(--red);color:#fff}
+.btn-danger:hover{opacity:.85}
+.btn-outline{background:transparent;border:1px solid var(--bg3);color:var(--fg2)}
+.btn-outline:hover{border-color:var(--accent);color:var(--fg)}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap}
+
+.key-status{display:flex;align-items:center;gap:8px;padding:12px;background:var(--bg);border-radius:var(--radius-sm);margin-bottom:16px}
+.key-status.set{border-left:3px solid var(--green)}
+.key-status.unset{border-left:3px solid var(--yellow)}
+
+/* ── Skills Panel ─────────────────────────────────── */
+.skill-list{display:grid;gap:10px}
+.skill-card{background:var(--bg);border:1px solid var(--bg3);border-radius:var(--radius-sm);padding:14px;display:flex;align-items:center;gap:12px}
+.skill-card .skill-icon{font-size:1.4rem;width:36px;text-align:center}
+.skill-card .skill-name{font-weight:500}
+.skill-card .skill-desc{font-size:.8rem;color:var(--fg2);margin-top:2px}
+.skill-card .skill-source{margin-left:auto;font-size:.7rem;background:var(--bg3);padding:2px 8px;border-radius:4px;color:var(--fg2)}
+
+/* ── Inbox Panel ──────────────────────────────────── */
+.inbox-item{background:var(--bg);border:1px solid var(--bg3);border-radius:var(--radius-sm);padding:14px;display:flex;align-items:flex-start;gap:12px;margin-bottom:8px}
+.inbox-item.unread{border-left:3px solid var(--accent)}
+.inbox-item .inbox-icon{font-size:1.2rem;flex-shrink:0;margin-top:2px}
+.inbox-item .inbox-text{flex:1;font-size:.9rem}
+.inbox-item .inbox-time{font-size:.7rem;color:var(--fg3);margin-top:4px}
+.inbox-item .inbox-mark{font-size:.75rem;color:var(--accent2);cursor:pointer;flex-shrink:0}
+.inbox-empty{text-align:center;color:var(--fg3);padding:40px}
+
+/* ── QR Panel ─────────────────────────────────────── */
+.qr-container{text-align:center;padding:20px}
+.qr-container img{max-width:200px;border-radius:var(--radius);border:2px solid var(--bg3)}
+.qr-url{font-family:var(--mono);font-size:.85rem;color:var(--accent2);margin-top:12px;word-break:break-all}
+
+/* ── Confirmation Modal (Issue #869) ───────────────── */
+.confirm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;justify-content:center;align-items:center;animation:fadeIn .2s ease}
+.confirm-overlay.active{display:flex}
+.confirm-modal{background:var(--bg2);border:1px solid var(--bg3);border-radius:var(--radius);padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.5);animation:modalIn .25s ease}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes modalIn{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:none}}
+.confirm-modal .confirm-icon{font-size:2rem;text-align:center;margin-bottom:12px}
+.confirm-modal .confirm-title{font-size:1.1rem;font-weight:600;text-align:center;margin-bottom:8px}
+.confirm-modal .confirm-tool{font-size:.75rem;color:var(--fg3);text-align:center;margin-bottom:16px;font-family:var(--mono)}
+.confirm-modal .confirm-text{font-size:.95rem;line-height:1.6;color:var(--fg);text-align:center;padding:16px;background:var(--bg);border-radius:var(--radius-sm);margin-bottom:20px}
+.confirm-modal .confirm-actions{display:flex;gap:12px;justify-content:center}
+.confirm-modal .confirm-actions button{padding:10px 28px;border-radius:var(--radius-sm);font-size:.95rem;font-weight:600;transition:all .15s}
+.confirm-modal .btn-confirm{background:var(--green);color:#fff}
+.confirm-modal .btn-confirm:hover{opacity:.85;transform:translateY(-1px)}
+.confirm-modal .btn-reject{background:var(--bg3);color:var(--fg2)}
+.confirm-modal .btn-reject:hover{background:var(--red);color:#fff;transform:translateY(-1px)}
+
+/* ── Toast ────────────────────────────────────────── */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--bg2);border:1px solid var(--bg3);border-radius:var(--radius);padding:14px 20px;color:var(--fg);font-size:.9rem;box-shadow:var(--shadow);z-index:200;animation:toastIn .3s ease;max-width:360px}
+.toast.success{border-left:3px solid var(--green)}
+.toast.error{border-left:3px solid var(--red)}
+@keyframes toastIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+
+/* ── Mobile ───────────────────────────────────────── */
+@media(max-width:768px){
+  .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:50;transform:translateX(-100%)}
+  .sidebar.open{transform:none}
+  .sidebar-toggle{display:block}
+  .sidebar-overlay.open{display:block}
+  .msg{max-width:90%}
+  .chat-header{padding-left:52px}
+  .panel{padding:16px}
+}
+</style>
+</head>
+<body>
+
+<button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Menu">☰</button>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h1>🧠 Bantz</h1>
+      <div class="subtitle">Personal AI Assistant</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-item active" onclick="showPanel('chat')" data-panel="chat">
+        <span class="icon">💬</span> Chat
+      </div>
+      <div class="nav-item" onclick="showPanel('settings')" data-panel="settings">
+        <span class="icon">⚙️</span> Ayarlar
+      </div>
+      <div class="nav-item" onclick="showPanel('skills')" data-panel="skills">
+        <span class="icon">🔧</span> Yetenekler
+        <span class="nav-badge" id="skillCount">-</span>
+      </div>
+      <div class="nav-item" onclick="showPanel('inbox')" data-panel="inbox">
+        <span class="icon">📥</span> Inbox
+        <span class="nav-badge" id="inboxBadge" style="display:none">0</span>
+      </div>
+      <div class="nav-item" onclick="showPanel('access')" data-panel="access">
+        <span class="icon">📱</span> Telefon Erişimi
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="status-grid" id="statusGrid">
+        <div class="status-item"><span class="status-dot unknown"></span>Brain</div>
+        <div class="status-item"><span class="status-dot unknown"></span>vLLM</div>
+        <div class="status-item"><span class="status-dot unknown"></span>Gemini</div>
+        <div class="status-item"><span class="status-dot unknown"></span>API</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <div class="main">
+    <!-- Chat Panel -->
+    <div class="panel active" id="panel-chat" style="padding:0;display:flex">
+      <div style="flex:1;display:flex;flex-direction:column">
+        <div class="chat-header">
+          <h2>💬 Chat</h2>
+          <span class="route-badge" id="lastRoute">ready</span>
+          <div class="conn-status">
+            <span class="status-dot" id="wsDot"></span>
+            <span id="wsLabel">bağlanıyor...</span>
+          </div>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+          <div class="msg system">Bantz'a hoş geldin! Bir şey sor veya komut yaz.</div>
+        </div>
+        <div class="chat-input">
+          <div class="input-row">
+            <textarea id="chatInput" placeholder="Mesajını yaz..." rows="1" onkeydown="handleInputKey(event)"></textarea>
+            <button class="send-btn" id="sendBtn" onclick="sendMessage()">Gönder</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="panel" id="panel-settings">
+      <h2 class="panel-title">⚙️ Ayarlar</h2>
+
+      <div class="card">
+        <div class="card-title"><span class="icon">🔑</span> Gemini API Key</div>
+        <div class="key-status unset" id="geminiStatus">
+          <span class="status-dot yellow"></span>
+          <span id="geminiStatusText">Kontrol ediliyor...</span>
+        </div>
+        <div class="form-group">
+          <label for="geminiKeyInput">API Key</label>
+          <input type="password" id="geminiKeyInput" placeholder="AIza... (Google AI Studio'dan al)">
+          <div class="hint">Key Fernet ile şifrelenerek vault'a kaydedilir. Asla plain text olarak saklanmaz.</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="saveGeminiKey()">💾 Kaydet</button>
+          <button class="btn btn-danger" onclick="deleteGeminiKey()" id="deleteKeyBtn" style="display:none">🗑️ Sil</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="icon">🔒</span> API Token</div>
+        <div class="key-status" id="apiTokenStatus">
+          <span class="status-dot"></span>
+          <span id="apiTokenStatusText">Kontrol ediliyor...</span>
+        </div>
+        <div class="form-group">
+          <div class="hint">BANTZ_API_TOKEN env var ile ayarlanır. Aktifse tüm API çağrıları Bearer token gerektirir.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="icon">📊</span> Sistem Bilgisi</div>
+        <div id="systemInfo" style="font-size:.85rem;color:var(--fg2)">Yükleniyor...</div>
+      </div>
+    </div>
+
+    <!-- Skills Panel -->
+    <div class="panel" id="panel-skills">
+      <h2 class="panel-title">🔧 Yetenekler</h2>
+      <div class="skill-list" id="skillList">
+        <div style="color:var(--fg2)">Yükleniyor...</div>
+      </div>
+    </div>
+
+    <!-- Inbox Panel -->
+    <div class="panel" id="panel-inbox">
+      <h2 class="panel-title">📥 Inbox</h2>
+      <div id="inboxList">
+        <div class="inbox-empty">📭 Inbox boş</div>
+      </div>
+    </div>
+
+    <!-- Phone Access Panel -->
+    <div class="panel" id="panel-access">
+      <h2 class="panel-title">📱 Telefon Erişimi</h2>
+      <div class="card">
+        <div class="card-title"><span class="icon">📶</span> LAN Erişim Adresi</div>
+        <p style="font-size:.9rem;color:var(--fg2);margin-bottom:16px">Telefonundan aynı WiFi üzerinden bu adrese git:</p>
+        <div class="qr-container">
+          <img id="qrImage" alt="QR Code" style="display:none">
+          <div class="qr-url" id="accessUrl">Yükleniyor...</div>
+        </div>
+        <div style="margin-top:16px;text-align:center">
+          <button class="btn btn-outline" onclick="copyAccessUrl()">📋 URL'yi Kopyala</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="icon">💡</span> Nasıl Kullanılır?</div>
+        <ol style="font-size:.9rem;color:var(--fg2);padding-left:20px;line-height:1.8">
+          <li>Bilgisayarın ve telefonun aynı WiFi ağında olmalı</li>
+          <li>Yukarıdaki adresi telefon tarayıcında aç</li>
+          <li>Safari/Chrome: "Ana Ekrana Ekle" ile uygulama gibi kullan</li>
+          <li>Tüm özellikler telefondan da çalışır</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirmation Modal (Issue #869) -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-modal">
+    <div class="confirm-icon">⚠️</div>
+    <div class="confirm-title">İşlem Onayı</div>
+    <div class="confirm-tool" id="confirmTool"></div>
+    <div class="confirm-text" id="confirmText"></div>
+    <div class="confirm-actions">
+      <button class="btn-confirm" onclick="confirmAction('yes')">✅ Evet, Devam Et</button>
+      <button class="btn-reject" onclick="confirmAction('no')">❌ İptal</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── State ────────────────────────────────────────── */
+let ws = null;
+let wsReconnectTimer = null;
+const API = window.location.origin;
+
+/* ── Sidebar ──────────────────────────────────────── */
+function toggleSidebar(){
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('open');
+}
+function showPanel(name){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  const panel = document.getElementById('panel-'+name);
+  if(panel){panel.classList.add('active');if(name==='chat')panel.style.display='flex'}
+  document.querySelector(`.nav-item[data-panel="${name}"]`)?.classList.add('active');
+  // Close mobile sidebar
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('open');
+  // Load data for panel
+  if(name==='settings')loadSettings();
+  if(name==='skills')loadSkills();
+  if(name==='inbox')loadInbox();
+  if(name==='access')loadAccess();
+}
+
+/* ── WebSocket ────────────────────────────────────── */
+function connectWS(){
+  const proto = location.protocol==='https:'?'wss:':'ws:';
+  const url = `${proto}//${location.host}/ws/chat`;
+  try{ ws = new WebSocket(url) }catch(e){ setWSStatus('down','hata');return }
+  ws.onopen = ()=>{ setWSStatus('ok','bağlı'); if(wsReconnectTimer){clearTimeout(wsReconnectTimer);wsReconnectTimer=null} };
+  ws.onclose = ()=>{ setWSStatus('down','koptu'); scheduleReconnect() };
+  ws.onerror = ()=>{ setWSStatus('down','hata') };
+  ws.onmessage = (e)=>{
+    try{
+      const msg = JSON.parse(e.data);
+      if(msg.type==='chat'){
+        hideTyping();
+        addMessage('assistant', msg.data.response||'(boş yanıt)', msg.data.route);
+        document.getElementById('lastRoute').textContent = msg.data.route||'unknown';
+      } else if(msg.type==='confirm_request'){
+        // Issue #869: Show confirmation dialog
+        hideTyping();
+        addMessage('assistant', msg.data.response||'İşlem onayı bekleniyor...', msg.data.route);
+        document.getElementById('lastRoute').textContent = msg.data.route||'confirmation';
+        showConfirmDialog(msg.data.tool||'', msg.data.prompt||msg.data.response||'');
+      } else if(msg.type==='event'){
+        // Orchestrator trace events — could show in future
+      } else if(msg.type==='error'){
+        hideTyping();
+        addMessage('system', '⚠️ '+( msg.data.error||'Bilinmeyen hata'));
+      }
+    }catch(err){ console.error('WS parse error',err) }
+  };
+}
+function scheduleReconnect(){
+  if(!wsReconnectTimer) wsReconnectTimer = setTimeout(()=>{wsReconnectTimer=null;connectWS()}, 3000);
+}
+function setWSStatus(status, label){
+  const dot = document.getElementById('wsDot');
+  const lbl = document.getElementById('wsLabel');
+  dot.className = 'status-dot '+status;
+  lbl.textContent = label;
+}
+
+/* ── Confirmation Dialog (Issue #869) ──────────────── */
+function showConfirmDialog(tool, prompt){
+  document.getElementById('confirmTool').textContent = tool||'';
+  document.getElementById('confirmText').textContent = prompt||'Bu işlemi onaylıyor musunuz?';
+  document.getElementById('confirmOverlay').classList.add('active');
+}
+function hideConfirmDialog(){
+  document.getElementById('confirmOverlay').classList.remove('active');
+}
+function confirmAction(action){
+  hideConfirmDialog();
+  if(action==='yes'){
+    addMessage('user','✅ Evet, onaylıyorum');
+  } else {
+    addMessage('user','❌ İptal');
+  }
+  showTyping();
+  if(ws && ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify({type:'confirm',action:action}));
+  } else {
+    // REST fallback — send Turkish confirmation token
+    const msg = action==='yes'?'evet':'hayır';
+    fetch(API+'/api/v1/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})})
+      .then(r=>r.json())
+      .then(d=>{hideTyping();addMessage('assistant',d.response||d.text||'(boş)',d.route);})
+      .catch(e=>{hideTyping();addMessage('system','⚠️ Bağlantı hatası: '+e.message)});
+  }
+}
+
+/* ── Chat ─────────────────────────────────────────── */
+function sendMessage(){
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if(!text) return;
+  addMessage('user', text);
+  input.value='';
+  autoResize(input);
+  showTyping();
+  if(ws && ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify({type:'chat',message:text}));
+  } else {
+    // Fallback to REST
+    fetch(API+'/api/v1/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})})
+      .then(r=>r.json())
+      .then(d=>{
+        hideTyping();
+        addMessage('assistant',d.response||d.text||'(boş)',d.route);
+        document.getElementById('lastRoute').textContent=d.route||'unknown';
+        // Issue #869: Handle confirmation in REST response
+        if(d.requires_confirmation && d.confirmation_prompt){
+          showConfirmDialog(d.confirmation_tool||'', d.confirmation_prompt);
+        }
+      })
+      .catch(e=>{hideTyping();addMessage('system','⚠️ Bağlantı hatası: '+e.message)});
+  }
+}
+function addMessage(role, text, route){
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'msg '+role;
+  // Simple markdown: bold, code blocks, inline code
+  let html = escapeHtml(text);
+  html = html.replace(/```([\s\S]*?)```/g,'<pre>$1</pre>');
+  html = html.replace(/`([^`]+)`/g,'<code style="background:var(--bg);padding:2px 5px;border-radius:3px;font-family:var(--mono);font-size:.85em">$1</code>');
+  html = html.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  html = html.replace(/\n/g,'<br>');
+  div.innerHTML = html;
+  // Meta
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = new Date().toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+  if(route && role==='assistant') meta.textContent += ' · '+route;
+  div.appendChild(meta);
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+function showTyping(){
+  if(document.getElementById('typingIndicator'))return;
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className='typing';div.id='typingIndicator';
+  div.innerHTML='<div class="typing-dots"><span></span><span></span><span></span></div> Düşünüyor...';
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  document.getElementById('sendBtn').disabled = true;
+}
+function hideTyping(){
+  document.getElementById('typingIndicator')?.remove();
+  document.getElementById('sendBtn').disabled = false;
+}
+function handleInputKey(e){
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();return}
+  autoResize(e.target);
+}
+function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px'}
+function escapeHtml(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
+
+/* ── Settings ─────────────────────────────────────── */
+function loadSettings(){
+  fetch(API+'/api/v1/settings/status').then(r=>r.json()).then(d=>{
+    // Gemini status
+    const gs = document.getElementById('geminiStatus');
+    const gt = document.getElementById('geminiStatusText');
+    const db = document.getElementById('deleteKeyBtn');
+    if(d.gemini_key_set){
+      gs.className='key-status set';
+      gs.querySelector('.status-dot').className='status-dot ok';
+      gt.textContent='✓ Gemini API Key ayarlanmış — Finalizer aktif';
+      db.style.display='inline-block';
+    } else {
+      gs.className='key-status unset';
+      gs.querySelector('.status-dot').className='status-dot yellow';
+      gt.textContent='⚠ Gemini API Key ayarlanmamış — 3B fallback kullanılıyor';
+      db.style.display='none';
+    }
+    // API token
+    const ats = document.getElementById('apiTokenStatus');
+    const att = document.getElementById('apiTokenStatusText');
+    if(d.api_token_set){
+      ats.className='key-status set';
+      ats.querySelector('.status-dot').className='status-dot ok';
+      att.textContent='✓ API Token aktif — Bearer auth gerekli';
+    } else {
+      ats.className='key-status unset';
+      ats.querySelector('.status-dot').className='status-dot yellow';
+      att.textContent='⚠ API Token ayarlanmamış — auth devre dışı (dev mode)';
+    }
+    // System info
+    const si = document.getElementById('systemInfo');
+    si.innerHTML = `
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px">
+        <span>Versiyon:</span><span>${d.version||'0.3.0'}</span>
+        <span>Uptime:</span><span>${formatUptime(d.uptime_seconds||0)}</span>
+        <span>Brain:</span><span>${d.brain_active?'✓ Aktif':'⚠ Legacy'}</span>
+        <span>Finalizer:</span><span>${d.finalizer||'3B (local)'}</span>
+        <span>Router Model:</span><span style="font-family:var(--mono);font-size:.8rem">${d.router_model||'-'}</span>
+        <span>Tools:</span><span>${d.tool_count||0} kayıtlı</span>
+      </div>`;
+  }).catch(()=>{
+    document.getElementById('geminiStatusText').textContent='Bağlantı hatası';
+    document.getElementById('systemInfo').textContent='Yüklenemedi';
+  });
+}
+function saveGeminiKey(){
+  const key = document.getElementById('geminiKeyInput').value.trim();
+  if(!key){showToast('API key boş olamaz','error');return}
+  if(!key.startsWith('AIza')){showToast('Geçersiz key formatı (AIza... ile başlamalı)','error');return}
+  fetch(API+'/api/v1/settings/gemini-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:key})})
+    .then(r=>r.json())
+    .then(d=>{
+      if(d.ok){
+        showToast('✓ Gemini API Key kaydedildi ve aktifleştirildi','success');
+        document.getElementById('geminiKeyInput').value='';
+        loadSettings();
+        loadHealth();
+      } else {
+        showToast('✗ Hata: '+(d.error||'Bilinmeyen'),'error');
+      }
+    }).catch(e=>showToast('✗ Bağlantı hatası','error'));
+}
+function deleteGeminiKey(){
+  if(!confirm('Gemini API Key silinecek. Emin misin?'))return;
+  fetch(API+'/api/v1/settings/gemini-key',{method:'DELETE'})
+    .then(r=>r.json())
+    .then(d=>{
+      if(d.ok){showToast('✓ Key silindi','success');loadSettings();loadHealth();}
+      else showToast('✗ '+d.error,'error');
+    }).catch(e=>showToast('✗ Bağlantı hatası','error'));
+}
+
+/* ── Skills ────────────────────────────────────────── */
+function loadSkills(){
+  fetch(API+'/api/v1/skills').then(r=>r.json()).then(d=>{
+    document.getElementById('skillCount').textContent=d.count||0;
+    const list = document.getElementById('skillList');
+    if(!d.skills||!d.skills.length){list.innerHTML='<div style="color:var(--fg2)">Kayıtlı yetenek yok</div>';return}
+    list.innerHTML = d.skills.map(s=>`
+      <div class="skill-card">
+        <div class="skill-icon">${s.source==='declarative'?'📝':'🔧'}</div>
+        <div>
+          <div class="skill-name">${escapeHtml(s.name)}</div>
+          <div class="skill-desc">${escapeHtml(s.description||'')}</div>
+        </div>
+        <span class="skill-source">${s.source}</span>
+      </div>`).join('');
+  }).catch(()=>{document.getElementById('skillList').innerHTML='<div style="color:var(--red)">Yüklenemedi</div>'});
+}
+
+/* ── Inbox ─────────────────────────────────────────── */
+function loadInbox(){
+  fetch(API+'/api/v1/inbox').then(r=>r.json()).then(d=>{
+    const badge = document.getElementById('inboxBadge');
+    if(d.unread>0){badge.textContent=d.unread;badge.style.display='inline'}
+    else badge.style.display='none';
+    const list = document.getElementById('inboxList');
+    if(!d.items||!d.items.length){list.innerHTML='<div class="inbox-empty">📭 Inbox boş</div>';return}
+    list.innerHTML = d.items.map(it=>`
+      <div class="inbox-item ${it.read?'':'unread'}">
+        <span class="inbox-icon">${it.kind==='reminder'?'⏰':it.kind==='checkin'?'👋':'📢'}</span>
+        <div>
+          <div class="inbox-text">${escapeHtml(it.text)}</div>
+          <div class="inbox-time">${new Date(it.ts||it.timestamp).toLocaleString('tr-TR')}</div>
+        </div>
+        ${it.read?'':'<span class="inbox-mark" onclick="markRead('+it.id+')">✓ okundu</span>'}
+      </div>`).join('');
+  }).catch(()=>{document.getElementById('inboxList').innerHTML='<div class="inbox-empty" style="color:var(--red)">Yüklenemedi</div>'});
+}
+function markRead(id){
+  fetch(API+'/api/v1/inbox/'+id+'/read',{method:'POST'}).then(()=>loadInbox()).catch(()=>{});
+}
+
+/* ── Phone Access ──────────────────────────────────── */
+function loadAccess(){
+  fetch(API+'/api/v1/settings/status').then(r=>r.json()).then(d=>{
+    const url = d.access_url || ('http://'+location.hostname+':'+location.port);
+    document.getElementById('accessUrl').textContent = url;
+    // Try QR code
+    const qrImg = document.getElementById('qrImage');
+    fetch(API+'/api/v1/qrcode').then(r=>{
+      if(r.ok) return r.blob();
+      throw new Error('no qr');
+    }).then(blob=>{
+      qrImg.src=URL.createObjectURL(blob);
+      qrImg.style.display='block';
+    }).catch(()=>{qrImg.style.display='none'});
+  }).catch(()=>{document.getElementById('accessUrl').textContent='Yüklenemedi'});
+}
+function copyAccessUrl(){
+  const url = document.getElementById('accessUrl').textContent;
+  navigator.clipboard.writeText(url).then(()=>showToast('✓ URL kopyalandı','success')).catch(()=>showToast('Kopyalanamadı','error'));
+}
+
+/* ── Health ─────────────────────────────────────────── */
+function loadHealth(){
+  fetch(API+'/api/v1/health').then(r=>r.json()).then(d=>{
+    const grid = document.getElementById('statusGrid');
+    const comps = d.components||[];
+    const getStatus = (name)=>{const c=comps.find(x=>x.name===name);return c?c.status:'unknown'};
+    grid.innerHTML = `
+      <div class="status-item"><span class="status-dot ${getStatus('brain')}"></span>Brain</div>
+      <div class="status-item"><span class="status-dot ${getStatus('vllm')}"></span>vLLM</div>
+      <div class="status-item"><span class="status-dot ${getStatus('gemini')||'unknown'}"></span>Gemini</div>
+      <div class="status-item"><span class="status-dot ok"></span>API</div>`;
+  }).catch(()=>{});
+}
+
+/* ── Toast ─────────────────────────────────────────── */
+function showToast(text,type='success'){
+  const old = document.querySelector('.toast');if(old)old.remove();
+  const div = document.createElement('div');
+  div.className='toast '+type;
+  div.textContent=text;
+  document.body.appendChild(div);
+  setTimeout(()=>div.remove(),4000);
+}
+
+/* ── Helpers ───────────────────────────────────────── */
+function formatUptime(s){
+  if(s<60)return Math.floor(s)+'sn';
+  if(s<3600)return Math.floor(s/60)+'dk';
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);
+  return h+'sa '+m+'dk';
+}
+
+/* ── Init ──────────────────────────────────────────── */
+window.addEventListener('DOMContentLoaded',()=>{
+  connectWS();
+  loadHealth();
+  // Auto-refresh health every 30s
+  setInterval(loadHealth, 30000);
+  // Load initial data
+  fetch(API+'/api/v1/skills').then(r=>r.json()).then(d=>{document.getElementById('skillCount').textContent=d.count||0}).catch(()=>{});
+  fetch(API+'/api/v1/inbox').then(r=>r.json()).then(d=>{const b=document.getElementById('inboxBadge');if(d.unread>0){b.textContent=d.unread;b.style.display='inline'}}).catch(()=>{});
+  // Focus input
+  document.getElementById('chatInput').focus();
+});
+</script>
+</body>
+</html>

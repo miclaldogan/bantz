@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import os
 import threading
 from dataclasses import dataclass, field
@@ -23,13 +24,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Try to import cryptography, fall back to simple obfuscation
+# Issue #692: cryptography is mandatory — base64 is NOT encryption.
 try:
     from cryptography.fernet import Fernet, InvalidToken
-    HAS_FERNET = True
 except ImportError:
-    HAS_FERNET = False
-    InvalidToken = Exception
+    raise RuntimeError(
+        "The 'cryptography' package is required for the secrets vault. "
+        "Install it with: pip install cryptography"
+    )
+
+logger = logging.getLogger(__name__)
 
 
 class SecretType(Enum):
@@ -90,8 +94,9 @@ class SecretsVault:
     """
     Encrypted secrets vault.
     
-    Stores secrets with Fernet encryption.
-    Falls back to base64 obfuscation if cryptography not available.
+    Stores secrets with Fernet symmetric encryption.
+    Requires the ``cryptography`` package — will fail fast on import
+    if it is not installed.
     """
     
     def __init__(
@@ -118,24 +123,24 @@ class SecretsVault:
         
         self._key = encryption_key
         
-        # Initialize Fernet if available
-        if HAS_FERNET:
-            try:
-                # Ensure key is valid Fernet key (32 bytes, base64 encoded)
-                if len(encryption_key) == 32:
-                    fernet_key = base64.urlsafe_b64encode(encryption_key)
-                elif len(encryption_key) == 44:  # Already base64
-                    fernet_key = encryption_key
-                else:
-                    # Hash to 32 bytes
-                    fernet_key = base64.urlsafe_b64encode(
-                        hashlib.sha256(encryption_key).digest()
-                    )
-                self._fernet = Fernet(fernet_key)
-            except Exception:
-                self._fernet = None
-        else:
-            self._fernet = None
+        # Initialize Fernet (always available — cryptography is mandatory)
+        try:
+            # Ensure key is valid Fernet key (32 bytes, base64 encoded)
+            if len(encryption_key) == 32:
+                fernet_key = base64.urlsafe_b64encode(encryption_key)
+            elif len(encryption_key) == 44:  # Already base64
+                fernet_key = encryption_key
+            else:
+                # Hash to 32 bytes
+                fernet_key = base64.urlsafe_b64encode(
+                    hashlib.sha256(encryption_key).digest()
+                )
+            self._fernet = Fernet(fernet_key)
+        except Exception as e:
+            raise EncryptionError(
+                f"Failed to initialize Fernet encryption: {e}. "
+                f"Key length: {len(encryption_key)}"
+            )
         
         self._secrets: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()
@@ -150,8 +155,10 @@ class SecretsVault:
             try:
                 with open(key_path, "rb") as f:
                     return f.read()
-            except IOError:
-                pass
+            except IOError as e:
+                raise VaultError(
+                    f"Vault key file exists but cannot be read: {key_path} — {e}"
+                ) from e
         
         # Generate new key
         key = os.urandom(32)
@@ -161,8 +168,11 @@ class SecretsVault:
                 f.write(key)
             # Set restrictive permissions
             os.chmod(key_path, 0o600)
-        except IOError:
-            pass
+        except IOError as e:
+            raise VaultError(
+                f"Vault key could not be written to {key_path}: {e}. "
+                "Without a persisted key, secrets will be lost on restart."
+            ) from e
         
         return key
     
@@ -178,39 +188,32 @@ class SecretsVault:
     def _save(self) -> None:
         """Save secrets to storage."""
         try:
-            with open(self._storage_path, "w") as f:
+            fd = os.open(
+                str(self._storage_path),
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o600,
+            )
+            with os.fdopen(fd, "w") as f:
                 json.dump(self._secrets, f, indent=2)
-            # Set restrictive permissions
-            os.chmod(self._storage_path, 0o600)
-        except IOError:
-            pass
+        except IOError as e:
+            logger.error("Vault save failed: %s", e)
+            raise
     
     def _encrypt(self, value: str) -> str:
-        """Encrypt a value."""
-        if self._fernet:
-            try:
-                encrypted = self._fernet.encrypt(value.encode())
-                return encrypted.decode()
-            except Exception as e:
-                raise EncryptionError(f"Encryption failed: {e}")
-        
-        # Fallback: base64 obfuscation (not secure, but functional)
-        return base64.b64encode(value.encode()).decode()
+        """Encrypt a value using Fernet."""
+        try:
+            encrypted = self._fernet.encrypt(value.encode())
+            return encrypted.decode()
+        except Exception as e:
+            raise EncryptionError(f"Encryption failed: {e}")
     
     def _decrypt(self, encrypted: str) -> str:
-        """Decrypt a value."""
-        if self._fernet:
-            try:
-                decrypted = self._fernet.decrypt(encrypted.encode())
-                return decrypted.decode()
-            except InvalidToken:
-                raise DecryptionError("Invalid encryption key or corrupted data")
-            except Exception as e:
-                raise DecryptionError(f"Decryption failed: {e}")
-        
-        # Fallback: base64 decode
+        """Decrypt a value using Fernet."""
         try:
-            return base64.b64decode(encrypted.encode()).decode()
+            decrypted = self._fernet.decrypt(encrypted.encode())
+            return decrypted.decode()
+        except InvalidToken:
+            raise DecryptionError("Invalid encryption key or corrupted data")
         except Exception as e:
             raise DecryptionError(f"Decryption failed: {e}")
     

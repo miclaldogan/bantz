@@ -53,7 +53,7 @@ class ActionClassifier:
         "calculator": PermissionLevel.LOW,
         "translate": PermissionLevel.LOW,
         "define_word": PermissionLevel.LOW,
-        "read_clipboard": PermissionLevel.LOW,
+        "read_clipboard": PermissionLevel.MEDIUM,
         
         # MEDIUM - External access, first-time ask
         "send_email": PermissionLevel.MEDIUM,
@@ -133,7 +133,7 @@ class ActionClassifier:
         Classify an action into a permission level.
         
         Args:
-            action: Action to classify
+            action: Action to classify (string or Enum with .value)
             context: Optional context for elevation
             
         Returns:
@@ -141,21 +141,30 @@ class ActionClassifier:
         """
         context = context or {}
         
+        # Normalise: accept Enum members as well as plain strings
+        if hasattr(action, "value"):
+            action = action.value
+        
         # Get base level
         base_level = self._levels.get(action, self._default_level)
         
         # Check for elevation from context
-        level = self._check_elevation(action, base_level, context)
+        level, elevation_reason = self._check_elevation(action, base_level, context)
         
         # Determine flags
         is_destructive = self.is_destructive(action)
         is_external = self.is_external(action)
         
-        # Build reason
-        if action in self._levels:
-            reason = f"Mapped action: {action} → {level.value}"
-        else:
+        # Build reason — include elevation info when level was raised
+        if action not in self._levels:
             reason = f"Unknown action, using default: {self._default_level.value}"
+        elif elevation_reason:
+            reason = (
+                f"Mapped action: {action} → {base_level.value}, "
+                f"elevated to {level.value} ({elevation_reason})"
+            )
+        else:
+            reason = f"Mapped action: {action} → {level.value}"
         
         return ActionClassification(
             action=action,
@@ -170,46 +179,64 @@ class ActionClassifier:
         action: str,
         base_level: PermissionLevel,
         context: Dict[str, Any]
-    ) -> PermissionLevel:
+    ) -> tuple:
         """
         Check if context requires level elevation.
         
         Context can elevate but never lower the level.
+        
+        Returns:
+            (PermissionLevel, reason_str | None)
         """
         level = base_level
+        reasons: List[str] = []
         
         # Sensitive domain elevation
-        if context.get("domain") in ["banking", "medical", "legal"]:
+        domain = context.get("domain")
+        if domain in ["banking", "medical", "legal"]:
             if level < PermissionLevel.HIGH:
                 level = PermissionLevel.HIGH
+                reasons.append(f"sensitive domain: {domain}")
         
         # Large amount elevation
-        if context.get("amount", 0) > 1000:
+        amount = context.get("amount", 0)
+        if amount > 1000:
             if level < PermissionLevel.HIGH:
                 level = PermissionLevel.HIGH
+                reasons.append(f"high amount: {amount}")
         
         # Multiple targets elevation
-        if context.get("target_count", 1) > 10:
+        target_count = context.get("target_count", 1)
+        if target_count > 10:
             if level < PermissionLevel.MEDIUM:
                 level = PermissionLevel.MEDIUM
+                reasons.append(f"multiple targets: {target_count}")
         
         # Sensitive file elevation
         if context.get("is_sensitive_file", False):
             if level < PermissionLevel.HIGH:
                 level = PermissionLevel.HIGH
+                reasons.append("sensitive file")
         
-        return level
+        reason = ", ".join(reasons) if reasons else None
+        return level, reason
     
     def is_destructive(self, action: str) -> bool:
         """Check if action is destructive."""
+        if hasattr(action, "value"):
+            action = action.value
         return action in self.DESTRUCTIVE_ACTIONS
     
     def is_external(self, action: str) -> bool:
         """Check if action involves external access."""
+        if hasattr(action, "value"):
+            action = action.value
         return action in self.EXTERNAL_ACTIONS
     
     def get_level(self, action: str) -> PermissionLevel:
         """Get level for action (without context)."""
+        if hasattr(action, "value"):
+            action = action.value
         return self._levels.get(action, self._default_level)
     
     def add_action(self, action: str, level: PermissionLevel) -> None:

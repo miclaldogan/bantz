@@ -1345,8 +1345,11 @@ class TestEdgeCases:
         for _ in range(len(pattern)):
             segmenter.process(audio_chunk)
         
-        # Should not crash
-        assert True
+        # After rapid transitions the segmenter must reach a stable state
+        # (pattern ends with silence → should not be speaking)
+        assert segmenter.is_speaking is False
+        # segment_count may be 0 or more, but must be a valid non-negative int
+        assert segmenter.segment_count >= 0
     
     def test_listener_multiple_wake_words(self):
         from bantz.voice.continuous import ContinuousListener, ListenerState
