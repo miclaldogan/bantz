@@ -1409,15 +1409,43 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         # Check if keyword-based detection disagrees with model's route.
         # Issue #890/#891: Also catch misrouted gmail and system intents.
         _route_was_overridden = False
-        if route in ("system", "smalltalk", "unknown") and user_input:
+        if user_input:
             keyword_route = self._detect_route_from_input(user_input)
-            if keyword_route in ("calendar", "gmail", "system") and keyword_route != route:
-                logger.info(
-                    "[route_override] model=%s but keywords=%s for '%s'",
-                    route, keyword_route, user_input[:40],
-                )
-                route = keyword_route
-                _route_was_overridden = True
+            if keyword_route not in ("unknown",) and keyword_route != route:
+                # Always override system/smalltalk/unknown routes
+                if route in ("system", "smalltalk", "unknown"):
+                    logger.info(
+                        "[route_override] model=%s but keywords=%s for '%s'",
+                        route, keyword_route, user_input[:40],
+                    )
+                    route = keyword_route
+                    _route_was_overridden = True
+                else:
+                    # Cross-route misroute: override when keyword confidence
+                    # is significantly higher than the model route's score.
+                    text_lower = (user_input or "").lower()
+                    tokens = set(re.split(r"[^a-zçğıöşü]+", text_lower))
+                    kw_score = 0
+                    for kw in self._ROUTE_KEYWORDS.get(keyword_route, []):
+                        if " " in kw:
+                            kw_score += 1 if kw in text_lower else 0
+                        else:
+                            kw_score += 1 if kw in tokens else 0
+                    model_score = 0
+                    for kw in self._ROUTE_KEYWORDS.get(route, []):
+                        if " " in kw:
+                            model_score += 1 if kw in text_lower else 0
+                        else:
+                            model_score += 1 if kw in tokens else 0
+                    if kw_score >= 2 and model_score == 0:
+                        logger.info(
+                            "[route_override] cross-route: model=%s(score=%d) "
+                            "but keywords=%s(score=%d) for '%s'",
+                            route, model_score, keyword_route, kw_score,
+                            user_input[:40],
+                        )
+                        route = keyword_route
+                        _route_was_overridden = True
 
         # ── Issue #421: Post-repair intent validation ────────────────────
         raw_intent = str(normalized.get("calendar_intent") or "none").strip().lower()
