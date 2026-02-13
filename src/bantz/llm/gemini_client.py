@@ -139,7 +139,7 @@ class GeminiClient(LLMClient):
 
         url = f"{self._base_url}/v1beta/models"
         try:
-            r = requests.get(url, params={"key": self._api_key}, timeout=float(timeout_seconds))
+            r = requests.get(url, headers={"x-goog-api-key": self._api_key}, timeout=float(timeout_seconds))
             return r.status_code == 200
         except Exception:
             return False
@@ -230,8 +230,10 @@ class GeminiClient(LLMClient):
             try:
                 r = requests.post(
                     url,
-                    params={"key": self._api_key},
-                    headers={"Content-Type": "application/json"},
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": self._api_key,
+                    },
                     data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                     timeout=self._timeout_seconds,
                 )
@@ -534,8 +536,10 @@ class GeminiClient(LLMClient):
         try:
             r = requests.post(
                 url,
-                params={"key": self._api_key},
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": self._api_key,
+                },
                 data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                 timeout=self._timeout_seconds,
                 stream=True,
