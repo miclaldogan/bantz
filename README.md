@@ -115,15 +115,77 @@ export BANTZ_VLLM_MODEL="Qwen/Qwen2.5-3B-Instruct-AWQ"
 ### 4. Run
 
 ```bash
-# Single command
-bantz --once "yarın saat 3'te toplantı kur"
+# Health check — verify everything is wired up
+bantz doctor
 
 # Interactive daemon
 bantz --serve
 
+# Single command
+bantz --once "yarın saat 3'te toplantı kur"
+
 # Voice mode (push-to-talk)
 bantz --voice --piper-model /path/to/tr.onnx --asr-allow-download
 ```
+
+### 5. First-run Onboarding (optional)
+
+```bash
+# Interactive wizard — checks env, GPU, vLLM, Google OAuth, writes config
+bantz onboard
+```
+
+<details>
+<summary>🩺 Doctor output example</summary>
+
+```
+$ bantz doctor
+[✓] Python 3.10.12
+[✓] vLLM reachable at http://127.0.0.1:8001
+[✓] Model loaded: Qwen/Qwen2.5-3B-Instruct-AWQ
+[✓] GPU: NVIDIA RTX 4060 — 5.2 / 8.0 GB free
+[✓] Env file: ~/.config/bantz/env
+[✓] Google Calendar token valid
+[✓] Google Gmail token valid
+[✓] Disk: 42 GB free
+──────────────────────────────
+All 8 checks passed ✓
+```
+
+</details>
+
+<details>
+<summary>🎬 Demo: Calendar conversation</summary>
+
+```
+$ bantz --once "bugün neler var?"
+#1  09:00-09:30  Standup Meeting
+#2  14:00-15:00  Sprint Review
+#3  16:30-17:00  1-on-1 with Ahmet
+
+$ bantz --once "#2 saat 15:30'a kaydır"
+✅ 'Sprint Review' etkinliği 14:00 → 15:30 olarak güncellendi
+
+$ bantz --once "yarın sabah 10'da TÜBİTAK toplantısı kur"
+✅ 'TÜBİTAK toplantısı' etkinliği yarın 10:00 için oluşturuldu (60 dk)
+```
+
+</details>
+
+<details>
+<summary>📧 Demo: Gmail interaction</summary>
+
+```
+$ bantz --once "okunmamış maillerimi göster"
+#1  ali@example.com — Sprint notları ✉️
+#2  tubitak@gov.tr — Proje Onayı ✉️
+#3  hr@company.com — İzin talebi ✉️
+
+$ bantz --once "Ahmet'e toplantı hakkında mail yaz"
+✉️ E-posta gönderildi: ahmet@example.com — Toplantı hakkında
+```
+
+</details>
 
 <details>
 <summary>💡 Enable Gemini for quality writing (optional)</summary>
@@ -373,6 +435,12 @@ pip install -e ".[dev]"
 # Run all unit tests
 pytest tests/ -v
 
+# Golden path E2E tests (must pass before merge)
+pytest tests/ -v --run-golden-path
+
+# Regression tests (top 5 recurring bugs)
+pytest tests/ -v --run-regression
+
 # Run specific test categories
 pytest tests/test_json_repair_golden.py -v     # JSON repair golden tests
 pytest tests/test_tiered_*.py -v               # Tiered scoring tests
@@ -380,15 +448,14 @@ pytest tests/test_issue_520_banner.py -v       # Runtime banner tests
 
 # Integration tests (requires running vLLM)
 pytest tests/ -v --run-integration
-
-# Regression tests (requires benchmark results)
-pytest tests/ -v -m regression
 ```
 
 ### Test Coverage Highlights
 
 | Area | Tests | What's covered |
 |:-----|:------|:---------------|
+| Golden Path E2E | 14 tests | Calendar + Inbox end-to-end flows, failure modes |
+| Regression Suite | 10 tests | Turkish anaphora, context overflow, İ lowering, time slots, #N refs |
 | JSON Repair | 58 golden tests | Markdown fencing, truncated output, wrong types/enums, Turkish unicode |
 | Tiered Scoring | Complexity, writing, risk | Turkish query scoring with read/write disambiguation |
 | Orchestrator | Multi-turn, tool execution | Error recovery, context carry, fallback paths |
@@ -466,6 +533,7 @@ bantz/
 | [docs/acceptance-tests.md](docs/acceptance-tests.md) | Acceptance test plan and criteria |
 | [docs/acceptance-tests.md](docs/acceptance-tests.md) | Acceptance test criteria |
 | [docs/secrets-hygiene.md](docs/secrets-hygiene.md) | API key and secrets best practices |
+| [CHANGELOG.md](CHANGELOG.md) | Release notes and upgrade guide |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
 | [SECURITY.md](SECURITY.md) | Security policy |
 
