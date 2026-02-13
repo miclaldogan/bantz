@@ -277,10 +277,16 @@ def detect_language_issue(text: str) -> Optional[str]:
     if total_letters >= 10:
         # Issue #999: Skip confidence check for URLs and code-like strings
         # — these are technical content, not human language to translate.
+        # Issue #1176: Parenthesis check was too broad — normal Turkish
+        # text with parentheses (e.g. "Ali (kardeşim) geldi") would
+        # bypass the confidence check. Now requires actual code keywords.
         _url_or_code = (
             "://" in text
             or text.strip().startswith("http")
-            or "(" in text and ")" in text  # function call pattern
+            or (
+                "(" in text and ")" in text
+                and re.search(r"\b(?:def|class|import|return|print|function|const|var|let)\b", text)
+            )
         )
         if _url_or_code:
             return None
