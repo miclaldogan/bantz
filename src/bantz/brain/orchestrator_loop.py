@@ -13,6 +13,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, replace
@@ -52,6 +53,7 @@ from bantz.brain.plan_verifier import verify_plan
 from bantz.brain.tool_param_builder import build_tool_params
 from bantz.brain.misroute_integration import record_turn_misroute
 from bantz.brain.context_builder import ContextBuilder
+from bantz.brain.language_bridge import get_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +369,30 @@ class OrchestratorLoop:
         # use it as a fallback (e.g. gmail.query_from_nl text field).
         state.current_user_input = user_input
 
+        # Issue #1242: Language Bridge — Input Gate
+        # Translate TR user input to EN canonical for the router.
+        # Original TR text stays in state.current_user_input for finalization.
+        _bridge = get_bridge()
+        _bridge_input_on = (
+            _bridge is not None
+            and os.getenv("BANTZ_BRIDGE_INPUT_GATE", "1").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+        if _bridge_input_on:
+            _br = _bridge.to_en(user_input)
+            _router_input = _br.canonical
+            state.detected_lang = _br.detected_lang
+            state.canonical_input = _br.canonical
+            if _br.detected_lang == "tr" and _br.canonical != user_input:
+                logger.info(
+                    "[BRIDGE] Input Gate: lang=%s canonical=%r protected=%s",
+                    _br.detected_lang, _br.canonical, list(_br.protected_spans),
+                )
+        else:
+            _router_input = user_input
+            state.detected_lang = ""
+            state.canonical_input = ""
+
         start_time = time.time()
 
         # Issue #417: Build session context once per turn (cached with TTL)
@@ -496,7 +522,7 @@ class OrchestratorLoop:
                 )
             else:
                 # Phase 1: LLM Planning (route, intent, tools, confirmation)
-                orchestrator_output = self._llm_planning_phase(user_input, state)
+                orchestrator_output = self._llm_planning_phase(_router_input, state)
             
             # Issue #837: Self-Evolving Agent — detect skill gaps
             if (
@@ -648,10 +674,25 @@ class OrchestratorLoop:
         # use it as a fallback (e.g. gmail.query_from_nl text field).
         state.current_user_input = user_input
 
+        # Issue #1242: Language Bridge — Input Gate (run_full_cycle path)
+        _bridge = get_bridge()
+        _bridge_input_on = (
+            _bridge is not None
+            and os.getenv("BANTZ_BRIDGE_INPUT_GATE", "1").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+        if _bridge_input_on:
+            _br = _bridge.to_en(user_input)
+            _router_input = _br.canonical
+            state.detected_lang = _br.detected_lang
+            state.canonical_input = _br.canonical
+        else:
+            _router_input = user_input
+
         start_time = time.time()
 
         # Phase 1: plan
-        orchestrator_output = self._llm_planning_phase(user_input, state)
+        orchestrator_output = self._llm_planning_phase(_router_input, state)
 
         # Issue #407: Full preroute bypass → skip tools + finalization
         if orchestrator_output.raw_output.get("preroute_complete"):

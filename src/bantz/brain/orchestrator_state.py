@@ -67,6 +67,10 @@ class OrchestratorState:
 
     # Issue #1218: Store last listed gmail message headers for entity resolution
     gmail_listed_messages: list[dict[str, str]] = field(default_factory=list)
+
+    # Issue #1242: Language Bridge — detected language and canonical EN input
+    detected_lang: str = ""
+    canonical_input: str = ""
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue).
@@ -240,3 +244,5 @@ class OrchestratorState:
         self.gmail_next_page_token = ""
         self.gmail_last_query = ""
         self.gmail_listed_messages = []
+        self.detected_lang = ""
+        self.canonical_input = ""
