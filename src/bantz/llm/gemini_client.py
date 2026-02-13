@@ -627,7 +627,8 @@ class GeminiClient(LLMClient):
 
             # Record success
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
-            self._record_success(0)  # Token count not easily available in stream
+            estimated_tokens = max(len(total_text) // 4, 1) if total_text else 0
+            self._record_success(estimated_tokens)
 
             if _metrics_enabled():
                 metrics_logger.info(
