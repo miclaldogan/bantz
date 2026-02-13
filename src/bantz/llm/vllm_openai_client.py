@@ -462,24 +462,6 @@ class VLLMOpenAIClient(LLMClient):
             )
             
             for chunk_data in stream:
-                # First token timing
-                if not ttft_measured:
-                    ttft_ms = int((time.perf_counter() - t0) * 1000)
-                    ttft_measured = True
-                    
-                    # Track TTFT
-                    if self.track_ttft:
-                        try:
-                            from bantz.llm.ttft_monitor import record_ttft
-                            record_ttft(
-                                ttft_ms=ttft_ms,
-                                phase=self.ttft_phase,
-                                model=self.model_name,
-                                backend=self.backend_name,
-                            )
-                        except Exception as e:
-                            logger.debug(f"TTFT tracking failed: {e}")
-
                 # Issue #1013: Try to extract usage from final chunk (vLLM sends
                 # usage stats in the last streaming chunk when available)
                 if hasattr(chunk_data, "usage") and chunk_data.usage:
@@ -500,6 +482,24 @@ class VLLMOpenAIClient(LLMClient):
                 if content:
                     chunk_count += 1
                     total_content_chars += len(content)
+
+                    # Issue #1101: Measure TTFT on first real content chunk,
+                    # not on metadata/empty chunks that vLLM sends first.
+                    if not ttft_measured:
+                        ttft_ms = int((time.perf_counter() - t0) * 1000)
+                        ttft_measured = True
+
+                        if self.track_ttft:
+                            try:
+                                from bantz.llm.ttft_monitor import record_ttft
+                                record_ttft(
+                                    ttft_ms=ttft_ms,
+                                    phase=self.ttft_phase,
+                                    model=self.model_name,
+                                    backend=self.backend_name,
+                                )
+                            except Exception as e:
+                                logger.debug(f"TTFT tracking failed: {e}")
                     
                     yield StreamChunk(
                         content=content,
