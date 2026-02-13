@@ -1121,6 +1121,37 @@ class OrchestratorLoop:
             if hard:
                 output = replace(output, ask_user=True, question="Anlayamadım, tekrar eder misin?")
 
+        # Issue #1214: Keyword-based route recovery when LLM routes to
+        # smalltalk/unknown with no tool_plan but input has tool indicators.
+        if (
+            output.route in ("smalltalk", "unknown")
+            and not output.tool_plan
+            and not output.raw_output.get("preroute_complete")
+        ):
+            kw_route = self.orchestrator._detect_route_from_input(user_input)
+            if kw_route not in ("smalltalk", "unknown"):
+                resolved_tool = self.orchestrator._resolve_tool_from_intent(
+                    kw_route, "none", "none",
+                )
+                if resolved_tool:
+                    logger.info(
+                        "[Issue #1214] Recovering misrouted %s→%s tool=%s for '%.40s'",
+                        output.route, kw_route, resolved_tool, user_input,
+                    )
+                    output = replace(
+                        output,
+                        route=kw_route,
+                        tool_plan=[resolved_tool],
+                        confidence=max(output.confidence, 0.5),
+                        assistant_reply="",
+                        raw_output={
+                            **output.raw_output,
+                            "misroute_recovery": True,
+                            "original_route": output.route,
+                            "recovered_route": kw_route,
+                        },
+                    )
+
         return output
 
     # Issue #941: Static email helpers and _post_route_correction_email_send

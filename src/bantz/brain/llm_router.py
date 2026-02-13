@@ -1293,6 +1293,8 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
             "mail", "e-posta", "eposta", "mesaj", "gönder",
             "oku", "inbox", "gelen kutusu", "draft", "taslak",
             "yaz", "cevapla", "reply",
+            # Issue #1214: Additional gmail-context keywords
+            "güncelleme", "içerik", "bildirim", "notification",
         ],
         "system": [
             "saat kaç", "tarih", "gün ne", "pil", "batarya",
