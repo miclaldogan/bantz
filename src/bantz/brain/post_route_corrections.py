@@ -85,8 +85,11 @@ def extract_subject_hint(text: str) -> str | None:
     """
     t = (text or "").strip()
     # "toplantı hakkında mail gönder" → subject = "toplantı"
+    # Issue #1177: Use lazy match (.{2,60}?) so the pattern captures the
+    # shortest possible subject, avoiding eating the recipient name.
+    # Also anchor with \b to avoid mid-word matches.
     m = re.search(
-        r"\b(.{2,60})\s+(?:hakkında|konulu|ile\s+ilgili|konusunda)\s+(?:bir\s+)?(?:mail|e-?posta)\b",
+        r"\b(.{2,60}?)\s+(?:hakkında|konulu|ile\s+ilgili|konusunda)\s+(?:bir\s+)?(?:mail|e-?posta)\b",
         t,
         flags=re.IGNORECASE,
     )
