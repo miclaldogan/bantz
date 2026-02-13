@@ -72,7 +72,12 @@ _TURKISH_MARKERS = re.compile(
     r"tamam|efendim|oldu|yapıldı|açıyorum|kapatıyorum|"
     r"oluşturdum|arama|sonuçları|hatırlatma|"
     r"merhaba|günaydın|iyi|nasıl|ne|nerede|ama|veya|"
-    r"şey|çok|biraz|sonra|önce|şimdi)\b",
+    r"şey|çok|biraz|sonra|önce|şimdi|"
+    r"oluyor|ediyor|ediyorum|yapıyor|yapıyorum|bakıyorum|"
+    r"gidiyor|geliyor|diyor|olacak|saat|saatte|gün|bugün|"
+    r"yarın|dakika|bekliyorum|anlıyorum|biliyorum|istiyorum|"
+    r"gönderiyorum|alıyorum|görüyorum|söylüyorum|diyorum|"
+    r"kontrol|planımız|etkinlik|takvim|mail|posta|dostum)\b",
     re.IGNORECASE,
 )
 
