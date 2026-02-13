@@ -1014,7 +1014,12 @@ def _extract_reason_code(err: Exception) -> str:
 def _check_hard_failures(
     tool_results: list[dict[str, Any]],
 ) -> Optional[str]:
-    """If any tools hard-failed, return a deterministic error message."""
+    """If ALL tools hard-failed, return a deterministic error message.
+
+    Issue #1172: Only early-exit when every tool failed. Partial failures
+    (some succeeded, some failed) should be handled by the finalizer so
+    it can report both the successes and the errors to the user.
+    """
     if not tool_results:
         return None
 
@@ -1026,7 +1031,13 @@ def _check_hard_failures(
     if not hard_failures:
         return None
 
-    error_msg = "Üzgünüm efendim, bazı işlemler başarısız oldu:\n"
+    # Issue #1172: If some tools succeeded, let the finalizer handle the
+    # mixed result — don't early-exit with an error-only message.
+    successes = [r for r in tool_results if r.get("success", False)]
+    if successes:
+        return None
+
+    error_msg = "Üzgünüm efendim, işlemler başarısız oldu:\n"
     for result in hard_failures:
         tool_name = str(result.get("tool") or "")
         err = str(result.get("error") or "Unknown error")
