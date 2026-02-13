@@ -174,9 +174,8 @@ class PromptBuilder:
         # Optional blocks (ordered by usefulness; trim later if needed).
         blocks: list[tuple[str, str]] = []
 
-        # Issue #874: Inject personality block as first content block
-        if personality_block:
-            blocks.append(("PERSONALITY", personality_block))
+        # Issue #1059: Personality is already in the system prompt via
+        # _build_system_prompt — do NOT add it again as a content block.
 
         if session_context:
             blocks.append(("SESSION_CONTEXT", _json_dumps_compact(session_context, max_chars=self._limits.session_context)))
@@ -297,23 +296,36 @@ class PromptBuilder:
         if estimate_tokens(render()) <= self._token_budget:
             return render()
 
-        # 5) Drop RECENT_TURNS entirely — less important than date/time
+        # 5) Issue #1059: Trim personality block if present (less critical than tool data)
+        for i, (name, content) in enumerate(b):
+            if name == "PERSONALITY":
+                b[i] = (name, _truncate(content, max_chars=400))
+
+        if estimate_tokens(render()) <= self._token_budget:
+            return render()
+
+        # 6) Drop PERSONALITY entirely — tool results matter more
+        b = [(n, c) for (n, c) in b if n != "PERSONALITY"]
+        if estimate_tokens(render()) <= self._token_budget:
+            return render()
+
+        # 7) Drop RECENT_TURNS entirely — less important than date/time
         b = [(n, c) for (n, c) in b if n != "RECENT_TURNS"]
         if estimate_tokens(render()) <= self._token_budget:
             return render()
 
-        # 6) Drop DIALOG_SUMMARY — still less critical than SESSION_CONTEXT
+        # 8) Drop DIALOG_SUMMARY — still less critical than SESSION_CONTEXT
         b = [(n, c) for (n, c) in b if n != "DIALOG_SUMMARY"]
         if estimate_tokens(render()) <= self._token_budget:
             return render()
 
-        # 7) Drop SESSION_CONTEXT last — contains current_datetime which is
+        # 9) Drop SESSION_CONTEXT last — contains current_datetime which is
         # critical for calendar/scheduling accuracy (Issue #1007)
         b = [(n, c) for (n, c) in b if n != "SESSION_CONTEXT"]
         if estimate_tokens(render()) <= self._token_budget:
             return render()
 
-        # 6) Last resort: truncate user input
+        # 10) Last resort: truncate user input
         truncated_user = _truncate(user_input, max_chars=self._limits.user_input_trim)
         return self._assemble(system=system, template=template, blocks=b, user_input=truncated_user)
 
