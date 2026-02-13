@@ -275,6 +275,10 @@ class OrchestratorOutput:
     raw_output: dict[str, Any] = field(default_factory=dict)  # Full LLM response for debugging
     finalizer_model: str = ""  # Issue #517: which model generated assistant_reply
 
+    # Issue #1273: ReAct loop — status field for multi-step planning
+    # "done" = single-shot (default), "needs_more_info" = continue after tool execution
+    status: str = "done"
+
     @property
     def intent(self) -> str:
         """Generic intent accessor across all routes.
@@ -405,7 +409,12 @@ class JarvisLLMOrchestrator:
     _SYSTEM_PROMPT_CORE = """Sen BANTZ'sın. SADECE TÜRKÇE konuş, 'Efendim' hitabı kullan.
 
 OUTPUT (tek JSON, Markdown/açıklama YOK):
-{"route":"<calendar|gmail|system|smalltalk|unknown>","calendar_intent":"<create|modify|cancel|query|none>","gmail_intent":"<list|search|read|send|none>","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dakika|null","title":"ad|null","window_hint":"today/tomorrow/evening/morning/week|null"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["tool_adı"],"ask_user":false,"question":"","requires_confirmation":false}
+{"route":"<calendar|gmail|system|smalltalk|unknown>","calendar_intent":"<create|modify|cancel|query|none>","gmail_intent":"<list|search|read|send|none>","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dakika|null","title":"ad|null","window_hint":"today/tomorrow/evening/morning/week|null"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["tool_adı"],"status":"done","ask_user":false,"question":"","requires_confirmation":false}
+
+status KURALLARI:
+- "done" → tek araç yeter, doğrudan çalıştır (varsayılan).
+- "needs_more_info" → araç çalıştıktan sonra sonucu gör, yeni plan yap (çok-adımlı görev).
+Çoğu istek tek araçla biter → status="done" kullan. Sadece birden fazla araç sırayla gerekliyse "needs_more_info" kullan.
 
 Slot değerlerini kullanıcının söylediğine göre doldur, söylemediğini null yap.
 NOT: memory_update ve reasoning_summary finalization'da doldurulur — burada gerekli DEĞİL.
@@ -436,12 +445,12 @@ SAAT: beşe→17:00, sabah beşte→05:00, akşam altıda→18:00, öğlen→12:
     # ── EXAMPLES BLOCK (~200 tokens) ─── stripped first ─────────────────
     _SYSTEM_PROMPT_EXAMPLES = """
 ÖRNEKLER:
-U: nasılsın → {"route":"smalltalk","confidence":1.0,"tool_plan":[],"assistant_reply":"İyiyim efendim, size nasıl yardımcı olabilirim?"}
-U: bugün neler var → {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.list_events"],"assistant_reply":""}
-U: beşe toplantı koy → {"route":"calendar","calendar_intent":"create","slots":{"time":"17:00","title":"toplantı"},"confidence":0.9,"tool_plan":["calendar.create_event"],"requires_confirmation":true,"assistant_reply":""}
-U: saat kaç → {"route":"system","confidence":0.95,"tool_plan":["time.now"],"assistant_reply":""}
-U: yıldızlı maillerim → {"route":"gmail","gmail_intent":"search","gmail":{"natural_query":"yıldızlı"},"confidence":0.95,"tool_plan":["gmail.smart_search"],"assistant_reply":""}
-U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","gmail":{"to":"test@gmail.com","body":"Merhaba"},"confidence":0.9,"tool_plan":["gmail.send"],"requires_confirmation":true,"assistant_reply":""}"""
+U: nasılsın → {"route":"smalltalk","confidence":1.0,"tool_plan":[],"status":"done","assistant_reply":"İyiyim efendim, size nasıl yardımcı olabilirim?"}
+U: bugün neler var → {"route":"calendar","calendar_intent":"query","slots":{"window_hint":"today"},"confidence":0.9,"tool_plan":["calendar.list_events"],"status":"done","assistant_reply":""}
+U: beşe toplantı koy → {"route":"calendar","calendar_intent":"create","slots":{"time":"17:00","title":"toplantı"},"confidence":0.9,"tool_plan":["calendar.create_event"],"status":"done","requires_confirmation":true,"assistant_reply":""}
+U: saat kaç → {"route":"system","confidence":0.95,"tool_plan":["time.now"],"status":"done","assistant_reply":""}
+U: yıldızlı maillerim → {"route":"gmail","gmail_intent":"search","gmail":{"natural_query":"yıldızlı"},"confidence":0.95,"tool_plan":["gmail.smart_search"],"status":"done","assistant_reply":""}
+U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","gmail":{"to":"test@gmail.com","body":"Merhaba"},"confidence":0.9,"tool_plan":["gmail.send"],"status":"done","requires_confirmation":true,"assistant_reply":""}"""
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
@@ -656,6 +665,111 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
     def is_healthy(self) -> bool:
         """Public read-only property for router health status (Issue #372)."""
         return self._router_healthy
+
+    # ------------------------------------------------------------------
+    # Issue #1273: ReAct re-planning — observe tool results, plan next step
+    # ------------------------------------------------------------------
+    def react_replan(
+        self,
+        *,
+        user_input: str,
+        previous_output: "OrchestratorOutput",
+        observations: list[dict[str, Any]],
+        session_context: Optional[dict[str, Any]] = None,
+        iteration: int = 1,
+    ) -> "OrchestratorOutput":
+        """Re-plan after observing tool results (ReAct: Observe → Think → Act).
+
+        Builds a compact prompt containing the original request, previous plan,
+        tool observations, and asks the LLM to produce the next action or
+        signal ``status="done"`` to finalize.
+
+        Args:
+            user_input: Original user request (EN canonical).
+            previous_output: The OrchestratorOutput from the previous iteration.
+            observations: List of tool observation dicts from executed tools.
+            session_context: Optional session context for the LLM.
+            iteration: Current ReAct iteration number (1-indexed).
+
+        Returns:
+            New OrchestratorOutput for the next action.
+        """
+        # Build observation block
+        obs_lines: list[str] = []
+        for obs in observations:
+            tool = obs.get("tool", "?")
+            success = "✓" if obs.get("success", False) else "✗"
+            summary = obs.get("result_summary", "")[:300]
+            obs_lines.append(f"  {success} {tool}: {summary}")
+        obs_block = "\n".join(obs_lines)
+
+        # Compact re-plan prompt
+        from datetime import datetime as _dt
+        _now = _dt.now().astimezone()
+        _TR_DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        _day_name = _TR_DAYS[_now.weekday()]
+        _date_line = f"BUGÜN: {_now.strftime('%Y-%m-%d')} {_day_name}, saat {_now.strftime('%H:%M')}."
+
+        # Use system prompt core (tools list needed for valid tool_plan)
+        system_part = self._system_prompt.split("ÖRNEKLER:")[0].rstrip() if "ÖRNEKLER:" in self._system_prompt else self._system_prompt
+
+        replan_prompt = f"""{_date_line}
+
+{system_part}
+
+ÖNCEKİ PLAN (iterasyon {iteration - 1}):
+route={previous_output.route}, tool_plan={previous_output.tool_plan}
+
+ARAÇ SONUÇLARI:
+{obs_block}
+
+Yukarıdaki araç sonuçlarına göre karar ver:
+- Hedef tamamlandıysa veya tek araç yeterliyse → status="done", tool_plan=[]
+- Ek araç gerekiyorsa → status="needs_more_info", tool_plan=["sonraki_araç"]
+
+USER: {user_input}
+ASSISTANT (sadece JSON):"""
+
+        # Estimate tokens and call LLM with reasonable limits
+        prompt_tokens = _estimate_tokens(replan_prompt)
+        context_len = self._get_model_context_length()
+        max_tokens = max(64, min(512, context_len - prompt_tokens - 50))
+
+        _stop_tokens = ["\nUSER:", "\n\nUSER:", "\nÖRNEK", "\n---"]
+
+        try:
+            raw_text = self._llm.complete_text(
+                prompt=replan_prompt,
+                temperature=0.0,
+                max_tokens=max_tokens,
+                stop=_stop_tokens,
+            )
+        except TypeError:
+            raw_text = self._llm.complete_text(prompt=replan_prompt)
+        except Exception as e:
+            logger.warning("[react_replan] LLM call failed: %s — defaulting to done", e)
+            from dataclasses import replace
+            return replace(previous_output, status="done", tool_plan=[])
+
+        # Parse and extract
+        try:
+            parsed, was_repaired = self._parse_json(raw_text)
+        except Exception:
+            logger.warning("[react_replan] JSON parse failed — defaulting to done")
+            from dataclasses import replace
+            return replace(previous_output, status="done", tool_plan=[])
+
+        if parsed is None:
+            from dataclasses import replace
+            return replace(previous_output, status="done", tool_plan=[])
+
+        result = self._extract_output(parsed, raw_text=raw_text, user_input=user_input, repaired=was_repaired)
+
+        logger.info(
+            "[react_replan] iteration=%d → route=%s tools=%s status=%s conf=%.2f",
+            iteration, result.route, result.tool_plan, result.status, result.confidence,
+        )
+        return result
 
     def route(
         self,
@@ -1929,6 +2043,11 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
             except ImportError:
                 pass  # graceful degradation
 
+        # Issue #1273: Extract ReAct status field
+        _react_status = str(parsed.get("status") or "done").strip().lower()
+        if _react_status not in ("done", "needs_more_info"):
+            _react_status = "done"
+
         return OrchestratorOutput(
             route=route,
             calendar_intent=calendar_intent,
@@ -1946,6 +2065,7 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
             memory_update=memory_update,
             reasoning_summary=reasoning_summary,
             raw_output=parsed,
+            status=_react_status,
         )
 
     def _fallback_output(self, user_input: str, error: str) -> OrchestratorOutput:
