@@ -68,6 +68,9 @@ class OrchestratorState:
     # Issue #1218: Store last listed gmail message headers for entity resolution
     gmail_listed_messages: list[dict[str, str]] = field(default_factory=list)
 
+    # Issue #1224: Store last listed calendar events for #N follow-up resolution
+    calendar_listed_events: list[dict[str, Any]] = field(default_factory=list)
+
     # Issue #1242: Language Bridge — detected language and canonical EN input
     detected_lang: str = ""
     canonical_input: str = ""
@@ -244,5 +247,6 @@ class OrchestratorState:
         self.gmail_next_page_token = ""
         self.gmail_last_query = ""
         self.gmail_listed_messages = []
+        self.calendar_listed_events = []
         self.detected_lang = ""
         self.canonical_input = ""

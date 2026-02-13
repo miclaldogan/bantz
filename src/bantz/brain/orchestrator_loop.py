@@ -316,6 +316,7 @@ class OrchestratorLoop:
             ("calendar", "create"): ["calendar.create_event"],
             ("calendar", "modify"): ["calendar.update_event"],
             ("calendar", "cancel"): ["calendar.delete_event"],
+            ("calendar", "free_slots"): ["calendar.find_free_slots"],
             # System routes
             ("system", "time"): ["time.now"],
             ("system", "status"): ["system.status"],
@@ -627,6 +628,12 @@ class OrchestratorLoop:
                     )
                 except Exception as _trl_exc:
                     logger.debug("[Issue #1221] Tool result limiter failed: %s", _trl_exc)
+
+                # Issue #1224: Persist calendar events for #N follow-up
+                try:
+                    self._save_calendar_context(tool_results, state)
+                except Exception as _cc_exc:
+                    logger.debug("[Issue #1224] Calendar context save failed: %s", _cc_exc)
 
                 # Phase 3: LLM Finalization (generate final response with tool results)
                 final_output = self._llm_finalization_phase(
@@ -1252,6 +1259,43 @@ class OrchestratorLoop:
                     },
                 )
         
+        # Issue #1224: Calendar #N reference resolution — when user says
+        # "#2 toplantısını sil" and we previously listed events, resolve
+        # the event ref index to the actual event_id.
+        if (
+            state.calendar_listed_events
+            and output.route == "calendar"
+            and output.calendar_intent in ("cancel", "modify", "query")
+        ):
+            try:
+                from bantz.brain.calendar_intent import parse_hash_ref_index
+                _ref_idx = parse_hash_ref_index(user_input)
+                if _ref_idx is not None and 1 <= _ref_idx <= len(state.calendar_listed_events):
+                    _ref_event = state.calendar_listed_events[_ref_idx - 1]
+                    _ref_event_id = _ref_event.get("id") or _ref_event.get("event_id")
+                    if _ref_event_id:
+                        logger.info(
+                            "[Issue #1224] Resolved calendar #%d → event_id=%s",
+                            _ref_idx, _ref_event_id,
+                        )
+                        _new_slots = {**(output.slots or {}), "event_id": _ref_event_id}
+                        # For modify/cancel, also carry over title for confirmation prompt
+                        _ref_title = _ref_event.get("summary") or _ref_event.get("title") or ""
+                        if _ref_title:
+                            _new_slots.setdefault("title", _ref_title)
+                        output = replace(
+                            output,
+                            slots=_new_slots,
+                            raw_output={
+                                **output.raw_output,
+                                "calendar_ref_resolved": True,
+                                "resolved_ref_index": _ref_idx,
+                                "resolved_event_id": _ref_event_id,
+                            },
+                        )
+            except Exception as _ref_exc:
+                logger.debug("[Issue #1224] Calendar ref resolution failed: %s", _ref_exc)
+
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Decision:")
             logger.debug(f"  Route: {output.route}")
@@ -2015,6 +2059,42 @@ class OrchestratorLoop:
                             )
 
         return finalized
+
+    # ------------------------------------------------------------------
+    # Issue #1224: Calendar context persistence for follow-up resolution
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _save_calendar_context(
+        tool_results: list[dict[str, Any]],
+        state: OrchestratorState,
+    ) -> None:
+        """Persist calendar.list_events results in state for #N follow-up.
+
+        Each event is stored as ``{id, summary, start, end}`` so that
+        subsequent turns referencing ``#2`` can resolve to the real event_id.
+        """
+        for tr in tool_results:
+            if tr.get("tool") != "calendar.list_events":
+                continue
+            if not tr.get("success"):
+                continue
+            raw = tr.get("raw_result")
+            if not isinstance(raw, dict):
+                continue
+            events = raw.get("events")
+            if not isinstance(events, list):
+                continue
+            # Store compact event refs (id + summary + start/end for display)
+            state.calendar_listed_events = [
+                {
+                    "id": ev.get("id") or ev.get("event_id") or "",
+                    "summary": ev.get("summary") or ev.get("title") or "",
+                    "start": ev.get("start") or "",
+                    "end": ev.get("end") or "",
+                }
+                for ev in events
+                if isinstance(ev, dict)
+            ]
     
     def _update_state_phase(
         self,
