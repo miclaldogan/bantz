@@ -56,6 +56,10 @@ class OrchestratorState:
 
     # Issue #875: Pending disambiguation request
     disambiguation_pending: Optional[DisambiguationRequest] = field(default=None)
+
+    # Issue #1212: Follow-up context — track last successful tool for anaphora
+    last_tool_called: str = ""
+    last_tool_route: str = ""
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue).
@@ -224,3 +228,5 @@ class OrchestratorState:
         self.session_context = None
         self.reference_table = None
         self.disambiguation_pending = None
+        self.last_tool_called = ""
+        self.last_tool_route = ""

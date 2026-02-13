@@ -1342,6 +1342,27 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
             return max(scores, key=scores.get)  # type: ignore[arg-type]
         return "unknown"
 
+    # Issue #1212: Anaphoric follow-up detection for Turkish
+    _ANAPHORA_TOKENS: frozenset[str] = frozenset({
+        "onlar", "bunlar", "şunlar", "bunları", "onları", "şunları",
+        "nelermiş", "neymiş", "neydi", "hangisi", "hangileri",
+        "özetle", "detay", "ayrıntı", "devam", "devamı",
+        "tekrarla", "göster", "oku", "anlat",
+    })
+
+    def _is_anaphoric_followup(self, user_input: str) -> bool:
+        """Detect if user input is an anaphoric follow-up (e.g. 'nelermiş onlar').
+
+        Issue #1212: Short inputs with demonstrative pronouns or continuation
+        words indicate the user is referring to previous tool results.
+        """
+        text = (user_input or "").strip().lower()
+        tokens = set(re.split(r"[^a-zçğıöşü]+", text))
+        # Must be a short utterance (≤6 words) with at least one anaphora token
+        if len(tokens) > 6:
+            return False
+        return bool(tokens & self._ANAPHORA_TOKENS)
+
     # ── Issue #LLM-quality: Deterministic tool resolution from route+intent ──
     _TOOL_LOOKUP: dict[tuple[str, str], str] = {
         ("calendar", "create"): "calendar.create_event",
