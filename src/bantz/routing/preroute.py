@@ -529,7 +529,17 @@ class CalendarListRule(PatternRule):
             time_slot = _extract_time(text)
             if time_slot is not None:
                 extracted["date"] = time_slot.value.strftime("%Y-%m-%d")
-                if not time_slot.is_relative or time_slot.value.hour != 0:
+                # Issue #1181: The old check (hour != 0) excluded explicit
+                # midnight ("gece 12", "00:00"). Now we check whether the
+                # user's text contains an explicit time reference — if it
+                # does, we always extract the time, even at midnight.
+                _has_explicit_time = bool(re.search(
+                    r"\bsaat\b|\d{1,2}[:.]\d{2}|\d{1,2}[''`](?:de|da|te|ta)\b"
+                    r"|gece\s*(?:12|yarısı|on\s*iki)",
+                    text,
+                    re.IGNORECASE,
+                ))
+                if not time_slot.is_relative or _has_explicit_time or time_slot.value.hour != 0:
                     extracted["time"] = time_slot.value.strftime("%H:%M")
         except Exception:
             pass
