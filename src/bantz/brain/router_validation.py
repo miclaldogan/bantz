@@ -47,7 +47,7 @@ __all__ = [
 
 VALID_ROUTES: Set[str] = {"calendar", "gmail", "smalltalk", "system", "wiki", "chat", "unknown"}
 VALID_CALENDAR_INTENTS: Set[str] = {"create", "modify", "cancel", "delete", "query", "none"}
-VALID_GMAIL_INTENTS: Set[str] = {"list", "search", "read", "send", "reply", "forward", "delete", "mark_read", "none"}
+VALID_GMAIL_INTENTS: Set[str] = {"list", "search", "read", "send", "reply", "forward", "delete", "mark_read", "draft", "none"}
 
 REQUIRED_FIELDS: List[str] = [
     "route",
