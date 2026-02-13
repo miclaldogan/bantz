@@ -66,6 +66,19 @@ def extract_recipient_name(text: str) -> str | None:
     if m:
         return m.group(1).strip() or None
 
+    # Pattern 2b: Name (consonant-ending, ≥3 chars) + bare dative (e/a) + mail
+    # Issue #1180: "Ahmete mail gönder", "Mehmete bir mail at"
+    # Consonant-ending names take bare -e/-a without buffer-y.
+    # Require ≥3 chars before the suffix to reduce false positives.
+    _CONSONANTS = "bcçdfgğhjklmnprsştvyzBCÇDFGĞHJKLMNPRSŞTVYZ"
+    m = re.search(
+        rf"\b([A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]{{2,}}[{_CONSONANTS}])[eEaA]\s+{_MAIL}",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip() or None
+
     # Pattern 3: mail keyword + name ("mail gönder Ahmet'e")
     m = re.search(
         rf"\b(?:mail|e-?posta)\b.*?\b({_NAME})\s*'?\s*[yY]?[eEaA]\b",
