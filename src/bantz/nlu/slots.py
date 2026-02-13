@@ -185,15 +185,36 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
         r"\bhaftaya\b": 7,
     }
     
+    # Turkish number word pattern for hour extraction
+    _TR_NUM_WORDS = '|'.join(sorted(
+        [k for k, v in TURKISH_NUMBERS.items() if isinstance(v, int) and 0 < v <= 23],
+        key=len, reverse=True,
+    ))
+
     for pattern, offset in day_offsets.items():
         if re.search(pattern, text_lower):
             target_time = base_time + timedelta(days=offset)
             
-            # Check for time specification
-            time_match = re.search(r"saat\s*(\d{1,2})(?:[:.:](\d{2}))?", text_lower)
+            # Check for time specification (digits or Turkish number words)
+            # Suffix pattern handles dative (-e/-a/-ye/-ya) and locative (-de/-da/-te/-ta)
+            time_match = re.search(
+                rf"saat\s*(?:(\d{{1,2}})(?:[:.:](\d{{2}}))?|({_TR_NUM_WORDS}))(?:[ydt]?[eaEA])?\b",
+                text_lower,
+            )
             if time_match:
-                hour = int(time_match.group(1))
-                minute = int(time_match.group(2) or 0)
+                if time_match.group(1):
+                    hour = int(time_match.group(1))
+                    minute = int(time_match.group(2) or 0)
+                elif time_match.group(3):
+                    hour = int(_parse_turkish_number(time_match.group(3)))
+                    minute = 0
+                else:
+                    hour = 0
+                    minute = 0
+                # PM heuristic: if hour 1-6 and current time is past noon,
+                # assume afternoon.
+                if 1 <= hour <= 6 and base_time.hour >= 12:
+                    hour += 12
                 target_time = target_time.replace(hour=hour, minute=minute, second=0)
             
             raw = re.search(pattern, text_lower)
@@ -219,6 +240,10 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
             
             # Validate hour
             if 0 <= hour <= 23 and 0 <= minute <= 59:
+                # PM heuristic: if hour 1-6 and current time is past noon,
+                # assume afternoon.
+                if 1 <= hour <= 6 and base_time.hour >= 12:
+                    hour += 12
                 target_time = base_time.replace(hour=hour, minute=minute, second=0)
                 
                 # If time has passed today, assume tomorrow
@@ -231,7 +256,32 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
                     is_relative=False,
                     confidence=0.85,
                 )
-    
+
+    # Pattern 4: "saat dört", "saat ikiye" — Turkish number words as time
+    _tr_num_re = '|'.join(sorted(
+        [k for k, v in TURKISH_NUMBERS.items() if isinstance(v, int) and 0 < v <= 23],
+        key=len, reverse=True,
+    ))
+    # Suffix pattern: dative -e/-a/-ye/-ya, locative -de/-da/-te/-ta
+    tr_time_match = re.search(
+        rf"saat\s*({_tr_num_re})(?:[ydt]?[eaEA])?\b",
+        text_lower,
+    )
+    if tr_time_match:
+        hour = int(_parse_turkish_number(tr_time_match.group(1)))
+        if 1 <= hour <= 6 and base_time.hour >= 12:
+            hour += 12
+        if 0 <= hour <= 23:
+            target_time = base_time.replace(hour=hour, minute=0, second=0)
+            if target_time < base_time:
+                target_time += timedelta(days=1)
+            return TimeSlot(
+                value=target_time,
+                raw_text=tr_time_match.group(0),
+                is_relative=False,
+                confidence=0.85,
+            )
+
     return None
 
 
