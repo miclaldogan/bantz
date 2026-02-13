@@ -321,8 +321,11 @@ def calendar_create_event_tool(
     else:
         d = _resolve_date_token(d)
 
-    # Past-date guard (Issue #663): warn but allow (user may update existing events)
-    if _is_past(d, hhmm):
+    # Past-time guard (Issue #1212): if time already passed today, shift to tomorrow
+    if _is_past(d, hhmm) and d == _date_today():
+        d = _date_tomorrow()
+        logger.info("[CALENDAR] Time %s already passed today, shifted to tomorrow: %s", hhmm, d)
+    elif _is_past(d, hhmm):
         logger.warning("[CALENDAR] Event in the past: %s %s", d, hhmm)
 
     start_dt = _dt(d, hhmm)

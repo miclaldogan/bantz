@@ -17,6 +17,7 @@ This module converts Turkish word-based clock references to HH:MM:
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Optional
 
 # ── Turkish number → int (1-12 for clock hours) ──────────────────────────
@@ -102,14 +103,15 @@ _CONTEXT_WORDS = frozenset({
 })
 
 
-def _apply_pm_default(hour: int, text: str) -> int:
+def _apply_pm_default(hour: int, text: str, *, now_hour: Optional[int] = None) -> int:
     """Apply PM default rule for ambiguous hours 1-6.
 
-    Rules (Issue #312):
+    Rules (Issue #312 + #1212):
     - Hours 1-6 without "sabah" → PM (+12)
     - Hours 1-6 with "sabah"   → AM (as-is)
     - Hours 1-6 with "akşam"   → PM (+12)
-    - Hours 7-12               → as-is (no default shift)
+    - Hours 7-12 without marker → if current time >= hour, PM (+12)
+    - Hours 7-12 with marker    → obey marker
     - Hours 13-23              → already 24h, no shift
     """
     if hour > 12:
@@ -126,10 +128,20 @@ def _apply_pm_default(hour: int, text: str) -> int:
     # Ambiguous: apply PM default for 1-6 only
     if 1 <= hour <= 6:
         return hour + 12
-    return hour  # 7-12 kept as-is
+
+    # Issue #1212: Hours 7-12 without explicit marker — use current time
+    # as context.  If it's already past that hour today, user likely means
+    # PM (e.g. saying "sekize" at 16:00 means 20:00, not 08:00).
+    if 7 <= hour <= 12:
+        if now_hour is None:
+            now_hour = datetime.now().astimezone().hour
+        if now_hour >= hour:
+            return hour + 12 if hour + 12 <= 23 else hour
+
+    return hour  # morning or early enough — keep as-is
 
 
-def parse_hhmm_turkish(text: str) -> Optional[str]:
+def parse_hhmm_turkish(text: str, *, now_hour: Optional[int] = None) -> Optional[str]:
     """Parse Turkish clock-time expression to HH:MM string.
 
     This is the main entry point. It handles:
@@ -139,6 +151,9 @@ def parse_hhmm_turkish(text: str) -> Optional[str]:
     - Quarter: "üçü çeyrek geçe" (15:15), "beşe çeyrek kala" (16:45)
     - AM/PM markers: "sabah beşte" → 05:00, "akşam altıda" → 18:00
     - Digit hours: "saat 5" → 17:00 (PM default)
+
+    Args:
+        now_hour: Override for current hour (for testing). If None, uses system clock.
 
     Returns:
         "HH:MM" string or None if no clock-time found.
@@ -153,7 +168,7 @@ def parse_hhmm_turkish(text: str) -> Optional[str]:
     if m:
         raw_hour = int(m.group(1))
         if 0 <= raw_hour <= 23:
-            hour = _apply_pm_default(raw_hour, t) if raw_hour <= 12 else raw_hour
+            hour = _apply_pm_default(raw_hour, t, now_hour=now_hour) if raw_hour <= 12 else raw_hour
             minute = 30 if _BUCUK_RE.search(t) else 0
             hour = hour % 24
             return f"{hour:02d}:{minute:02d}"
@@ -163,7 +178,7 @@ def parse_hhmm_turkish(text: str) -> Optional[str]:
     saat_match = _match_saat_word(t)
     if saat_match is not None:
         raw_hour = saat_match
-        hour = _apply_pm_default(raw_hour, t)
+        hour = _apply_pm_default(raw_hour, t, now_hour=now_hour)
         minute = 30 if _BUCUK_RE.search(t) else 0
         hour = hour % 24
         return f"{hour:02d}:{minute:02d}"
@@ -173,16 +188,16 @@ def parse_hhmm_turkish(text: str) -> Optional[str]:
     if hour_val is not None:
         # Check for "çeyrek geçe" / "çeyrek kala"
         if _CEYREK_GECE_RE.search(t):
-            hour = _apply_pm_default(hour_val, t)
+            hour = _apply_pm_default(hour_val, t, now_hour=now_hour)
             hour = hour % 24
             return f"{hour:02d}:15"
         if _CEYREK_KALA_RE.search(t):
             # "beşe çeyrek kala" → 4:45 (one hour before, +45 min)
-            target_hour = _apply_pm_default(hour_val, t)
+            target_hour = _apply_pm_default(hour_val, t, now_hour=now_hour)
             target_hour = (target_hour - 1) % 24
             return f"{target_hour:02d}:45"
 
-        hour = _apply_pm_default(hour_val, t)
+        hour = _apply_pm_default(hour_val, t, now_hour=now_hour)
         minute = 30 if _BUCUK_RE.search(t) else 0
         hour = hour % 24
         return f"{hour:02d}:{minute:02d}"
@@ -272,14 +287,25 @@ def post_process_slot_time(
     except (ValueError, IndexError):
         return slot_time
 
-    # If they agree on hour (or differ by <2h), keep LLM
+    # If they agree exactly, keep LLM
+    if llm_hour == rb_hour:
+        return slot_time
+
+    # Issue #1212: When explicit PM marker ("akşam") is present, ALWAYS
+    # trust rule-based — it correctly applies +12.  LLM often returns
+    # off-by-one (e.g. 19:00 for "akşam sekiz" instead of 20:00).
+    has_pm = bool(_PM_MARKERS.search(user_text))
+    has_am = bool(_AM_MARKERS.search(user_text))
+    if has_pm or has_am:
+        return rule_based
+
+    # Small disagreement (≤1h) without explicit marker: keep LLM
     if abs(llm_hour - rb_hour) <= 1:
         return slot_time
 
-    # Disagree: check if this is a 1-6 AM/PM issue
-    # If one is AM and other is PM variant of same base hour, prefer rule-based
+    # Classic AM/PM flip (differ by 12): trust rule-based
     if abs(llm_hour - rb_hour) == 12:
-        return rule_based  # Classic AM/PM flip — trust rule-based
+        return rule_based
 
     # Otherwise keep rule-based (it's deterministic)
     return rule_based
