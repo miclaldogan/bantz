@@ -1278,7 +1278,7 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
     _ROUTE_KEYWORDS: dict[str, list[str]] = {
         "calendar": [
             "etkinlik", "takvim", "randevu", "toplantı",
-            "saat", "yarın", "bugün", "akşam", "sabah", "öğle",
+            "yarın", "bugün", "akşam", "sabah", "öğle",
             "ekle", "oluştur", "planla", "ne yapıyoruz",
             "programım", "programda", "gündem",
             # Issue #1071: Replaced generic "plan" and "iptal" with
