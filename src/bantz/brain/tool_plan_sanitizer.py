@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 # Map of known LLM-hallucinated or mismatched tool names to correct tools.
 # Key: (tool_name, gmail_intent or "*") → replacement tool name.
 TOOL_REMAP: dict[tuple[str, str], str] = {
-    ("gmail.list_drafts", "list"): "gmail.list_messages",
     ("gmail.list_all", "*"): "gmail.list_messages",
     ("gmail.search_messages", "*"): "gmail.smart_search",
     ("gmail.check_inbox", "*"): "gmail.list_messages",
