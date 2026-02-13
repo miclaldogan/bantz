@@ -757,10 +757,11 @@ def parse_intent(text: str) -> Parsed:
             return Parsed(intent="browser_click", slots={"text": name})
 
     # browser_type: "şunu yaz: ...", "[3] alanına yaz: ..."
-    m = re.search(r"\[(\d+)\]\s*(alan[ıi]na)?\s*yaz\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    # NOTE: \b after "yaz" prevents matching conjugated forms like "yazdın", "yazar".
+    m = re.search(r"\[(\d+)\]\s*(alan[ıi]na)?\s*yaz\b\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
     if m:
         return Parsed(intent="browser_type", slots={"index": int(m.group(1)), "text": m.group(3).strip()})
-    m = re.search(r"\b(şunu\s+yaz|yaz)\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
+    m = re.search(r"\b(şunu\s+yaz|yaz)\b\s*:?\s*(.+)$", text, flags=re.IGNORECASE)
     if m:
         return Parsed(intent="browser_type", slots={"text": m.group(2).strip()})
 
