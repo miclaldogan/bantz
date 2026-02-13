@@ -473,10 +473,11 @@ def _register_calendar(registry: "ToolRegistry") -> int:
               calendar_list_events_tool)
     n += _reg(registry, "calendar.create_event", "Create a calendar event.",
               _obj(("title", "string", "Event title"),
-                   ("start", "string", "Start datetime ISO"),
-                   ("end", "string", "End datetime ISO"),
-                   ("description", "string", "Event description"),
-                   required=["title", "start"]),
+                   ("date", "string", "Event date (YYYY-MM-DD or natural language)"),
+                   ("time", "string", "Event time (HH:MM)"),
+                   ("duration", "integer", "Duration in minutes (default 60)"),
+                   ("window_hint", "string", "Time window hint (e.g. morning, afternoon)"),
+                   required=["title"]),
               calendar_create_event_tool, risk="medium", confirm=True)
     n += _reg(registry, "calendar.update_event", "Update a calendar event.",
               _obj(("event_id", "string", "Event ID"), required=["event_id"]),
