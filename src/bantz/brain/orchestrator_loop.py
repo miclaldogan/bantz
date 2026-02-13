@@ -619,26 +619,11 @@ class OrchestratorLoop:
                 final_output = orchestrator_output
                 tool_results = []
             else:
-                # Phase 2: Tool Execution (with confirmation firewall)
-                tool_results = self._execute_tools_phase(orchestrator_output, state)
-
-                # Phase 2.5: Verify tool results (Issue #591 / #523)
-                tool_results = self._verify_results_phase(tool_results, state)
-
-                # Issue #1221: Enforce tool result size limits before finalization
-                try:
-                    from bantz.brain.tool_result_limiter import enforce_result_size_limits
-                    tool_results = enforce_result_size_limits(
-                        tool_results, trace_id=_trace_id,
-                    )
-                except Exception as _trl_exc:
-                    logger.debug("[Issue #1221] Tool result limiter failed: %s", _trl_exc)
-
-                # Issue #1224: Persist calendar events for #N follow-up
-                try:
-                    self._save_calendar_context(tool_results, state)
-                except Exception as _cc_exc:
-                    logger.debug("[Issue #1224] Calendar context save failed: %s", _cc_exc)
+                # ── Issue #1273: ReAct Loop (Düşün → Yap → Gözlemle → Tekrar Düşün)
+                tool_results = self._react_execute_loop(
+                    orchestrator_output, state, _router_input,
+                    trace_id=_trace_id,
+                )
 
                 # Phase 3: LLM Finalization (generate final response with tool results)
                 final_output = self._llm_finalization_phase(
@@ -763,11 +748,10 @@ class OrchestratorLoop:
             final_output = orchestrator_output
             tool_results = []
         else:
-            # Phase 2: execute tools
-            tool_results = self._execute_tools_phase(orchestrator_output, state)
-
-            # Phase 2.5: verify
-            tool_results = self._verify_results_phase(tool_results, state)
+            # ── Issue #1273: ReAct Loop (run_full_cycle path) ────────────
+            tool_results = self._react_execute_loop(
+                orchestrator_output, state, _router_input,
+            )
 
             # Phase 3: finalize
             final_output = self._llm_finalization_phase(
@@ -889,7 +873,133 @@ class OrchestratorLoop:
             logger.debug("[TRACE] Export failed: %s", exc)
 
         return trace
-    
+
+    # -----------------------------------------------------------------
+    # Issue #1273: Shared ReAct execution loop
+    # -----------------------------------------------------------------
+    def _react_execute_loop(
+        self,
+        orchestrator_output: "OrchestratorOutput",
+        state: OrchestratorState,
+        router_input: str,
+        trace_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """Execute the ReAct (Düşün → Yap → Gözlemle → Tekrar Düşün) loop.
+
+        Runs tool execution iteratively.  When the LLM signals
+        ``status="needs_more_info"``, tool results are fed back to the
+        router's ``react_replan`` method which decides the next action.
+
+        Single-shot (``status="done"``) runs exactly one iteration — fully
+        backward compatible with pre-ReAct behaviour.
+
+        Returns:
+            Accumulated ``tool_results`` list across all iterations.
+        """
+        _REACT_MAX_ITERATIONS = int(
+            os.getenv("BANTZ_REACT_MAX_ITER", "3")
+        )
+        _REACT_TIMEOUT_S = float(
+            os.getenv("BANTZ_REACT_TIMEOUT_S", "15.0")
+        )
+        _react_start = time.time()
+
+        # Clear per-turn ReAct state
+        state.react_observations = []
+        state.react_iteration = 0
+
+        all_tool_results: list[dict[str, Any]] = []
+        _current_output = orchestrator_output
+
+        for _react_iter in range(1, _REACT_MAX_ITERATIONS + 1):
+            state.react_iteration = _react_iter
+
+            # ── Time guard ──
+            if time.time() - _react_start > _REACT_TIMEOUT_S:
+                logger.warning(
+                    "[ReAct] Timeout after %.1fs at iteration %d — finalizing",
+                    time.time() - _react_start, _react_iter,
+                )
+                break
+
+            # Phase 2: Tool Execution
+            tool_results = self._execute_tools_phase(_current_output, state)
+
+            # Phase 2.5: Verify
+            tool_results = self._verify_results_phase(tool_results, state)
+
+            # Issue #1221: Enforce tool result size limits
+            try:
+                from bantz.brain.tool_result_limiter import enforce_result_size_limits
+                tool_results = enforce_result_size_limits(
+                    tool_results, trace_id=trace_id,
+                )
+            except Exception:
+                pass
+
+            # Issue #1224: Calendar context
+            try:
+                self._save_calendar_context(tool_results, state)
+            except Exception:
+                pass
+
+            all_tool_results.extend(tool_results)
+
+            # ── OBSERVE ──
+            for tr in tool_results:
+                state.react_observations.append({
+                    "iteration": _react_iter,
+                    "tool": tr.get("tool", ""),
+                    "result_summary": tr.get("result_summary", "")[:300],
+                    "success": tr.get("success", False),
+                })
+
+            # ── Should we continue? ──
+            if _current_output.status != "needs_more_info":
+                break
+            if state.has_pending_confirmation():
+                break
+            if _current_output.ask_user:
+                break
+            if not tool_results:
+                break
+            if _react_iter >= _REACT_MAX_ITERATIONS:
+                logger.info("[ReAct] Max iterations (%d) reached", _REACT_MAX_ITERATIONS)
+                break
+
+            # ── RE-PLAN ──
+            logger.info(
+                "[ReAct] iteration=%d → re-planning with %d observations",
+                _react_iter, len(state.react_observations),
+            )
+            try:
+                _current_output = self.orchestrator.react_replan(
+                    user_input=router_input,
+                    previous_output=_current_output,
+                    observations=state.react_observations,
+                    session_context=state.session_context,
+                    iteration=_react_iter + 1,
+                )
+            except Exception as _exc:
+                logger.warning("[ReAct] Re-plan failed: %s — finalizing", _exc)
+                break
+
+        # Record trace metadata
+        state.trace["react"] = {
+            "iterations": state.react_iteration,
+            "observations_count": len(state.react_observations),
+            "elapsed_ms": int((time.time() - _react_start) * 1000),
+        }
+        if state.react_iteration > 1:
+            logger.info(
+                "[ReAct] Completed %d iterations, %d observations, %.1fs",
+                state.react_iteration,
+                len(state.react_observations),
+                time.time() - _react_start,
+            )
+
+        return all_tool_results
+
     def _llm_planning_phase(
         self,
         user_input: str,

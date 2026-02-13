@@ -139,7 +139,7 @@ def test_retrieved_memory_long_content_trimmed():
     # Should be present but trimmed
     assert "RETRIEVED_MEMORY" in prompt
     # Original long_memory is much longer than what fits in prompt
-    assert len(prompt) < len(long_memory) + 2000  # Some overhead for system prompt
+    assert len(prompt) < len(long_memory) + 2500  # Some overhead for system prompt (Issue #1273: +status rules)
 
 
 def test_integration_retrieved_memory_calendar_context():

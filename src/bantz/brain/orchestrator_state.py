@@ -74,6 +74,13 @@ class OrchestratorState:
     # Issue #1242: Language Bridge — detected language and canonical EN input
     detected_lang: str = ""
     canonical_input: str = ""
+
+    # Issue #1273: ReAct loop — per-turn observations from tool execution
+    # Each entry: {"iteration": int, "tool": str, "result_summary": str, "success": bool}
+    # Cleared at the start of each turn. Carries observations across ReAct
+    # iterations so the LLM can see what happened and decide next action.
+    react_observations: list[dict[str, Any]] = field(default_factory=list)
+    react_iteration: int = 0  # current ReAct iteration within a turn
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue).
@@ -222,13 +229,17 @@ class OrchestratorState:
             }
             for r in self.last_tool_results
         ]
-        return {
+        ctx = {
             "rolling_summary": self.rolling_summary,
             "recent_conversation": self.conversation_history[-2:] if self.conversation_history else [],
             "last_tool_results": safe_results,
             "pending_confirmation": self.peek_pending_confirmation(),
             "pending_confirmations": list(self.pending_confirmations),
         }
+        # Issue #1273: Include ReAct observations if mid-loop
+        if self.react_observations:
+            ctx["react_observations"] = list(self.react_observations)
+        return ctx
     
     def reset(self) -> None:
         """Reset state (new session)."""
@@ -250,3 +261,5 @@ class OrchestratorState:
         self.calendar_listed_events = []
         self.detected_lang = ""
         self.canonical_input = ""
+        self.react_observations = []
+        self.react_iteration = 0
