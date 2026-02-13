@@ -260,7 +260,7 @@ def _register_terminal(registry: "ToolRegistry") -> int:
     n += _reg(registry, "terminal.list", "List running background processes.",
               _obj(), terminal_background_list_tool)
     n += _reg(registry, "terminal.kill", "Kill a background process.",
-              _obj(("pid", "integer", "Process ID to kill"), required=["pid"]),
+              _obj(("id", "integer", "Background process ID to kill"), required=["id"]),
               terminal_background_kill_tool, risk="medium", confirm=True)
     return n
 
