@@ -541,18 +541,52 @@ class GeminiClient(LLMClient):
         chunk_count = 0
         total_text = ""
 
-        try:
-            r = requests.post(
-                url,
-                headers={
-                    "Content-Type": "application/json",
-                    "x-goog-api-key": self._api_key,
-                },
-                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                timeout=self._timeout_seconds,
-                stream=True,
-            )
+        # Issue #1109: Retry the initial HTTP connection (not the stream
+        # iteration) to match non-streaming retry behaviour.
+        _max_stream_retries = 3
+        _last_exc: Optional[Exception] = None
+        r = None
+        for _attempt in range(1, _max_stream_retries + 1):
+            try:
+                r = requests.post(
+                    url,
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": self._api_key,
+                    },
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    timeout=self._timeout_seconds,
+                    stream=True,
+                )
+                if r.status_code == 429 and _attempt < _max_stream_retries:
+                    _wait = 2 ** _attempt
+                    logger.warning("[GEMINI_STREAM] 429 rate-limited, retry %d/%d in %ds",
+                                   _attempt, _max_stream_retries, _wait)
+                    time.sleep(_wait)
+                    continue
+                if r.status_code >= 500 and _attempt < _max_stream_retries:
+                    _wait = 2 ** _attempt
+                    logger.warning("[GEMINI_STREAM] %d server error, retry %d/%d in %ds",
+                                   r.status_code, _attempt, _max_stream_retries, _wait)
+                    time.sleep(_wait)
+                    continue
+                break
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                _last_exc = exc
+                if _attempt < _max_stream_retries:
+                    _wait = 2 ** _attempt
+                    logger.warning("[GEMINI_STREAM] connection error, retry %d/%d in %ds: %s",
+                                   _attempt, _max_stream_retries, _wait, exc)
+                    time.sleep(_wait)
+                    continue
+                raise LLMConnectionError(
+                    f"Gemini stream connection failed after {_max_stream_retries} attempts"
+                ) from exc
 
+        if r is None:
+            raise LLMConnectionError("Gemini stream connection failed") from _last_exc
+
+        try:
             if r.status_code != 200:
                 self._record_failure()
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
