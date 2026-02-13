@@ -59,6 +59,51 @@ logger = logging.getLogger(__name__)
 # Re-exported above for backward compatibility.
 
 
+def _match_mail_by_keyword(
+    user_input: str,
+    listed_messages: list[dict[str, str]],
+) -> str | None:
+    """Match a user keyword against previously listed gmail messages.
+
+    Issue #1218: When user says "github mailinin içeriğini özetle", match
+    "github" against stored message subjects and senders.
+    Returns the message_id of the best match, or None.
+    """
+    text = (user_input or "").strip().lower()
+    if not text or not listed_messages:
+        return None
+
+    # Extract potential keywords by removing Turkish stop words / suffixes
+    _STOP_WORDS = frozenset({
+        "mailinin", "mailin", "maili", "mailini", "mailine", "mailden",
+        "mailinin", "mesajın", "mesajının", "mesajı",
+        "içeriğini", "içeriği", "özetle", "özetini", "özetler",
+        "anlat", "oku", "göster", "aç", "bak", "ne", "diyor", "yazıyor",
+        "son", "gelen", "misin", "bakar", "misiniz",
+    })
+    tokens = re.split(r"[^a-zçğıöşü0-9]+", text)
+    keywords = [t for t in tokens if t and len(t) >= 2 and t not in _STOP_WORDS]
+
+    if not keywords:
+        return None
+
+    best_id: str | None = None
+    best_score = 0
+
+    for msg in listed_messages:
+        subject = (msg.get("subject") or "").lower()
+        sender = (msg.get("from") or "").lower()
+        score = 0
+        for kw in keywords:
+            if kw in subject or kw in sender:
+                score += 1
+        if score > best_score:
+            best_score = score
+            best_id = msg.get("id")
+
+    return best_id if best_score > 0 else None
+
+
 @dataclass
 class OrchestratorConfig:
     """Configuration for orchestrator loop."""
@@ -1078,6 +1123,34 @@ class OrchestratorLoop:
                     "page_token": state.gmail_next_page_token,
                 },
             )
+
+        # Issue #1218: Specific mail fetch — when user mentions a mail by
+        # keyword (e.g. "github mailinin içeriğini özetle") and we have
+        # previously listed messages, resolve the message_id by matching
+        # against stored subject/sender headers.
+        if (
+            state.gmail_listed_messages
+            and output.route == "gmail"
+            and output.tool_plan
+            and "gmail.list_messages" in output.tool_plan
+        ):
+            matched_id = _match_mail_by_keyword(user_input, state.gmail_listed_messages)
+            if matched_id:
+                logger.info(
+                    "[Issue #1218] Resolved specific mail id=%s from '%.40s'",
+                    matched_id, user_input,
+                )
+                output = replace(
+                    output,
+                    tool_plan=["gmail.get_message"],
+                    gmail_intent="detail",
+                    slots={**(output.slots or {}), "message_id": matched_id},
+                    raw_output={
+                        **output.raw_output,
+                        "specific_mail_resolved": True,
+                        "resolved_message_id": matched_id,
+                    },
+                )
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Decision:")
@@ -1932,6 +2005,18 @@ class OrchestratorLoop:
                     q = raw.get("query") or ""
                     if q:
                         state.gmail_last_query = str(q)
+                    # Issue #1218: Store listed message headers for entity resolution
+                    messages = raw.get("messages") or []
+                    if isinstance(messages, list) and messages:
+                        state.gmail_listed_messages = [
+                            {
+                                "id": str(m.get("id", "")),
+                                "from": str(m.get("from", "")),
+                                "subject": str(m.get("subject", "")),
+                            }
+                            for m in messages[:20]
+                            if isinstance(m, dict) and m.get("id")
+                        ]
                     break
     
     # =========================================================================
