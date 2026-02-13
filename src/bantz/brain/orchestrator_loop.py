@@ -1691,7 +1691,8 @@ class OrchestratorLoop:
                         merged_slots.update(args)
                     params = self._build_tool_params(
                         tool_name, merged_slots, output,
-                        user_input=state.current_user_input,
+                        user_input=state.canonical_input or state.current_user_input,
+                        original_user_input=state.current_user_input if state.canonical_input else None,
                     )
 
                 # Drop nulls (LLM JSON often includes explicit nulls for optional slots).
@@ -1849,8 +1850,13 @@ class OrchestratorLoop:
         output: Optional["OrchestratorOutput"] = None,
         *,
         user_input: Optional[str] = None,
+        original_user_input: Optional[str] = None,
     ) -> dict[str, Any]:
-        return build_tool_params(tool_name, slots, output, user_input=user_input)
+        return build_tool_params(
+            tool_name, slots, output,
+            user_input=user_input,
+            original_user_input=original_user_input,
+        )
     
     def _llm_finalization_phase(
         self,
