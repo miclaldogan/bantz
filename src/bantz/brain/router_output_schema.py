@@ -34,7 +34,7 @@ __all__ = [
 
 # ── Slim schema: ONLY routing-critical fields (~50 token output) ────────
 SLIM_SCHEMA_JSON = (
-    '{"route":"calendar|gmail|smalltalk|unknown",'
+    '{"route":"calendar|gmail|system|smalltalk|unknown",'
     '"calendar_intent":"create|modify|cancel|query|none",'
     '"slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null",'
     '"duration":"dk|null","title":"str|null",'
@@ -58,7 +58,7 @@ EXTENDED_FIELDS_JSON = (
 
 # ── Full schema: slim + extended (backwards compatible) ─────────────────
 FULL_SCHEMA_JSON = (
-    '{"route":"calendar|gmail|smalltalk|unknown",'
+    '{"route":"calendar|gmail|system|smalltalk|unknown",'
     '"calendar_intent":"create|modify|cancel|query|none",'
     '"slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null",'
     '"duration":"dk|null","title":"str|null",'
