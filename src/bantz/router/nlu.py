@@ -432,7 +432,8 @@ def parse_intent(text: str) -> Parsed:
         return Parsed(intent="queue_status", slots={})
 
     # Dev mode transitions
-    if re.search(r"\b(dev\s+mod(a|u)\s+ge(ç|c)|dev\s+mode\s+on|dev\s+mode\s+aktif|dev\s+mod\s+a(ç|c))\b", t):
+    # Issue #1107: Accept Turkish dative suffix -una/-üne → "dev moduna geç"
+    if re.search(r"\b(dev\s+mod(un?a|u)\s+ge(ç|c)|dev\s+mode\s+on|dev\s+mode\s+aktif|dev\s+mod\s+a(ç|c))\b", t):
         return Parsed(intent="enter_dev_mode", slots={})
     if re.search(
         r"\b(normal\s+mod(a|u)\s+d(ö|o)n|dev\s+moddan\s+c(ı|i)k|dev\s+moddan\s+ç(ı|i)k|dev\s+mode\s+off)\b",
