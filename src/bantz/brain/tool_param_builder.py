@@ -79,6 +79,7 @@ def build_tool_params(
     output: Optional[OrchestratorOutput] = None,
     *,
     user_input: Optional[str] = None,
+    original_user_input: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build tool parameters from orchestrator slots.
 
@@ -86,7 +87,18 @@ def build_tool_params(
     Handles nested objects like gmail: {to, subject, body}.
 
     Issue #340: Applies field aliasing for common LLM variations.
+    Issue #1244: When ``original_user_input`` differs from ``user_input``
+    (bridge translated), content params (title, body, description) are
+    restored from the original Turkish text so the LLM's EN translations
+    don't leak into user-facing data.
     """
+    # Issue #1244: Determine if bridge is active (inputs differ)
+    _bridge_active = (
+        original_user_input is not None
+        and user_input is not None
+        and original_user_input != user_input
+    )
+
     params: dict[str, Any] = {}
 
     if tool_name.startswith("gmail."):
@@ -216,4 +228,93 @@ def build_tool_params(
     if valid_fields is not None:
         params = {k: v for k, v in params.items() if k in valid_fields}
 
+    # Issue #1244: Content param restoration — when bridge translated
+    # the user input to EN, the LLM may have set content params (title,
+    # body, description) in English.  Restore them from original TR text.
+    _CONTENT_PARAMS = {"title", "summary", "description"}
+    if _bridge_active and tool_name.startswith("calendar."):
+        _original = (original_user_input or "").strip()
+        for _cp in _CONTENT_PARAMS:
+            if _cp in params and params[_cp] and _original:
+                _slot_val = str(params[_cp]).strip().lower()
+                _orig_lower = _original.lower()
+                # If the slot value looks like it came from the EN canonical
+                # (i.e. it appears in the EN text but not in the original TR),
+                # try to extract the TR content from the original input.
+                if (
+                    user_input
+                    and _slot_val in user_input.lower()
+                    and _slot_val not in _orig_lower
+                ):
+                    _tr_title = _extract_tr_content_from_input(
+                        _original, tool_name,
+                    )
+                    if _tr_title:
+                        logger.info(
+                            "[Issue #1244] Restored %s from TR: %r → %r",
+                            _cp, params[_cp], _tr_title,
+                        )
+                        params[_cp] = _tr_title
+
     return params
+
+
+# Issue #1244: Turkish content extraction patterns for calendar events
+_TR_TITLE_PATTERNS = [
+    # "X ekle/oluştur/kaydet" — content before action verb
+    re.compile(
+        r"(?:takvime?\s+)?(.+?)\s+(?:ekle|oluştur|kaydet|koy|yaz|planla)",
+        re.IGNORECASE,
+    ),
+    # "X için etkinlik/toplantı" — content before event type
+    re.compile(
+        r"(.+?)\s+(?:için\s+)?(?:etkinlik|toplantı|randevu)",
+        re.IGNORECASE,
+    ),
+    # Fallback: extract content words (skip time/date/action words)
+]
+
+_TR_NOISE_WORDS = frozenset({
+    "yarın", "bugün", "sabah", "akşam", "öğle", "gece",
+    "saat", "da", "de", "tam", "için", "bir", "takvime",
+    "takvimime", "ekle", "oluştur", "kaydet", "koy", "yaz",
+    "planla", "bak", "bana", "benim", "lütfen",
+})
+
+
+def _extract_tr_content_from_input(original: str, tool_name: str) -> str:
+    """Extract Turkish content (title/description) from original user input.
+
+    Issue #1244: When bridge translates input, LLM may produce EN slot values.
+    This function extracts the TR content from the original text.
+    """
+    text = original.strip()
+    if not text:
+        return ""
+
+    # Try patterns
+    for pat in _TR_TITLE_PATTERNS:
+        m = pat.search(text)
+        if m:
+            candidate = m.group(1).strip()
+            # Remove time-like tokens
+            candidate = re.sub(r"\b\d{1,2}[:.]\d{2}\b", "", candidate).strip()
+            candidate = re.sub(r"\bsaat\s*\d+\b", "", candidate, flags=re.IGNORECASE).strip()
+            # Remove date words (yarın, bugün, etc.)
+            _date_words = {"yarın", "bugün", "dün", "pazartesi", "salı", "çarşamba",
+                           "perşembe", "cuma", "cumartesi", "pazar", "sabah", "akşam",
+                           "öğle", "öğlen", "gece"}
+            candidate_words = candidate.split()
+            candidate_words = [w for w in candidate_words if w.lower() not in _date_words]
+            candidate = " ".join(candidate_words).strip()
+            if candidate and len(candidate) >= 2:
+                return candidate
+
+    # Fallback: extract non-noise content words
+    words = re.split(r"\s+", text.lower())
+    content_words = [w for w in words if w not in _TR_NOISE_WORDS and len(w) >= 2
+                     and not re.match(r"\d", w)]
+    if content_words:
+        return " ".join(content_words)
+
+    return ""
