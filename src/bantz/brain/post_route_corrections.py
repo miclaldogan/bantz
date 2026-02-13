@@ -149,8 +149,10 @@ def post_route_correction_email_send(
                 "[POST_ROUTE_CORRECTION] email_send: LLM already route=gmail/send, skipping override"
             )
         return output
-    if _route not in ("unknown", "smalltalk", "calendar", "system", ""):
-        # Issue #1006: Also catch calendar/system misroutes for email-send
+    if _route not in ("unknown", "smalltalk", ""):
+        # Issue #1057: Only override unknown/smalltalk misroutes.
+        # Calendar/system routes must NOT be hijacked even if the user
+        # text contains email-like keywords (e.g. "mail gönder konulu toplantı").
         return output
 
     gmail_obj = dict(getattr(output, "gmail", None) or {})
