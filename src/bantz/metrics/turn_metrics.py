@@ -67,6 +67,12 @@ class TurnMetrics:
     tts_ms: Optional[float] = None
     total_ms: float = 0.0
 
+    # Issue #1220: Pipeline metrics for sprint measurement
+    tools_ok: int = 0          # How many tools succeeded
+    tools_fail: int = 0        # How many tools failed
+    confirmation_triggered: bool = False  # Was confirmation requested?
+    confirmation_tool: Optional[str] = None  # Which tool triggered confirmation
+
     # Budget violations
     budget_violations: List[str] = field(default_factory=list)
 
@@ -116,6 +122,8 @@ class TurnMetrics:
             del d["error"]
         if d.get("tool") is None:
             del d["tool"]
+        if d.get("confirmation_tool") is None:
+            del d["confirmation_tool"]
         if not d.get("tags"):
             del d["tags"]
         return d
