@@ -58,16 +58,16 @@ def build_repair_prompt(*, raw_text: str, error_summary: str, validation_error: 
         validation_error: Optional ValidationError with detailed context
         
     Returns:
-        Repair prompt in Turkish with error-specific guidance
+        Repair prompt in English for 3B Qwen model compatibility
     """
     
     base_prompt = (
-        "Aşağıdaki metinden sadece GEÇERLİ JSON OBJESİ döndür.\n"
-        "- Markdown, backtick, açıklama, yorum, extra anahtar YAZMA.\n"
-        "- Çıktın yalnızca tek bir JSON object olsun.\n"
-        "- Trailing comma kullanma (son eleman sonrasında virgül olmasın).\n\n"
-        "ZORUNLU ŞEKİL:\n"
-        "- JSON object içinde mutlaka 'type' alanı olmalı.\n"
+        "Extract ONLY a VALID JSON OBJECT from the text below.\n"
+        "- Do NOT include markdown, backticks, comments, or extra keys.\n"
+        "- Output must be exactly one JSON object.\n"
+        "- Do NOT use trailing commas (no comma after the last element).\n\n"
+        "REQUIRED SHAPE:\n"
+        "- The JSON object MUST contain a 'type' field.\n"
         "- type ∈ {SAY, CALL_TOOL, ASK_USER, FAIL}\n"
         "- SAY => {\"type\":\"SAY\",\"text\":\"...\"}\n"
         "- ASK_USER => {\"type\":\"ASK_USER\",\"question\":\"...\"}\n"
@@ -83,31 +83,31 @@ def build_repair_prompt(*, raw_text: str, error_summary: str, validation_error: 
         field_path = validation_error.field_path
         
         if error_type == "unknown_tool":
-            error_guidance += "⚠️ TOOL HATASI:\n"
+            error_guidance += "⚠️ TOOL ERROR:\n"
             if suggestions:
-                error_guidance += f"- Geçerli tool adları: {', '.join(suggestions[:5])}\n"
+                error_guidance += f"- Valid tool names: {', '.join(suggestions[:5])}\n"
             if field_path:
-                error_guidance += f"- Hatalı alan: {field_path}\n"
+                error_guidance += f"- Invalid field: {field_path}\n"
         
         elif error_type == "schema_error":
-            error_guidance += "⚠️ ŞEKİL HATASI:\n"
+            error_guidance += "⚠️ SCHEMA ERROR:\n"
             if field_path:
-                error_guidance += f"- Eksik/Hatalı alan: {field_path}\n"
+                error_guidance += f"- Missing/invalid field: {field_path}\n"
             if suggestions:
                 for sug in suggestions[:3]:
                     error_guidance += f"- {sug}\n"
         
         elif error_type == "missing_param":
-            error_guidance += "⚠️ PARAMETRE HATASI:\n"
+            error_guidance += "⚠️ PARAMETER ERROR:\n"
             if field_path:
-                error_guidance += f"- Eksik parametre: {field_path}\n"
+                error_guidance += f"- Missing parameter: {field_path}\n"
             if suggestions:
-                error_guidance += f"- Gerekli: {', '.join(suggestions[:5])}\n"
+                error_guidance += f"- Required: {', '.join(suggestions[:5])}\n"
         
         elif error_type == "bad_type":
-            error_guidance += "⚠️ TİP HATASI:\n"
+            error_guidance += "⚠️ TYPE ERROR:\n"
             if field_path:
-                error_guidance += f"- Hatalı alan: {field_path}\n"
+                error_guidance += f"- Invalid field: {field_path}\n"
             if suggestions:
                 error_guidance += f"- {suggestions[0]}\n"
         
@@ -116,8 +116,8 @@ def build_repair_prompt(*, raw_text: str, error_summary: str, validation_error: 
     return (
         base_prompt +
         error_guidance +
-        f"Hata özeti: {error_summary}\n\n"
-        "Orijinal metin:\n"
+        f"Error summary: {error_summary}\n\n"
+        "Original text:\n"
         f"{raw_text}\n"
     )
 
