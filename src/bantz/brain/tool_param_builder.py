@@ -31,6 +31,8 @@ def build_tool_params(
     tool_name: str,
     slots: dict[str, Any],
     output: Optional[OrchestratorOutput] = None,
+    *,
+    user_input: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build tool parameters from orchestrator slots.
 
@@ -77,10 +79,28 @@ def build_tool_params(
             if "title" in params and "subject" not in params:
                 params["subject"] = params.pop("title")
 
+            # Issue #1209: Ensure subject always present (required field).
+            # LLM often returns subject=null which gets dropped by null-filter.
+            if "subject" not in params:
+                params["subject"] = ""
+
         # Minimal aliasing for gmail.send_to_contact
         if tool_name == "gmail.send_to_contact":
             if "name" not in params and "to" in params:
                 params["name"] = params.get("to")
+
+        # Issue #1200: Aliasing for gmail.query_from_nl
+        # LLM outputs natural_query / search_term / query but the tool
+        # function signature requires `text`.
+        if tool_name == "gmail.query_from_nl":
+            if "text" not in params:
+                for alias in ["natural_query", "search_term", "query"]:
+                    if alias in params:
+                        params["text"] = params.pop(alias)
+                        break
+            # Fallback: use user_input as text when no alias matched
+            if "text" not in params and user_input:
+                params["text"] = user_input
 
     else:
         params = dict(slots)

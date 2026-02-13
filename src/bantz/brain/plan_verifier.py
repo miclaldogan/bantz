@@ -51,8 +51,12 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(gönder|yolla|send|e-?posta)\b", re.IGNORECASE),
     re.compile(r"\b(oku|read|aç|open)\b", re.IGNORECASE),
     re.compile(r"\b(takvim|calendar|toplantı|meeting|randevu)\b", re.IGNORECASE),
-    re.compile(r"\b(saat kaç|what time|tarih|date)\b", re.IGNORECASE),
+    re.compile(r"\b(saat\s*kaç\w*|what time|tarih|date)\b", re.IGNORECASE),
     re.compile(r"\b(kontrol\s*et|planımız|plan\s*var|etkinlik|ne\s*var)\b", re.IGNORECASE),
+    # Temporal / schedule query indicators
+    re.compile(r"\b(bugün|yarın|dün|bu\s*hafta|bu\s*ay|geçen\s*hafta|gelecek\s*hafta)\b", re.IGNORECASE),
+    re.compile(r"\b(neler|ne\s*yapacağız|ne\s*yapıyoruz|programım|ajanda)\b", re.IGNORECASE),
+    re.compile(r"\b(incele|incel[ea]\w*|gözden\s*geçir)\b", re.IGNORECASE),
     re.compile(r"\b(mailleri?|son\s*mail|gelen\s*kutusu|inbox)\b", re.IGNORECASE),
     re.compile(r"\b(ne\s*yazıyor|ne\s*diyor|ne\s*gelmiş|var\s*mı)\b", re.IGNORECASE),
     re.compile(r"\b(ara|bul|search|find|kontrol)\b", re.IGNORECASE),

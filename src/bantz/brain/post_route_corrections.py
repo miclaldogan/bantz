@@ -226,8 +226,10 @@ def post_route_correction_email_send(
     slots = dict(getattr(output, "slots", None) or {})
 
     # Issue #1006: Extract subject from user input instead of empty default
+    # Issue #1209: Use explicit check — setdefault doesn't override None values
     subject_hint = extract_subject_hint(user_input)
-    gmail_obj.setdefault("subject", subject_hint or "")
+    if not gmail_obj.get("subject"):
+        gmail_obj["subject"] = subject_hint or ""
 
     if not gmail_obj.get("to"):
         email = extract_first_email(user_input)

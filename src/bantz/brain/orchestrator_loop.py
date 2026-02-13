@@ -318,6 +318,10 @@ class OrchestratorLoop:
         if state is None:
             state = OrchestratorState()
         
+        # Issue #1200: Stash user_input in state so tool param builder can
+        # use it as a fallback (e.g. gmail.query_from_nl text field).
+        state.current_user_input = user_input
+
         start_time = time.time()
 
         # Issue #417: Build session context once per turn (cached with TTL)
@@ -594,6 +598,10 @@ class OrchestratorLoop:
         """
         if state is None:
             state = OrchestratorState()
+
+        # Issue #1200: Stash user_input in state so tool param builder can
+        # use it as a fallback (e.g. gmail.query_from_nl text field).
+        state.current_user_input = user_input
 
         start_time = time.time()
 
@@ -1456,12 +1464,20 @@ class OrchestratorLoop:
                     continue
                 
                 # Build parameters: prefer explicit tool_plan args, else fall back to slots.
+                # Issue #1208: gmail.* tools ALWAYS go through _build_tool_params
+                # for proper aliasing (natural_query→text, title→subject, etc.)
                 args = tool_args_by_name.get(tool_name)
-                if args is not None:
+                if args is not None and not tool_name.startswith("gmail."):
                     params = dict(output.slots)
                     params.update(args)
                 else:
-                    params = self._build_tool_params(tool_name, output.slots, output)
+                    merged_slots = dict(output.slots)
+                    if args:
+                        merged_slots.update(args)
+                    params = self._build_tool_params(
+                        tool_name, merged_slots, output,
+                        user_input=state.current_user_input,
+                    )
 
                 # Drop nulls (LLM JSON often includes explicit nulls for optional slots).
                 # Prevents spurious schema/type failures.
@@ -1616,8 +1632,10 @@ class OrchestratorLoop:
         tool_name: str,
         slots: dict[str, Any],
         output: Optional["OrchestratorOutput"] = None,
+        *,
+        user_input: Optional[str] = None,
     ) -> dict[str, Any]:
-        return build_tool_params(tool_name, slots, output)
+        return build_tool_params(tool_name, slots, output, user_input=user_input)
     
     def _llm_finalization_phase(
         self,
