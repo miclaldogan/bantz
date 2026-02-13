@@ -380,7 +380,7 @@ class FastFinalizer:
             "",
             "PLANNER_DECISION (JSON):",
             json.dumps(ctx.planner_decision, ensure_ascii=False),
-        ]
+        ])
 
         if ctx.tool_results:
             finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
