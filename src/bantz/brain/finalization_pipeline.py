@@ -334,6 +334,7 @@ class QualityFinalizer:
                 "- Yeni sayı, saat, tarih, miktar, fiyat UYDURMA. Verilerde yoksa söyleme.",
                 "- Yeni isim, e-posta, telefon UYDURMA.",
                 "- Emin olmadığın bilgiyi söyleme; belirsizse 'bilgi yok' de.",
+                "- TOOL_RESULTS boşsa veya tüm tool'lar başarısızsa: saat, başlık, mail konusu gibi fakt iddiası YASAK. Sadece 'erişemedim' veya 'bilgi yok' de.",
                 "",
                 "- Kısa ve öz cevap ver (1-3 cümle).",
                 "",
@@ -396,6 +397,7 @@ class FastFinalizer:
             "- Sadece kullanıcıya söyleyeceğin düz metni üret.",
             "- JSON üretme ({...} YASAK). Markdown üretme (**, #, ``` YASAK).",
             "- Yeni sayı/saat/tarih/isim uydurma; SADECE verilerdeki bilgileri kullan.",
+            "- TOOL_RESULTS boşsa veya başarısızsa: saat, başlık, mail konusu gibi fakt iddiası YASAK.",
             "- Kısa ve öz cevap ver (1-3 cümle).",
             "",
             "PLANNER_DECISION (JSON):",
@@ -673,6 +675,29 @@ class FinalizationPipeline:
                     finalizer_strategy="deterministic_system",
                 )
                 return replace(output, assistant_reply=det_reply, finalizer_model="none(deterministic_system)")
+
+        # --- Issue #1228: No-Hallucination Gate ----------------------------
+        # If route is tool-dependent (calendar/gmail) but NO tool succeeded,
+        # skip the LLM finalizer entirely.  Sending to Gemini/3B with zero
+        # real data causes hallucinated times, titles, and "kesin ama yanlış"
+        # assertions.  Return a deterministic "erişemedim" message instead.
+        _TOOL_DEPENDENT_ROUTES = {"calendar", "gmail"}
+        if (
+            route in _TOOL_DEPENDENT_ROUTES
+            and not _has_pending_confirmation
+            and _no_tool_success(ctx.tool_results)
+        ):
+            ctx.state.update_trace(
+                finalizer_guard="no_hallucination",
+                finalizer_guard_triggered=True,
+                finalizer_guard_route=route,
+            )
+            nh_msg = _no_tool_success_message(route)
+            return replace(
+                output,
+                assistant_reply=nh_msg,
+                finalizer_model="none(no_hallucination_gate)",
+            )
 
         # --- Quality finalizer path -----------------------------------------
         _quality_llm = getattr(self._quality, "_llm", None) if self._quality else None
@@ -1231,6 +1256,43 @@ def _check_hard_failures(
         err = str(result.get("error") or "Unknown error")
         error_msg += f"- {tool_name}: {err}\n"
     return error_msg.strip()
+
+
+# ---------------------------------------------------------------------------
+# Issue #1228: No-Hallucination Gate helpers
+# ---------------------------------------------------------------------------
+
+def _no_tool_success(tool_results: list[dict[str, Any]]) -> bool:
+    """Return True if no tool in *tool_results* succeeded.
+
+    Covers three cases:
+    1. tool_results is empty/None (tool call was never attempted)
+    2. All results have ``success=False``
+    3. Results list exists but every entry is a failure
+    """
+    if not tool_results:
+        return True
+    return not any(r.get("success", False) for r in tool_results)
+
+
+_NO_TOOL_SUCCESS_MESSAGES: dict[str, str] = {
+    "calendar": (
+        "Takvime şu an erişemedim efendim. "
+        "Tekrar denememi ister misiniz?"
+    ),
+    "gmail": (
+        "E-posta kutusuna şu an erişemedim efendim. "
+        "Tekrar denememi ister misiniz?"
+    ),
+}
+
+
+def _no_tool_success_message(route: str) -> str:
+    """Return a deterministic Turkish error for a tool-dependent route."""
+    return _NO_TOOL_SUCCESS_MESSAGES.get(
+        route,
+        "İşlemi şu an gerçekleştiremedim efendim. Tekrar denememi ister misiniz?",
+    )
 
 
 # ---------------------------------------------------------------------------
