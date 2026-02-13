@@ -237,6 +237,11 @@ BANTZ_BRIEFING_HOUR=08
 # BANTZ_BRIDGE_LOG=0                       # Log every translation (debug)
 
 
+# ─── Structured Tool Calling (Issue #1274) ───────────────────────
+# Use Ollama's native tools API instead of JSON-from-text parsing.
+# Eliminates ~800 lines of JSON repair code when enabled.
+# BANTZ_STRUCTURED_TOOLS=0                 # Master switch (1=on, 0=off)
+
 # ─── Debug ───────────────────────────────────────────────────────
 # BANTZ_DEBUG=0                            # Enable debug mode (1=on)
 # BANTZ_DEBUG_TIERS=0                      # Tier-specific debug logging

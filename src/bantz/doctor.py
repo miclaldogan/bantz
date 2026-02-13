@@ -102,6 +102,7 @@ def _check_env_vars() -> List[CheckResult]:
         ("BANTZ_VLLM_URL", "vLLM URL"),
         ("GOOGLE_APPLICATION_CREDENTIALS", "Google credentials"),
         ("BANTZ_BRIDGE_ENABLED", "Language bridge"),
+        ("BANTZ_STRUCTURED_TOOLS", "Structured tool calling"),
     ]
     for var, label in critical:
         val = os.getenv(var)

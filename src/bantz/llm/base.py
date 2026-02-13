@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional, Protocol
+from typing import Dict, List, Optional, Protocol
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,18 @@ class LLMMessage:
 
 
 @dataclass(frozen=True)
+class LLMToolCall:
+    """A single tool/function call returned by the LLM.
+
+    Issue #1274: Structured Tool Calling — parsed from
+    ``choice.message.tool_calls`` in the OpenAI-compatible response.
+    """
+    id: str  # Server-assigned call id (e.g. "call_abc123")
+    name: str  # Function name (e.g. "gmail.send")
+    arguments: dict  # Parsed arguments dict
+
+
+@dataclass(frozen=True)
 class LLMResponse:
     """Standard response from LLM client."""
     content: str  # Generated text
@@ -36,6 +48,8 @@ class LLMResponse:
     tokens_used: int  # Total tokens (prompt + completion)
     finish_reason: str  # "stop" | "length" | "error"
     usage: Optional[object] = None  # Backend-specific usage payload (optional)
+    # Issue #1274: Structured Tool Calling — populated when LLM returns tool_calls
+    tool_calls: Optional[List["LLMToolCall"]] = None
 
 
 class LLMClientError(Exception):
