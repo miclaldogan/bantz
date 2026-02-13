@@ -239,6 +239,24 @@ def calendar_list_events_tool(
 
     if isinstance(resp, dict):
         resp.setdefault("window", {"time_min": win.time_min, "time_max": win.time_max} if win else None)
+        # Issue #1224: Add deterministic display hint for the finalizer.
+        # Numbering enables #N follow-up references.
+        events = resp.get("events")
+        if isinstance(events, list) and events:
+            lines: list[str] = []
+            for i, ev in enumerate(events, 1):
+                _s = ev.get("start") or ""
+                _e = ev.get("end") or ""
+                _title = ev.get("summary") or ev.get("title") or "(başlıksız)"
+                # Extract HH:MM from ISO strings
+                _sh = _s[11:16] if len(_s) >= 16 else _s
+                _eh = _e[11:16] if len(_e) >= 16 else _e
+                lines.append(f"#{i} {_sh}-{_eh} {_title}")
+            resp["display_hint"] = "\n".join(lines)
+            resp["event_count"] = len(events)
+        elif isinstance(events, list):
+            resp["display_hint"] = "Takvimde bu tarihte etkinlik bulunamadı."
+            resp["event_count"] = 0
     return resp
 
 
@@ -343,12 +361,20 @@ def calendar_create_event_tool(
         )
 
     try:
-        return create_event_with_idempotency(
+        result = create_event_with_idempotency(
             title=summary,
             start=start_dt.isoformat(),
             end=end_dt.isoformat(),
             create_fn=do_create,
         )
+        # Issue #1224: Deterministic display hint
+        if isinstance(result, dict) and result.get("ok"):
+            _dup = result.get("duplicate")
+            _hint = f"✅ '{summary}' etkinliği {d} {hhmm} için oluşturuldu ({dur} dk)."
+            if _dup:
+                _hint = f"⚠️ '{summary}' zaten mevcut ({d} {hhmm}), tekrar oluşturulmadı."
+            result["display_hint"] = _hint
+        return result
     except Exception as e:
         return {"ok": False, "error": _tr_calendar_error(e)}
 
@@ -400,7 +426,7 @@ def calendar_update_event_tool(
         return {"ok": False, "error": "No fields to update (need title, time, location, or description)"}
 
     try:
-        return update_event(
+        result = update_event(
             event_id=eid,
             start=start_iso,
             end=end_iso,
@@ -408,6 +434,17 @@ def calendar_update_event_tool(
             description=desc,
             location=loc,
         )
+        # Issue #1224: Deterministic display hint
+        if isinstance(result, dict) and result.get("ok"):
+            _parts = []
+            if summary:
+                _parts.append(f"başlık: {summary}")
+            if start_iso:
+                _parts.append(f"zaman: {d} {hhmm}")
+            if loc:
+                _parts.append(f"konum: {loc}")
+            result["display_hint"] = f"✅ Etkinlik güncellendi ({', '.join(_parts)})." if _parts else "✅ Etkinlik güncellendi."
+        return result
     except Exception as e:
         return {"ok": False, "error": _tr_calendar_error(e)}
 
