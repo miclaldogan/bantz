@@ -473,10 +473,9 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
 
         self._llm = effective_llm
         # Issue #943: Build prompt with dynamic tool list instead of hardcoded
-        self._system_prompt = (
-            system_prompt if system_prompt is not None
-            else self._build_system_prompt()
-        )
+        # Issue #1094: If no custom prompt, use None so the property falls back
+        # to cls.SYSTEM_PROMPT (which sync_valid_tools can update at runtime).
+        self._custom_system_prompt: Optional[str] = system_prompt
         self._confidence_threshold = float(confidence_threshold)
         self._max_attempts = int(max_attempts)
 
@@ -487,6 +486,18 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         self._router_healthy: bool = self._check_router_health()
         self._consecutive_failures: int = 0
         self._max_consecutive_failures: int = 3  # Mark unhealthy after N failures
+
+    @property
+    def _system_prompt(self) -> str:
+        """Return the active system prompt.
+
+        Issue #1094: If no custom prompt was passed at init, always read from
+        ``cls.SYSTEM_PROMPT`` so that ``sync_valid_tools()`` updates propagate
+        to live instances without requiring reconstruction.
+        """
+        if self._custom_system_prompt is not None:
+            return self._custom_system_prompt
+        return self._build_system_prompt()
 
     def _check_router_health(self) -> bool:
         """Check if the router LLM backend is healthy.
