@@ -232,7 +232,7 @@ class QualityFinalizer:
 
     def _build_prompt(self, ctx: FinalizationContext) -> str:
         """Try ``PromptBuilder`` first, fall back to inline template."""
-        from bantz.brain.orchestrator_loop import _prepare_tool_results_for_finalizer
+        from bantz.brain.tool_result_summarizer import _prepare_tool_results_for_finalizer
 
         finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
             ctx.tool_results or [],
@@ -358,7 +358,7 @@ class FastFinalizer:
             return None
 
     def _build_prompt(self, ctx: FinalizationContext) -> str:
-        from bantz.brain.orchestrator_loop import _prepare_tool_results_for_finalizer
+        from bantz.brain.tool_result_summarizer import _prepare_tool_results_for_finalizer
 
         prompt_lines = [
             "Kimlik / Roller:",
@@ -810,7 +810,7 @@ class FinalizationPipeline:
             validated = _validate_reply_language(output.assistant_reply)
             return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
 
-        from bantz.brain.orchestrator_loop import _build_tool_success_summary
+        from bantz.brain.tool_result_summarizer import _build_tool_success_summary
 
         return replace(
             output,
