@@ -123,7 +123,18 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
         TimeSlot if found, None otherwise
     """
     if base_time is None:
-        base_time = datetime.now()
+        # Issue #1179: Use BANTZ_TIMEZONE if available so NLU resolves
+        # times in the user's timezone, not the server's.
+        import os as _os
+        _tz_name = _os.environ.get("BANTZ_TIMEZONE", "").strip()
+        if _tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+                base_time = datetime.now(tz=ZoneInfo(_tz_name))
+            except Exception:
+                base_time = datetime.now()
+        else:
+            base_time = datetime.now()
     
     text_lower = text.lower()
     
@@ -735,11 +746,16 @@ class SlotExtractor:
         """Initialize the extractor."""
         pass
     
-    def extract_all(self, text: str) -> Dict[str, Any]:
+    def extract_all(
+        self, text: str, *, base_time: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
         """Extract all possible slots from text.
         
         Args:
             text: Input text
+            base_time: Base time for relative calculations. If *None*,
+                ``extract_time`` will fall back to ``BANTZ_TIMEZONE`` env
+                then ``datetime.now()``.
         
         Returns:
             Dictionary of slot name to extracted value
@@ -747,7 +763,7 @@ class SlotExtractor:
         slots = {}
         
         # Extract time
-        time_slot = extract_time(text)
+        time_slot = extract_time(text, base_time=base_time)
         if time_slot:
             slots["time"] = time_slot
         
