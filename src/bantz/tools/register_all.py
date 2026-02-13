@@ -299,12 +299,12 @@ def _register_gmail(registry: "ToolRegistry") -> int:
     n = 0
     n += _reg(registry, "gmail.unread_count", "Get unread email count.",
               _obj(), gmail_unread_count_tool)
-    n += _reg(registry, "gmail.list", "List recent emails.",
+    n += _reg(registry, "gmail.list_messages", "List recent emails.",
               _obj(("max_results", "integer", "Max results (default 10)"),
                    ("label", "string", "Label filter"),
                    ("query", "string", "Search query")),
               gmail_list_messages_tool)
-    n += _reg(registry, "gmail.get", "Get full email content.",
+    n += _reg(registry, "gmail.get_message", "Get full email content.",
               _obj(("message_id", "string", "Gmail message ID"), required=["message_id"]),
               gmail_get_message_tool)
     n += _reg(registry, "gmail.send", "Send an email.",
@@ -313,10 +313,10 @@ def _register_gmail(registry: "ToolRegistry") -> int:
                    ("body", "string", "Email body"),
                    required=["to", "subject", "body"]),
               gmail_send_tool, risk="high", confirm=True)
-    n += _reg(registry, "gmail.search", "Smart Gmail search.",
+    n += _reg(registry, "gmail.smart_search", "Smart Gmail search.",
               _obj(("query", "string", "Search query"), required=["query"]),
               gmail_smart_search_tool)
-    n += _reg(registry, "gmail.categories", "List Gmail categories with counts.",
+    n += _reg(registry, "gmail.list_categories", "List Gmail categories with counts.",
               _obj(), gmail_list_categories_tool)
     return n
 
@@ -447,21 +447,21 @@ def _register_calendar(registry: "ToolRegistry") -> int:
         return 0
 
     n = 0
-    n += _reg(registry, "calendar.list", "List upcoming calendar events.",
+    n += _reg(registry, "calendar.list_events", "List upcoming calendar events.",
               _obj(("days", "integer", "Days ahead to look (default 7)"),
                    ("max_results", "integer", "Max events")),
               calendar_list_events_tool)
-    n += _reg(registry, "calendar.create", "Create a calendar event.",
+    n += _reg(registry, "calendar.create_event", "Create a calendar event.",
               _obj(("title", "string", "Event title"),
                    ("start", "string", "Start datetime ISO"),
                    ("end", "string", "End datetime ISO"),
                    ("description", "string", "Event description"),
                    required=["title", "start"]),
               calendar_create_event_tool, risk="medium", confirm=True)
-    n += _reg(registry, "calendar.update", "Update a calendar event.",
+    n += _reg(registry, "calendar.update_event", "Update a calendar event.",
               _obj(("event_id", "string", "Event ID"), required=["event_id"]),
               calendar_update_event_tool, risk="medium", confirm=True)
-    n += _reg(registry, "calendar.delete", "Delete a calendar event.",
+    n += _reg(registry, "calendar.delete_event", "Delete a calendar event.",
               _obj(("event_id", "string", "Event ID"), required=["event_id"]),
               calendar_delete_event_tool, risk="high", confirm=True)
     return n
