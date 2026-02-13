@@ -278,6 +278,106 @@ def format_time_now(result: Dict[str, Any]) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────
+# Additional formatters (Issue #1075)
+# ─────────────────────────────────────────────────────────────────
+
+
+def format_gmail_unread_count(result: Dict[str, Any]) -> str:
+    """Format gmail.unread_count result."""
+    count = result.get("count") or result.get("unread_count") or result.get("total") or 0
+    if count == 0:
+        return "Okunmamış mesaj yok efendim."
+    return f"{count} okunmamış mesaj var efendim."
+
+
+def format_gmail_smart_search(result: Dict[str, Any]) -> str:
+    """Format gmail.smart_search result."""
+    messages = result.get("messages") or result.get("results") or []
+    if not messages:
+        return "Arama sonucu bulunamadı efendim."
+
+    lines: List[str] = []
+    for msg in messages[:10]:
+        sender = msg.get("from") or msg.get("sender") or "Bilinmeyen"
+        if "<" in sender:
+            sender = sender.split("<")[0].strip()
+        subject = msg.get("subject") or "Konu yok"
+        if len(subject) > 40:
+            subject = subject[:37] + "..."
+        lines.append(f"{sender}: {subject}")
+
+    count = len(lines)
+    header = f"{count} sonuç bulundu efendim:"
+    body = " | ".join(lines)
+    return f"{header} {body}"
+
+
+def format_calendar_find_free_slots(result: Dict[str, Any]) -> str:
+    """Format calendar.find_free_slots result."""
+    slots = result.get("slots") or result.get("free_slots") or result.get("available") or []
+    if not slots:
+        return "Uygun boş zaman dilimi bulunamadı efendim."
+
+    lines: List[str] = []
+    for slot in slots[:8]:
+        start_str = slot.get("start") or ""
+        end_str = slot.get("end") or ""
+        if isinstance(start_str, dict):
+            start_str = start_str.get("dateTime") or start_str.get("date") or ""
+        if isinstance(end_str, dict):
+            end_str = end_str.get("dateTime") or end_str.get("date") or ""
+        start_dt = _parse_iso(start_str)
+        end_dt = _parse_iso(end_str)
+        if start_dt and end_dt:
+            dur = _calc_duration_minutes(start_dt, end_dt)
+            lines.append(f"{_format_time_tr(start_dt)}-{_format_time_tr(end_dt)} ({_format_duration(dur)})")
+        elif start_dt:
+            lines.append(_format_time_tr(start_dt))
+        else:
+            lines.append(str(slot))
+
+    count = len(lines)
+    header = f"{count} boş zaman dilimi bulundu efendim:"
+    body = " | ".join(lines)
+    return f"{header} {body}"
+
+
+def format_web_search(result: Dict[str, Any]) -> str:
+    """Format web.search result."""
+    results = result.get("results") or result.get("items") or result.get("hits") or []
+    if not results:
+        return "Arama sonucu bulunamadı efendim."
+
+    lines: List[str] = []
+    for item in results[:5]:
+        title = item.get("title") or "Başlıksız"
+        snippet = item.get("snippet") or item.get("description") or ""
+        if len(title) > 50:
+            title = title[:47] + "..."
+        if snippet and len(snippet) > 60:
+            snippet = snippet[:57] + "..."
+        entry = title
+        if snippet:
+            entry += f" — {snippet}"
+        lines.append(entry)
+
+    return f"{len(lines)} sonuç bulundu efendim: " + " | ".join(lines)
+
+
+def format_system_status(result: Dict[str, Any]) -> str:
+    """Format system.status result."""
+    status = result.get("status") or result.get("state") or "bilinmiyor"
+    uptime = result.get("uptime") or ""
+    version = result.get("version") or ""
+    parts = [f"Sistem durumu: {status}"]
+    if uptime:
+        parts.append(f"çalışma süresi: {uptime}")
+    if version:
+        parts.append(f"versiyon: {version}")
+    return ", ".join(parts) + " efendim."
+
+
+# ─────────────────────────────────────────────────────────────────
 # Formatter registry
 # ─────────────────────────────────────────────────────────────────
 
@@ -286,9 +386,14 @@ _FORMATTERS: Dict[str, Callable[[Dict[str, Any]], str]] = {
     "calendar.create_event": format_calendar_create_event,
     "calendar.delete_event": format_calendar_delete_event,
     "calendar.update_event": format_calendar_update_event,
+    "calendar.find_free_slots": format_calendar_find_free_slots,
     "gmail.list_messages": format_gmail_list_messages,
     "gmail.send": format_gmail_send,
     "gmail.get_message": format_gmail_get_message,
+    "gmail.unread_count": format_gmail_unread_count,
+    "gmail.smart_search": format_gmail_smart_search,
+    "web.search": format_web_search,
+    "system.status": format_system_status,
     "time.now": format_time_now,
 }
 
