@@ -1262,6 +1262,81 @@ class OrchestratorLoop:
                         "resolved_message_id": matched_id,
                     },
                 )
+
+        # Issue #1230: Mail disambiguation-first — resolve #N refs and
+        # force disambiguation when intent is detail/read but no message_id.
+        if (
+            state.gmail_listed_messages
+            and output.route == "gmail"
+            and output.gmail_intent in ("read", "detail")
+            and not (output.slots or {}).get("message_id")
+        ):
+            _mail_resolved = False
+
+            # 1) Try #N reference (e.g. "#2 maili anlat")
+            try:
+                from bantz.brain.calendar_intent import parse_hash_ref_index
+                _mail_ref = parse_hash_ref_index(user_input)
+                if _mail_ref is not None and 1 <= _mail_ref <= len(state.gmail_listed_messages):
+                    _ref_msg = state.gmail_listed_messages[_mail_ref - 1]
+                    _ref_msg_id = _ref_msg.get("id")
+                    if _ref_msg_id:
+                        logger.info(
+                            "[Issue #1230] Resolved gmail #%d → id=%s",
+                            _mail_ref, _ref_msg_id,
+                        )
+                        output = replace(
+                            output,
+                            tool_plan=["gmail.get_message"],
+                            slots={**(output.slots or {}), "message_id": _ref_msg_id},
+                            raw_output={
+                                **output.raw_output,
+                                "gmail_ref_resolved": True,
+                                "resolved_ref_index": _mail_ref,
+                            },
+                        )
+                        _mail_resolved = True
+            except Exception:
+                pass
+
+            # 2) Try keyword match (e.g. "github maili")
+            if not _mail_resolved:
+                _kw_id = _match_mail_by_keyword(user_input, state.gmail_listed_messages)
+                if _kw_id:
+                    logger.info(
+                        "[Issue #1230] Keyword match → id=%s from '%.40s'",
+                        _kw_id, user_input,
+                    )
+                    output = replace(
+                        output,
+                        tool_plan=["gmail.get_message"],
+                        slots={**(output.slots or {}), "message_id": _kw_id},
+                        raw_output={
+                            **output.raw_output,
+                            "specific_mail_resolved": True,
+                            "resolved_message_id": _kw_id,
+                        },
+                    )
+                    _mail_resolved = True
+
+            # 3) Disambiguation — no match, ask user to pick
+            if not _mail_resolved:
+                lines = ["Hangi maili istiyorsunuz efendim?"]
+                for i, m in enumerate(state.gmail_listed_messages[:10], start=1):
+                    _subj = m.get("subject") or "(konu yok)"
+                    _sender = m.get("from") or ""
+                    lines.append(f"  #{i}  {_sender} — {_subj}")
+                logger.info("[Issue #1230] Mail disambiguation prompt shown")
+                output = replace(
+                    output,
+                    ask_user=True,
+                    question="\n".join(lines),
+                    tool_plan=[],
+                    raw_output={
+                        **output.raw_output,
+                        "mail_disambiguation": True,
+                    },
+                )
         
         # Issue #1224: Calendar #N reference resolution — when user says
         # "#2 toplantısını sil" and we previously listed events, resolve
