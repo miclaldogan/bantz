@@ -1373,9 +1373,30 @@ class OrchestratorLoop:
                         output.route, inferred,
                     )
                     output = replace(output, route=inferred)
+                elif not inferred:
+                    # Issue #1229: Cannot infer correct route → hard-block
+                    # tool execution to prevent misrouted tool calls.
+                    logger.warning(
+                        "[PLAN_VERIFIER] Cannot infer route from tool_plan, "
+                        "blocking execution. errors=%s",
+                        correctable,
+                    )
+                    output = replace(
+                        output,
+                        tool_plan=[],
+                        ask_user=True,
+                        question="Bu isteği tam anlayamadım efendim. Biraz daha açar mısınız?",
+                    )
 
             if hard:
-                output = replace(output, ask_user=True, question="Anlayamadım, tekrar eder misin?")
+                # Issue #1229: Hard errors MUST clear tool_plan to prevent
+                # execution of invalid/dangerous tool calls.
+                output = replace(
+                    output,
+                    tool_plan=[],
+                    ask_user=True,
+                    question="Anlayamadım, tekrar eder misin?",
+                )
 
         # Issue #1214: Keyword-based route recovery when LLM routes to
         # smalltalk/unknown with no tool_plan but input has tool indicators.

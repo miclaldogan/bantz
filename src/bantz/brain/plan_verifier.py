@@ -207,3 +207,40 @@ def verify_plan(
         logger.debug("[PLAN_VERIFIER] plan OK route=%s tools=%d", route, len(tool_plan))
 
     return (not errors), errors
+
+
+# ── Issue #1229: Error classification ────────────────────────────────
+# CRITICAL errors MUST block tool execution.
+# WARNING errors are logged but do not block.
+_CRITICAL_PREFIXES: frozenset[str] = frozenset({
+    "unknown_tool",
+    "route_tool_mismatch",
+    "smalltalk_with_tools",
+    "missing_slot",
+    "missing_gmail_field",
+    "route_intent_mismatch",
+})
+
+_WARNING_PREFIXES: frozenset[str] = frozenset({
+    "tool_plan_no_indicators",
+    "calendar_write_no_temporal",
+})
+
+
+def classify_errors(
+    errors: list[str],
+) -> tuple[list[str], list[str]]:
+    """Split plan errors into (critical, warnings).
+
+    Critical errors must prevent tool execution.
+    Warnings are informational and should be logged only.
+    """
+    critical: list[str] = []
+    warnings: list[str] = []
+    for err in errors:
+        prefix = err.split(":")[0]
+        if prefix in _CRITICAL_PREFIXES:
+            critical.append(err)
+        else:
+            warnings.append(err)
+    return critical, warnings
