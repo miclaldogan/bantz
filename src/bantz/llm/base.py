@@ -133,13 +133,14 @@ class LLMClient(ABC):
         pass
     
     @abstractmethod
-    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, system_prompt: Optional[str] = None) -> str:
         """Simple text completion (used by Router).
         
         Args:
-            prompt: Single prompt string
+            prompt: Single prompt string (sent as user message)
             temperature: Sampling temperature
             max_tokens: Max tokens to generate
+            system_prompt: Optional system instructions (sent as system message)
             
         Returns:
             Generated text
@@ -180,7 +181,7 @@ class LLMClientProtocol(Protocol):
     ) -> str:
         ...
     
-    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, system_prompt: Optional[str] = None) -> str:
         ...
     
     @property

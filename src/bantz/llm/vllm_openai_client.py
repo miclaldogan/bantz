@@ -509,9 +509,16 @@ class VLLMOpenAIClient(LLMClient):
                     f"vLLM stream failed: {e}"
                 ) from e
     
-    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None) -> str:
-        """Simple text completion (used by Router)."""
-        messages = [LLMMessage(role="user", content=prompt)]
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None, system_prompt: Optional[str] = None) -> str:
+        """Simple text completion (used by Router).
+
+        Issue #1050: When system_prompt is provided it is sent as a proper
+        system message instead of being crammed into the user message.
+        """
+        messages: List[LLMMessage] = []
+        if system_prompt:
+            messages.append(LLMMessage(role="system", content=system_prompt))
+        messages.append(LLMMessage(role="user", content=prompt))
         return self.chat(messages, temperature=temperature, max_tokens=max_tokens, stop=stop)
     
     @property
