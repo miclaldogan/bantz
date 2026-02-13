@@ -1481,18 +1481,22 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         # If route is calendar but intent is "none", infer intent from Turkish input
         if route == "calendar" and calendar_intent == "none":
             _input_lower = (user_input or "").lower()
-            _CREATE_WORDS = ("ekle", "ekleyebilir", "koy", "oluştur", "planla", "kur", "ayarla")
-            _QUERY_WORDS = ("ne yapıyoruz", "ne var", "neler var", "planım", "programım", "gündem", "takvim", "bugün", "yarın", "var mı", "ne yapacağız", "planımız")
-            _CANCEL_WORDS = ("iptal", "sil", "kaldır")
-            _MODIFY_WORDS = ("değiştir", "ertele", "kaydır", "güncelle")
+            # Issue #1105: Use word-boundary tokenized matching to avoid
+            # substring collisions (kur→kurumsal, sil→silikon).
+            _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
+            _CREATE_WORDS = {"ekle", "ekleyebilir", "koy", "oluştur", "planla", "kur", "ayarla"}
+            _QUERY_WORDS_MULTI = ("ne yapıyoruz", "ne var", "neler var", "var mı", "ne yapacağız")
+            _QUERY_WORDS_SINGLE = {"planım", "programım", "gündem", "takvim", "bugün", "yarın", "planımız"}
+            _CANCEL_WORDS = {"iptal", "sil", "kaldır"}
+            _MODIFY_WORDS = {"değiştir", "ertele", "kaydır", "güncelle"}
             
-            if any(w in _input_lower for w in _CREATE_WORDS):
+            if _input_tokens & _CREATE_WORDS:
                 calendar_intent = "create"
-            elif any(w in _input_lower for w in _QUERY_WORDS):
+            elif any(w in _input_lower for w in _QUERY_WORDS_MULTI) or (_input_tokens & _QUERY_WORDS_SINGLE):
                 calendar_intent = "query"
-            elif any(w in _input_lower for w in _CANCEL_WORDS):
+            elif _input_tokens & _CANCEL_WORDS:
                 calendar_intent = "cancel"
-            elif any(w in _input_lower for w in _MODIFY_WORDS):
+            elif _input_tokens & _MODIFY_WORDS:
                 calendar_intent = "modify"
             else:
                 calendar_intent = "query"  # default for calendar route
