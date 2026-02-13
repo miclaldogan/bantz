@@ -1912,7 +1912,50 @@ class OrchestratorLoop:
 
         pipeline = self._get_finalization_pipeline()
 
-        return pipeline.run(ctx)
+        finalized = pipeline.run(ctx)
+
+        # ----- Issue #1243: Output Gate (EN→TR) -----
+        # When the bridge translated the user input to EN for routing,
+        # the finalizer usually produces Turkish output (via Gemini prompt).
+        # However, when the fast/quality finalizer returns English or
+        # mixed-language text, the Output Gate translates it back to TR.
+        # Gated by BANTZ_BRIDGE_OUTPUT_GATE env var (default: false).
+        if (
+            os.environ.get("BANTZ_BRIDGE_OUTPUT_GATE", "").lower()
+            in ("1", "true", "yes")
+            and state.detected_lang == "tr"
+        ):
+            _reply = finalized.assistant_reply or ""
+            if _reply.strip():
+                from bantz.brain.language_guard import detect_language_issue
+
+                _lang_issue = detect_language_issue(_reply)
+                if _lang_issue is not None:
+                    _bridge = get_bridge()
+                    if _bridge is not None:
+                        try:
+                            _tr_reply = _bridge.to_tr(_reply)
+                            if _tr_reply and _tr_reply.strip():
+                                logger.info(
+                                    "[BRIDGE] Output Gate: %s → translated %d chars EN→TR",
+                                    _lang_issue,
+                                    len(_reply),
+                                )
+                                finalized = replace(
+                                    finalized,
+                                    assistant_reply=_tr_reply,
+                                )
+                            else:
+                                logger.warning(
+                                    "[BRIDGE] Output Gate: to_tr returned empty, keeping original",
+                                )
+                        except Exception as _og_exc:
+                            logger.warning(
+                                "[BRIDGE] Output Gate translation failed: %s — keeping original",
+                                _og_exc,
+                            )
+
+        return finalized
     
     def _update_state_phase(
         self,
