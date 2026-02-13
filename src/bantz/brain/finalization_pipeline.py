@@ -986,9 +986,26 @@ def _safe_complete(
 
     try:
         if timeout > 0:
+            # Issue #1182: Sync the HTTP-level timeout with the
+            # ThreadPoolExecutor timeout so the HTTP request aborts at
+            # the same instant instead of lingering for up to 240s.
+            _original_timeout = getattr(llm, "_timeout_seconds", None)
+            if _original_timeout is not None and _original_timeout > timeout:
+                try:
+                    llm._timeout_seconds = timeout  # type: ignore[attr-defined]
+                except Exception:
+                    pass
             with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="finalizer") as pool:
                 future = pool.submit(_do_complete)
-                text = future.result(timeout=timeout)
+                try:
+                    text = future.result(timeout=timeout)
+                finally:
+                    # Restore original timeout
+                    if _original_timeout is not None:
+                        try:
+                            llm._timeout_seconds = _original_timeout  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
         else:
             text = _do_complete()
     except concurrent.futures.TimeoutError:
