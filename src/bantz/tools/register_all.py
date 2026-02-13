@@ -148,14 +148,13 @@ def _register_browser(registry: "ToolRegistry") -> int:
     n += _reg(registry, "browser.info", "Get current page info (title, URL, meta).",
               _obj(), browser_info_tool)
     n += _reg(registry, "browser.detail", "Get detailed content of a page element.",
-              _obj(("selector", "string", "CSS selector"), required=["selector"]),
+              _obj(("index", "integer", "Element index from browser.scan (default 0)")),
               browser_detail_tool)
-    n += _reg(registry, "browser.wait", "Wait for a page element to appear.",
-              _obj(("selector", "string", "CSS selector to wait for"),
-                   ("timeout", "integer", "Timeout in ms (default 5000)")),
+    n += _reg(registry, "browser.wait", "Wait for a specified duration.",
+              _obj(("seconds", "integer", "Wait time in seconds (1-30, default 2)")),
               browser_wait_tool)
     n += _reg(registry, "browser.extract", "Extract structured data from page.",
-              _obj(("selector", "string", "CSS selector for extraction")),
+              _obj(("index", "integer", "Element index from browser.scan (default 0)")),
               browser_detail_tool)  # reuse detail handler
     return n
 
@@ -211,7 +210,9 @@ def _register_file(registry: "ToolRegistry") -> int:
 
     n = 0
     n += _reg(registry, "file.read", "Read file contents.",
-              _obj(("path", "string", "File path"), ("lines", "string", "Line range e.g. '1-50'"),
+              _obj(("path", "string", "File path"),
+                   ("start_line", "integer", "First line to read (1-based)"),
+                   ("end_line", "integer", "Last line to read (1-based)"),
                    required=["path"]),
               file_read_tool)
     n += _reg(registry, "file.write", "Write content to a file.",
@@ -398,7 +399,9 @@ def _register_gmail_extended(registry: "ToolRegistry") -> int:
     n += _reg(registry, "gmail.list_drafts", "List email drafts.",
               _obj(("max_results", "integer", "Max results")), gmail_list_drafts_tool)
     n += _reg(registry, "gmail.update_draft", "Update an existing draft.",
-              _obj(("draft_id", "string", "Draft ID"), required=["draft_id"]),
+              _obj(("draft_id", "string", "Draft ID"),
+                   ("updates", "object", "Fields to update (to, subject, body)"),
+                   required=["draft_id"]),
               gmail_update_draft_tool)
     n += _reg(registry, "gmail.send_draft", "Send a draft email.",
               _obj(("draft_id", "string", "Draft ID"), required=["draft_id"]),
@@ -470,8 +473,10 @@ def _register_calendar(registry: "ToolRegistry") -> int:
 
     n = 0
     n += _reg(registry, "calendar.list_events", "List upcoming calendar events.",
-              _obj(("days", "integer", "Days ahead to look (default 7)"),
-                   ("max_results", "integer", "Max events")),
+              _obj(("date", "string", "Date to query (YYYY-MM-DD or natural language)"),
+                   ("window_hint", "string", "Time window hint (e.g. morning, afternoon)"),
+                   ("query", "string", "Search query to filter events"),
+                   ("max_results", "integer", "Max events (default 10)")),
               calendar_list_events_tool)
     n += _reg(registry, "calendar.create_event", "Create a calendar event.",
               _obj(("title", "string", "Event title"),
@@ -482,7 +487,14 @@ def _register_calendar(registry: "ToolRegistry") -> int:
                    required=["title"]),
               calendar_create_event_tool, risk="medium", confirm=True)
     n += _reg(registry, "calendar.update_event", "Update a calendar event.",
-              _obj(("event_id", "string", "Event ID"), required=["event_id"]),
+              _obj(("event_id", "string", "Event ID"),
+                   ("title", "string", "New event title"),
+                   ("date", "string", "New date (YYYY-MM-DD)"),
+                   ("time", "string", "New time (HH:MM)"),
+                   ("duration", "integer", "New duration in minutes"),
+                   ("location", "string", "New location"),
+                   ("description", "string", "New description"),
+                   required=["event_id"]),
               calendar_update_event_tool, risk="medium", confirm=True)
     n += _reg(registry, "calendar.delete_event", "Delete a calendar event.",
               _obj(("event_id", "string", "Event ID"), required=["event_id"]),
