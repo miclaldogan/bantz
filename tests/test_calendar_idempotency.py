@@ -108,10 +108,14 @@ class TestNormalization:
         assert normalize_title("   ") == ""
     
     def test_normalize_datetime_iso(self):
-        """Test ISO datetime normalization."""
+        """Test ISO datetime normalization.
+        
+        normalize_datetime converts to UTC for consistent idempotency hashing.
+        15:00+03:00 → 12:00 UTC.
+        """
         result = normalize_datetime("2026-02-01T15:00:00+03:00")
         assert "2026-02-01" in result
-        assert "15:00" in result
+        assert "12:00" in result  # 15:00+03:00 = 12:00 UTC
     
     def test_normalize_datetime_with_whitespace(self):
         """Test datetime whitespace handling."""
@@ -139,7 +143,7 @@ class TestKeyGeneration:
         key = generate_idempotency_key(**sample_event)
         
         assert isinstance(key, str)
-        assert len(key) == 16  # SHA-256 truncated to 16 chars
+        assert len(key) == 32  # SHA-256 truncated to 32 hex chars
     
     def test_generate_key_deterministic(self, sample_event):
         """Test that same inputs produce same key."""

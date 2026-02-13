@@ -12,6 +12,27 @@ READONLY_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 WRITE_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 
+def _to_local_iso(iso_str: str | None) -> str | None:
+    """Convert an ISO datetime string to local timezone.
+
+    Google Calendar API may return UTC timestamps (e.g. '2026-02-13T18:00:00Z').
+    This converts to local timezone (e.g. '2026-02-13T21:00:00+03:00') so that
+    downstream consumers (summarizer, finalizer) display correct local times.
+    """
+    if not isinstance(iso_str, str) or "T" not in iso_str:
+        return iso_str
+    try:
+        # Python 3.10 fromisoformat doesn't support "Z" suffix
+        clean = iso_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(clean)
+        if dt.tzinfo is not None:
+            local_dt = dt.astimezone()
+            return local_dt.replace(microsecond=0).isoformat()
+        return iso_str
+    except (ValueError, TypeError):
+        return iso_str
+
+
 def _now_rfc3339() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -736,8 +757,8 @@ def list_events(
             {
                 "id": it.get("id"),
                 "summary": it.get("summary"),
-                "start": start.get("dateTime") or start.get("date"),
-                "end": end.get("dateTime") or end.get("date"),
+                "start": _to_local_iso(start.get("dateTime") or start.get("date")),
+                "end": _to_local_iso(end.get("dateTime") or end.get("date")),
                 "location": it.get("location"),
                 "htmlLink": it.get("htmlLink"),
                 "status": it.get("status"),
@@ -1032,8 +1053,8 @@ def create_event(
     start_obj = created.get("start") if isinstance(created.get("start"), dict) else {}
     end_obj = created.get("end") if isinstance(created.get("end"), dict) else {}
 
-    event_start = start_obj.get("dateTime") or start_obj.get("date") or start_dt.isoformat()
-    event_end = end_obj.get("dateTime") or end_obj.get("date") or end_dt.isoformat()
+    event_start = _to_local_iso(start_obj.get("dateTime") or start_obj.get("date")) or start_dt.isoformat()
+    event_end = _to_local_iso(end_obj.get("dateTime") or end_obj.get("date")) or end_dt.isoformat()
     event_id = created.get("id")
 
     # Cache newly created event for immediate visibility (#315)
@@ -1220,8 +1241,8 @@ def update_event(
         "id": updated.get("id") or str(event_id).strip(),
         "htmlLink": updated.get("htmlLink"),
         "summary": updated.get("summary"),
-        "start": start_obj.get("dateTime") or start_obj.get("date"),
-        "end": end_obj.get("dateTime") or end_obj.get("date"),
+        "start": _to_local_iso(start_obj.get("dateTime") or start_obj.get("date")),
+        "end": _to_local_iso(end_obj.get("dateTime") or end_obj.get("date")),
         "location": updated.get("location"),
         "description": updated.get("description"),
         "calendar_id": cal_id,

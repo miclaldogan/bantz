@@ -169,17 +169,21 @@ def _extract_field(raw: Any, *field_names: str) -> str | None:
 
 
 def _extract_event_time(raw: Any) -> str | None:
-    """Extract HH:MM time from a calendar event tool result.
+    """Extract HH:MM time from a calendar event tool result (local timezone).
+
+    Google Calendar API may return UTC timestamps (e.g. '2026-02-13T18:00:00Z').
+    This function converts to local timezone before extracting HH:MM.
 
     Looks for 'start' field in various formats:
-    - ISO string: "2026-02-13T20:00:00+03:00" → "20:00"
-    - Dict: {"dateTime": "2026-02-13T20:00:00+03:00"} → "20:00"
-    - Params: {"time": "20:00"} → "20:00"
+    - ISO string: "2026-02-13T18:00:00Z" → "21:00" (UTC+3)
+    - ISO string: "2026-02-13T21:00:00+03:00" → "21:00"
+    - Dict: {"dateTime": "2026-02-13T21:00:00+03:00"} → "21:00"
+    - Params: {"time": "21:00"} → "21:00"
     """
     if not isinstance(raw, dict):
         return None
 
-    # Direct time field (from params echo)
+    # Direct time field (from params echo) — already local
     t = raw.get("time")
     if isinstance(t, str) and ":" in t and len(t) <= 5:
         return t.strip()
@@ -189,11 +193,19 @@ def _extract_event_time(raw: Any) -> str | None:
     if isinstance(start, dict):
         start = start.get("dateTime") or start.get("date")
     if isinstance(start, str) and "T" in start:
-        # Extract HH:MM from ISO string
         try:
+            from datetime import datetime as _dt_cls
+            # Python 3.10 fromisoformat doesn't support "Z"
+            clean = start.replace("Z", "+00:00")
+            dt = _dt_cls.fromisoformat(clean)
+            # Convert to local timezone if timezone-aware
+            if dt.tzinfo is not None:
+                local_dt = dt.astimezone()
+                return local_dt.strftime("%H:%M")
+            # Fallback: extract HH:MM directly
             time_part = start.split("T")[1]
-            return time_part[:5]  # "20:00"
-        except (IndexError, TypeError):
+            return time_part[:5]
+        except (ValueError, IndexError, TypeError):
             pass
 
     return None
