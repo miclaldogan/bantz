@@ -407,18 +407,20 @@ def get_client_and_qos_for_text(
     text: str,
     *,
     profile: str = "default",
-    fast_client_timeout: float = 120.0,
-    quality_client_timeout: float = 240.0,
+    fast_client_timeout: Optional[float] = None,
+    quality_client_timeout: Optional[float] = None,
 ) -> tuple[LLMClientProtocol, TierDecision, TierQoS]:
     """Return (client, decision, qos) for a given user text.
 
-    - `qos` is intended for per-call defaults (e.g. chat max_tokens).
-    - Client timeouts are still controlled via `*_client_timeout`.
+    Issue #1110: Client timeouts now default to ``qos.timeout_s`` instead of
+    hardcoded 120/240, matching ``get_client_for_text()`` behaviour.
     """
 
     decision = decide_tier(text)
     qos = get_qos(use_quality=bool(decision.use_quality), profile=profile)
 
     if decision.use_quality:
-        return create_quality_client(timeout=quality_client_timeout), decision, qos
-    return create_fast_client(timeout=fast_client_timeout), decision, qos
+        _timeout = quality_client_timeout if quality_client_timeout is not None else qos.timeout_s
+        return create_quality_client(timeout=_timeout), decision, qos
+    _timeout = fast_client_timeout if fast_client_timeout is not None else qos.timeout_s
+    return create_fast_client(timeout=_timeout), decision, qos
