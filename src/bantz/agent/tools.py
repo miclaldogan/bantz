@@ -165,6 +165,10 @@ class ToolRegistry:
         if not tool:
             return False, f"unknown_tool:{name}"
 
+        # Issue #1174: Work on a shallow copy so empty-string → None
+        # coercion doesn't mutate the caller's original dict.
+        params = dict(params)
+
         schema = tool.parameters or {}
         required = schema.get("required") or []
         for key in required:
