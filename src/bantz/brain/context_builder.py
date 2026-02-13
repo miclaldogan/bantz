@@ -245,10 +245,17 @@ class ContextBuilder:
                 context_parts.append(mem_block)
 
             # Update personality injector with user name
+            # Issue #1178: Invalidate personality cache when name changes
             if self._personality_injector is not None:
                 pname = um_facts.get("name", "")
                 if pname:
+                    old_name = getattr(
+                        getattr(self._personality_injector, "config", None),
+                        "user_name", "",
+                    ) or ""
                     self._personality_injector.update_user_name(pname)
+                    if pname != old_name:
+                        self._personality_block_built = False
 
         except Exception as exc:
             logger.debug("[CONTEXT_BUILDER] user_memory failed: %s", exc)
