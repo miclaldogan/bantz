@@ -144,7 +144,7 @@ def _register_browser(registry: "ToolRegistry") -> int:
 def _register_pc(registry: "ToolRegistry") -> int:
     try:
         from bantz.tools.pc_tools import (
-            pc_hotkey_tool, pc_mouse_move_tool, pc_mouse_click_tool,
+            pc_hotkey_tool, pc_type_tool, pc_mouse_move_tool, pc_mouse_click_tool,
             pc_mouse_scroll_tool, clipboard_set_tool, clipboard_get_tool,
         )
     except ImportError as e:
@@ -168,7 +168,7 @@ def _register_pc(registry: "ToolRegistry") -> int:
               pc_mouse_scroll_tool, risk="low")
     n += _reg(registry, "pc.type", "Type text on keyboard.",
               _obj(("text", "string", "Text to type"), required=["text"]),
-              pc_hotkey_tool, risk="medium", confirm=True)  # xdotool type
+              pc_type_tool, risk="medium", confirm=True)  # xdotool type
     n += _reg(registry, "clipboard.set", "Set clipboard content.",
               _obj(("text", "string", "Text to copy"), required=["text"]),
               clipboard_set_tool, risk="low")

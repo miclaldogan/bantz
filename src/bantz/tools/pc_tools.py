@@ -80,6 +80,35 @@ def pc_hotkey_tool(*, combo: str = "", **_: Any) -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
+# ── pc_type (Issue #1052) ──────────────────────────────────────────
+
+def pc_type_tool(*, text: str = "", **_: Any) -> Dict[str, Any]:
+    """Type text on the keyboard using xdotool type.
+
+    Unlike pc_hotkey_tool (which sends key combos via 'xdotool key'),
+    this uses 'xdotool type' to simulate typing a string of characters.
+    """
+    if not text:
+        return {"ok": False, "error": "text_required"}
+
+    if not _check_tool("xdotool"):
+        return {"ok": False, "error": "xdotool_not_installed"}
+
+    # Safety: limit text length to prevent accidental massive input
+    if len(text) > 5000:
+        return {"ok": False, "error": "text_too_long (max 5000 chars)"}
+
+    try:
+        result = _run_cmd(["xdotool", "type", "--clearmodifiers", text], timeout=30)
+        if result.returncode == 0:
+            return {"ok": True, "typed": True, "length": len(text)}
+        return {"ok": False, "error": f"xdotool_error: {result.stderr.strip()}"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "xdotool_timeout"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ── pc_mouse_move ───────────────────────────────────────────────────
 
 def pc_mouse_move_tool(*, x: int = 0, y: int = 0, duration_ms: int = 0, **_: Any) -> Dict[str, Any]:
