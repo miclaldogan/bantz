@@ -349,15 +349,24 @@ class JarvisLLMOrchestrator:
         "time.now", "system.status",
     })
 
+    # Issue #1275: Class-level registry reference for route-based schema injection
+    _tool_registry: Optional[Any] = None
+
     @classmethod
-    def sync_valid_tools(cls, registry_names: list[str]) -> None:
+    def sync_valid_tools(cls, registry_names: list[str], *, registry: Optional[Any] = None) -> None:
         """Intersect _VALID_TOOLS with an actual ToolRegistry at startup.
 
         Logs warnings for tools referenced in the system prompt or
         _VALID_TOOLS that do not appear in the live registry, then
         narrows _VALID_TOOLS to the intersection so the router can
         never emit a tool the executor cannot find.
+
+        Issue #1275: When *registry* is provided, stores a reference so
+        that route-based tool schema injection can generate compact
+        per-tool schema lines at prompt build time.
         """
+        if registry is not None:
+            cls._tool_registry = registry
         registry_set = frozenset(registry_names)
         phantom = cls._VALID_TOOLS - registry_set
         if phantom:
@@ -449,6 +458,81 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         tools_csv = ", ".join(sorted(names))
         core = cls._SYSTEM_PROMPT_CORE.replace("{{TOOLS}}", tools_csv)
         return core + cls._SYSTEM_PROMPT_DETAIL + cls._SYSTEM_PROMPT_EXAMPLES
+
+    # ------------------------------------------------------------------
+    # Issue #1275: Route-based tool schema injection
+    # ------------------------------------------------------------------
+    @classmethod
+    def _get_tool_schemas_for_route(cls, route: str) -> str:
+        """Return compact tool schemas for the given *route*.
+
+        Uses the class-level ``_tool_registry`` reference (set by
+        ``sync_valid_tools``) to call ``get_schemas_for_route()``.
+        Returns an empty string when the registry is unavailable or the
+        route has no matching tools.
+        """
+        if cls._tool_registry is None:
+            return ""
+        try:
+            return cls._tool_registry.get_schemas_for_route(
+                route, valid_tools=cls._VALID_TOOLS,
+            )
+        except Exception as exc:
+            logger.debug("[tool_schema] Failed to get schemas for route=%s: %s", route, exc)
+            return ""
+
+    # Route keywords for schema injection (Issue #1275)
+    # Maps Turkish keywords to route names for pre-LLM schema detection.
+    _SCHEMA_ROUTE_KEYWORDS: dict[str, list[str]] = {
+        "gmail": [
+            "mail", "e-posta", "eposta", "inbox", "gelen kutusu",
+            "gönder", "yanıtla", "reply", "draft", "taslak",
+            "etiket", "label", "okunmamış", "unread",
+        ],
+        "calendar": [
+            "takvim", "toplantı", "etkinlik", "randevu", "program",
+            "calendar", "event", "meeting", "müsait", "boş slot",
+        ],
+        "contacts": [
+            "kişi", "rehber", "contact", "telefon numarası",
+        ],
+        "system": [
+            "cpu", "ram", "bellek", "disk", "sistem", "durum",
+            "saat kaç", "tarih",
+        ],
+    }
+
+    @staticmethod
+    def _detect_schema_route(
+        user_input: str,
+        session_context: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """Detect the most likely route for tool schema injection.
+
+        Issue #1275: Uses preroute_hint (if available) or keyword matching
+        to determine which domain's tool schemas to inject into the prompt.
+        Returns empty string if no clear route is detected (smalltalk, etc.).
+        """
+        # Priority 1: preroute_hint from PreRouter
+        if session_context:
+            hint = session_context.get("preroute_hint") or {}
+            intent_str = hint.get("preroute_intent", "")
+            # Map intent to route: CALENDAR_LIST → calendar, GMAIL_LIST → gmail, etc.
+            intent_lower = intent_str.lower()
+            for route in ("calendar", "gmail", "contacts", "system"):
+                if route in intent_lower:
+                    return route
+
+        # Priority 2: keyword matching on user input
+        text = user_input.lower()
+        best_route = ""
+        best_hits = 0
+        for route, keywords in JarvisLLMOrchestrator._SCHEMA_ROUTE_KEYWORDS.items():
+            hits = sum(1 for kw in keywords if kw in text)
+            if hits > best_hits:
+                best_hits = hits
+                best_route = route
+        return best_route if best_hits > 0 else ""
 
     def __init__(
         self,
@@ -795,6 +879,23 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         dated_system_prompt = _date_line + self._system_prompt
 
         system_prompt = self._maybe_compact_system_prompt(dated_system_prompt, token_budget=budget)
+
+        # ── Issue #1275: Route-based tool schema injection ──
+        # Detect likely route from preroute hint or user input keywords,
+        # then inject compact per-tool schemas so the LLM knows exact
+        # parameter names and types instead of guessing.
+        _schema_block = ""
+        _detected_route = self._detect_schema_route(user_input, session_context)
+        if _detected_route:
+            _schemas = self._get_tool_schemas_for_route(_detected_route)
+            if _schemas:
+                _schema_block = f"\nARAÇ DETAYLARI ({_detected_route}):\n{_schemas}\n"
+                logger.debug(
+                    "[tool_schema] Injected %d tool schemas for route=%s",
+                    _schemas.count("\n") + 1, _detected_route,
+                )
+
+        system_prompt = system_prompt + _schema_block
         system_tokens = _estimate_tokens(system_prompt)
         user_tokens = _estimate_tokens(f"USER: {user_input}\nASSISTANT (sadece JSON):")
         

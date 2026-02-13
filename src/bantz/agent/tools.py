@@ -147,6 +147,62 @@ class ToolRegistry:
         """Return all registered tools sorted by name."""
         return [self._tools[n] for n in self.names()]
 
+    # ------------------------------------------------------------------
+    # Issue #1275: Route-based compact tool schema for LLM prompt injection
+    # ------------------------------------------------------------------
+    def get_schemas_for_route(
+        self,
+        route: str,
+        *,
+        valid_tools: frozenset[str] | set[str] | None = None,
+    ) -> str:
+        """Return compact one-liner schemas for tools matching *route*.
+
+        The route is matched against the tool name prefix (e.g. ``"gmail"``
+        matches ``gmail.send``, ``gmail.list_messages``, etc.).  Only tools
+        that are also in *valid_tools* (if provided) are included so that
+        phantom / unregistered tools never leak into the prompt.
+
+        Returns a newline-separated block like::
+
+            - gmail.send(to*, subject*, body*) — E-posta gönderir [HIGH,confirm]
+            - gmail.list_messages(query, max_results, label) — Mailleri listeler [LOW]
+        """
+        prefix = f"{route}."
+        lines: list[str] = []
+
+        for name in self.names():
+            if not name.startswith(prefix):
+                continue
+            if valid_tools is not None and name not in valid_tools:
+                continue
+
+            tool = self._tools[name]
+            schema = tool.parameters or {}
+            props = schema.get("properties") or {}
+            required = set(schema.get("required") or [])
+
+            # Build compact param list: param* means required
+            params: list[str] = []
+            for pname in sorted(props.keys()):
+                if pname in required:
+                    params.append(f"{pname}*")
+                else:
+                    params.append(pname)
+
+            param_str = ", ".join(params)
+            desc = (tool.description or "").split(".")[0].strip()  # first sentence
+
+            risk = tool.risk_level or "LOW"
+            tag = f"[{risk}"
+            if tool.requires_confirmation:
+                tag += ",confirm"
+            tag += "]"
+
+            lines.append(f"- {name}({param_str}) — {desc} {tag}")
+
+        return "\n".join(lines)
+
     def get_schema(self, name: str) -> dict[str, Any] | None:
         """Return the JSON Schema for a single tool, or None if not found."""
         tool = self.get(name)

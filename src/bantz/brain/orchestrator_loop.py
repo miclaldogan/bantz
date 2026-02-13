@@ -300,8 +300,9 @@ class OrchestratorLoop:
         )
 
         # Issue #900: Sync router _VALID_TOOLS with actual ToolRegistry
+        # Issue #1275: Pass registry reference for route-based schema injection
         try:
-            JarvisLLMOrchestrator.sync_valid_tools(self.tools.names())
+            JarvisLLMOrchestrator.sync_valid_tools(self.tools.names(), registry=self.tools)
         except Exception:
             logger.warning("[ORCHESTRATOR] sync_valid_tools failed", exc_info=True)
 
