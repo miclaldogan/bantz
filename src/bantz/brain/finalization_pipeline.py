@@ -39,19 +39,69 @@ logger = logging.getLogger(__name__)
 
 _LANG_FALLBACK = "Efendim, isteğiniz işlendi."
 
+# Issue #1232: Route-aware fallback templates for language guard rejects.
+_ROUTE_FALLBACK_TEMPLATES: dict[str, str] = {
+    "calendar": "Takvim bilgileriniz güncellendi efendim.",
+    "gmail": "E-posta işleminiz tamamlandı efendim.",
+    "system": "Sistem bilgisi alındı efendim.",
+    "smalltalk": "Buyurun efendim, size nasıl yardımcı olabilirim?",
+}
 
-def _validate_reply_language(text: str) -> str:
-    """Return *text* if it looks Turkish, otherwise a deterministic fallback.
+
+def _route_aware_fallback(
+    route: str | None = None,
+    tool_results: list[dict[str, Any]] | None = None,
+) -> str:
+    """Generate a route-aware Turkish fallback when language guard rejects.
+
+    Issue #1232: Instead of the generic 'isteğiniz işlendi', produce a
+    meaningful message based on the route and tool results.
+    """
+    # 1) Try tool-result summary (most informative)
+    if tool_results:
+        successes = [r for r in tool_results if r.get("success", False)]
+        if successes:
+            try:
+                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                summary = _build_tool_success_summary(tool_results)
+                if summary and summary != "Tamamlandı efendim.":
+                    return summary
+            except Exception:
+                pass
+
+    # 2) Route-based template
+    r = (route or "").strip().lower()
+    if r in _ROUTE_FALLBACK_TEMPLATES:
+        return _ROUTE_FALLBACK_TEMPLATES[r]
+
+    # 3) Ultimate fallback
+    return _LANG_FALLBACK
+
+
+def _validate_reply_language(
+    text: str,
+    *,
+    route: str | None = None,
+    tool_results: list[dict[str, Any]] | None = None,
+) -> str:
+    """Return *text* if it looks Turkish, otherwise a route-aware fallback.
 
     Uses :func:`bantz.brain.language_guard.validate_turkish` to detect
     CJK, Cyrillic, or other non-Turkish output from the 3B model.
+
+    Issue #1232: When rejected, generates a route-aware Turkish response
+    using tool results or route templates instead of the generic fallback.
     """
     from bantz.brain.language_guard import validate_turkish
 
-    validated, ok = validate_turkish(text, fallback=_LANG_FALLBACK)
-    if not ok:
-        logger.warning("language_guard rejected LLM output (non-Turkish): %.60s…", text)
-    return validated
+    # First pass: check with generic fallback
+    _placeholder = "__LANG_GUARD_REJECTED__"
+    validated, ok = validate_turkish(text, fallback=_placeholder)
+    if ok:
+        return validated
+
+    logger.warning("language_guard rejected LLM output (non-Turkish): %.60s…", text)
+    return _route_aware_fallback(route=route, tool_results=tool_results)
 
 
 def _reply_needs_refinalization(reply: str | None) -> bool:
@@ -716,16 +766,16 @@ class FinalizationPipeline:
         if ctx.use_quality and self._quality is not None and not quality_is_fast_fallback:
             text = self._try_quality(ctx)
             if text:
-                # Issue #653: language post-validation
-                text = _validate_reply_language(text)
+                # Issue #653 + #1232: language post-validation with route context
+                text = _validate_reply_language(text, route=route, tool_results=ctx.tool_results)
                 return replace(output, assistant_reply=text, finalizer_model=_quality_model or "quality")
 
             # Quality failed / guard rejected → fall back to fast
             if self._fast is not None:
                 text = self._fast.finalize(ctx)
                 if text:
-                    # Issue #653: language post-validation
-                    text = _validate_reply_language(text)
+                    # Issue #653 + #1232: language post-validation with route context
+                    text = _validate_reply_language(text, route=route, tool_results=ctx.tool_results)
                     self._emit_quality_degraded(
                         ctx,
                         reason="quality_failed_fallback",
@@ -747,8 +797,8 @@ class FinalizationPipeline:
             if self._fast is not None:
                 text = self._fast.finalize(ctx)
                 if text:
-                    # Issue #653: language post-validation
-                    text = _validate_reply_language(text)
+                    # Issue #653 + #1232: language post-validation with route context
+                    text = _validate_reply_language(text, route=route, tool_results=ctx.tool_results)
                     self._emit_quality_degraded(
                         ctx,
                         reason="quality_unavailable_fallback",
@@ -786,8 +836,8 @@ class FinalizationPipeline:
             if should_fast_finalize:
                 text = self._fast.finalize(ctx)
                 if text:
-                    # Issue #653: language post-validation
-                    text = _validate_reply_language(text)
+                    # Issue #653 + #1232: language post-validation with route context
+                    text = _validate_reply_language(text, route=route, tool_results=ctx.tool_results)
                     return replace(output, assistant_reply=text, finalizer_model=_fast_model or "fast")
 
         # --- Default fallback -----------------------------------------------
@@ -890,7 +940,8 @@ class FinalizationPipeline:
                 return guarded
             # Validate language — original reply may be from 3B model (CJK/mixed)
             if output.assistant_reply:
-                validated = _validate_reply_language(output.assistant_reply)
+                _route = (output.route or "").strip().lower()
+                validated = _validate_reply_language(output.assistant_reply, route=_route)
                 return replace(output, assistant_reply=validated, finalizer_model="none(no_tools)")
             return replace(output, finalizer_model="none(no_tools)")
 
@@ -922,11 +973,13 @@ class FinalizationPipeline:
                 if summary and summary != "Tamamlandı efendim.":
                     return replace(output, assistant_reply=summary, finalizer_model="none(tool_summary_over_generic)")
             # Non-generic existing reply is fine
-            validated = _validate_reply_language(output.assistant_reply)
+            _route = (output.route or "").strip().lower()
+            validated = _validate_reply_language(output.assistant_reply, route=_route, tool_results=ctx.tool_results)
             return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
 
         if output.assistant_reply:
-            validated = _validate_reply_language(output.assistant_reply)
+            _route = (output.route or "").strip().lower()
+            validated = _validate_reply_language(output.assistant_reply, route=_route, tool_results=ctx.tool_results)
             return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
 
         from bantz.brain.tool_result_summarizer import _build_tool_success_summary
