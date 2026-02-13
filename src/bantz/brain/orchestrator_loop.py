@@ -404,10 +404,28 @@ class OrchestratorLoop:
                 pending = state.peek_pending_confirmation() or {}
                 pending_tool = str(pending.get("tool") or "").strip()
                 pending_slots = pending.get("slots") or {}
-                # Derive route/intent from the tool name (e.g. "calendar.create_event" → "calendar" / "create_event")
+                # Derive route/intent from the tool name (e.g. "calendar.create_event" → "calendar" / "create")
                 _parts = pending_tool.split(".", 1)
                 _derived_route = _parts[0] if _parts else "unknown"
-                _derived_intent = _parts[1] if len(_parts) > 1 else "none"
+                _tool_suffix = _parts[1] if len(_parts) > 1 else "none"
+                # Issue #1086: Map tool suffix to semantic intent
+                _TOOL_SUFFIX_TO_INTENT: dict[str, str] = {
+                    "create_event": "create",
+                    "update_event": "modify",
+                    "delete_event": "cancel",
+                    "list_events": "query",
+                    "find_free_slots": "free_slots",
+                    "find_event": "query",
+                    "get_event": "query",
+                    "send": "send",
+                    "list_messages": "list",
+                    "get_message": "read",
+                    "smart_search": "search",
+                    "create_draft": "draft",
+                    "generate_reply": "reply",
+                    "unread_count": "list",
+                }
+                _derived_intent = _TOOL_SUFFIX_TO_INTENT.get(_tool_suffix, _tool_suffix)
                 logger.info(
                     "[CONFIRMATION] Bypassing LLM planning — executing confirmed "
                     "tool %s directly.",
