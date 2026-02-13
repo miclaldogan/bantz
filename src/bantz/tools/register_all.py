@@ -218,8 +218,8 @@ def _register_file(registry: "ToolRegistry") -> int:
                    required=["path", "content"]),
               file_write_tool, risk="medium", confirm=True)
     n += _reg(registry, "file.edit", "Edit a specific part of a file.",
-              _obj(("path", "string", "File path"), ("old", "string", "Text to replace"),
-                   ("new", "string", "Replacement text"), required=["path", "old", "new"]),
+              _obj(("path", "string", "File path"), ("old_string", "string", "Text to replace"),
+                   ("new_string", "string", "Replacement text"), required=["path", "old_string", "new_string"]),
               file_edit_tool, risk="medium", confirm=True)
     n += _reg(registry, "file.create", "Create a new file.",
               _obj(("path", "string", "File path"), ("content", "string", "Initial content"),
