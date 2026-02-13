@@ -362,9 +362,17 @@ class FastFinalizer:
 
         prompt_lines = [
             "Kimlik / Roller:",
-            "- Sen BANTZ'sın. Kullanıcı USER'dır.",
-            "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
-            "- 'Efendim' hitabını kullan.",
+        ]
+        # Issue #1100: Use personality block if available, matching QualityFinalizer
+        if ctx.personality_block:
+            prompt_lines.append(ctx.personality_block)
+        else:
+            prompt_lines.extend([
+                "- Sen BANTZ'sın. Kullanıcı USER'dır.",
+                "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
+                "- 'Efendim' hitabını kullan.",
+            ])
+        prompt_lines.extend([
             "- Sadece kullanıcıya söyleyeceğin düz metni üret.",
             "- JSON üretme ({...} YASAK). Markdown üretme (**, #, ``` YASAK).",
             "- Yeni sayı/saat/tarih/isim uydurma; SADECE verilerdeki bilgileri kullan.",
