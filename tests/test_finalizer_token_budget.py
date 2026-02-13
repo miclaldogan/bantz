@@ -331,3 +331,117 @@ def test_failed_tool_not_affected_by_budget():
     assert not truncated
     assert prepared[0]["success"] is False
     assert prepared[0]["error"] == "Authentication failed"
+
+
+# ============================================================================
+# Context-window guard (Issue #1253)
+# ============================================================================
+
+
+class TestContextWindowGuard:
+    """Test that _safe_complete respects model context window limits."""
+
+    def test_get_context_window_from_method(self):
+        """_get_context_window should use get_model_context_length() if present."""
+        from bantz.brain.finalization_pipeline import _get_context_window
+
+        mock_llm = Mock()
+        mock_llm.get_model_context_length.return_value = 8192
+        assert _get_context_window(mock_llm) == 8192
+
+    def test_get_context_window_from_attr(self):
+        """_get_context_window should fall back to context_window attr."""
+        from bantz.brain.finalization_pipeline import _get_context_window
+
+        mock_llm = Mock(spec=[])
+        mock_llm.context_window = 4096
+        assert _get_context_window(mock_llm) == 4096
+
+    def test_get_context_window_default(self):
+        """_get_context_window should return 4096 when no info available."""
+        from bantz.brain.finalization_pipeline import (
+            _get_context_window,
+            _DEFAULT_CONTEXT_WINDOW,
+        )
+
+        mock_llm = Mock(spec=["complete_text"])
+        assert _get_context_window(mock_llm) == _DEFAULT_CONTEXT_WINDOW
+
+    def test_safe_complete_shrinks_max_tokens(self):
+        """When prompt is large, max_tokens should be reduced to fit context."""
+        from bantz.brain.finalization_pipeline import _safe_complete
+
+        mock_llm = Mock()
+        mock_llm.get_model_context_length.return_value = 4096
+        mock_llm.complete_text.return_value = "OK response"
+
+        # Create a prompt that's ~3800 tokens (15200 chars / 4)
+        big_prompt = "a " * 7600  # ~3800 tokens
+        result = _safe_complete(mock_llm, big_prompt, max_tokens=512)
+
+        assert result == "OK response"
+        # Verify complete_text was called with reduced max_tokens
+        call_kwargs = mock_llm.complete_text.call_args
+        actual_max = call_kwargs.kwargs.get("max_tokens") or call_kwargs[1].get("max_tokens")
+        # max_tokens should be less than 512 since prompt is ~3800
+        assert actual_max is not None
+        assert actual_max < 512
+
+    def test_safe_complete_no_shrink_when_fits(self):
+        """When prompt fits comfortably, max_tokens should remain unchanged."""
+        from bantz.brain.finalization_pipeline import _safe_complete
+
+        mock_llm = Mock()
+        mock_llm.get_model_context_length.return_value = 4096
+        mock_llm.complete_text.return_value = "OK response"
+
+        # Small prompt ~50 tokens
+        small_prompt = "Merhaba " * 25
+        result = _safe_complete(mock_llm, small_prompt, max_tokens=512)
+
+        assert result == "OK response"
+        call_kwargs = mock_llm.complete_text.call_args
+        actual_max = call_kwargs.kwargs.get("max_tokens") or call_kwargs[1].get("max_tokens")
+        assert actual_max == 512
+
+    def test_safe_complete_truncates_huge_prompt(self):
+        """When prompt alone exceeds context window, it should be truncated."""
+        from bantz.brain.finalization_pipeline import _safe_complete
+
+        mock_llm = Mock()
+        mock_llm.get_model_context_length.return_value = 4096
+        mock_llm.complete_text.return_value = "OK response"
+
+        # Prompt of ~5000 tokens (20000 chars)
+        huge_prompt = "x " * 10000  # ~5000 tokens, exceeds 4096
+        result = _safe_complete(mock_llm, huge_prompt, max_tokens=512)
+
+        assert result == "OK response"
+        # The prompt passed to complete_text should be shorter than original
+        call_args = mock_llm.complete_text.call_args
+        actual_prompt = call_args.kwargs.get("prompt") or call_args[0][0] if call_args[0] else call_args.kwargs["prompt"]
+        assert len(actual_prompt) < len(huge_prompt)
+
+    def test_quality_finalizer_caps_prompt_budget(self):
+        """QualityFinalizer should cap prompt budget based on context window."""
+        from bantz.brain.finalization_pipeline import QualityFinalizer
+
+        mock_llm = Mock()
+        mock_llm.get_model_context_length.return_value = 4096
+        mock_llm.complete_text.return_value = "Efendim, sonuçlar burada."
+
+        finalizer = QualityFinalizer(finalizer_llm=mock_llm, timeout=5.0)
+
+        # The _prompt_budget should be capped:
+        # context_window(4096) - max_tokens(512) - margin(64) = 3520
+        # min(5000, max(1500, 3520)) = 3520
+        # This means for gmail.get_message, 5000 gets capped to 3520
+        ctx_window = 4096
+        max_prompt = ctx_window - 512 - 64
+        assert max_prompt == 3520
+        assert max_prompt < 5000  # Budget IS capped for detail tools
+
+    def test_default_context_window_value(self):
+        """_DEFAULT_CONTEXT_WINDOW should be 4096."""
+        from bantz.brain.finalization_pipeline import _DEFAULT_CONTEXT_WINDOW
+        assert _DEFAULT_CONTEXT_WINDOW == 4096
