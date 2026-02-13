@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re as _re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Optional
@@ -11,6 +12,22 @@ from bantz.llm.tiered import score_complexity, score_writing_need
 
 
 PromptVariant = Literal["A", "B"]
+
+# ── Issue #1074: Instruction-like patterns to strip from tool results ────
+_INJECTION_PATTERNS = _re.compile(
+    r"(?i)(ignore\s+(all\s+)?(previous\s+)?instructions|"
+    r"you\s+are\s+now|system\s*:\s*|"
+    r"forget\s+(everything|all)|"
+    r"disregard\s+(all|previous)|"
+    r"override\s+instructions|"
+    r"new\s+instructions?\s*:)",
+)
+
+
+def _sanitize_tool_data(text: str) -> str:
+    """Wrap tool results in boundary markers and strip injection patterns."""
+    cleaned = _INJECTION_PATTERNS.sub("[FILTERED]", text)
+    return f"--- DATA START ---\n{cleaned}\n--- DATA END ---"
 
 
 @dataclass(frozen=True)
@@ -188,7 +205,8 @@ class PromptBuilder:
 
         if tool_results:
             # Tool results can be large; allow bigger and rely on trimming.
-            blocks.append(("TOOL_RESULTS", _json_dumps_compact(tool_results, max_chars=self._limits.tool_results)))
+            raw = _json_dumps_compact(tool_results, max_chars=self._limits.tool_results)
+            blocks.append(("TOOL_RESULTS", _sanitize_tool_data(raw)))
 
         if recent_turns:
             # Keep at most last 2 turns initially.
