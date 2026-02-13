@@ -61,6 +61,34 @@ logger = logging.getLogger(__name__)
 # Re-exported above for backward compatibility.
 
 
+def _turkish_lower(s: str) -> str:
+    """Lowercase with Turkish İ→i fix.
+
+    Python's str.lower() maps İ (U+0130) to i + combining-dot (U+0307),
+    which breaks regex tokenization.  Stripping U+0307 after lowering is
+    safe because composed ö/ü use U+0308 (diaeresis), not U+0307.
+    """
+    return s.lower().replace("\u0307", "")
+
+
+def _fuzzy_token_match(keyword: str, text: str, threshold: float = 0.75) -> bool:
+    """Check if *keyword* fuzzy-matches any word in *text*.
+
+    Issue #1256: Users often misspell proper nouns ("tübirak" for "tübitak",
+    "hackaton" for "hackathon").  We use SequenceMatcher ratio on individual
+    word tokens.  Only keywords ≥ 3 chars are eligible.
+    """
+    if len(keyword) < 3:
+        return False
+    from difflib import SequenceMatcher
+    for word in re.split(r"[^a-zçğıöşü0-9]+", text):
+        if not word or len(word) < 3:
+            continue
+        if SequenceMatcher(None, keyword, word).ratio() >= threshold:
+            return True
+    return False
+
+
 def _match_mail_by_keyword(
     user_input: str,
     listed_messages: list[dict[str, str]],
@@ -69,9 +97,11 @@ def _match_mail_by_keyword(
 
     Issue #1218: When user says "github mailinin içeriğini özetle", match
     "github" against stored message subjects and senders.
+    Issue #1256: Falls back to fuzzy matching (SequenceMatcher ≥ 0.75) when
+    exact substring matching finds no hit, catching common typos.
     Returns the message_id of the best match, or None.
     """
-    text = (user_input or "").strip().lower()
+    text = _turkish_lower(user_input or "").strip()
     if not text or not listed_messages:
         return None
 
@@ -90,15 +120,19 @@ def _match_mail_by_keyword(
         return None
 
     best_id: str | None = None
-    best_score = 0
+    best_score = 0.0
 
     for msg in listed_messages:
-        subject = (msg.get("subject") or "").lower()
-        sender = (msg.get("from") or "").lower()
-        score = 0
+        subject = _turkish_lower(msg.get("subject") or "")
+        sender = _turkish_lower(msg.get("from") or "")
+        score = 0.0
         for kw in keywords:
+            # 1) Exact substring match (full weight)
             if kw in subject or kw in sender:
-                score += 1
+                score += 1.0
+            # 2) Fuzzy fallback (Issue #1256) – partial weight
+            elif _fuzzy_token_match(kw, subject) or _fuzzy_token_match(kw, sender):
+                score += 0.6
         if score > best_score:
             best_score = score
             best_id = msg.get("id")
