@@ -171,7 +171,7 @@ class NoNewFactsGuard:
             "Yeni rakam ekleme. Gerekirse rakam içeren detayları çıkar.\n"
         )
 
-        retry_text = _safe_complete(self._llm, retry_prompt)
+        retry_text = _safe_complete(self._llm, retry_prompt, temperature=0.2, max_tokens=256)
         if not retry_text:
             return None
 
@@ -207,7 +207,7 @@ class QualityFinalizer:
     def finalize(self, ctx: FinalizationContext) -> Optional[str]:
         """Build a prompt, call the quality LLM, apply guard, return text or ``None``."""
         finalizer_prompt = self._build_prompt(ctx)
-        text = _safe_complete(self._llm, finalizer_prompt, timeout=self._timeout)
+        text = _safe_complete(self._llm, finalizer_prompt, timeout=self._timeout, temperature=0.3, max_tokens=512)
 
         if not text:
             return None
@@ -353,7 +353,7 @@ class FastFinalizer:
         """Build a fast prompt, call the planner LLM, return text or ``None``."""
         try:
             prompt = self._build_prompt(ctx)
-            return _safe_complete(self._llm, prompt, timeout=self._timeout)
+            return _safe_complete(self._llm, prompt, timeout=self._timeout, temperature=0.2, max_tokens=256)
         except Exception:
             return None
 
