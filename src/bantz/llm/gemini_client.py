@@ -294,9 +294,17 @@ class GeminiClient(LLMClient):
                 candidates = data.get("candidates") or []
                 text_out = ""
                 finish_reason = "stop"
+                _FINISH_REASON_MAP = {
+                    "STOP": "stop",
+                    "MAX_TOKENS": "length",
+                    "SAFETY": "error",
+                    "RECITATION": "error",
+                    "OTHER": "error",
+                }
                 if candidates and isinstance(candidates[0], dict):
                     cand = candidates[0]
-                    finish_reason = str(cand.get("finishReason") or "stop")
+                    _raw_reason = str(cand.get("finishReason") or "STOP")
+                    finish_reason = _FINISH_REASON_MAP.get(_raw_reason, _raw_reason.lower())
                     content_data = cand.get("content") or {}
                     parts = content_data.get("parts") or []
                     if parts and isinstance(parts[0], dict):
