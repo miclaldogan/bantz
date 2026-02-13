@@ -1377,6 +1377,7 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         ("gmail", "list"): "gmail.list_messages",
         ("gmail", "send"): "gmail.send",
         ("gmail", "read"): "gmail.list_messages",
+        ("gmail", "detail"): "gmail.get_message",  # Issue #1218
         ("gmail", "draft"): "gmail.create_draft",
         ("gmail", "reply"): "gmail.generate_reply",
         ("gmail", "forward"): "gmail.send",
