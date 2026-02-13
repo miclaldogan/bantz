@@ -55,12 +55,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Run tests marked with @pytest.mark.benchmark.",
     )
+    parser.addoption(
+        "--run-golden-path",
+        action="store_true",
+        default=False,
+        help="Run golden path E2E tests (Issue #1226). Must pass for merge.",
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     run_integration = bool(config.getoption("--run-integration"))
     run_regression = bool(config.getoption("--run-regression"))
     run_benchmark = bool(config.getoption("--run-benchmark"))
+    run_golden_path = bool(config.getoption("--run-golden-path"))
 
     deselected: list[pytest.Item] = []
     selected: list[pytest.Item] = []
@@ -73,6 +80,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             deselected.append(item)
             continue
         if not run_benchmark and item.get_closest_marker("benchmark"):
+            deselected.append(item)
+            continue
+        if not run_golden_path and item.get_closest_marker("golden_path"):
             deselected.append(item)
             continue
         selected.append(item)
