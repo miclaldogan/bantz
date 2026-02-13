@@ -138,6 +138,30 @@ _FALLBACK_ALWAYS_CONFIRM: set[str] = {
 
 _RISK_NAME_MAP = {"safe": ToolRisk.SAFE, "moderate": ToolRisk.MODERATE, "destructive": ToolRisk.DESTRUCTIVE}
 
+# Issue #1079: Bridge between ToolRisk (safe/moderate/destructive) and
+# RiskLevel (LOW/MED/HIGH) used in agent/tools.py & register_all.py.
+_TOOL_RISK_TO_RISK_LEVEL: dict[ToolRisk, str] = {
+    ToolRisk.SAFE: "LOW",
+    ToolRisk.MODERATE: "MED",
+    ToolRisk.DESTRUCTIVE: "HIGH",
+}
+
+_RISK_LEVEL_TO_TOOL_RISK: dict[str, ToolRisk] = {
+    "LOW": ToolRisk.SAFE,
+    "MED": ToolRisk.MODERATE,
+    "HIGH": ToolRisk.DESTRUCTIVE,
+}
+
+
+def tool_risk_to_risk_level(risk: ToolRisk) -> str:
+    """Convert ToolRisk enum to RiskLevel literal (LOW/MED/HIGH)."""
+    return _TOOL_RISK_TO_RISK_LEVEL.get(risk, "LOW")
+
+
+def risk_level_to_tool_risk(level: str) -> ToolRisk:
+    """Convert RiskLevel literal to ToolRisk enum."""
+    return _RISK_LEVEL_TO_TOOL_RISK.get(level.upper(), ToolRisk.SAFE)
+
 # Default policy.json path (relative to project root)
 _DEFAULT_POLICY_PATH = Path(__file__).resolve().parents[3] / "config" / "policy.json"
 
