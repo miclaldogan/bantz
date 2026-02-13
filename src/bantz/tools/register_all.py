@@ -230,8 +230,9 @@ def _register_file(registry: "ToolRegistry") -> int:
               _obj(("path", "string", "File path"), required=["path"]),
               file_undo_tool, risk="medium")
     n += _reg(registry, "file.search", "Search for files or text patterns.",
-              _obj(("query", "string", "Search pattern"), ("path", "string", "Base directory"),
-                   required=["query"]),
+              _obj(("pattern", "string", "File name glob pattern"), ("content", "string", "Text to search inside files"),
+                   ("path", "string", "Base directory"),
+                   required=["pattern"]),
               file_search_tool)
     return n
 
