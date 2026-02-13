@@ -1061,6 +1061,8 @@ def build_finalization_context(
     planner_decision = {
         "route": orchestrator_output.route,
         "calendar_intent": orchestrator_output.calendar_intent,
+        "gmail_intent": orchestrator_output.gmail_intent,
+        "gmail": orchestrator_output.gmail,
         "slots": orchestrator_output.slots,
         "tool_plan": orchestrator_output.tool_plan,
         "requires_confirmation": orchestrator_output.requires_confirmation,
