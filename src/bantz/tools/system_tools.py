@@ -116,6 +116,38 @@ def system_status(*, include_env: bool = False, **_: Any) -> dict[str, Any]:
     return out
 
 
+# ── system_notify (Issue #1051) ─────────────────────────────────────
+
+def system_notify_tool(*, message: str = "", title: str = "Bantz", **_: Any) -> dict[str, Any]:
+    """Show a desktop notification using notify-send (Linux).
+
+    Falls back gracefully when notify-send is not available.
+    """
+    import shutil
+    import subprocess
+
+    if not message:
+        return {"ok": False, "error": "message_required"}
+
+    if not shutil.which("notify-send"):
+        return {"ok": False, "error": "notify-send not installed"}
+
+    try:
+        result = subprocess.run(
+            ["notify-send", "--app-name=Bantz", title, message],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return {"ok": True, "sent": True}
+        return {"ok": False, "error": f"notify-send error: {result.stderr.strip()}"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "notify-send timeout"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def system_screenshot_tool(*, monitor: int = 0, **_: Any) -> dict[str, Any]:
     """Capture a screenshot and return base64-encoded image data.
 

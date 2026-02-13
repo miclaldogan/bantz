@@ -472,7 +472,7 @@ def _register_calendar(registry: "ToolRegistry") -> int:
 def _register_system(registry: "ToolRegistry") -> int:
     try:
         from bantz.tools.system_tools import (
-            system_info_tool,
+            system_status,
             system_notify_tool,
             system_screenshot_tool,
         )
@@ -481,7 +481,7 @@ def _register_system(registry: "ToolRegistry") -> int:
 
     n = 0
     n += _reg(registry, "system.info", "Get system information (CPU, RAM, disk).",
-              _obj(), system_info_tool)
+              _obj(), system_status)
     n += _reg(registry, "system.notify", "Show desktop notification.",
               _obj(("message", "string", "Notification message"), required=["message"]),
               system_notify_tool)
