@@ -7,6 +7,7 @@ Contains: build_tool_params with field aliasing logic.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Optional
 
 from bantz.brain.llm_router import OrchestratorOutput
@@ -25,6 +26,50 @@ GMAIL_VALID_PARAMS = frozenset({
     "message", "text", "content", "message_body",
     "title",
 })
+
+
+# Issue #1213: Turkish patterns for extracting Gmail query from user input.
+# Matches: "X'dan gelen", "X'den gelen", "Xdan gelen", "Xden gelen"
+# Also: "X hakkında", "X ile ilgili", "X konulu"
+_SENDER_PATTERN = re.compile(
+    r"([a-zçğıöşüA-ZÇĞİÖŞÜ0-9_.@-]+)[''ʼ]?(?:dan|den|tan|ten)\s+gelen",
+    re.IGNORECASE,
+)
+_SUBJECT_PATTERNS = [
+    re.compile(r"([a-zçğıöşüA-ZÇĞİÖŞÜ0-9_.@\s-]+?)\s+(?:hakkında|hakkındaki)", re.IGNORECASE),
+    re.compile(r"([a-zçğıöşüA-ZÇĞİÖŞÜ0-9_.@\s-]+?)\s+(?:ile\s+ilgili)", re.IGNORECASE),
+    re.compile(r"([a-zçğıöşüA-ZÇĞİÖŞÜ0-9_.@\s-]+?)\s+konulu", re.IGNORECASE),
+]
+
+
+def _extract_gmail_query_from_input(user_input: str) -> str:
+    """Extract a Gmail search query from Turkish user input.
+
+    Issue #1213: Parses patterns like:
+    - 'tübitaktan gelen mailleri listele' → 'from:tübitak'
+    - 'github hakkındaki mailler' → 'github'
+    - 'linkedinden gelen mesajlar' → 'from:linkedin'
+    """
+    text = (user_input or "").strip()
+    if not text:
+        return ""
+
+    # Try sender pattern first: "Xdan/Xden gelen"
+    m = _SENDER_PATTERN.search(text)
+    if m:
+        sender = m.group(1).strip().rstrip("'ʼ'")
+        if sender and len(sender) >= 2:
+            return f"from:{sender}"
+
+    # Try subject/topic patterns
+    for pat in _SUBJECT_PATTERNS:
+        m = pat.search(text)
+        if m:
+            topic = m.group(1).strip()
+            if topic and len(topic) >= 2:
+                return topic
+
+    return ""
 
 
 def build_tool_params(
@@ -113,6 +158,20 @@ def build_tool_params(
                         break
             if "natural_query" not in params and user_input:
                 params["natural_query"] = user_input
+
+        # Issue #1213: Gmail list_messages query extraction from user input.
+        # When LLM calls gmail.list_messages without a query but the user
+        # input contains Turkish sender/keyword patterns, extract a Gmail
+        # query to avoid returning unfiltered results.
+        if tool_name == "gmail.list_messages" and user_input:
+            if not params.get("query"):
+                extracted_query = _extract_gmail_query_from_input(user_input)
+                if extracted_query:
+                    params["query"] = extracted_query
+                    logger.info(
+                        "[Issue #1213] Extracted gmail query '%s' from user input",
+                        extracted_query,
+                    )
 
     else:
         params = dict(slots)
