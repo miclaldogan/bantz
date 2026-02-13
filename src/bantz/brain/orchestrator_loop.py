@@ -1043,6 +1043,41 @@ class OrchestratorLoop:
                     "carried_tool": prev_tool,
                 },
             )
+
+        # Issue #1217: Gmail pagination — detect "başka", "devamı" etc.
+        # and inject page_token + previous query into the tool plan.
+        _PAGINATION_TOKENS = frozenset({
+            "başka", "devam", "devamı", "sonraki", "diğer", "diğerleri",
+        })
+        _pagination_text = (user_input or "").strip().lower()
+        _pagination_words = set(re.split(r"[^a-zçğıöşü]+", _pagination_text))
+        _is_pagination = bool(_pagination_words & _PAGINATION_TOKENS) or "daha var mı" in _pagination_text
+        if (
+            _is_pagination
+            and state.gmail_next_page_token
+            and state.last_tool_called in ("gmail.list_messages", "gmail.smart_search")
+        ):
+            logger.info(
+                "[Issue #1217] Pagination detected: injecting page_token for gmail"
+            )
+            output = replace(
+                output,
+                route="gmail",
+                tool_plan=["gmail.list_messages"],
+                gmail_intent="list",
+                confidence=max(output.confidence, 0.7),
+                assistant_reply="",
+                slots={
+                    **(output.slots or {}),
+                    "page_token": state.gmail_next_page_token,
+                    "query": state.gmail_last_query,
+                },
+                raw_output={
+                    **output.raw_output,
+                    "pagination_followup": True,
+                    "page_token": state.gmail_next_page_token,
+                },
+            )
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Decision:")
@@ -1886,6 +1921,18 @@ class OrchestratorLoop:
                 state.last_tool_called = r["tool"]
                 state.last_tool_route = (output.route or "").strip().lower()
                 break
+
+        # Issue #1217: Store gmail pagination token for continuation
+        for r in tool_results:
+            if r.get("success", False) and r.get("tool") in ("gmail.list_messages", "gmail.smart_search"):
+                raw = r.get("raw_result")
+                if isinstance(raw, dict):
+                    npt = raw.get("next_page_token") or ""
+                    state.gmail_next_page_token = str(npt)
+                    q = raw.get("query") or ""
+                    if q:
+                        state.gmail_last_query = str(q)
+                    break
     
     # =========================================================================
     # Memory-lite Helper Methods (Issue #141)

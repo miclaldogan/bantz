@@ -60,6 +60,10 @@ class OrchestratorState:
     # Issue #1212: Follow-up context — track last successful tool for anaphora
     last_tool_called: str = ""
     last_tool_route: str = ""
+
+    # Issue #1217: Gmail pagination — store next_page_token for continuation
+    gmail_next_page_token: str = ""
+    gmail_last_query: str = ""
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue).
@@ -230,3 +234,5 @@ class OrchestratorState:
         self.disambiguation_pending = None
         self.last_tool_called = ""
         self.last_tool_route = ""
+        self.gmail_next_page_token = ""
+        self.gmail_last_query = ""
