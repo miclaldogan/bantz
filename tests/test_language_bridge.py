@@ -499,3 +499,72 @@ class TestOutputGate:
         cjk_reply = "这是你的日历事件"
         issue = detect_language_issue(cjk_reply)
         assert issue == "cjk_detected"
+
+
+# ============================================================================
+# Anaphoric follow-up + Bridge interaction (Issue #1254)
+# ============================================================================
+
+
+class TestAnaphoricBridgeInteraction:
+    """Test that anaphoric detection works on original TR text, not bridge EN text."""
+
+    def test_anaphoric_tokens_include_basska(self):
+        """'başka' should be in anaphora tokens for follow-up detection."""
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+
+        assert "başka" in JarvisLLMOrchestrator._ANAPHORA_TOKENS
+
+    def test_anaphoric_tokens_include_iceriginde(self):
+        """'içeriğinde' should be in anaphora tokens."""
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+
+        assert "içeriğinde" in JarvisLLMOrchestrator._ANAPHORA_TOKENS
+
+    def test_anaphoric_tokens_include_daha(self):
+        """'daha' should be in anaphora tokens."""
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+
+        assert "daha" in JarvisLLMOrchestrator._ANAPHORA_TOKENS
+
+    def test_anaphoric_detects_tr_followup(self):
+        """Anaphoric check should detect Turkish follow-up like 'içeriğinde başka ne var'."""
+        from unittest.mock import Mock
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+
+        mock_llm = Mock()
+        orch = JarvisLLMOrchestrator.__new__(JarvisLLMOrchestrator)
+        # Minimal init for _is_anaphoric_followup
+        result = orch._is_anaphoric_followup("içeriğinde başka ne var")
+        assert result is True
+
+    def test_anaphoric_does_not_detect_en_translation(self):
+        """EN translation 'What else is in it?' should NOT match TR anaphora tokens."""
+        from unittest.mock import Mock
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+
+        orch = JarvisLLMOrchestrator.__new__(JarvisLLMOrchestrator)
+        result = orch._is_anaphoric_followup("What else is in it?")
+        assert result is False
+
+    def test_anaphoric_detects_ozetle(self):
+        """'bunları özetle' should match."""
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+
+        orch = JarvisLLMOrchestrator.__new__(JarvisLLMOrchestrator)
+        assert orch._is_anaphoric_followup("bunları özetle") is True
+
+    def test_anaphoric_detects_devami(self):
+        """'devamı' should match."""
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+
+        orch = JarvisLLMOrchestrator.__new__(JarvisLLMOrchestrator)
+        assert orch._is_anaphoric_followup("devamı var mı") is True
+
+    def test_anaphoric_rejects_long_input(self):
+        """Inputs with >6 tokens should not match as anaphoric."""
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+
+        orch = JarvisLLMOrchestrator.__new__(JarvisLLMOrchestrator)
+        long_input = "yarın sabah saat dokuzda bir toplantı ayarlayabilir misin"
+        assert orch._is_anaphoric_followup(long_input) is False

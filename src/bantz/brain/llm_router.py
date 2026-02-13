@@ -1345,11 +1345,15 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         return "unknown"
 
     # Issue #1212: Anaphoric follow-up detection for Turkish
+    # Issue #1254: Added "başka", "içeriğinde", "ne var", "daha" etc.
     _ANAPHORA_TOKENS: frozenset[str] = frozenset({
         "onlar", "bunlar", "şunlar", "bunları", "onları", "şunları",
         "nelermiş", "neymiş", "neydi", "hangisi", "hangileri",
         "özetle", "detay", "ayrıntı", "devam", "devamı",
         "tekrarla", "göster", "oku", "anlat",
+        # Issue #1254: Common follow-up words missing from original set
+        "başka", "içeriğinde", "içeriği", "içindeki", "daha",
+        "neler", "neymiş", "bana", "söyle", "açıkla",
     })
 
     def _is_anaphoric_followup(self, user_input: str) -> bool:
