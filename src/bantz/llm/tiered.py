@@ -83,7 +83,9 @@ def get_qos(
     profile_key = (profile or "default").strip().upper().replace("-", "_")
 
     default_timeout = 90.0 if use_quality else 20.0
-    default_max_tokens = 512 if use_quality else 256
+    # Issue #1070: Fast-tier 256 was too low for router JSON with 12+ fields
+    # (reasoning_summary array alone can exceed 256 tokens) → truncation → repair loop
+    default_max_tokens = 512 if use_quality else 420
 
     timeout_s = _env_float(
         f"BANTZ_QOS_{profile_key}_{tier}_TIMEOUT_S",
