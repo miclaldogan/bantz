@@ -41,7 +41,7 @@ SLIM_SCHEMA_JSON = (
     '"window_hint":"evening|tomorrow|morning|today|week|null"},'
     '"confidence":0.0-1.0,'
     '"tool_plan":["tool_name"],'
-    '"gmail_intent":"list|search|read|send|none",'
+    '"gmail_intent":"list|search|read|send|reply|forward|delete|mark_read|draft|none",'
     '"requires_confirmation":false}'
 )
 
@@ -66,7 +66,7 @@ FULL_SCHEMA_JSON = (
     '"confidence":0.0-1.0,'
     '"tool_plan":["tool_name"],'
     '"assistant_reply":"metin",'
-    '"gmail_intent":"list|search|read|send|none",'
+    '"gmail_intent":"list|search|read|send|reply|forward|delete|mark_read|draft|none",'
     '"gmail":{},'
     '"ask_user":false,'
     '"question":"",'
