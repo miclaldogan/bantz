@@ -102,6 +102,18 @@ def build_tool_params(
             if "text" not in params and user_input:
                 params["text"] = user_input
 
+        # Aliasing for gmail.smart_search
+        # LLM may put the query into search_term/query instead of natural_query,
+        # or may not provide it at all.  Fallback to user_input.
+        if tool_name == "gmail.smart_search":
+            if "natural_query" not in params:
+                for alias in ["search_term", "query"]:
+                    if alias in params:
+                        params["natural_query"] = params.pop(alias)
+                        break
+            if "natural_query" not in params and user_input:
+                params["natural_query"] = user_input
+
     else:
         params = dict(slots)
 

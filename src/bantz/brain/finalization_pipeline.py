@@ -625,6 +625,24 @@ class FinalizationPipeline:
                 )
                 return replace(output, assistant_reply=det_reply, finalizer_model="none(deterministic_calendar)")
 
+        # --- Deterministic reply for system tools (time.now etc.) -----------
+        # System tools like time.now have fully deterministic outputs.
+        # Sending them to Gemini causes wrong times (LLM-generated vs actual).
+        if route in ("system", "pc") and ctx.tool_results:
+            _system_det_tools = {"time.now", "system.status"}
+            has_system = any(
+                r.get("tool") in _system_det_tools and r.get("success", False)
+                for r in ctx.tool_results
+            )
+            if has_system:
+                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                det_reply = _build_tool_success_summary(ctx.tool_results)
+                ctx.state.update_trace(
+                    finalizer_used=False,
+                    finalizer_strategy="deterministic_system",
+                )
+                return replace(output, assistant_reply=det_reply, finalizer_model="none(deterministic_system)")
+
         # --- Quality finalizer path -----------------------------------------
         _quality_llm = getattr(self._quality, "_llm", None) if self._quality else None
         _fast_llm = None

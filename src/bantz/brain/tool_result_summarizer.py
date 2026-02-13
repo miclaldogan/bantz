@@ -293,6 +293,35 @@ def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
         elif tool_name == "contacts.resolve":
             parts.append("Kişi bilgisi çözümlendi efendim.")
 
+        elif tool_name == "time.now":
+            if isinstance(raw, dict):
+                t = raw.get("time") or ""
+                d = raw.get("date") or ""
+                if t and d:
+                    parts.append(f"Şu an {d} saat {t} efendim.")
+                elif t:
+                    parts.append(f"Saat {t} efendim.")
+                else:
+                    parts.append("Saat bilgisi alındı efendim.")
+            else:
+                parts.append("Saat bilgisi alındı efendim.")
+
+        elif tool_name == "system.status":
+            if isinstance(raw, dict):
+                cpu = raw.get("cpu_percent")
+                mem = raw.get("memory_percent")
+                info_parts = []
+                if cpu is not None:
+                    info_parts.append(f"CPU: %{cpu}")
+                if mem is not None:
+                    info_parts.append(f"RAM: %{mem}")
+                if info_parts:
+                    parts.append(f"Sistem durumu: {', '.join(info_parts)} efendim.")
+                else:
+                    parts.append("Sistem durumu alındı efendim.")
+            else:
+                parts.append("Sistem durumu alındı efendim.")
+
         else:
             tool_short = tool_name.split(".")[-1] if "." in tool_name else tool_name
             parts.append(f"{tool_short} tamamlandı efendim.")

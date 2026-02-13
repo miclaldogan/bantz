@@ -44,6 +44,9 @@ class OrchestratorState:
 
     # Turn counter (used by memory-lite summaries)
     turn_count: int = 0
+
+    # Current user input (set at the start of each turn for param builder fallback)
+    current_user_input: str = ""
     
     # Session context (timezone, locale, datetime) - Issue #359
     session_context: Optional[dict[str, Any]] = None

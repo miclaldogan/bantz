@@ -1652,6 +1652,17 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
             if lang_issue:
                 assistant_reply = ""
 
+        # ── Clear LLM assistant_reply when deterministic tools are planned ──
+        # The LLM often generates wrong answers for factual queries like
+        # "saat kaç" (e.g. "üç yedi" instead of "dokuz yedi").  When a
+        # deterministic tool (time.now, system.status) is in the plan,
+        # clear the reply so the tool result is used instead.
+        _DETERMINISTIC_TOOLS = {"time.now", "system.status"}
+        if assistant_reply and tool_plan and any(t in _DETERMINISTIC_TOOLS for t in tool_plan):
+            logger.info("[reply_clear] Clearing LLM reply '%s' — deterministic tool %s in plan",
+                        assistant_reply[:40], [t for t in tool_plan if t in _DETERMINISTIC_TOOLS])
+            assistant_reply = ""
+
         # Orchestrator extensions (Issue #134)
         ask_user = bool(parsed.get("ask_user", False))
         question = str(parsed.get("question") or "").strip()
