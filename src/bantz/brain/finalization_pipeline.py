@@ -825,17 +825,31 @@ def _tool_data_is_empty(tool_results: list[dict[str, Any]]) -> bool:
         if raw.get("ok") is False:
             continue  # tool-level failure
         # Check known data-carrying keys
-        for key in ("events", "messages", "slots", "results", "items", "data"):
+        for key in ("events", "messages", "slots", "results", "items", "data",
+                     "contacts", "labels", "drafts", "attachments", "files",
+                     "output", "summary", "content", "entries"):
             val = raw.get(key)
             if isinstance(val, list) and len(val) > 0:
                 return False
             if isinstance(val, dict) and val:
+                return False
+            if isinstance(val, str) and val.strip():
                 return False
         # Check count/total fields
         for key in ("total_count", "resultSizeEstimate", "count"):
             val = raw.get(key)
             if isinstance(val, (int, float)) and val > 0:
                 return False
+        # Issue #1065: Catch-all — if dict has keys beyond ok/error/status
+        # metadata, it likely contains useful data.
+        _META_KEYS = {"ok", "error", "status", "success", "ts", "timestamp"}
+        if set(raw.keys()) - _META_KEYS:
+            # Has non-meta keys we don't recognise — check if any are non-empty
+            for k, v in raw.items():
+                if k in _META_KEYS:
+                    continue
+                if v is not None and v != "" and v != [] and v != {}:
+                    return False
     return True
 
 
