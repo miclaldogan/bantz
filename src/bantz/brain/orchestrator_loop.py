@@ -347,6 +347,7 @@ class OrchestratorLoop:
             _AFFIRMATIVE_TOKENS = frozenset({
                 "evet", "e", "yes", "y", "ok", "okay", "tamam", "olur",
                 "peki", "tabii", "tabi", "elbette", "onaylıyorum",
+                "gönder", "at", "yolla",
             })
             _NEGATIVE_TOKENS = frozenset({
                 "hayır", "h", "no", "n", "iptal", "vazgeç", "istemiyorum",
@@ -405,6 +406,7 @@ class OrchestratorLoop:
                 pending = state.peek_pending_confirmation() or {}
                 pending_tool = str(pending.get("tool") or "").strip()
                 pending_slots = pending.get("slots") or {}
+                pending_gmail = pending.get("gmail") or {}
                 # Derive route/intent from the tool name (e.g. "calendar.create_event" → "calendar" / "create")
                 _parts = pending_tool.split(".", 1)
                 _derived_route = _parts[0] if _parts else "unknown"
@@ -437,6 +439,7 @@ class OrchestratorLoop:
                     route=_derived_route,
                     calendar_intent=_derived_intent,
                     slots=pending_slots,
+                    gmail=pending_gmail,
                     confidence=1.0,
                     tool_plan=[pending_tool] if pending_tool else [],
                     assistant_reply="",
@@ -1044,15 +1047,34 @@ class OrchestratorLoop:
 
         # Issue #907: Static plan verification
         from bantz.brain.llm_router import JarvisLLMOrchestrator
+        from bantz.brain.plan_verifier import infer_route_from_tools
         plan_ok, plan_errors = verify_plan(
             output.__dict__ if hasattr(output, "__dict__") else vars(output),
             user_input,
             JarvisLLMOrchestrator._VALID_TOOLS,
         )
         if not plan_ok:
-            logger.warning("[PLAN_VERIFIER] errors=%s — falling back to ask_user", plan_errors)
-            # For hard errors (unknown tool, missing slot) — ask user to clarify
-            hard = [e for e in plan_errors if not e.startswith("tool_plan_no_indicators")]
+            logger.warning("[PLAN_VERIFIER] errors=%s input=%.60s", plan_errors, user_input)
+            # Separate correctable errors from hard errors
+            _correctable = {"route_tool_mismatch", "smalltalk_with_tools", "route_intent_mismatch"}
+            correctable = [e for e in plan_errors if any(e.startswith(c) for c in _correctable)]
+            hard = [
+                e for e in plan_errors
+                if not e.startswith("tool_plan_no_indicators")
+                and not any(e.startswith(c) for c in _correctable)
+            ]
+
+            # Auto-correct route from tool_plan prefixes when the only errors
+            # are route/tool mismatches (LLM got tools right but route wrong).
+            if correctable and not hard:
+                inferred = infer_route_from_tools(output.tool_plan)
+                if inferred and inferred != output.route:
+                    logger.info(
+                        "[PLAN_VERIFIER] Auto-correcting route %s→%s based on tool_plan",
+                        output.route, inferred,
+                    )
+                    output = replace(output, route=inferred)
+
             if hard:
                 output = replace(output, ask_user=True, question="Anlayamadım, tekrar eder misin?")
 
@@ -1287,6 +1309,7 @@ class OrchestratorLoop:
                             "tool": tool_name,
                             "prompt": prompt,
                             "slots": output.slots,
+                            "gmail": getattr(output, "gmail", None) or {},
                             "risk_level": risk.value,
                         })
 
@@ -1378,6 +1401,7 @@ class OrchestratorLoop:
                     "tool": tool_name,
                     "prompt": prompt,
                     "slots": output.slots,
+                    "gmail": getattr(output, "gmail", None) or {},
                     "risk_level": risk.value,
                 })
 

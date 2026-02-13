@@ -48,7 +48,7 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(sil|kaldır|delete|remove|cancel)\b", re.IGNORECASE),
     re.compile(r"\b(güncelle|değiştir|update|change|modify|move)\b", re.IGNORECASE),
     re.compile(r"\b(listele|göster|bak|list|show)\b", re.IGNORECASE),
-    re.compile(r"\b(gönder|yolla|send|mail|e-?posta)\b", re.IGNORECASE),
+    re.compile(r"\b(gönder|yolla|send|e-?posta)\b", re.IGNORECASE),
     re.compile(r"\b(oku|read|aç|open)\b", re.IGNORECASE),
     re.compile(r"\b(takvim|calendar|toplantı|meeting|randevu)\b", re.IGNORECASE),
     re.compile(r"\b(saat kaç|what time|tarih|date)\b", re.IGNORECASE),
@@ -60,6 +60,14 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(yaz|yazar?\s*m[iı]s[iı]n|yazd[ıi]r|write|compose|draft)\b", re.IGNORECASE),
     re.compile(r"\b(cevapla|yan[ıi]tla|reply|respond)\b", re.IGNORECASE),
     re.compile(r"\b(hat[ıi]rlat|remind|alarm|bildir)\b", re.IGNORECASE),
+    # Common Turkish mail/message words (with suffixes)
+    re.compile(r"\bmail[a-zıüöğçş]*\b", re.IGNORECASE),
+    re.compile(r"\b(mesaj|mesajlar[ıi]?|ileti)\b", re.IGNORECASE),
+    re.compile(r"\b(görüntüle|görüntüleyebil|söyle|söyler?\s*m[iı]s[iı]n)\b", re.IGNORECASE),
+    re.compile(r"\b(okunmuş|okunmam[ıi]ş|okunan|okunmayan|unread)\b", re.IGNORECASE),
+    re.compile(r"\b(at|atma[nk]?[ıi]?|diyelim|de)\b", re.IGNORECASE),
+    re.compile(r"\b(konu|adres[a-zıüöğçş]*)\b", re.IGNORECASE),
+    re.compile(r"\b(kontro[lr]|kontorl)\b", re.IGNORECASE),  # common typo tolerance
 ]
 
 # ── Issue #1002: Calendar write intents that should have date/time ───
@@ -76,6 +84,31 @@ _ROUTE_INTENT_MISMATCH: dict[str, set[str]] = {
 def _has_tool_indicators(user_input: str) -> bool:
     """Return True if user input contains keywords hinting at a tool action."""
     return any(p.search(user_input) for p in _TOOL_INDICATOR_PATTERNS)
+
+
+def infer_route_from_tools(tool_plan: list[Any]) -> str | None:
+    """Infer the correct route from tool_plan prefixes.
+
+    Returns a route string ("gmail", "calendar", "system") if all tools
+    in the plan share the same domain prefix, or ``None`` if the plan is
+    empty or ambiguous.
+    """
+    if not tool_plan:
+        return None
+    domains: set[str] = set()
+    for item in tool_plan:
+        name = item if isinstance(item, str) else (
+            item.get("tool") if isinstance(item, dict) else str(item)
+        )
+        if not name:
+            continue
+        prefix = name.split(".", 1)[0]
+        if prefix == "time":
+            continue  # time.* is allowed in any route
+        domains.add(prefix)
+    if len(domains) == 1:
+        return domains.pop()
+    return None
 
 
 def verify_plan(

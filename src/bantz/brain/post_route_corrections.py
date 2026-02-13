@@ -16,14 +16,46 @@ logger = logging.getLogger(__name__)
 
 
 def looks_like_email_send_intent(text: str) -> bool:
-    """Heuristic check for email-send intent in Turkish text."""
+    """Heuristic check for email-send intent in Turkish text.
+
+    Issue #1205: Expanded to match suffixed 'mail' forms (mailine, maile),
+    standalone 'mesaj' + action verb, 'adresine' + email address, and
+    'diyelim/söyleyelim' with email context.
+    """
     t = (text or "").strip().lower()
     if not t:
         return False
-    return bool(
-        re.search(r"\b(mail|e-?posta)\b\s*(gönder|at|yaz|yolla|ilet)\b", t)
-        or re.search(r"\b(mail|e-?posta)\b.*\b(gönder|at|yaz|yolla|ilet)\b", t)
-    )
+
+    _verbs = r"gönder|at|yaz|yolla|ilet"
+    _verbs_conj = r"gönder\w*|at\w{0,6}|yaz\w*|yolla\w*|ilet\w*"
+
+    # Pattern 1 (original): bare mail/e-posta + action verb
+    if re.search(r"\b(mail|e-?posta)\b\s*(" + _verbs + r")\b", t):
+        return True
+    if re.search(r"\b(mail|e-?posta)\b.*\b(" + _verbs + r")\b", t):
+        return True
+
+    # Pattern 2: Suffixed mail (mailine, maile, mailime) + action verb or mesaj
+    if re.search(r"\bmail\w+", t) and re.search(
+        r"\b(" + _verbs_conj + r"|mesaj\w*)\b", t
+    ):
+        return True
+
+    # Pattern 3: mesaj + action verb (mesaj at, mesaj gönder, mesaj atmanı)
+    if re.search(r"\bmesaj\b", t) and re.search(r"\b(" + _verbs_conj + r")\b", t):
+        return True
+
+    # Pattern 4: adresine + email address (implicit email send)
+    if re.search(r"\badresine\b", t) and re.search(r"[^\s@]+@[^\s@]+\.\w+", t):
+        return True
+
+    # Pattern 5: diyelim/söyleyelim with email address context
+    if re.search(r"\b(diyelim|söyleyelim)\b", t) and re.search(
+        r"[^\s@]+@[^\s@]+\.\w+", t
+    ):
+        return True
+
+    return False
 
 
 def extract_first_email(text: str) -> str | None:
@@ -95,6 +127,7 @@ def extract_subject_hint(text: str) -> str | None:
     """Extract potential subject from user input.
 
     Issue #1006: Looks for 'hakkında', 'konulu', 'ile ilgili' patterns.
+    Issue #1205: Added 'konu X olsun' and 'konu X' (end-of-input) patterns.
     """
     t = (text or "").strip()
     # "toplantı hakkında mail gönder" → subject = "toplantı"
@@ -117,6 +150,24 @@ def extract_subject_hint(text: str) -> str | None:
     )
     if m2:
         return str(m2.group(1)).strip()
+
+    # Issue #1205: "konu test olsun" / "konusu proje güncellemesi olsun"
+    m3 = re.search(
+        r"\bkonu(?:su)?\s+(.{2,80}?)\s+olsun\b",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m3:
+        return str(m3.group(1)).strip()
+
+    # Issue #1205: "konu test" at end of input (no colon, no olsun)
+    m4 = re.search(
+        r"\bkonu(?:su)?\s+([^,;.]{2,60}?)\s*$",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m4:
+        return str(m4.group(1)).strip()
 
     return None
 

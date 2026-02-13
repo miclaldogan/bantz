@@ -646,7 +646,7 @@ class BantzServer:
                     _yes_tokens = {
                         "evet", "e", "ok", "tamam", "onay", "onaylıyorum",
                         "kabul", "yes", "y", "olur", "peki", "ekle", "yap",
-                        "koy", "kaydet",
+                        "koy", "kaydet", "gönder", "at", "yolla",
                     }
                     _no_tokens = {
                         "hayır", "hayir", "h", "no", "n", "iptal", "vazgeç",
