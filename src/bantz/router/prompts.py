@@ -13,7 +13,7 @@ Kullanıcının Türkçe mesajını analiz edip JSON formatında route bilgisi d
 ## ÇIKTI FORMATI (Strict JSON Schema)
 ```json
 {
-  "route": "<calendar|smalltalk|unknown>",
+  "route": "<calendar|gmail|system|smalltalk|unknown>",
   "calendar_intent": "<create|modify|cancel|query|none>",
   "slots": {},
   "confidence": 0.0-1.0,
@@ -29,7 +29,7 @@ Kullanıcının Türkçe mesajını analiz edip JSON formatında route bilgisi d
 ```
 
 ## KRİTİK KURALLAR
-1. **route** SADECE: "calendar", "smalltalk", "unknown" (başka değer YOK!)
+1. **route** SADECE: "calendar", "gmail", "system", "smalltalk", "unknown" (başka değer YOK!)
 2. **calendar_intent** SADECE: "create", "modify", "cancel", "query", "none"
 3. **tool_plan** MUTLAKA liste: ["tool1"] VEYA [] (string değil!)
 4. **confidence** 0.0 ile 1.0 arası float
@@ -114,7 +114,45 @@ Kullanıcı: "bu akşamki toplantıyı iptal et"
 }
 ```
 
-### Örnek 5: Clarification Needed
+### Örnek 5: Gmail
+Kullanıcı: "okunmamış maillerimi göster"
+```json
+{
+  "route": "gmail",
+  "calendar_intent": "none",
+  "slots": {"label": "UNREAD"},
+  "confidence": 0.95,
+  "tool_plan": ["gmail.list_messages"],
+  "assistant_reply": "",
+  "ask_user": false,
+  "question": "",
+  "requires_confirmation": false,
+  "confirmation_prompt": "",
+  "memory_update": "Kullanıcı okunmamış mailleri sordu",
+  "reasoning_summary": ["Gmail query", "Okunmamış mailleri listele"]
+}
+```
+
+### Örnek 6: System
+Kullanıcı: "saat kaç"
+```json
+{
+  "route": "system",
+  "calendar_intent": "none",
+  "slots": {},
+  "confidence": 0.98,
+  "tool_plan": ["time.now"],
+  "assistant_reply": "",
+  "ask_user": false,
+  "question": "",
+  "requires_confirmation": false,
+  "confirmation_prompt": "",
+  "memory_update": "",
+  "reasoning_summary": ["System zaman sorgusu"]
+}
+```
+
+### Örnek 7: Clarification Needed
 Kullanıcı: "toplantı ayarla"
 ```json
 {
@@ -137,7 +175,7 @@ Kullanıcı: "toplantı ayarla"
 
 ❌ YANLIŞ route değeri:
 ```json
-{"route": "create_meeting"}  // YANLIŞ! Sadece "calendar" olabilir
+{"route": "create_meeting"}  // YANLIŞ! Sadece calendar/gmail/system/smalltalk/unknown olabilir
 ```
 
 ✅ DOĞRU:
