@@ -1628,7 +1628,7 @@ class OrchestratorLoop:
                     except Exception:
                         pass
                 _personality_block = _pi.build_finalizer_block(
-                    user_name=getattr(_pi, "_config", None) and _pi._config.user_name or None,
+                    user_name=getattr(getattr(_pi, "config", None), "user_name", None),
                     facts=_fin_facts,
                     preferences=_fin_prefs,
                 )
