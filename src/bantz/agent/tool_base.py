@@ -204,13 +204,18 @@ class ToolBase(ABC):
                 if input[param_name] is None or input[param_name] == "":
                     return False, f"Required parameter '{param_name}' cannot be empty"
         
-        # Check parameter types
+        # Check parameter types (with string→int coercion for LLM outputs)
         for param_name, value in input.items():
             if param_name in params:
                 param_def = params[param_name]
                 if isinstance(param_def, dict):
                     expected_type = param_def.get("type")
-                    if expected_type and not self._check_type(value, expected_type):
+                    if expected_type == "integer" and isinstance(value, str):
+                        try:
+                            input[param_name] = int(value)
+                        except (ValueError, TypeError):
+                            return False, f"Parameter '{param_name}' must be of type '{expected_type}'"
+                    elif expected_type and not self._check_type(value, expected_type):
                         return False, f"Parameter '{param_name}' must be of type '{expected_type}'"
         
         return True, ""

@@ -193,7 +193,14 @@ class ToolRegistry:
                 if not isinstance(value, bool):
                     return False, f"bad_type:{key}:expected_boolean"
             elif expected == "integer":
-                if isinstance(value, bool) or not isinstance(value, int):
+                if isinstance(value, bool):
+                    return False, f"bad_type:{key}:expected_int"
+                if isinstance(value, str):
+                    try:
+                        params[key] = int(value)
+                    except (ValueError, TypeError):
+                        return False, f"bad_type:{key}:expected_int"
+                elif not isinstance(value, int):
                     return False, f"bad_type:{key}:expected_int"
             elif expected == "number":
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
