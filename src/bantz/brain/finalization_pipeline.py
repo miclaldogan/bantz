@@ -961,6 +961,12 @@ def _tool_first_guard_message(*, route: str) -> str:
 # Module-level helpers
 # ---------------------------------------------------------------------------
 
+# Issue #1183: Reusable thread pool for _safe_complete — avoids creating
+# and destroying a ThreadPoolExecutor on every finalization call.
+_FINALIZER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="finalizer",
+)
+
 def _safe_complete(
     llm: LLMCompletionProtocol, prompt: str, *, timeout: float = 0, **kwargs: Any
 ) -> Optional[str]:
@@ -995,22 +1001,24 @@ def _safe_complete(
                     llm._timeout_seconds = timeout  # type: ignore[attr-defined]
                 except Exception:
                     pass
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="finalizer") as pool:
-                future = pool.submit(_do_complete)
-                try:
-                    text = future.result(timeout=timeout)
-                finally:
-                    # Restore original timeout
-                    if _original_timeout is not None:
-                        try:
-                            llm._timeout_seconds = _original_timeout  # type: ignore[attr-defined]
-                        except Exception:
-                            pass
+            # Issue #1183: Use module-level executor instead of creating
+            # a new one per call to avoid thread churn under load.
+            future = _FINALIZER_EXECUTOR.submit(_do_complete)
+            try:
+                text = future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                logger.error("[FINALIZER] LLM call timed out after %.1fs", timeout)
+                return None
+            finally:
+                # Restore original timeout
+                if _original_timeout is not None:
+                    try:
+                        llm._timeout_seconds = _original_timeout  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
         else:
             text = _do_complete()
-    except concurrent.futures.TimeoutError:
-        logger.error("[FINALIZER] LLM call timed out after %.1fs", timeout)
-        return None
     except Exception as exc:
         logger.warning("[FINALIZER] LLM call failed: %s", exc)
         return None
