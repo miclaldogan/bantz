@@ -264,6 +264,45 @@ class VLLMOpenAIClient(LLMClient):
             for m in messages
         ]
         
+        # Issue #1061: Retry with exponential backoff for transient errors
+        max_retries = 3
+        last_exc: Exception | None = None
+        for attempt in range(max_retries):
+            t0 = time.perf_counter()
+            try:
+                return self._do_chat_request(
+                    client, openai_messages,
+                    temperature=temperature, max_tokens=max_tokens,
+                    seed=seed, response_format=response_format, stop=stop,
+                )
+            except (LLMConnectionError, LLMTimeoutError) as e:
+                last_exc = e
+                if attempt < max_retries - 1:
+                    delay = 0.5 * (2 ** attempt)
+                    logger.warning(
+                        "[vLLM] Transient error (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1, max_retries, delay, e,
+                    )
+                    time.sleep(delay)
+                else:
+                    raise
+            except Exception:
+                raise  # Non-retryable errors fail immediately
+        # Should not reach here, but just in case
+        raise last_exc  # type: ignore[misc]
+
+    def _do_chat_request(
+        self,
+        client: Any,
+        openai_messages: list[dict[str, str]],
+        *,
+        temperature: float,
+        max_tokens: int,
+        seed: Optional[int],
+        response_format: Optional[dict[str, Any]],
+        stop: Optional[List[str]],
+    ) -> LLMResponse:
+        """Execute a single chat request (extracted for retry logic)."""
         t0 = time.perf_counter()
         try:
             # Call OpenAI-compatible API
