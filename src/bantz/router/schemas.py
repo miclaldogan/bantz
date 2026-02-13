@@ -18,6 +18,8 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 class RouteType(str, Enum):
     """Valid route types for router output."""
     CALENDAR = "calendar"
+    GMAIL = "gmail"
+    SYSTEM = "system"
     SMALLTALK = "smalltalk"
     UNKNOWN = "unknown"
 
