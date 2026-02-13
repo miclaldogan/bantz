@@ -21,6 +21,7 @@ GMAIL_VALID_PARAMS = frozenset({
     "to", "name", "subject", "body", "cc", "bcc",
     "label", "category", "query", "search_term", "natural_query",
     "message_id", "max_results", "unread_only", "prefer_unread",
+    "page_token",
     # Aliases (remapped in build_tool_params)
     "recipient", "email", "address", "emails", "to_address",
     "message", "text", "content", "message_body",
@@ -194,7 +195,7 @@ def build_tool_params(
     # so stray LLM values like to:"dostum" don't hit the email sanitizer.
     _GMAIL_LIST_VALID = frozenset({
         "query", "max_results", "unread_only", "prefer_unread",
-        "label", "category",
+        "label", "category", "page_token",
     })
     _GMAIL_SEARCH_VALID = frozenset({
         "natural_query", "max_results", "unread_only",
