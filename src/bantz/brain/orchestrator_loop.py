@@ -398,8 +398,12 @@ class OrchestratorLoop:
         """
         if state is None:
             state = OrchestratorState()
-        
-        # Issue #1200: Stash user_input in state so tool param builder can
+
+        # ── Issue #1221: Generate trace_id for end-to-end request tracking ──
+        import uuid as _uuid_mod
+        _trace_id = _uuid_mod.uuid4().hex[:16]
+        state.trace["trace_id"] = _trace_id
+        logger.info("[TRACE] trace_id=%s user_input=%.60r", _trace_id, user_input)
         # use it as a fallback (e.g. gmail.query_from_nl text field).
         state.current_user_input = user_input
 
@@ -444,7 +448,10 @@ class OrchestratorLoop:
             state.session_context = self._session_ctx_caches[sid].get_or_build()
         
         # Emit turn start event
-        self.event_bus.publish("turn.start", {"user_input": user_input})
+        self.event_bus.publish("turn.start", {
+            "user_input": user_input,
+            "trace_id": _trace_id,
+        })
         
         try:
             # ── Issue #894 fix: Auto-detect affirmative input when a pending
@@ -612,6 +619,15 @@ class OrchestratorLoop:
                 # Phase 2.5: Verify tool results (Issue #591 / #523)
                 tool_results = self._verify_results_phase(tool_results, state)
 
+                # Issue #1221: Enforce tool result size limits before finalization
+                try:
+                    from bantz.brain.tool_result_limiter import enforce_result_size_limits
+                    tool_results = enforce_result_size_limits(
+                        tool_results, trace_id=_trace_id,
+                    )
+                except Exception as _trl_exc:
+                    logger.debug("[Issue #1221] Tool result limiter failed: %s", _trl_exc)
+
                 # Phase 3: LLM Finalization (generate final response with tool results)
                 final_output = self._llm_finalization_phase(
                     user_input,
@@ -630,6 +646,7 @@ class OrchestratorLoop:
                 "route": final_output.route,
                 "intent": final_output.calendar_intent,
                 "confidence": final_output.confidence,
+                "trace_id": _trace_id,
             })
 
             # Issue #664: Structured trace export (per turn)
@@ -643,6 +660,7 @@ class OrchestratorLoop:
                     state_trace=state.trace,
                     total_elapsed_ms=int(elapsed * 1000),
                 )
+                turn_trace["trace_id"] = _trace_id  # Issue #1221
                 write_turn_trace(turn_trace)
             except Exception as exc:
                 logger.debug("[TRACE] Export failed: %s", exc)
