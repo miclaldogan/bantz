@@ -168,6 +168,32 @@ def _extract_field(raw: Any, *field_names: str) -> str | None:
     return None
 
 
+def _extract_event_list(raw: Any) -> list[dict[str, str]]:
+    """Extract a list of {title, time} from calendar.list_events result.
+
+    Issue #1215: Supports both list-of-dicts and dict-with-events-key formats.
+    """
+    events: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        events = raw
+    elif isinstance(raw, dict):
+        for key in ("events", "items", "data"):
+            val = raw.get(key)
+            if isinstance(val, list):
+                events = val
+                break
+
+    result = []
+    for ev in events[:10]:  # cap at 10 for display
+        if not isinstance(ev, dict):
+            continue
+        title = str(ev.get("summary") or ev.get("title") or "").strip()
+        time_str = _extract_event_time(ev) or ""
+        if title or time_str:
+            result.append({"title": title, "time": time_str})
+    return result
+
+
 def _extract_event_time(raw: Any) -> str | None:
     """Extract HH:MM time from a calendar event tool result (local timezone).
 
@@ -235,10 +261,25 @@ def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
             if tool_name == "calendar.list_events":
                 if count == 0:
                     parts.append("Takvimde etkinlik bulunamadı efendim.")
-                elif count == 1:
-                    parts.append("1 etkinlik bulundu efendim.")
                 else:
-                    parts.append(f"{count} etkinlik bulundu efendim.")
+                    # Issue #1215: Include event details (title + time)
+                    events = _extract_event_list(raw)
+                    if events:
+                        lines = []
+                        for ev in events:
+                            title = ev.get("title", "")
+                            time_str = ev.get("time", "")
+                            if title and time_str:
+                                lines.append(f"  • {time_str} — {title}")
+                            elif title:
+                                lines.append(f"  • {title}")
+                        if lines:
+                            header = f"{count} etkinlik bulundu efendim:" if count > 1 else "1 etkinlik bulundu efendim:"
+                            parts.append(header + "\n" + "\n".join(lines))
+                        else:
+                            parts.append(f"{count} etkinlik bulundu efendim." if count > 1 else "1 etkinlik bulundu efendim.")
+                    else:
+                        parts.append(f"{count} etkinlik bulundu efendim." if count > 1 else "1 etkinlik bulundu efendim.")
             else:
                 if count == 0:
                     parts.append("Uygun boş zaman dilimi bulunamadı efendim.")
