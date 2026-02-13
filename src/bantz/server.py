@@ -541,7 +541,10 @@ class BantzServer:
                     "browser": browser_url,
                     "overlay": "bağlı" if (get_ipc_overlay_hook()._client and get_ipc_overlay_hook()._client.connected) else "kapalı",
                     "queue_active": self.ctx.queue_active(),
-                    "pending": self.ctx.pending is not None,
+                    "pending": (
+                        self.ctx.pending is not None
+                        or (self._brain_state is not None and self._brain_state.has_pending_confirmation())
+                    ),
                 },
             }
 
@@ -601,6 +604,23 @@ class BantzServer:
         parsed = parse_intent(command)
         if parsed.intent.startswith("browser_"):
             self._init_browser()
+
+        # ── Cross-system confirmation: if old Router has ctx.pending and user
+        #    says yes/no (NLU → confirm_yes/confirm_no which doesn't start with
+        #    "browser_"), route to old Router so it can resolve its own pending. ──
+        if self.ctx.pending is not None and parsed.intent in ("confirm_yes", "confirm_no"):
+            router = self._get_router()
+            result = router.handle(text=command, ctx=self.ctx)
+            overlay = get_ipc_overlay_hook()
+            if overlay._client and overlay._client.connected:
+                if result.ok:
+                    overlay.speaking_sync(result.user_text[:100] if result.user_text else "Tamam!")
+                else:
+                    overlay.speaking_sync(result.user_text[:100] if result.user_text else "Bir sorun oluştu.")
+            return {
+                "ok": result.ok,
+                "text": result.user_text or ("Tamam." if result.ok else "Hata oluştu."),
+            }
 
         # Show thinking state on overlay
         overlay = get_ipc_overlay_hook()
