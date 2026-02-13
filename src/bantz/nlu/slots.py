@@ -76,8 +76,13 @@ TIME_UNITS = {
 }
 
 
-def _parse_turkish_number(text: str) -> Optional[int]:
-    """Parse Turkish number words to integer."""
+def _parse_turkish_number(text: str) -> Optional[float]:
+    """Parse Turkish number words to numeric value.
+
+    Issue #1173: Returns float instead of int to support fractional
+    values like 'yarım' (0.5) and 'buçuk' (0.5). Callers that need
+    int should convert explicitly.
+    """
     text = text.lower().strip()
     
     # Direct digit
@@ -86,15 +91,18 @@ def _parse_turkish_number(text: str) -> Optional[int]:
     
     # Direct word match
     if text in TURKISH_NUMBERS:
-        return int(TURKISH_NUMBERS[text])
+        return TURKISH_NUMBERS[text]
     
     # Compound numbers like "on beş" or "yirmi üç"
+    # Also handles "bir buçuk" (1.5), "iki buçuk" (2.5)
     parts = text.split()
     if len(parts) == 2:
-        tens = TURKISH_NUMBERS.get(parts[0], 0)
-        ones = TURKISH_NUMBERS.get(parts[1], 0)
-        if tens >= 10 and ones < 10:
-            return int(tens + ones)
+        first = TURKISH_NUMBERS.get(parts[0], 0)
+        second = TURKISH_NUMBERS.get(parts[1], 0)
+        if parts[1] == "buçuk" and first >= 1:
+            return first + 0.5
+        if first >= 10 and second < 10:
+            return first + second
     
     return None
 
@@ -120,8 +128,9 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
     text_lower = text.lower()
     
     # Pattern 1: X dakika/saat/gün sonra
+    # Issue #1173: Added yarım|buçuk so "yarım saat sonra" is matched.
     pattern_relative = re.compile(
-        r"(\d+|bir|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on|yirmi|otuz)\s*"
+        r"(\d+|bir|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on|yirmi|otuz|yarım|buçuk)\s*"
         r"(saniye|sn|dakika|dk|saat|sa|gün|hafta)\s*"
         r"(sonra|içinde)",
         re.IGNORECASE,
