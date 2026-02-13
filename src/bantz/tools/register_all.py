@@ -47,17 +47,31 @@ def register_all_tools(registry: "ToolRegistry") -> int:
 
 # ── helpers ──────────────────────────────────────────────────────────
 
+# Issue #1079: Canonical risk mapping — single vocabulary for both
+# register_all and metadata.py ToolRisk.
+_RISK_NORMALIZE: dict[str, str] = {
+    "low": "LOW",
+    "safe": "LOW",
+    "medium": "MED",
+    "moderate": "MED",
+    "med": "MED",
+    "high": "HIGH",
+    "destructive": "HIGH",
+}
+
+
 def _reg(registry: "ToolRegistry", name: str, desc: str, params: dict,
          fn, *, risk: str = "low", confirm: bool = False) -> bool:
     """Register a single tool, returning True on success."""
     from bantz.agent.tools import Tool
+    canonical_risk = _RISK_NORMALIZE.get(risk.lower().strip(), "LOW")
     try:
         registry.register(Tool(
             name=name,
             description=desc,
             parameters=params,
             function=fn,
-            risk_level=risk,
+            risk_level=canonical_risk,
             requires_confirmation=confirm,
         ))
         return True
