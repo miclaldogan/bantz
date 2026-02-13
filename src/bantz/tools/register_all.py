@@ -334,7 +334,7 @@ def _register_gmail(registry: "ToolRegistry") -> int:
                    required=["to", "subject", "body"]),
               gmail_send_tool, risk="high", confirm=True)
     n += _reg(registry, "gmail.smart_search", "Smart Gmail search.",
-              _obj(("query", "string", "Search query"), required=["query"]),
+              _obj(("natural_query", "string", "Search query in natural language"), required=["natural_query"]),
               gmail_smart_search_tool)
     n += _reg(registry, "gmail.list_categories", "List Gmail categories with counts.",
               _obj(), gmail_list_categories_tool)
