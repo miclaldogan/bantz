@@ -785,6 +785,12 @@ class FinalizationPipeline:
                         getattr(finalizer_llm, "backend_name", "") or ""
                     ),
                 )
+                # Issue #1216: Log rate limit / timeout errors prominently
+                if "429" in str(code) or "rate" in str(e).lower():
+                    logger.warning(
+                        "[Issue #1216] Gemini rate limit (429) hit — "
+                        "falling back to tool summary. Error: %s", e,
+                    )
         except Exception:
             pass
 
@@ -850,6 +856,26 @@ class FinalizationPipeline:
             return replace(output, assistant_reply=error_msg.strip(), finalizer_model="none(error)")
 
         # Tools succeeded — use existing reply or generate summary
+        # Issue #1216: When Gemini 429/timeout degrades to fallback, prefer
+        # the tool-aware summary over the router's generic reply (which is
+        # often something useless like "İsteğiniz işlendi efendim").
+        if output.assistant_reply and ctx.tool_results:
+            # Check if the existing reply is generic/unhelpful
+            _generic_phrases = {
+                "isteğiniz işlendi", "tamamlandı", "işlem yapıldı",
+                "efendim, isteğiniz", "anlayamadım",
+            }
+            _reply_lower = (output.assistant_reply or "").strip().lower()
+            _is_generic = any(g in _reply_lower for g in _generic_phrases)
+            if _is_generic:
+                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                summary = _build_tool_success_summary(ctx.tool_results)
+                if summary and summary != "Tamamlandı efendim.":
+                    return replace(output, assistant_reply=summary, finalizer_model="none(tool_summary_over_generic)")
+            # Non-generic existing reply is fine
+            validated = _validate_reply_language(output.assistant_reply)
+            return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
+
         if output.assistant_reply:
             validated = _validate_reply_language(output.assistant_reply)
             return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
