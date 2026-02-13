@@ -531,6 +531,18 @@ def main(argv: list[str] | None = None) -> int:
         proactive_args = proactive_p.parse_args(argv)
         return handle_proactive_command(proactive_args)
 
+    # Doctor — system health diagnostics (Issue #1223)
+    if argv and argv[0] == "doctor":
+        from bantz.doctor import run_doctor
+        verbose = "--verbose" in argv or "-v" in argv
+        return run_doctor(verbose=verbose)
+
+    # Onboard — guided first-time setup wizard (Issue #1223)
+    if argv and argv[0] == "onboard":
+        from bantz.onboard import run_onboard
+        non_interactive = "--non-interactive" in argv or "--yes" in argv
+        return run_onboard(non_interactive=non_interactive)
+
     # Declarative skill CLI (Issue #833)
     if argv and argv[0] == "skill":
         from bantz.skills.declarative.cli import handle_skill_command, add_skill_subparser
