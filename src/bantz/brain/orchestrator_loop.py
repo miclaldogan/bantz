@@ -1102,11 +1102,14 @@ class OrchestratorLoop:
         # and we have a recent tool call, carry forward the previous route
         # and re-execute the previous tool so the finalizer can give a richer
         # summary using the existing tool results in state.
+        # Issue #1254: Use original TR text for anaphoric detection, not the
+        # bridge-translated EN text.  _ANAPHORA_TOKENS are Turkish words.
+        _anaphoric_text = state.current_user_input or user_input
         if (
             state.last_tool_called
             and output.route in ("unknown", "smalltalk")
             and not output.tool_plan
-            and self.orchestrator._is_anaphoric_followup(user_input)
+            and self.orchestrator._is_anaphoric_followup(_anaphoric_text)
         ):
             prev_route = state.last_tool_route or "unknown"
             prev_tool = state.last_tool_called
@@ -1132,10 +1135,11 @@ class OrchestratorLoop:
 
         # Issue #1217: Gmail pagination — detect "başka", "devamı" etc.
         # and inject page_token + previous query into the tool plan.
+        # Issue #1254: Use original TR text for pagination detection.
         _PAGINATION_TOKENS = frozenset({
             "başka", "devam", "devamı", "sonraki", "diğer", "diğerleri",
         })
-        _pagination_text = (user_input or "").strip().lower()
+        _pagination_text = (state.current_user_input or user_input or "").strip().lower()
         _pagination_words = set(re.split(r"[^a-zçğıöşü]+", _pagination_text))
         _is_pagination = bool(_pagination_words & _PAGINATION_TOKENS) or "daha var mı" in _pagination_text
         if (
