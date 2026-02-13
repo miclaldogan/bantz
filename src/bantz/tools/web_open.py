@@ -6,6 +6,7 @@ Opens a URL and extracts readable text content.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -143,9 +144,8 @@ def _is_url_allowed(url: str) -> bool:
             if allowed in domain:
                 return True
         
-        # For MVP, allow all HTTPS URLs (can be restricted later)
-        # Remove this in production for stricter control
-        if parsed.scheme == "https":
+        # For MVP, allow all HTTPS URLs only if explicitly opted in
+        if parsed.scheme == "https" and os.environ.get("BANTZ_WEB_OPEN_UNRESTRICTED", "") == "1":
             return True
         
         return False
