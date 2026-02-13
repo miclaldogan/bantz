@@ -131,6 +131,15 @@ def build_tool_params(
         "location", "description",
     })
     _CALENDAR_DELETE_VALID = frozenset({"event_id"})
+    # Gmail read-only tools: strip compose-only fields (to, body, etc.)
+    # so stray LLM values like to:"dostum" don't hit the email sanitizer.
+    _GMAIL_LIST_VALID = frozenset({
+        "query", "max_results", "unread_only", "prefer_unread",
+        "label", "category",
+    })
+    _GMAIL_SEARCH_VALID = frozenset({
+        "natural_query", "max_results", "unread_only",
+    })
     _TOOL_VALID_FIELDS: dict[str, frozenset[str]] = {
         "calendar.list_events": _CALENDAR_LIST_VALID,
         "calendar.find_event": _CALENDAR_LIST_VALID,
@@ -140,6 +149,8 @@ def build_tool_params(
         "calendar.create_event": _CALENDAR_CREATE_VALID,
         "calendar.update_event": _CALENDAR_UPDATE_VALID,
         "calendar.delete_event": _CALENDAR_DELETE_VALID,
+        "gmail.list_messages": _GMAIL_LIST_VALID,
+        "gmail.smart_search": _GMAIL_SEARCH_VALID,
     }
     valid_fields = _TOOL_VALID_FIELDS.get(tool_name)
     if valid_fields is not None:

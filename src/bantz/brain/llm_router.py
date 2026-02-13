@@ -1285,6 +1285,9 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
             # multi-word patterns to avoid false positives.
             "takvim planı", "günlük plan", "haftalık plan",
             "etkinlik iptal", "randevu iptal", "toplantı iptal",
+            # "saat kaçta" = "at what time" (calendar follow-up about
+            # event times) vs "saat kaç" = "what time is it" (system).
+            "saat kaçta",
         ],
         "gmail": [
             "mail", "e-posta", "eposta", "mesaj", "gönder",
@@ -1316,12 +1319,22 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         for route, keywords in self._ROUTE_KEYWORDS.items():
             score = 0
             for kw in keywords:
-                # Multi-word keywords (e.g. "gelen kutusu") — check original text
+                # Multi-word keywords (e.g. "gelen kutusu") — check original
+                # text but require a word boundary after the last word.
+                # This prevents "saat kaç" from matching "saat kaçta".
                 if " " in kw:
-                    if kw in text:
+                    pattern = re.escape(kw) + r"(?![a-zçğıöşü])"
+                    if re.search(pattern, text):
                         score += 1
                 else:
+                    # Turkish agglutination: "mail" → "mailleri",
+                    # "takvim" → "takvimde", etc.  Check if any token
+                    # starts with the keyword (prefix match).  Keywords
+                    # ≥3 chars avoid false positives; older exact-match
+                    # is kept as fallback for short keywords.
                     if kw in tokens:
+                        score += 1
+                    elif len(kw) >= 3 and any(t.startswith(kw) for t in tokens):
                         score += 1
             if score > 0:
                 scores[route] = score
@@ -1807,16 +1820,42 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         )
 
     def _fallback_output(self, user_input: str, error: str) -> OrchestratorOutput:
-        """Fallback output when parsing fails."""
+        """Fallback output when parsing fails.
+
+        Uses keyword-based route detection so the correct tool can still
+        be executed even when the 7B model outputs malformed JSON.
+        """
         logger.warning(f"Orchestrator fallback triggered: {error}")
+
+        # Attempt keyword based route + tool resolution
+        kw_route = self._detect_route_from_input(user_input)
+        tool_plan: list[str] = []
+        assistant_reply = "Efendim, tam anlayamadım. Tekrar eder misiniz?"
+
+        if kw_route not in ("unknown", "smalltalk"):
+            resolved = self._resolve_tool_from_intent(
+                kw_route, "none", "none",
+            )
+            if resolved:
+                tool_plan = [resolved]
+                assistant_reply = ""  # Let finalization handle it
+                logger.info(
+                    "[fallback_output] keyword route=%s → tool=%s for '%s'",
+                    kw_route, resolved, user_input[:40],
+                )
+
         return OrchestratorOutput(
-            route="unknown",
+            route=kw_route if kw_route != "unknown" else "unknown",
             calendar_intent="none",
             slots={},
-            confidence=0.0,
-            tool_plan=[],
-            assistant_reply="Efendim, tam anlayamadım. Tekrar eder misiniz?",
-            raw_output={"error": error, "user_input": user_input},
+            confidence=0.3 if tool_plan else 0.0,
+            tool_plan=tool_plan,
+            assistant_reply=assistant_reply,
+            raw_output={
+                "error": error,
+                "user_input": user_input,
+                "fallback_keyword_route": kw_route,
+            },
         )
 
 
