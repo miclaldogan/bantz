@@ -1079,7 +1079,8 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
 
         # Tier 2: Strip detail block — gmail search examples + time format table
         # (saves ~400 tokens).  Detail block starts at known headers.
-        for header in ("GMAIL ARAMA", "GMAIL SMART_SEARCH", "SYSTEM ROUTE", "TÜRKÇE SAAT ÖRNEKLERİ", "SAAT FORMATLARI"):
+        # Issue #1097: Updated to match PR #937 compressed header format.
+        for header in ("GMAIL:", "SYSTEM:", "SAAT:"):
             if header in sp and _estimate_tokens(sp) > token_budget:
                 sp = sp.split(header, 1)[0].rstrip()
 
