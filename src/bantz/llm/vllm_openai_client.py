@@ -122,7 +122,7 @@ class VLLMOpenAIClient(LLMClient):
 
         try:
             r = requests.get(
-                f"{self.base_url}/v1/models",
+                f"{self._api_base_url}/models",
                 timeout=float(timeout_seconds),
             )
             if r.status_code != 200:
@@ -152,7 +152,20 @@ class VLLMOpenAIClient(LLMClient):
             return None
         except Exception:
             return None
-    
+
+    @property
+    def _api_base_url(self) -> str:
+        """Return base_url normalized to include /v1 suffix exactly once.
+
+        Issue #1102: Several methods duplicated this logic; centralised here
+        so ``list_available_models``, ``get_model_context_length``, and
+        ``is_available`` all use the same URL.
+        """
+        _base = self.base_url.rstrip("/")
+        if not _base.endswith("/v1"):
+            _base = f"{_base}/v1"
+        return _base
+
     def _get_client(self):
         """Lazy-initialize OpenAI client (thread-safe)."""
         if self._client is not None:
@@ -168,10 +181,8 @@ class VLLMOpenAIClient(LLMClient):
                 ) from e
             
             # OpenAI client expects base_url to point to API root.
-            # self.base_url might already include /v1 or not.
-            _api_base = self.base_url.rstrip("/")
-            if not _api_base.endswith("/v1"):
-                _api_base = f"{_api_base}/v1"
+            # Issue #1102: Use shared _api_base_url property.
+            _api_base = self._api_base_url
             
             self._client = OpenAI(
                 base_url=_api_base,
@@ -209,12 +220,8 @@ class VLLMOpenAIClient(LLMClient):
         
         try:
             # Issue #996: self.base_url is the raw URL (e.g. http://localhost:8001).
-            # vLLM serves /v1/models, not /models.  Must mirror _get_client()'s
-            # /v1 suffix logic.
-            _api_base = self.base_url.rstrip("/")
-            if not _api_base.endswith("/v1"):
-                _api_base = f"{_api_base}/v1"
-            health_url = f"{_api_base}/models"
+            # Issue #1102: Use shared _api_base_url property.
+            health_url = f"{self._api_base_url}/models"
             r = requests.get(
                 health_url,
                 timeout=float(timeout_seconds),
@@ -581,7 +588,7 @@ class VLLMOpenAIClient(LLMClient):
         
         try:
             r = requests.get(
-                f"{self.base_url}/v1/models",
+                f"{self._api_base_url}/models",
                 timeout=float(timeout_seconds),
             )
             r.raise_for_status()
