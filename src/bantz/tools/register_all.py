@@ -14,7 +14,7 @@ Usage
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from bantz.agent.tools import ToolRegistry
@@ -117,9 +117,15 @@ def _register_browser(registry: "ToolRegistry") -> int:
               _obj(("selector", "string", "CSS selector"), ("text", "string", "Text to type"),
                    required=["selector", "text"]),
               browser_type_tool, risk="medium", confirm=True)
+    # Issue #1063: Dispatch scroll direction based on parameter
+    def _browser_scroll_dispatch(*, direction: str = "down", **kw: Any) -> Any:
+        if direction.lower().strip() in ("up", "yukarı", "yukari"):
+            return browser_scroll_up_tool(**kw)
+        return browser_scroll_down_tool(**kw)
+
     n += _reg(registry, "browser.scroll", "Scroll the page up or down.",
               _obj(("direction", "string", "up or down")),
-              browser_scroll_down_tool)
+              _browser_scroll_dispatch)
     n += _reg(registry, "browser.search", "Search text on the current page.",
               _obj(("query", "string", "Text to search"), required=["query"]),
               browser_search_tool)
