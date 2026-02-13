@@ -1008,6 +1008,41 @@ class OrchestratorLoop:
         # Issue #607: Post-route correction for email sending.
         # The 3B router can misroute send-intents to smalltalk/unknown.
         output = self._post_route_correction_email_send(user_input, output)
+
+        # Issue #1212: Anaphoric follow-up recovery.
+        # When user says "nelermiş onlar", "bunları özetle" etc. after a tool
+        # call, the 3B router often misroutes to smalltalk/unknown because
+        # there are no domain-specific keywords.  If the input is anaphoric
+        # and we have a recent tool call, carry forward the previous route
+        # and re-execute the previous tool so the finalizer can give a richer
+        # summary using the existing tool results in state.
+        if (
+            state.last_tool_called
+            and output.route in ("unknown", "smalltalk")
+            and not output.tool_plan
+            and self.orchestrator._is_anaphoric_followup(user_input)
+        ):
+            prev_route = state.last_tool_route or "unknown"
+            prev_tool = state.last_tool_called
+            logger.info(
+                "[Issue #1212] Anaphoric follow-up detected: '%s' → "
+                "carrying forward route=%s tool=%s",
+                user_input, prev_route, prev_tool,
+            )
+            from dataclasses import replace as _dc_replace
+            output = _dc_replace(
+                output,
+                route=prev_route,
+                tool_plan=[prev_tool],
+                confidence=max(output.confidence, 0.6),
+                assistant_reply="",  # let finalization handle it
+                raw_output={
+                    **output.raw_output,
+                    "anaphoric_followup": True,
+                    "carried_route": prev_route,
+                    "carried_tool": prev_tool,
+                },
+            )
         
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Decision:")
@@ -1813,6 +1848,13 @@ class OrchestratorLoop:
 
         # Advance turn counter (used by memory-lite summaries)
         state.turn_count += 1
+
+        # Issue #1212: Track last successful tool + route for follow-up context
+        for r in reversed(tool_results):
+            if r.get("success", False) and r.get("tool"):
+                state.last_tool_called = r["tool"]
+                state.last_tool_route = (output.route or "").strip().lower()
+                break
     
     # =========================================================================
     # Memory-lite Helper Methods (Issue #141)
