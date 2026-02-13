@@ -678,8 +678,11 @@ class GeminiClient(LLMClient):
                 ttft = chunk.ttft_ms
         return "".join(parts).strip(), ttft
 
-    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
-        messages = [LLMMessage(role="user", content=prompt)]
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, system_prompt: Optional[str] = None) -> str:
+        messages: list[LLMMessage] = []
+        if system_prompt:
+            messages.append(LLMMessage(role="system", content=system_prompt))
+        messages.append(LLMMessage(role="user", content=prompt))
         return self.chat(messages, temperature=temperature, max_tokens=max_tokens)
 
 
