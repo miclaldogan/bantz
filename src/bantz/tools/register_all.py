@@ -517,10 +517,7 @@ def _register_system(registry: "ToolRegistry") -> int:
 
 def _register_time(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.time_tools import (
-            time_now_tool,
-            time_convert_tool,
-        )
+        from bantz.tools.time_tools import time_now_tool
     except ImportError:
         return 0
 
@@ -528,10 +525,4 @@ def _register_time(registry: "ToolRegistry") -> int:
     n += _reg(registry, "time.now", "Get current date and time.",
               _obj(("timezone", "string", "Timezone (default: local)")),
               time_now_tool)
-    n += _reg(registry, "time.convert", "Convert time between timezones.",
-              _obj(("time", "string", "Time to convert"),
-                   ("from_tz", "string", "Source timezone"),
-                   ("to_tz", "string", "Target timezone"),
-                   required=["time"]),
-              time_convert_tool)
     return n
