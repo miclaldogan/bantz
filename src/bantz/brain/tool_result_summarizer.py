@@ -168,6 +168,37 @@ def _extract_field(raw: Any, *field_names: str) -> str | None:
     return None
 
 
+def _extract_event_time(raw: Any) -> str | None:
+    """Extract HH:MM time from a calendar event tool result.
+
+    Looks for 'start' field in various formats:
+    - ISO string: "2026-02-13T20:00:00+03:00" → "20:00"
+    - Dict: {"dateTime": "2026-02-13T20:00:00+03:00"} → "20:00"
+    - Params: {"time": "20:00"} → "20:00"
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    # Direct time field (from params echo)
+    t = raw.get("time")
+    if isinstance(t, str) and ":" in t and len(t) <= 5:
+        return t.strip()
+
+    # Start field (ISO datetime or dict)
+    start = raw.get("start")
+    if isinstance(start, dict):
+        start = start.get("dateTime") or start.get("date")
+    if isinstance(start, str) and "T" in start:
+        # Extract HH:MM from ISO string
+        try:
+            time_part = start.split("T")[1]
+            return time_part[:5]  # "20:00"
+        except (IndexError, TypeError):
+            pass
+
+    return None
+
+
 def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
     """Build a tool-aware success summary instead of generic 'Tamamlandı efendim'.
 
@@ -204,8 +235,14 @@ def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
 
         elif tool_name == "calendar.create_event":
             title = _extract_field(raw, "title", "summary")
-            if title:
+            # Extract time from the tool result for deterministic reply
+            start_time = _extract_event_time(raw)
+            if title and start_time:
+                parts.append(f"'{title}' etkinliği {start_time}'de oluşturuldu efendim.")
+            elif title:
                 parts.append(f"'{title}' etkinliği oluşturuldu efendim.")
+            elif start_time:
+                parts.append(f"Etkinlik {start_time}'de oluşturuldu efendim.")
             else:
                 parts.append("Etkinlik oluşturuldu efendim.")
 

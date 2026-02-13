@@ -146,6 +146,12 @@ def build_default_registry() -> ToolRegistry:
     }
 
     # ── Calendar tools ──────────────────────────────────────────────
+    # list_events / find_event only need query-relevant fields (no duration/time)
+    calendar_query_props = {
+        "date": calendar_slot_props["date"],
+        "title": calendar_slot_props["title"],
+        "window_hint": calendar_slot_props["window_hint"],
+    }
     reg.register(
         Tool(
             name="calendar.list_events",
@@ -153,7 +159,7 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
-                    **calendar_slot_props,
+                    **calendar_query_props,
                     "max_results": {"type": "integer", "description": "Max events to return (default 10)"},
                     "query": {"type": "string", "description": "Free-text search query"},
                 },
@@ -173,7 +179,7 @@ def build_default_registry() -> ToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
-                    **calendar_slot_props,
+                    **calendar_query_props,
                     "max_results": {"type": "integer", "description": "Max events to return"},
                     "query": {"type": "string", "description": "Free-text search query"},
                 },

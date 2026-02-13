@@ -105,4 +105,32 @@ def build_tool_params(
     else:
         params = dict(slots)
 
+    # Issue #1212: Strip fields that don't belong to the tool schema.
+    # LLM often sends calendar_intent, duration, etc. to tools that don't
+    # accept them, causing safety guard validation failures.
+    _CALENDAR_LIST_VALID = frozenset({
+        "date", "window_hint", "query", "max_results", "title",
+    })
+    _CALENDAR_CREATE_VALID = frozenset({
+        "title", "date", "time", "duration", "window_hint",
+    })
+    _CALENDAR_UPDATE_VALID = frozenset({
+        "event_id", "title", "date", "time", "duration",
+        "location", "description",
+    })
+    _CALENDAR_DELETE_VALID = frozenset({"event_id"})
+    _TOOL_VALID_FIELDS: dict[str, frozenset[str]] = {
+        "calendar.list_events": _CALENDAR_LIST_VALID,
+        "calendar.find_event": _CALENDAR_LIST_VALID,
+        "calendar.find_free_slots": frozenset({
+            "duration", "window_hint", "date", "suggestions",
+        }),
+        "calendar.create_event": _CALENDAR_CREATE_VALID,
+        "calendar.update_event": _CALENDAR_UPDATE_VALID,
+        "calendar.delete_event": _CALENDAR_DELETE_VALID,
+    }
+    valid_fields = _TOOL_VALID_FIELDS.get(tool_name)
+    if valid_fields is not None:
+        params = {k: v for k, v in params.items() if k in valid_fields}
+
     return params

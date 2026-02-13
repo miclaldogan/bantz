@@ -606,6 +606,25 @@ class FinalizationPipeline:
             msg = _empty_data_message(route=route, calendar_intent=cal_intent)
             return replace(output, assistant_reply=msg, finalizer_model="none(empty_data_guard)")
 
+        # --- Issue #1212: Deterministic reply for calendar write ops --------
+        # Calendar create/update/delete results are fully predictable — using
+        # Gemini here causes hallucinated times/titles.  Use deterministic
+        # summary instead.
+        if route == "calendar" and ctx.tool_results:
+            write_tools = {"calendar.create_event", "calendar.update_event", "calendar.delete_event"}
+            has_write = any(
+                r.get("tool") in write_tools and r.get("success", False)
+                for r in ctx.tool_results
+            )
+            if has_write:
+                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                det_reply = _build_tool_success_summary(ctx.tool_results)
+                ctx.state.update_trace(
+                    finalizer_used=False,
+                    finalizer_strategy="deterministic_calendar_write",
+                )
+                return replace(output, assistant_reply=det_reply, finalizer_model="none(deterministic_calendar)")
+
         # --- Quality finalizer path -----------------------------------------
         _quality_llm = getattr(self._quality, "_llm", None) if self._quality else None
         _fast_llm = None
