@@ -834,9 +834,12 @@ def parse_intent(text: str) -> Parsed:
         return Parsed(intent="page_question", slots={"question": question})
     
     # Direct questions: "CEO kim?", "Fiyatı ne?", "Kaç para?", "Ne zaman?"
+    # Guard: only match if the question references page/content context
+    # (bu/şu/sayfa/site/makale/içerik) to avoid hijacking calendar/gmail queries.
     if re.search(r"\b(kim|ne|neden|nas[ıi]l|nerede|ka[çc])\b.*\?$", t):
-        question = text.strip()
-        return Parsed(intent="page_question", slots={"question": question})
+        if re.search(r"\b(bu|şu|sayfa|site|makale|i[çc]erik|yaz[ıi]|paragraf)\b", t):
+            question = text.strip()
+            return Parsed(intent="page_question", slots={"question": question})
     
     # Detailed summarize: "detaylı anlat", "tam anlat", "daha detaylı özetle"
     if re.search(r"\b(tam|daha\s+)?(detayl[ıi]|uzun)\s*(anlat|[öo]zetle|a[çc][ıi]kla)\b", t):
