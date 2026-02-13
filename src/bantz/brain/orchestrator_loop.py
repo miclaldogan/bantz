@@ -990,7 +990,9 @@ class OrchestratorLoop:
                     output.slots[_nk] = _nv
             if "time" in _nlu_merged:
                 # Time from NLU's Turkish parser is more reliable than LLM guess
-                output.slots["time"] = _nlu_merged["time"]
+                # Issue #1098: Only override if LLM didn't already extract a time
+                if not output.slots.get("time"):
+                    output.slots["time"] = _nlu_merged["time"]
 
         # Issue #607: Post-route correction for email sending.
         # The 3B router can misroute send-intents to smalltalk/unknown.
