@@ -14,10 +14,16 @@ from bantz.brain.llm_router import OrchestratorOutput
 logger = logging.getLogger(__name__)
 
 # Valid gmail parameter names (Issue #365)
+# Issue #1171: Include known aliases so they survive early filtering
+# before remap. Aliases are remapped to canonical names below.
 GMAIL_VALID_PARAMS = frozenset({
     "to", "name", "subject", "body", "cc", "bcc",
     "label", "category", "query", "search_term", "natural_query",
     "message_id", "max_results", "unread_only", "prefer_unread",
+    # Aliases (remapped in build_tool_params)
+    "recipient", "email", "address", "emails", "to_address",
+    "message", "text", "content", "message_body",
+    "title",
 })
 
 
