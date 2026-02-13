@@ -189,10 +189,12 @@ class OrchestratorLoop:
 
         # Issue #417: Session context cache (TTL 60s) — avoid rebuild every turn
         # Issue #902: Per-session cache to prevent multi-user context leak.
+        # Issue #1067: Use bounded cache to prevent memory leak.
         from bantz.brain.session_context_cache import SessionContextCache
 
         self._session_ctx_caches: dict[str, SessionContextCache] = {}
         self._session_ctx_ttl = 60.0
+        self._session_ctx_max_size = 32  # Max concurrent sessions cached
 
         # Issue #942: Caches to avoid redundant work in _llm_planning_phase
         # Issue #1010: Context assembly extracted to ContextBuilder
@@ -320,9 +322,14 @@ class OrchestratorLoop:
 
         # Issue #417: Build session context once per turn (cached with TTL)
         # Issue #902: Per-session cache keyed by state identity
+        # Issue #1067: Use session_id when available; cap cache size
         if not state.session_context:
-            sid = id(state)
+            sid = getattr(state, "session_id", None) or str(id(state))
             if sid not in self._session_ctx_caches:
+                # Evict oldest entry if at capacity
+                if len(self._session_ctx_caches) >= self._session_ctx_max_size:
+                    oldest = next(iter(self._session_ctx_caches))
+                    del self._session_ctx_caches[oldest]
                 from bantz.brain.session_context_cache import SessionContextCache
                 self._session_ctx_caches[sid] = SessionContextCache(ttl_seconds=self._session_ctx_ttl)
             state.session_context = self._session_ctx_caches[sid].get_or_build()
@@ -901,8 +908,11 @@ class OrchestratorLoop:
         session_context = state.session_context
         if not session_context:
             # Fallback: build fresh if somehow missing (e.g. direct _llm_planning_phase call)
-            sid = id(state)
+            sid = getattr(state, "session_id", None) or str(id(state))
             if sid not in self._session_ctx_caches:
+                if len(self._session_ctx_caches) >= self._session_ctx_max_size:
+                    oldest = next(iter(self._session_ctx_caches))
+                    del self._session_ctx_caches[oldest]
                 from bantz.brain.session_context_cache import SessionContextCache
                 self._session_ctx_caches[sid] = SessionContextCache(ttl_seconds=self._session_ctx_ttl)
             session_context = self._session_ctx_caches[sid].get_or_build()
