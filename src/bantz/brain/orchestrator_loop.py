@@ -325,11 +325,15 @@ class OrchestratorLoop:
 
         # Gmail intent mapping (gmail_intent → mandatory tools)
         # Issue #317: Extended Gmail label/category support
+        # Issue #1225: Added draft, reply, detail intents
         self._gmail_intent_map: dict[str, list[str]] = {
             "list": ["gmail.list_messages"],
             "search": ["gmail.smart_search"],
             "read": ["gmail.get_message"],
+            "detail": ["gmail.get_message"],
             "send": ["gmail.send"],
+            "draft": ["gmail.create_draft"],
+            "reply": ["gmail.generate_reply"],
         }
 
     def close(self) -> None:

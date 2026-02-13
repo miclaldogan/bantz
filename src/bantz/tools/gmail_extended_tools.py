@@ -173,7 +173,11 @@ def gmail_create_draft_tool(*, to: str = "", subject: str = "", body: str = "", 
         from bantz.google.gmail import gmail_create_draft
     except ImportError:
         return {"ok": False, "error": "gmail_module_not_available"}
-    return _safe_call(gmail_create_draft, to=to, subject=subject, body=body)
+    result = _safe_call(gmail_create_draft, to=to, subject=subject, body=body)
+    # Issue #1225: Display hint for draft creation
+    if isinstance(result, dict) and result.get("ok"):
+        result["display_hint"] = f"📝 Taslak oluşturuldu: {to} — {subject}"
+    return result
 
 
 # ── gmail.list_drafts ───────────────────────────────────────────────

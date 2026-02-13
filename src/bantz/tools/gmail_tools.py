@@ -185,6 +185,22 @@ def gmail_list_messages_tool(
         if detected_label and isinstance(result, dict):
             result["detected_label"] = detected_label.value
             result["detected_label_tr"] = detected_label.display_name_tr
+
+        # Issue #1225: Display hint for deterministic finalizer replies
+        if isinstance(result, dict):
+            msgs = result.get("messages")
+            if isinstance(msgs, list) and msgs:
+                lines: list[str] = []
+                for i, m in enumerate(msgs, 1):
+                    _from = (m.get("from") or m.get("sender") or "")[:30]
+                    _subj = (m.get("subject") or "")[:50]
+                    _unread = " \u2709\ufe0f" if m.get("unread") else ""
+                    lines.append(f"#{i} {_from} — {_subj}{_unread}")
+                result["display_hint"] = "\n".join(lines)
+                result["message_count"] = len(msgs)
+            elif isinstance(msgs, list):
+                result["display_hint"] = "Kriterlere uyan e-posta bulunamad\u0131."
+                result["message_count"] = 0
         
         return result
     except Exception as e:
@@ -270,6 +286,10 @@ def gmail_send_tool(
         if isinstance(result, dict) and result.get("ok", True):
             _gmail_record_send(str(to or ""), str(subject or ""))
 
+        # Issue #1225: Display hint for send confirmation
+        if isinstance(result, dict) and result.get("ok"):
+            result["display_hint"] = f"\u2709\ufe0f E-posta g\u00f6nderildi: {to} — {subject}"
+
         return result
     except Exception as e:
         msg = str(e)
@@ -330,6 +350,21 @@ def gmail_smart_search_tool(
             if detected_label:
                 result["detected_label"] = detected_label.value
                 result["detected_label_tr"] = detected_label.display_name_tr
+
+            # Issue #1225: Display hint (same format as list_messages)
+            msgs = result.get("messages")
+            if isinstance(msgs, list) and msgs:
+                lines: list[str] = []
+                for i, m in enumerate(msgs, 1):
+                    _from = (m.get("from") or m.get("sender") or "")[:30]
+                    _subj = (m.get("subject") or "")[:50]
+                    _unread = " \u2709\ufe0f" if m.get("unread") else ""
+                    lines.append(f"#{i} {_from} — {_subj}{_unread}")
+                result["display_hint"] = "\n".join(lines)
+                result["message_count"] = len(msgs)
+            elif isinstance(msgs, list):
+                result["display_hint"] = "Kriterlere uyan e-posta bulunamad\u0131."
+                result["message_count"] = 0
         
         return result
     except Exception as e:
