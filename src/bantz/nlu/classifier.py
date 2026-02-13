@@ -15,8 +15,10 @@ This is the "slow but accurate" path in the hybrid NLU system.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,6 +28,8 @@ from bantz.nlu.types import (
     ClarificationOption,
     IntentCategory,
 )
+
+from bantz.llm.base import LLMClientProtocol, LLMMessage, create_client
 
 
 # ============================================================================
@@ -45,15 +49,44 @@ class ClassifierConfig:
         min_confidence_threshold: Below this, mark as ambiguous
         cache_enabled: Whether to cache results
         cache_ttl_seconds: Cache entry lifetime
+        max_cache_size: Maximum cache entries (prevents memory leak)
+        cache_sweep_interval: Sweep expired entries every N classifies
     """
     
-    model: str = "qwen2.5:3b-instruct"
+    model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ"
     temperature: float = 0.1  # Low for consistent classification
     max_tokens: int = 256
     timeout_seconds: float = 30.0
     min_confidence_threshold: float = 0.5
     cache_enabled: bool = True
     cache_ttl_seconds: float = 300.0  # 5 minutes
+    max_cache_size: int = 1000
+    cache_sweep_interval: int = 50  # sweep every N classifies
+
+
+# ============================================================================
+# Global classifier singleton (thread-safe)
+# ============================================================================
+
+_classifier_instance: Optional["LLMIntentClassifier"] = None
+_classifier_lock = threading.Lock()
+
+
+def get_classifier() -> "LLMIntentClassifier":
+    """Get the canonical global classifier instance (thread-safe)."""
+    global _classifier_instance
+    if _classifier_instance is None:
+        with _classifier_lock:
+            if _classifier_instance is None:
+                _classifier_instance = LLMIntentClassifier()
+    return _classifier_instance
+
+
+def reset_classifier_instance() -> None:
+    """Reset the global classifier instance (testing only)."""
+    global _classifier_instance
+    with _classifier_lock:
+        _classifier_instance = None
 
 
 # ============================================================================
@@ -297,26 +330,28 @@ class LLMIntentClassifier:
     def __init__(
         self,
         config: Optional[ClassifierConfig] = None,
-        ollama_client: Optional[Any] = None,
+        llm_client: Optional[LLMClientProtocol] = None,
     ):
         """Initialize the classifier.
         
         Args:
             config: Classifier configuration
-            ollama_client: Pre-configured OllamaClient (optional)
+            llm_client: Pre-configured LLM client (optional)
         """
         self.config = config or ClassifierConfig()
-        self._client = ollama_client
+        self._client = llm_client
         self._cache: Dict[str, Tuple[IntentResult, float]] = {}  # text -> (result, timestamp)
+        self._classify_count: int = 0  # classify call counter for periodic sweep
     
     @property
     def client(self):
-        """Lazy-load Ollama client."""
+        """Lazy-load LLM client."""
         if self._client is None:
-            from bantz.llm.ollama_client import OllamaClient
-            self._client = OllamaClient(
+            self._client = create_client(
+                "vllm",
+                base_url=os.getenv("BANTZ_VLLM_URL", "http://127.0.0.1:8001"),
                 model=self.config.model,
-                timeout_seconds=self.config.timeout_seconds,
+                timeout=self.config.timeout_seconds,
             )
         return self._client
     
@@ -361,9 +396,8 @@ class LLMIntentClassifier:
             # Parse response
             result = self._parse_response(response, text, start_time)
             
-            # Cache result
-            if self.config.cache_enabled:
-                self._cache[cache_key] = (result, time.time())
+            # Cache result (bounded — Issue #652)
+            self._put_cache(cache_key, result)
             
             return result
             
@@ -386,8 +420,6 @@ class LLMIntentClassifier:
         context: Optional[Dict[str, Any]] = None,
     ) -> List:
         """Build messages for LLM chat."""
-        from bantz.llm.ollama_client import LLMMessage
-        
         messages = [LLMMessage(role="system", content=SYSTEM_PROMPT)]
         
         # Add context if provided
@@ -621,7 +653,48 @@ class LLMIntentClassifier:
             return None
         
         return result
-    
+
+    def _put_cache(self, key: str, result: IntentResult) -> None:
+        """Store a result in the cache, enforcing max size.
+
+        When the cache exceeds ``max_cache_size`` the oldest entry
+        (by insertion timestamp) is evicted.  A periodic sweep of
+        expired entries runs every ``cache_sweep_interval`` classifies.
+        """
+        if not self.config.cache_enabled:
+            return
+
+        # Periodic sweep — remove all TTL-expired entries
+        self._classify_count += 1
+        if self._classify_count % self.config.cache_sweep_interval == 0:
+            self._sweep_expired()
+
+        # Evict oldest if at capacity
+        while len(self._cache) >= self.config.max_cache_size:
+            self._evict_oldest()
+
+        self._cache[key] = (result, time.time())
+
+    def _sweep_expired(self) -> int:
+        """Remove all TTL-expired cache entries.
+
+        Returns:
+            Number of entries removed.
+        """
+        now = time.time()
+        ttl = self.config.cache_ttl_seconds
+        expired = [k for k, (_, ts) in self._cache.items() if now - ts > ttl]
+        for k in expired:
+            del self._cache[k]
+        return len(expired)
+
+    def _evict_oldest(self) -> None:
+        """Evict the single oldest cache entry by timestamp."""
+        if not self._cache:
+            return
+        oldest_key = min(self._cache, key=lambda k: self._cache[k][1])
+        del self._cache[oldest_key]
+
     def clear_cache(self):
         """Clear the result cache."""
         self._cache.clear()
@@ -630,6 +703,7 @@ class LLMIntentClassifier:
         """Get cache statistics."""
         return {
             "size": len(self._cache),
+            "max_size": self.config.max_cache_size,
             "enabled": self.config.cache_enabled,
             "ttl_seconds": self.config.cache_ttl_seconds,
         }
@@ -654,7 +728,7 @@ def classify_batch(
         List of IntentResults
     """
     if classifier is None:
-        classifier = LLMIntentClassifier()
+        classifier = get_classifier()
     
     return [classifier.classify(text) for text in texts]
 
@@ -673,5 +747,5 @@ def quick_classify(text: str) -> IntentResult:
     Returns:
         IntentResult
     """
-    classifier = LLMIntentClassifier()
+    classifier = get_classifier()
     return classifier.classify(text)

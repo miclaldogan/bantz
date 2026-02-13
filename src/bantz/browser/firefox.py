@@ -324,7 +324,7 @@ def _get_running_profile() -> Optional[str]:
                     # If lock was modified in last 60 seconds, likely active
                     if now - mtime < 60:
                         return item.name
-                except:
+                except Exception:
                     pass
     
     # If Firefox is running but we can't determine profile, assume it's fine

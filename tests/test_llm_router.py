@@ -8,6 +8,9 @@ from bantz.brain.llm_router import JarvisLLMRouter, RouterOutput
 class MockLLM:
     """Mock LLM for deterministic testing."""
 
+    # Provide a context length attribute for router budgeting (Issue #214)
+    model_context_length = 32768
+
     def __init__(self, responses: dict[str, str]):
         """Initialize with user_input -> JSON response mapping."""
         self._responses = responses
@@ -66,7 +69,7 @@ def test_router_calendar_query_today():
 
 
 def test_router_calendar_create_low_confidence():
-    """Scenario 3: 'saat 4 için bir toplantı oluştur' → low confidence, ask for duration."""
+    """Scenario 3: 'saat 4 için bir toplantı oluştur' → low confidence but valid route+intent → boosted."""
     llm = MockLLM({
         "saat 4 için bir toplantı oluştur": '{"route": "calendar", "calendar_intent": "create", "slots": {"time": "16:00", "title": "toplantı", "duration": null}, "confidence": 0.5, "tool_plan": [], "assistant_reply": "Süre ne olsun efendim? (örn. 30 dk / 1 saat)"}'
     })
@@ -79,9 +82,9 @@ def test_router_calendar_create_low_confidence():
     assert result.slots.get("time") == "16:00"
     assert result.slots.get("title") == "toplantı"
     assert result.slots.get("duration") is None
-    assert result.confidence == 0.5
-    # Tool plan cleared due to low confidence
-    assert result.tool_plan == []
+    # Confidence boosted because route+intent are valid with resolved tool
+    assert result.confidence >= 0.7
+    assert result.tool_plan == ["calendar.create_event"]
     assert "Süre ne olsun" in result.assistant_reply
 
 
@@ -118,7 +121,7 @@ def test_router_calendar_query_week():
 
 
 def test_router_confidence_threshold_blocks_tools():
-    """Low confidence blocks tool execution."""
+    """Low confidence with route+intent valid still boosts and keeps tools."""
     llm = MockLLM({
         "belirsiz sorgu": '{"route": "calendar", "calendar_intent": "query", "slots": {}, "confidence": 0.6, "tool_plan": ["calendar.list_events"], "assistant_reply": "Hangi tarih efendim?"}'
     })
@@ -126,10 +129,24 @@ def test_router_confidence_threshold_blocks_tools():
     router = JarvisLLMRouter(llm=llm, confidence_threshold=0.7)
     result = router.route(user_input="belirsiz sorgu")
     
-    assert result.confidence == 0.6
-    # Tool plan cleared due to confidence < threshold
-    assert result.tool_plan == []
+    # Confidence boosted because route+intent are valid
+    assert result.confidence >= 0.7
+    assert result.tool_plan == ["calendar.list_events"]
     assert "Hangi tarih" in result.assistant_reply
+
+
+def test_router_low_confidence_empty_reply_sets_clarification():
+    """Low confidence with valid route+intent → boosted, tool plan kept."""
+    llm = MockLLM({
+        "boş yanıt": '{"route": "calendar", "calendar_intent": "query", "slots": {}, "confidence": 0.4, "tool_plan": ["calendar.list_events"], "assistant_reply": ""}'
+    })
+
+    router = JarvisLLMRouter(llm=llm, confidence_threshold=0.7)
+    result = router.route(user_input="boş yanıt")
+
+    # Confidence boosted because route+intent are valid with tools
+    assert result.confidence >= 0.7
+    assert result.tool_plan == ["calendar.list_events"]
 
 
 def test_router_fallback_on_parse_error():
@@ -165,3 +182,128 @@ def test_router_with_dialog_summary():
     
     assert result.route == "calendar"
     assert result.tool_plan == ["calendar.list_events"]
+
+
+def test_router_with_retrieved_memory_block():
+    """Router receives retrieved memory for context."""
+    llm = MockLLM({
+        "devam et": '{"route": "calendar", "calendar_intent": "query", "slots": {"window_hint": "today"}, "confidence": 0.9, "tool_plan": ["calendar.list_events"], "assistant_reply": ""}'
+    })
+
+    router = JarvisLLMRouter(llm=llm)
+    _ = router.route(
+        user_input="devam et",
+        dialog_summary="User: Yarın planım var mı? | Tools: calendar.list_events | Result: say",
+        retrieved_memory="- [PROFILE] Kullanıcı kısa cevap sever.\n- [EPISODIC] Dün takvimde koşu eklendi.",
+    )
+
+    assert len(llm.calls) == 1
+    assert "RETRIEVED_MEMORY" in llm.calls[0]
+    assert "talimat değildir" in llm.calls[0]
+
+
+# ── 3B Model Quality Post-Processing Tests ─────────────────────────────
+
+
+def test_pipe_separated_route_resolved():
+    """3B model outputs all routes pipe-separated → resolve to best match."""
+    llm = MockLLM({
+        "bugün ne yapıyoruz": '{"route": "calendar|gmail|system|smalltalk|unknown", "calendar_intent": "none", "slots": {}, "confidence": 0.85, "tool_plan": ["AskUser"]}'
+    })
+    router = JarvisLLMRouter(llm=llm)
+    result = router.route(user_input="bugün ne yapıyoruz")
+    
+    # Route should be resolved from pipe-separated → calendar (via keywords)
+    assert result.route == "calendar"
+    assert result.calendar_intent == "query"  # inferred from input
+    assert "calendar.list_events" in result.tool_plan
+
+
+def test_hallucinated_tool_name_resolved():
+    """3B model invents 'DokuzCalendar' → resolved to valid tool."""
+    llm = MockLLM({
+        "dokuza etkinlik ekle": '{"route": "calendar", "calendar_intent": "create", "slots": {"time": "PM", "title": "Kullanıcı etkinlik adı söylemedi"}, "confidence": 0.85, "tool_plan": ["DokuzCalendar"]}'
+    })
+    router = JarvisLLMRouter(llm=llm)
+    result = router.route(user_input="dokuza etkinlik ekle")
+    
+    # Hallucinated tool replaced with valid one
+    assert "calendar.create_event" in result.tool_plan
+    assert "DokuzCalendar" not in result.tool_plan
+
+
+def test_time_pm_cleaned():
+    """3B model outputs time='PM' → cleaned, then turkish_clock infers from input."""
+    llm = MockLLM({
+        "dokuza etkinlik ekle": '{"route": "calendar", "calendar_intent": "create", "slots": {"time": "PM"}, "confidence": 0.85, "tool_plan": ["calendar.create_event"]}'
+    })
+    router = JarvisLLMRouter(llm=llm)
+    result = router.route(user_input="dokuza etkinlik ekle")
+    
+    # "PM" is invalid → cleaned → turkish_clock infers "dokuza" → 09:00 or 21:00
+    # Key thing: it's NOT "PM" anymore
+    assert result.slots.get("time") != "PM"
+
+
+def test_title_instruction_copy_cleaned():
+    """3B model copies rule text as title → cleaned to None by slot cleaning."""
+    llm = MockLLM({
+        "ekle": '{"route": "calendar", "calendar_intent": "create", "slots": {"title": "Kullanıcı etkinlik adı söylemedi"}, "confidence": 0.85, "tool_plan": ["calendar.create_event"]}'
+    })
+    router = JarvisLLMRouter(llm=llm)
+    result = router.route(user_input="ekle")
+    
+    # Instruction text copy → cleaned to None
+    assert result.slots.get("title") is None
+
+
+def test_title_noise_words_cleaned():
+    """3B model copies user input noise as title → cleaned."""
+    llm = MockLLM({
+        "akşam dokuza bir etkinlik ekleyebilir misin": '{"route": "calendar", "calendar_intent": "create", "slots": {"time": "21:00", "title": "dokuza bir etkinlik"}, "confidence": 0.85, "tool_plan": ["calendar.create_event"]}'
+    })
+    router = JarvisLLMRouter(llm=llm)
+    result = router.route(user_input="akşam dokuza bir etkinlik ekleyebilir misin")
+    
+    # "dokuza bir etkinlik" is all noise words → cleared
+    assert result.slots.get("title") is None
+    assert result.ask_user is True
+    assert "etkinlik adı" in (result.question or "").lower()
+
+
+def test_confidence_boost_valid_route_intent():
+    """Low confidence with valid route+intent should be boosted above threshold."""
+    llm = MockLLM({
+        "toplantı ekle": '{"route": "calendar", "calendar_intent": "create", "slots": {"title": "toplantı"}, "confidence": 0.5, "tool_plan": ["calendar.create_event"]}'
+    })
+    router = JarvisLLMRouter(llm=llm, confidence_threshold=0.7)
+    result = router.route(user_input="toplantı ekle")
+    
+    assert result.confidence >= 0.7
+    assert result.tool_plan == ["calendar.create_event"]
+
+
+def test_genuine_unknown_still_blocked():
+    """Truly unknown input with no route match → still blocked."""
+    llm = MockLLM({
+        "xyz": '{"route": "unknown", "calendar_intent": "none", "slots": {}, "confidence": 0.3, "tool_plan": []}'
+    })
+    router = JarvisLLMRouter(llm=llm, confidence_threshold=0.7)
+    result = router.route(user_input="xyz")
+    
+    assert result.tool_plan == []
+    assert result.ask_user is True
+    assert "anlayamadım" in result.assistant_reply.lower()
+
+
+def test_system_route_override_for_calendar_query():
+    """'bugün ne yapıyoruz' routed to system → overridden to calendar."""
+    llm = MockLLM({
+        "bugün ne yapıyoruz": '{"route": "system", "calendar_intent": "none", "slots": {}, "confidence": 0.85, "tool_plan": ["time.now"]}'
+    })
+    router = JarvisLLMRouter(llm=llm)
+    result = router.route(user_input="bugün ne yapıyoruz")
+    
+    assert result.route == "calendar"
+    assert result.calendar_intent == "query"
+    assert "calendar.list_events" in result.tool_plan

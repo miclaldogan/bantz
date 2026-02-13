@@ -171,6 +171,10 @@ class ClarificationManager:
         resolved = manager.resolve_from_response("youtube", context)
     """
     
+    # Memory bounds (Issue #652)
+    _MAX_PENDING: int = 500
+    _MAX_HISTORY: int = 500
+
     def __init__(self, config: Optional[ClarificationConfig] = None):
         """Initialize the manager.
         
@@ -432,6 +436,11 @@ class ClarificationManager:
             session_id: Session identifier
             clarification: The clarification request
         """
+        # Evict oldest pending if at capacity (Issue #652)
+        # Uses dict insertion order (Python 3.7+ guaranteed) — FIFO eviction
+        while len(self._pending) >= self._MAX_PENDING:
+            oldest_key = next(iter(self._pending))
+            del self._pending[oldest_key]
         self._pending[session_id] = clarification
     
     def get_pending(self, session_id: str) -> Optional[ClarificationRequest]:
@@ -519,6 +528,9 @@ class ClarificationManager:
         # Track for learning
         if self.config.remember_clarifications:
             self._history.append((clarification, option.intent))
+            # Trim oldest entries to prevent unbounded growth (Issue #652)
+            if len(self._history) > self._MAX_HISTORY:
+                self._history = self._history[-self._MAX_HISTORY:]
         
         return IntentResult(
             intent=option.intent,
@@ -550,6 +562,9 @@ class ClarificationManager:
         # Track for learning
         if self.config.remember_clarifications:
             self._history.append((clarification, f"{slot_name}={value}"))
+            # Trim oldest entries to prevent unbounded growth (Issue #652)
+            if len(self._history) > self._MAX_HISTORY:
+                self._history = self._history[-self._MAX_HISTORY:]
         
         return IntentResult(
             intent=intent,

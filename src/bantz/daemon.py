@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--session", default=DEFAULT_SESSION, help="Session name")
     parser.add_argument("--policy", default="config/policy.json", help="Policy file")
-    parser.add_argument("--log", default="bantz.log.jsonl", help="Log file")
+    parser.add_argument("--log", default="artifacts/logs/bantz.log.jsonl", help="Log file")
     parser.add_argument(
         "--init-browser",
         action="store_true",

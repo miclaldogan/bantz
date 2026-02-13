@@ -1,0 +1,21 @@
+[Unit]
+Description=BANTZ Voice (Wake Word + ASR)
+Documentation=https://github.com/miclaldogan/bantz
+After=bantz-core.service pulseaudio.service pipewire.service
+Requires=bantz-core.service
+
+[Service]
+Type=simple
+ExecStart=%h/Desktop/Bantz/.venv/bin/python -m bantz.voice.loop
+WorkingDirectory=%h/Desktop/Bantz
+EnvironmentFile=-%h/.config/bantz/env
+Environment=PYTHONPATH=%h/Desktop/Bantz/src
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+Restart=on-failure
+RestartSec=3
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=default.target

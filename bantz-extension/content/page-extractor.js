@@ -146,7 +146,9 @@ class PageExtractor {
       if (links.length >= maxLinks) break;
 
       const href = a.href;
-      if (!href || href.startsWith('javascript:') || href === '#') continue;
+      // Security Alert #8: Check for data: and vbscript: schemes too
+      if (!href || href.startsWith('javascript:') || href.startsWith('data:') || 
+          href.startsWith('vbscript:') || href === '#') continue;
       if (seen.has(href)) continue;
 
       const text = a.textContent.trim();

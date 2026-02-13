@@ -1,0 +1,148 @@
+{
+  "description": "Chat/smalltalk scenario test cases for benchmark suite (Issue #161)",
+  "version": "1.0",
+  "total_cases": 10,
+  "categories": {
+    "smalltalk": 5,
+    "memory": 3,
+    "context": 2
+  },
+  "cases": [
+    {
+      "id": "chat_small_001",
+      "category": "smalltalk",
+      "difficulty": "easy",
+      "input": "merhaba nasılsın",
+      "expected_route": "smalltalk",
+      "expected_intent": "greeting",
+      "expected_tools": [],
+      "success_criteria": "Friendly Turkish greeting response",
+      "quality_check": "Natural, conversational tone"
+    },
+    {
+      "id": "chat_small_002",
+      "category": "smalltalk",
+      "difficulty": "easy",
+      "input": "bugün hava nasıl",
+      "expected_route": "smalltalk",
+      "expected_intent": "weather_query",
+      "expected_tools": ["weather.current"],
+      "success_criteria": "Weather information provided",
+      "quality_check": "Natural language, not robotic"
+    },
+    {
+      "id": "chat_small_003",
+      "category": "smalltalk",
+      "difficulty": "medium",
+      "input": "sıkıldım ne yapabilirim",
+      "expected_route": "smalltalk",
+      "expected_intent": "suggestion_request",
+      "expected_tools": [],
+      "success_criteria": "Provides activity suggestions",
+      "quality_check": "Engaging, helpful tone"
+    },
+    {
+      "id": "chat_small_004",
+      "category": "smalltalk",
+      "difficulty": "medium",
+      "input": "bugün ne günü",
+      "expected_route": "smalltalk",
+      "expected_intent": "date_query",
+      "expected_tools": ["time.now"],
+      "success_criteria": "Returns current date/day",
+      "quality_check": "Conversational, not clinical"
+    },
+    {
+      "id": "chat_small_005",
+      "category": "smalltalk",
+      "difficulty": "hard",
+      "input": "şaka yap",
+      "expected_route": "smalltalk",
+      "expected_intent": "joke_request",
+      "expected_tools": [],
+      "success_criteria": "Tells a joke in Turkish",
+      "quality_check": "Humor appropriate, culturally relevant"
+    },
+    {
+      "id": "chat_memory_001",
+      "category": "memory",
+      "difficulty": "medium",
+      "input": "benim adım Ahmet",
+      "expected_route": "smalltalk",
+      "expected_intent": "user_info_update",
+      "expected_tools": [],
+      "success_criteria": "Acknowledges and remembers name",
+      "quality_check": "Confirms understanding naturally",
+      "follow_up": {
+        "input": "benim adım ne",
+        "expected_response_contains": "Ahmet"
+      }
+    },
+    {
+      "id": "chat_memory_002",
+      "category": "memory",
+      "difficulty": "hard",
+      "input": "en sevdiğim renk mavi",
+      "expected_route": "smalltalk",
+      "expected_intent": "user_preference",
+      "expected_tools": [],
+      "success_criteria": "Stores preference",
+      "quality_check": "Natural acknowledgment",
+      "follow_up": {
+        "input": "hangi rengi seviyorum",
+        "expected_response_contains": "mavi"
+      }
+    },
+    {
+      "id": "chat_memory_003",
+      "category": "memory",
+      "difficulty": "hard",
+      "input": "istanbul'da yaşıyorum",
+      "expected_route": "smalltalk",
+      "expected_intent": "user_location",
+      "expected_tools": [],
+      "success_criteria": "Remembers location",
+      "quality_check": "Conversational acknowledgment",
+      "follow_up": {
+        "input": "nerede yaşıyorum",
+        "expected_response_contains": "istanbul"
+      }
+    },
+    {
+      "id": "chat_context_001",
+      "category": "context",
+      "difficulty": "hard",
+      "input": "yarın toplantım var",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.create_event"],
+      "success_criteria": "Creates meeting",
+      "follow_up": {
+        "input": "onu 1 saat ertele",
+        "expected_route": "calendar",
+        "expected_intent": "update_event",
+        "expected_tools": ["calendar.find_event", "calendar.update_event"],
+        "success_criteria": "References previous 'toplantı' from context"
+      },
+      "quality_check": "Maintains conversation context"
+    },
+    {
+      "id": "chat_context_002",
+      "category": "context",
+      "difficulty": "hard",
+      "input": "python tutorial ara",
+      "expected_route": "web",
+      "expected_intent": "web_search",
+      "expected_tools": ["web.search"],
+      "success_criteria": "Searches web",
+      "follow_up": {
+        "input": "ilk sonucu aç",
+        "expected_route": "web",
+        "expected_intent": "web_open",
+        "expected_tools": ["web.open"],
+        "success_criteria": "Opens first result from previous search"
+      },
+      "quality_check": "Tracks multi-turn task flow"
+    }
+  ]
+}

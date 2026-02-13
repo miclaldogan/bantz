@@ -38,9 +38,10 @@ import logging
 import re
 import time
 
+from bantz.llm.base import LLMClientProtocol, LLMMessage
+
 if TYPE_CHECKING:
     from bantz.browser.extension_bridge import ExtensionBridge
-    from bantz.llm.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
 
@@ -585,7 +586,7 @@ class PageSummarizer:
     def __init__(
         self,
         extension_bridge: Optional["ExtensionBridge"] = None,
-        llm_client: Optional["OllamaClient"] = None,
+        llm_client: Optional[LLMClientProtocol] = None,
         extract_timeout: float = 5.0,
         llm_timeout: float = 60.0,
         cache_ttl: int = 3600,
@@ -798,8 +799,6 @@ class PageSummarizer:
         length: SummaryLength,
     ) -> PageSummary:
         """Generate summary based on requested length."""
-        from bantz.llm.ollama_client import LLMMessage
-        
         if length == SummaryLength.TWEET:
             # Tweet-size summary (max 280 chars)
             short_summary = await self._generate_tweet_summary(page)
@@ -827,8 +826,6 @@ class PageSummarizer:
     
     async def _generate_tweet_summary(self, page: ExtractedPage) -> str:
         """Generate tweet-size summary (max 280 chars)."""
-        from bantz.llm.ollama_client import LLMMessage
-        
         prompt = TWEET_SUMMARY_PROMPT.format(
             title=page.title,
             content=page.content[:4000],  # Limit content for tweet
@@ -850,8 +847,6 @@ class PageSummarizer:
     
     async def _generate_short_summary(self, page: ExtractedPage) -> str:
         """Generate short 1-2 sentence summary."""
-        from bantz.llm.ollama_client import LLMMessage
-        
         prompt = SHORT_SUMMARY_PROMPT.format(
             title=page.title,
             url=page.url,
@@ -870,8 +865,6 @@ class PageSummarizer:
         self, page: ExtractedPage
     ) -> tuple[str, List[str]]:
         """Generate detailed summary with key points."""
-        from bantz.llm.ollama_client import LLMMessage
-        
         prompt = DETAILED_SUMMARY_PROMPT.format(
             title=page.title,
             url=page.url,
@@ -964,8 +957,6 @@ class PageSummarizer:
             return None
         
         try:
-            from bantz.llm.ollama_client import LLMMessage
-            
             prompt = QUESTION_ANSWER_PROMPT.format(
                 title=title,
                 content=content[:6000],  # Limit for context

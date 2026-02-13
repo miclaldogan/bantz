@@ -47,7 +47,7 @@ from bantz.plugins.registry import (
 # =============================================================================
 
 
-class TestPlugin(BantzPlugin):
+class SamplePlugin(BantzPlugin):
     """A test plugin implementation."""
     
     @property
@@ -364,40 +364,40 @@ class TestBantzPlugin:
     
     def test_plugin_creation(self):
         """Test plugin instantiation."""
-        plugin = TestPlugin()
+        plugin = SamplePlugin()
         assert plugin.metadata.name == "test-plugin"
         assert plugin.metadata.version == "1.0.0"
     
     def test_plugin_intents(self):
         """Test plugin intent patterns."""
-        plugin = TestPlugin()
+        plugin = SamplePlugin()
         intents = plugin.get_intents()
         assert len(intents) == 1
         assert intents[0].intent == "test_action"
     
     def test_plugin_tools(self):
         """Test plugin tools."""
-        plugin = TestPlugin()
+        plugin = SamplePlugin()
         tools = plugin.get_tools()
         assert len(tools) == 1
         assert tools[0].name == "test_tool"
     
     def test_plugin_tool_execution(self):
         """Test plugin tool execution."""
-        plugin = TestPlugin()
+        plugin = SamplePlugin()
         tools = plugin.get_tools()
         result = tools[0].execute(input="hello")
         assert result == {"result": "tested: hello"}
     
     def test_plugin_config(self):
         """Test plugin config access."""
-        plugin = TestPlugin()
+        plugin = SamplePlugin()
         # Test that config attribute exists or can be set
         assert hasattr(plugin, 'config') or hasattr(plugin, '_config')
     
     def test_plugin_lifecycle(self):
         """Test plugin lifecycle hooks."""
-        plugin = TestPlugin()
+        plugin = SamplePlugin()
         
         # These should not raise
         plugin.on_load()
@@ -589,7 +589,7 @@ class TestLoadedPlugin:
     
     def test_loaded_plugin_creation(self):
         """Test loaded plugin creation."""
-        plugin = TestPlugin()
+        plugin = SamplePlugin()
         spec = PluginSpec(
             name="test",
             path=Path("/plugins/test"),
@@ -617,7 +617,7 @@ class TestPluginManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = MockPluginManager([Path(tmpdir)])
             
-            plugin = TestPlugin()
+            plugin = SamplePlugin()
             manager.add_mock_plugin(plugin)
             
             assert "test-plugin" in manager.plugins
@@ -628,7 +628,7 @@ class TestPluginManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = MockPluginManager([Path(tmpdir)])
             
-            plugin = TestPlugin()
+            plugin = SamplePlugin()
             manager.add_mock_plugin(plugin)
             
             # Should start enabled
@@ -647,21 +647,21 @@ class TestPluginManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = MockPluginManager([Path(tmpdir)])
             
-            plugin1 = TestPlugin()
+            plugin1 = SamplePlugin()
             plugin2 = MinimalPlugin()
             
             manager.add_mock_plugin(plugin1)
             manager.add_mock_plugin(plugin2)
             
             intents = manager.get_all_intents()
-            assert len(intents) >= 1  # At least from TestPlugin
+            assert len(intents) >= 1  # At least from SamplePlugin
     
     def test_manager_get_all_tools(self):
         """Test getting tools from all plugins."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = MockPluginManager([Path(tmpdir)])
             
-            plugin = TestPlugin()
+            plugin = SamplePlugin()
             manager.add_mock_plugin(plugin)
             
             tools = manager.get_all_tools()
@@ -672,7 +672,7 @@ class TestPluginManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = MockPluginManager([Path(tmpdir)])
             
-            plugin = TestPlugin()
+            plugin = SamplePlugin()
             manager.add_mock_plugin(plugin)
             
             # The intent gets prefixed with plugin name
@@ -687,7 +687,7 @@ class TestPluginManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = MockPluginManager([Path(tmpdir)])
             
-            plugin = TestPlugin()
+            plugin = SamplePlugin()
             manager.add_mock_plugin(plugin)
             
             assert "test-plugin" in manager.plugins
@@ -846,43 +846,26 @@ class TestSkillRegistry:
     
     def test_registry_creation(self):
         """Test registry creation."""
-        registry = SkillRegistry()
-        assert registry is not None
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            registry = SkillRegistry(install_dir=Path(td) / "p", cache_dir=Path(td) / "c")
+            assert registry is not None
     
     def test_registry_search(self):
         """Test searching the registry."""
-        registry = SkillRegistry()
-        results = registry.search("spotify")
-        
-        assert isinstance(results, RegistrySearchResult)
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            registry = SkillRegistry(install_dir=Path(td) / "p", cache_dir=Path(td) / "c")
+            results = registry.search("anything")
+            assert isinstance(results, RegistrySearchResult)
     
-    def test_registry_get(self):
-        """Test getting a specific plugin."""
-        registry = SkillRegistry()
-        entry = registry.get("spotify")
-        
-        # Mock registry should have spotify
-        if entry:
-            assert entry.name == "spotify"
-    
-    def test_registry_get_popular(self):
-        """Test getting popular plugins."""
-        registry = SkillRegistry()
-        popular = registry.get_popular(limit=5)
-        
-        assert isinstance(popular, list)
-        assert len(popular) <= 5
-    
-    def test_registry_get_by_category(self):
-        """Test getting plugins by category."""
-        registry = SkillRegistry()
-        # Call with any category - just verify it doesn't error
-        try:
-            result = registry.get_by_category("music")
-            assert isinstance(result, list)
-        except (AttributeError, NotImplementedError):
-            # Method may not exist in all implementations
-            pass
+    def test_registry_get_unknown(self):
+        """Test getting a non-existent plugin."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            registry = SkillRegistry(install_dir=Path(td) / "p", cache_dir=Path(td) / "c")
+            entry = registry.get("nonexistent")
+            assert entry is None
 
 
 class TestMockSkillRegistry:
@@ -890,9 +873,12 @@ class TestMockSkillRegistry:
     
     def test_mock_registry(self):
         """Test mock registry."""
-        registry = MockSkillRegistry()
+        entries = [
+            RegistryEntry(name="spotify", version="1.0", author="T", description="Music"),
+        ]
+        registry = MockSkillRegistry(entries=entries)
         
-        results = registry.search("music")
+        results = registry.search("spotify")
         assert isinstance(results, RegistrySearchResult)
         
         entry = registry.get("spotify")
@@ -1008,7 +994,7 @@ class TestIntegrationPlugin(BantzPlugin):
             
             # Use mock manager for direct plugin registration
             mock_manager = MockPluginManager([plugins_dir])
-            mock_manager.add_mock_plugin(TestPlugin())
+            mock_manager.add_mock_plugin(SamplePlugin())
             
             # Should be enabled (not in disabled list)
             assert mock_manager.is_enabled("test-plugin")

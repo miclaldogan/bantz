@@ -1,0 +1,1 @@
+{"route": "calendar", "calendar_intent": "create", "confidence": 0.9, "assistant_reply": "Toplantınızı şu saatte oluştur

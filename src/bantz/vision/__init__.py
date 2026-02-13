@@ -4,7 +4,7 @@ Bantz Vision Module.
 Multi-modal input capabilities:
 - Screen capture and analysis
 - Document understanding (PDF, images)
-- Vision LLM integration (LLaVA via Ollama)
+- Vision LLM integration (OpenAI-compatible API via vLLM)
 - OCR text extraction
 """
 
@@ -33,6 +33,12 @@ from bantz.vision.document import (
     DocumentPage,
     OCRResult,
     MockDocumentAnalyzer,
+)
+from bantz.vision.google_vision import (
+    GoogleVisionClient,
+    GoogleVisionError,
+    vision_ocr,
+    vision_describe,
 )
 from bantz.vision.screen import (
     ScreenUnderstanding,
@@ -74,6 +80,11 @@ __all__ = [
     "DocumentPage",
     "OCRResult",
     "MockDocumentAnalyzer",
+    # Google Vision
+    "GoogleVisionClient",
+    "GoogleVisionError",
+    "vision_ocr",
+    "vision_describe",
     # Screen
     "ScreenUnderstanding",
     "ScreenAnalysis",

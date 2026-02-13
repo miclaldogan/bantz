@@ -1,0 +1,454 @@
+{
+  "description": "Calendar scenario test cases for benchmark suite (Issue #161)",
+  "version": "1.0",
+  "total_cases": 30,
+  "categories": {
+    "create": 8,
+    "query": 8,
+    "modify": 6,
+    "cancel": 5,
+    "follow_up": 3
+  },
+  "cases": [
+    {
+      "id": "cal_create_001",
+      "category": "create",
+      "difficulty": "easy",
+      "input": "yarın saat 14'te diş randevusu oluştur",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.create_event"],
+      "expected_slots": {
+        "title": "diş randevusu",
+        "start": "tomorrow 14:00"
+      },
+      "success_criteria": "Event created with correct title and time"
+    },
+    {
+      "id": "cal_create_002",
+      "category": "create",
+      "difficulty": "medium",
+      "input": "gelecek pazartesi 10:00'da 2 saatlik toplantı ekle",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.create_event"],
+      "expected_slots": {
+        "title": "toplantı",
+        "start": "next monday 10:00",
+        "duration": "2 hours"
+      },
+      "success_criteria": "Event created with duration"
+    },
+    {
+      "id": "cal_create_003",
+      "category": "create",
+      "difficulty": "hard",
+      "input": "15 mart'ta öğleden sonra 3'te müşteri sunumu için takvime ekle, 1.5 saat sürecek",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.create_event"],
+      "expected_slots": {
+        "title": "müşteri sunumu",
+        "start": "2026-03-15 15:00",
+        "duration": "1.5 hours"
+      },
+      "success_criteria": "Specific date + time + duration parsed correctly"
+    },
+    {
+      "id": "cal_create_004",
+      "category": "create",
+      "difficulty": "medium",
+      "input": "bu akşam 19:00'da akşam yemeği planı yap",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.create_event"],
+      "expected_slots": {
+        "title": "akşam yemeği",
+        "start": "today 19:00"
+      },
+      "success_criteria": "Same-day event creation"
+    },
+    {
+      "id": "cal_create_005",
+      "category": "create",
+      "difficulty": "hard",
+      "input": "önümüzdeki hafta her gün saat 9'da standup meeting koy",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.create_event"],
+      "expected_slots": {
+        "title": "standup meeting",
+        "start": "next week",
+        "recurrence": "daily"
+      },
+      "success_criteria": "Recurring event creation",
+      "notes": "May require multiple create_event calls"
+    },
+    {
+      "id": "cal_create_006",
+      "category": "create",
+      "difficulty": "easy",
+      "input": "salı günü öğle yemeği randevusu",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.create_event"],
+      "expected_slots": {
+        "title": "öğle yemeği",
+        "start": "next tuesday 12:00"
+      },
+      "success_criteria": "Implicit time (lunch = 12:00)"
+    },
+    {
+      "id": "cal_create_007",
+      "category": "create",
+      "difficulty": "medium",
+      "input": "28 şubat'ta tüm gün tatil işaretle",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.create_event"],
+      "expected_slots": {
+        "title": "tatil",
+        "start": "2026-02-28",
+        "all_day": true
+      },
+      "success_criteria": "All-day event creation"
+    },
+    {
+      "id": "cal_create_008",
+      "category": "create",
+      "difficulty": "hard",
+      "input": "ayın son cuma günü 17:00'de ekip retrospective toplantısı ayarla, yer konferans salonu",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.create_event"],
+      "expected_slots": {
+        "title": "ekip retrospective",
+        "start": "last friday of month 17:00",
+        "location": "konferans salonu"
+      },
+      "success_criteria": "Relative date + location"
+    },
+    {
+      "id": "cal_query_001",
+      "category": "query",
+      "difficulty": "easy",
+      "input": "bugün ne planım var",
+      "expected_route": "calendar",
+      "expected_intent": "list_events",
+      "expected_tools": ["calendar.list_events"],
+      "expected_slots": {
+        "start_date": "today",
+        "end_date": "today"
+      },
+      "success_criteria": "Returns today's events"
+    },
+    {
+      "id": "cal_query_002",
+      "category": "query",
+      "difficulty": "medium",
+      "input": "bu hafta toplantılarımı göster",
+      "expected_route": "calendar",
+      "expected_intent": "list_events",
+      "expected_tools": ["calendar.list_events"],
+      "expected_slots": {
+        "start_date": "this week",
+        "end_date": "this week",
+        "query": "toplantı"
+      },
+      "success_criteria": "Filters by keyword 'toplantı'"
+    },
+    {
+      "id": "cal_query_003",
+      "category": "query",
+      "difficulty": "hard",
+      "input": "gelecek ay müşteri ile ilgili randevularım var mı",
+      "expected_route": "calendar",
+      "expected_intent": "list_events",
+      "expected_tools": ["calendar.list_events"],
+      "expected_slots": {
+        "start_date": "next month",
+        "end_date": "next month",
+        "query": "müşteri"
+      },
+      "success_criteria": "Month-range query with filter"
+    },
+    {
+      "id": "cal_query_004",
+      "category": "query",
+      "difficulty": "easy",
+      "input": "yarın saat kaçta randevum var",
+      "expected_route": "calendar",
+      "expected_intent": "list_events",
+      "expected_tools": ["calendar.list_events"],
+      "expected_slots": {
+        "start_date": "tomorrow"
+      },
+      "success_criteria": "Tomorrow's schedule"
+    },
+    {
+      "id": "cal_query_005",
+      "category": "query",
+      "difficulty": "medium",
+      "input": "15 mart'ta ne yapmam lazım",
+      "expected_route": "calendar",
+      "expected_intent": "list_events",
+      "expected_tools": ["calendar.list_events"],
+      "expected_slots": {
+        "start_date": "2026-03-15",
+        "end_date": "2026-03-15"
+      },
+      "success_criteria": "Specific date query"
+    },
+    {
+      "id": "cal_query_006",
+      "category": "query",
+      "difficulty": "hard",
+      "input": "önümüzdeki 3 gün içinde boş zamanlarımı bul",
+      "expected_route": "calendar",
+      "expected_intent": "find_free_slots",
+      "expected_tools": ["calendar.list_events"],
+      "expected_slots": {
+        "start_date": "today",
+        "end_date": "+3 days"
+      },
+      "success_criteria": "Free slot detection",
+      "notes": "May require additional logic"
+    },
+    {
+      "id": "cal_query_007",
+      "category": "query",
+      "difficulty": "medium",
+      "input": "bu hafta sonu planım var mı",
+      "expected_route": "calendar",
+      "expected_intent": "list_events",
+      "expected_tools": ["calendar.list_events"],
+      "expected_slots": {
+        "start_date": "this weekend"
+      },
+      "success_criteria": "Weekend-specific query"
+    },
+    {
+      "id": "cal_query_008",
+      "category": "query",
+      "difficulty": "easy",
+      "input": "saat 2'deki randevum ne",
+      "expected_route": "calendar",
+      "expected_intent": "find_event",
+      "expected_tools": ["calendar.list_events"],
+      "expected_slots": {
+        "time": "14:00",
+        "start_date": "today"
+      },
+      "success_criteria": "Time-specific query for today"
+    },
+    {
+      "id": "cal_modify_001",
+      "category": "modify",
+      "difficulty": "medium",
+      "input": "yarınki toplantıyı saat 15'e ertele",
+      "expected_route": "calendar",
+      "expected_intent": "update_event",
+      "expected_tools": ["calendar.find_event", "calendar.update_event"],
+      "expected_slots": {
+        "query": "toplantı",
+        "date": "tomorrow",
+        "new_time": "15:00"
+      },
+      "success_criteria": "Event rescheduled"
+    },
+    {
+      "id": "cal_modify_002",
+      "category": "modify",
+      "difficulty": "hard",
+      "input": "diş randevumu bir hafta sonraya al",
+      "expected_route": "calendar",
+      "expected_intent": "update_event",
+      "expected_tools": ["calendar.find_event", "calendar.update_event"],
+      "expected_slots": {
+        "query": "diş",
+        "date_offset": "+1 week"
+      },
+      "success_criteria": "Event moved to +7 days"
+    },
+    {
+      "id": "cal_modify_003",
+      "category": "modify",
+      "difficulty": "medium",
+      "input": "pazartesi günkü sunumun yerini ofis 301 yap",
+      "expected_route": "calendar",
+      "expected_intent": "update_event",
+      "expected_tools": ["calendar.find_event", "calendar.update_event"],
+      "expected_slots": {
+        "query": "sunum",
+        "date": "monday",
+        "location": "ofis 301"
+      },
+      "success_criteria": "Location updated"
+    },
+    {
+      "id": "cal_modify_004",
+      "category": "modify",
+      "difficulty": "hard",
+      "input": "müşteri toplantısını 1 saat uzat",
+      "expected_route": "calendar",
+      "expected_intent": "update_event",
+      "expected_tools": ["calendar.find_event", "calendar.update_event"],
+      "expected_slots": {
+        "query": "müşteri toplantısı",
+        "duration_change": "+1 hour"
+      },
+      "success_criteria": "Duration extended"
+    },
+    {
+      "id": "cal_modify_005",
+      "category": "modify",
+      "difficulty": "medium",
+      "input": "akşam yemeğinin saatini 20:00'ye değiştir",
+      "expected_route": "calendar",
+      "expected_intent": "update_event",
+      "expected_tools": ["calendar.find_event", "calendar.update_event"],
+      "expected_slots": {
+        "query": "akşam yemeği",
+        "new_time": "20:00"
+      },
+      "success_criteria": "Time changed"
+    },
+    {
+      "id": "cal_modify_006",
+      "category": "modify",
+      "difficulty": "hard",
+      "input": "perşembe saat 10'daki toplantıya Ahmet'i ekle",
+      "expected_route": "calendar",
+      "expected_intent": "update_event",
+      "expected_tools": ["calendar.find_event", "calendar.update_event"],
+      "expected_slots": {
+        "date": "thursday",
+        "time": "10:00",
+        "add_attendee": "Ahmet"
+      },
+      "success_criteria": "Attendee added"
+    },
+    {
+      "id": "cal_cancel_001",
+      "category": "cancel",
+      "difficulty": "easy",
+      "input": "yarınki diş randevusunu iptal et",
+      "expected_route": "calendar",
+      "expected_intent": "delete_event",
+      "expected_tools": ["calendar.find_event", "calendar.delete_event"],
+      "expected_slots": {
+        "query": "diş",
+        "date": "tomorrow"
+      },
+      "requires_confirmation": true,
+      "success_criteria": "Event deleted after confirmation"
+    },
+    {
+      "id": "cal_cancel_002",
+      "category": "cancel",
+      "difficulty": "medium",
+      "input": "bu hafta sonu planlarımı sil",
+      "expected_route": "calendar",
+      "expected_intent": "delete_event",
+      "expected_tools": ["calendar.list_events", "calendar.delete_event"],
+      "expected_slots": {
+        "date_range": "this weekend"
+      },
+      "requires_confirmation": true,
+      "success_criteria": "Multiple events deleted"
+    },
+    {
+      "id": "cal_cancel_003",
+      "category": "cancel",
+      "difficulty": "hard",
+      "input": "pazartesi günü saat 14:00'teki müşteri sunumunu kaldır",
+      "expected_route": "calendar",
+      "expected_intent": "delete_event",
+      "expected_tools": ["calendar.find_event", "calendar.delete_event"],
+      "expected_slots": {
+        "query": "müşteri sunumu",
+        "date": "monday",
+        "time": "14:00"
+      },
+      "requires_confirmation": true,
+      "success_criteria": "Specific event deleted"
+    },
+    {
+      "id": "cal_cancel_004",
+      "category": "cancel",
+      "difficulty": "medium",
+      "input": "15 mart'taki tüm randevuları iptal et",
+      "expected_route": "calendar",
+      "expected_intent": "delete_event",
+      "expected_tools": ["calendar.list_events", "calendar.delete_event"],
+      "expected_slots": {
+        "date": "2026-03-15"
+      },
+      "requires_confirmation": true,
+      "success_criteria": "All events on date deleted"
+    },
+    {
+      "id": "cal_cancel_005",
+      "category": "cancel",
+      "difficulty": "easy",
+      "input": "akşam yemeği planını çıkar",
+      "expected_route": "calendar",
+      "expected_intent": "delete_event",
+      "expected_tools": ["calendar.find_event", "calendar.delete_event"],
+      "expected_slots": {
+        "query": "akşam yemeği"
+      },
+      "requires_confirmation": true,
+      "success_criteria": "Event cancelled"
+    },
+    {
+      "id": "cal_followup_001",
+      "category": "follow_up",
+      "difficulty": "hard",
+      "input": "bugünkü toplantıdan sonra 30 dakikalık follow-up ekle",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.list_events", "calendar.create_event"],
+      "expected_slots": {
+        "query": "toplantı",
+        "date": "today",
+        "title": "follow-up",
+        "duration": "30 minutes",
+        "start": "after previous event"
+      },
+      "success_criteria": "Event created after found event"
+    },
+    {
+      "id": "cal_followup_002",
+      "category": "follow_up",
+      "difficulty": "hard",
+      "input": "müşteri sunumundan önce 15 dakika hazırlık zamanı ayır",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.find_event", "calendar.create_event"],
+      "expected_slots": {
+        "query": "müşteri sunumu",
+        "title": "hazırlık",
+        "duration": "15 minutes",
+        "start": "before target event"
+      },
+      "success_criteria": "Prep time added before event"
+    },
+    {
+      "id": "cal_followup_003",
+      "category": "follow_up",
+      "difficulty": "medium",
+      "input": "yarınki toplantı sonrası hatırlatıcı koy",
+      "expected_route": "calendar",
+      "expected_intent": "create_event",
+      "expected_tools": ["calendar.find_event", "calendar.create_event"],
+      "expected_slots": {
+        "query": "toplantı",
+        "date": "tomorrow",
+        "title": "hatırlatıcı",
+        "start": "after event"
+      },
+      "success_criteria": "Reminder created"
+    }
+  ]
+}

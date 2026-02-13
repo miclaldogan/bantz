@@ -269,7 +269,8 @@ class ResearchOrchestrator:
 # Factory function for creating orchestrator with defaults
 def create_research_orchestrator(
     event_bus: Optional[EventBus] = None,
-    search_tool=None
+    search_tool=None,
+    summarizer=None,
 ) -> ResearchOrchestrator:
     """
     Create a ResearchOrchestrator with default components.
@@ -277,14 +278,23 @@ def create_research_orchestrator(
     Args:
         event_bus: Optional event bus for events
         search_tool: Optional search tool for source collection
+        summarizer: Optional summarizer. If None, uses ResearchSummarizer.
     
     Returns:
         Configured ResearchOrchestrator
     """
+    if summarizer is None:
+        try:
+            from bantz.research.summarizer import create_research_summarizer
+            summarizer = create_research_summarizer()
+        except Exception:
+            pass  # Will use fallback snippet concatenation
+
     return ResearchOrchestrator(
         collector=SourceCollector(search_tool=search_tool),
         ranker=SourceRanker(),
         contradiction_detector=ContradictionDetector(),
         confidence_scorer=ConfidenceScorer(),
-        event_bus=event_bus
+        event_bus=event_bus,
+        summarizer=summarizer,
     )

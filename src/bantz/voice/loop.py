@@ -12,8 +12,8 @@ from typing import List, Optional
 class VoiceLoopConfig:
     session: str = "default"
     piper_model_path: str = ""
-    ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen2.5:3b-instruct"
+    vllm_url: str = "http://127.0.0.1:8001"
+    vllm_model: str = "Qwen/Qwen2.5-3B-Instruct-AWQ"
     whisper_model: str = "base"
     # Default to Turkish - English words like "instagram" still work fine
     language: Optional[str] = "tr"
@@ -86,17 +86,21 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
     - SPACE basılı tut: kaydet
     - SPACE bırak: transcribe -> daemon'a gönder -> TTS konuş
 
+    Architecture (Issue #570):
+      Voice → ASR → autocorrect → send_to_server() → brain (default since #567)
+      LLM fallback only triggers if server returns empty/error.
+
     Eğer global key hook çalışmazsa (Wayland/X kısıtları), Enter tabanlı fallback var.
     """
 
     from bantz.server import is_server_running, send_to_server, ensure_server_running
-    from bantz.llm import LLMMessage, OllamaClient
+    from bantz.llm import LLMMessage, create_client
     from bantz.voice.asr import ASR, ASRConfig
     from bantz.voice.tts import PiperTTS, PiperTTSConfig
 
     # Ensure session server is running (auto-start for voice mode)
     policy_path = os.environ.get("BANTZ_POLICY", "config/policy.json")
-    log_path = os.environ.get("BANTZ_LOG", "bantz.log.jsonl")
+    log_path = os.environ.get("BANTZ_LOG", "artifacts/logs/bantz.log.jsonl")
     ok, started_here, msg = ensure_server_running(cfg.session, policy_path=policy_path, log_path=log_path)
     if not ok:
         print(f"❌ Session server başlatılamadı (session={cfg.session}): {msg}")
@@ -120,17 +124,21 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
     if not cfg.enable_llm_fallback:
         print("   (LLM fallback kapalı: --no-llm)")
 
-    # Preflight: if LLM is enabled but Ollama isn't reachable, disable it once and continue.
+    # Preflight: if LLM is enabled but vLLM isn't reachable, disable it once and continue.
     if cfg.enable_llm_fallback:
         try:
-            probe = OllamaClient(base_url=cfg.ollama_url, model=cfg.ollama_model, timeout_seconds=2.0)
+            probe = create_client(
+                "vllm",
+                base_url=cfg.vllm_url,
+                model=cfg.vllm_model,
+                timeout=2.0,
+            )
             if not probe.is_available(timeout_seconds=1.5):
                 raise RuntimeError("unreachable")
         except Exception:
-            print("⚠️  Ollama çalışmıyor veya erişilemiyor; LLM rewrite/fallback devre dışı.")
-            print(f"   URL: {cfg.ollama_url}")
-            print(f"   Başlat: ollama serve")
-            print(f"   Model indir: ollama pull {cfg.ollama_model}")
+            print("⚠️  vLLM çalışmıyor veya erişilemiyor; LLM rewrite/fallback devre dışı.")
+            print(f"   URL: {cfg.vllm_url}")
+            print("   Başlat: scripts/vllm/start_3b.sh  (veya docs/setup/vllm.md)")
             cfg.enable_llm_fallback = False
 
     # Lazily initialize heavy components so the loop feels responsive.
@@ -164,7 +172,8 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
 
         return asr
 
-    llm: Optional[OllamaClient] = None
+    llm_fast = None
+    llm_quality = None
     history: List[LLMMessage] = []
     if cfg.enable_llm_fallback:
         history = [
@@ -342,8 +351,8 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
             try:
                 from bantz.llm.rewriter import CommandRewriter
                 llm_rewriter = CommandRewriter(
-                    model=cfg.ollama_model,
-                    base_url=cfg.ollama_url,
+                    model=cfg.vllm_model,
+                    base_url=cfg.vllm_url,
                     enabled=True,
                 )
             except Exception as e:
@@ -420,15 +429,55 @@ def run_voice_loop(cfg: VoiceLoopConfig) -> int:
             print("🤖 Seni yanlış duymuş olabilirim. Tekrar söyler misin?")
             return
 
-        # 2) Eğer daemon cevap veremediyse LLM fallback
+        # 2) LLM fallback: only if server/brain couldn't answer (Issue #570).
+        #    Primary path is send_to_server → brain pipeline (#567).
         if cfg.enable_llm_fallback and (not reply or not ok):
             try:
-                nonlocal llm
-                if llm is None:
-                    llm = OllamaClient(base_url=cfg.ollama_url, model=cfg.ollama_model)
+                nonlocal llm_fast, llm_quality
+
+                use_quality = False
+                qos_timeout_s = 20.0
+                qos_max_tokens = 256
+                try:
+                    from bantz.llm.tiered import decide_tier, get_qos
+                    import os
+
+                    decision = decide_tier(text)
+                    use_quality = bool(decision.use_quality) and decision.reason != "tiering_disabled"
+
+                    qos = get_qos(use_quality=use_quality, profile="voice")
+                    qos_timeout_s = float(qos.timeout_s)
+                    qos_max_tokens = int(qos.max_tokens)
+
+                    from bantz.llm.tier_env import get_tier_debug
+
+                    if get_tier_debug():
+                        tier = "quality" if use_quality else "fast"
+                        print(
+                            f"[tiered] voice_fallback tier={tier} reason={decision.reason} c={decision.complexity} w={decision.writing} r={decision.risk} qos_timeout_s={qos_timeout_s} qos_max_tokens={qos_max_tokens}"
+                        )
+                except Exception:
+                    use_quality = False
+
+                if use_quality:
+                    if llm_quality is None:
+                        from bantz.llm import create_quality_client
+
+                        llm_quality = create_quality_client(timeout=qos_timeout_s)
+                    llm = llm_quality
+                else:
+                    if llm_fast is None:
+                        llm_fast = create_client(
+                            "vllm",
+                            base_url=cfg.vllm_url,
+                            model=cfg.vllm_model,
+                            timeout=qos_timeout_s,
+                        )
+                    llm = llm_fast
+
                 history = history[-20:]  # keep it bounded
                 history.append(LLMMessage("user", text))
-                reply = llm.chat(history, temperature=0.4, max_tokens=512)
+                reply = llm.chat(history, temperature=0.4, max_tokens=qos_max_tokens)
                 history.append(LLMMessage("assistant", reply))
             except Exception as e:
                 reply = reply or f"(LLM hata: {e})"
@@ -547,14 +596,14 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
     Push-to-talk yerine sürekli dinleme modu.
     """
     from bantz.server import is_server_running, send_to_server, get_ipc_overlay_hook, ensure_server_running
-    from bantz.llm import LLMMessage, OllamaClient
+    from bantz.llm import LLMMessage, create_client
     from bantz.voice.asr import ASR, ASRConfig
     from bantz.voice.tts import PiperTTS, PiperTTSConfig
     from bantz.voice.wakeword import WakeWordDetector, WakeWordConfig, VADRecorder
     
     # Ensure session server is running (auto-start for wake-word mode)
     policy_path = os.environ.get("BANTZ_POLICY", "config/policy.json")
-    log_path = os.environ.get("BANTZ_LOG", "bantz.log.jsonl")
+    log_path = os.environ.get("BANTZ_LOG", "artifacts/logs/bantz.log.jsonl")
     ok, started_here, msg = ensure_server_running(cfg.session, policy_path=policy_path, log_path=log_path)
     if not ok:
         print(f"❌ Session server başlatılamadı (session={cfg.session}): {msg}")
@@ -585,6 +634,23 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
             print(f"   Model indir: ollama pull {cfg.ollama_model}")
             cfg.enable_llm_fallback = False
         tts = PiperTTS(PiperTTSConfig(model_path=cfg.piper_model_path))
+
+    # Preflight: if LLM is enabled but vLLM isn't reachable, disable it once and continue.
+    if cfg.enable_llm_fallback:
+        try:
+            probe = create_client(
+                "vllm",
+                base_url=cfg.vllm_url,
+                model=cfg.vllm_model,
+                timeout=2.0,
+            )
+            if not probe.is_available(timeout_seconds=1.5):
+                raise RuntimeError("unreachable")
+        except Exception:
+            print("⚠️  vLLM çalışmıyor veya erişilemiyor; LLM rewrite/fallback devre dışı.")
+            print(f"   URL: {cfg.vllm_url}")
+            print("   Başlat: scripts/vllm/start_3b.sh  (veya docs/setup/vllm.md)")
+            cfg.enable_llm_fallback = False
     
     # Setup ASR (lazy)
     asr: Optional[ASR] = None
@@ -604,7 +670,8 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
         return asr
     
     # Setup LLM fallback
-    llm: Optional[OllamaClient] = None
+    llm_fast = None
+    llm_quality = None
     history: List[LLMMessage] = []
     if cfg.enable_llm_fallback:
         history = [
@@ -720,19 +787,48 @@ def run_wake_word_loop(cfg: VoiceLoopConfig) -> int:
             
             # LLM fallback for unknown commands
             if not ok and cfg.enable_llm_fallback and "anlayamadım" in reply.lower():
-                if llm is None:
-                    try:
-                        llm = OllamaClient(base_url=cfg.ollama_url)
-                    except Exception as e:
-                        print(f"(LLM init hata: {e})")
-                        is_listening = False
-                        return
+                nonlocal llm_fast, llm_quality
+
+                use_quality = False
+                try:
+                    from bantz.llm.tiered import decide_tier
+
+                    decision = decide_tier(text)
+                    use_quality = bool(decision.use_quality) and decision.reason != "tiering_disabled"
+                except Exception:
+                    use_quality = False
+
+                if use_quality:
+                    if llm_quality is None:
+                        try:
+                            from bantz.llm import create_quality_client
+
+                            llm_quality = create_quality_client()
+                        except Exception as e:
+                            print(f"(LLM init hata: {e})")
+                            is_listening = False
+                            return
+                    llm = llm_quality
+                else:
+                    if llm_fast is None:
+                        try:
+                            llm_fast = create_client(
+                                "vllm",
+                                base_url=cfg.vllm_url,
+                                model=cfg.vllm_model,
+                            )
+                        except Exception as e:
+                            print(f"(LLM init hata: {e})")
+                            is_listening = False
+                            return
+                    llm = llm_fast
                 
                 print("🤖 LLM'e soruluyor...")
+                history[:] = history[-20:]
                 history.append(LLMMessage("user", text))
                 
                 try:
-                    llm_reply = llm.chat(history, model=cfg.ollama_model)
+                    llm_reply = llm.chat(history, temperature=0.4, max_tokens=512)
                     history.append(LLMMessage("assistant", llm_reply))
                     print(f"🤖 {llm_reply}")
                     

@@ -1,8 +1,8 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
-  - name: Security Vulnerability
+  - name: 🔒 Security Vulnerability Report
     url: https://github.com/miclaldogan/bantz/blob/dev/SECURITY.md
-    about: Report security vulnerabilities privately
-  - name: General Questions
+    about: Report security vulnerabilities privately through this channel
+  - name: 💬 Questions & Discussions
     url: https://github.com/miclaldogan/bantz/discussions
-    about: Ask questions or discuss ideas
+    about: Ask questions or share ideas

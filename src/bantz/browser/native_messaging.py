@@ -429,8 +429,47 @@ def main():
     # Create and run host
     host = create_default_host()
     
-    # TODO: Connect to Bantz daemon and set callback
-    # host.set_daemon_callback(daemon.handle_extension_message)
+    # Issue #857: Connect to Bantz daemon via Unix socket
+    def _daemon_callback(raw_message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Forward unhandled extension messages to the Bantz daemon."""
+        from bantz.server import send_to_server, is_server_running
+
+        if not is_server_running():
+            logger.warning("Bantz daemon is not running — cannot forward message")
+            return NativeMessage.error_response(
+                "Bantz daemon çalışmıyor. 'bantz --serve' ile başlatın.",
+                raw_message.get("requestId"),
+            ).to_dict()
+
+        # The daemon expects a 'command' string; extract from extension message
+        user_text = (
+            raw_message.get("text")
+            or raw_message.get("data", {}).get("text")
+            or raw_message.get("command")
+            or ""
+        )
+        if not user_text:
+            return NativeMessage.error_response(
+                "Mesaj metni bulunamadı.",
+                raw_message.get("requestId"),
+            ).to_dict()
+
+        try:
+            result = send_to_server(user_text)
+            return {
+                "type": "response",
+                "requestId": raw_message.get("requestId"),
+                "success": result.get("ok", False),
+                "data": result,
+            }
+        except Exception as exc:
+            logger.error("Daemon iletişim hatası: %s", exc)
+            return NativeMessage.error_response(
+                f"Daemon hatası: {exc}",
+                raw_message.get("requestId"),
+            ).to_dict()
+
+    host.set_daemon_callback(_daemon_callback)
     
     host.run()
 

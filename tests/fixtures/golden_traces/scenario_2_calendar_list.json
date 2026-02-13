@@ -1,0 +1,14 @@
+{
+  "scenario": "calendar_list_today",
+  "user_input": "bugün neler yapacağız bakalım",
+  "expected_trace": {
+    "route": "calendar",
+    "calendar_intent": "query",
+    "confidence_min": 0.7,
+    "tool_plan_len_min": 1,
+    "tools_executed_min": 1,
+    "requires_confirmation": false,
+    "tool_names": ["calendar.list_events"]
+  },
+  "description": "Calendar query for today - should call list_events"
+}

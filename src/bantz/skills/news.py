@@ -209,8 +209,17 @@ class GoogleSearchSource(NewsSource):
             if not href or not text or len(text) < 15:
                 continue
             
-            # Skip Google internal links
-            if "google.com" in href and "url?" not in href:
+            # Skip Google internal links (Security Alert #9, #27: use exact domain check)
+            # Check if domain is exactly google.com or a known Google subdomain
+            from urllib.parse import urlparse
+            try:
+                parsed = urlparse(href)
+                google_domains = {"google.com", "www.google.com", "news.google.com"}
+                is_google_internal = parsed.netloc in google_domains and "url?" not in href
+            except Exception:
+                is_google_internal = False
+            
+            if is_google_internal:
                 continue
             
             source = self._extract_source(href)

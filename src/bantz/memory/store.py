@@ -208,6 +208,9 @@ class MemoryStore:
         # Thread safety
         self._lock = threading.RLock()
         self._local = threading.local()
+        self._connections: list[sqlite3.Connection] = []
+        self._conn_lock = threading.Lock()
+        self._closed = False
         
         # Initialize database
         self._init_db()
@@ -217,13 +220,24 @@ class MemoryStore:
             self._load_index()
     
     def _get_connection(self) -> sqlite3.Connection:
-        """Get thread-local database connection."""
-        if not hasattr(self._local, 'connection'):
-            self._local.connection = sqlite3.connect(
+        """Get thread-local database connection (auto-reconnects after close)."""
+        need_new = not hasattr(self._local, 'connection')
+        if not need_new:
+            # Check if existing connection is still usable
+            try:
+                self._local.connection.execute("SELECT 1")
+            except Exception:
+                need_new = True
+        if need_new:
+            self._closed = False
+            conn = sqlite3.connect(
                 str(self.db_path),
                 check_same_thread=False,
             )
-            self._local.connection.row_factory = sqlite3.Row
+            conn.row_factory = sqlite3.Row
+            self._local.connection = conn
+            with self._conn_lock:
+                self._connections.append(conn)
         return self._local.connection
     
     def _init_db(self) -> None:
@@ -472,10 +486,35 @@ class MemoryStore:
             result = []
             for memory, _ in scored[:limit]:
                 memory.access()
-                self._update_access(memory)
                 result.append(memory)
             
+            # Batch-update access counts in a single transaction
+            if result:
+                self._batch_update_access(result)
+            
             return result
+    
+    def _batch_update_access(self, memories: List[Memory]) -> None:
+        """Batch-update access metadata in a single transaction."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("BEGIN")
+            for memory in memories:
+                cursor.execute("""
+                    UPDATE memories 
+                    SET access_count = ?, last_accessed = ?, importance = ?
+                    WHERE id = ?
+                """, (
+                    memory.access_count,
+                    memory.last_accessed.isoformat() if memory.last_accessed else None,
+                    memory.importance,
+                    memory.id,
+                ))
+            cursor.execute("COMMIT")
+        except Exception:
+            cursor.execute("ROLLBACK")
+            raise
     
     def _update_access(self, memory: Memory) -> None:
         """Update memory access in database."""
@@ -720,23 +759,28 @@ class MemoryStore:
         rows = cursor.fetchall()
         
         updated = 0
-        for row in rows:
-            memory = self._row_to_memory(row)
-            decay_amount = self.decay.calculate_decay(memory, days)
-            
-            if decay_amount > 0:
-                new_importance = max(0.0, memory.importance - decay_amount)
-                cursor.execute(
-                    "UPDATE memories SET importance = ? WHERE id = ?",
-                    (new_importance, memory.id)
-                )
-                updated += 1
+        try:
+            cursor.execute("BEGIN")
+            for row in rows:
+                memory = self._row_to_memory(row)
+                decay_amount = self.decay.calculate_decay(memory, days)
                 
-                # Update index
-                if self.index and memory.id in self.index.by_id:
-                    self.index.by_id[memory.id].importance = new_importance
+                if decay_amount > 0:
+                    new_importance = max(0.0, memory.importance - decay_amount)
+                    cursor.execute(
+                        "UPDATE memories SET importance = ? WHERE id = ?",
+                        (new_importance, memory.id)
+                    )
+                    updated += 1
+                    
+                    # Update index
+                    if self.index and memory.id in self.index.by_id:
+                        self.index.by_id[memory.id].importance = new_importance
+            cursor.execute("COMMIT")
+        except Exception:
+            cursor.execute("ROLLBACK")
+            raise
         
-        conn.commit()
         return updated
     
     def get_stats(self) -> MemoryStats:
@@ -854,7 +898,18 @@ class MemoryStore:
         return count
     
     def close(self) -> None:
-        """Close database connection."""
+        """Close all database connections (including other threads).
+
+        The store can be re-used after close — the next operation will
+        lazily create a fresh connection (reconnection).
+        """
+        self._closed = True
+        with self._conn_lock:
+            for conn in self._connections:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._connections.clear()
         if hasattr(self._local, 'connection'):
-            self._local.connection.close()
             del self._local.connection

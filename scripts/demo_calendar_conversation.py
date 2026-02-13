@@ -15,7 +15,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 
-from bantz.agent.builtin_tools import build_default_registry  # noqa: E402
+from bantz.agent.builtin_tools import build_planner_registry  # noqa: E402
 
 
 try:  # noqa: E402
@@ -198,7 +198,7 @@ def main() -> int:
     tz = _local_tzinfo(cfg.tz_name)
     now = datetime.now(tz)
 
-    reg = build_default_registry()
+    reg = build_planner_registry()
 
     if args.debug:
         print("[debug] date:", cfg.d.isoformat())

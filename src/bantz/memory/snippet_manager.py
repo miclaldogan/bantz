@@ -315,10 +315,10 @@ def create_memory_manager(
         session_store = create_session_store()
     
     if profile_store is None:
-        profile_store = create_persistent_store(db_path)
+        profile_store = create_persistent_store(db_path, table_name="snippets_profile")
     
     if episodic_store is None:
-        episodic_store = create_persistent_store(db_path)
+        episodic_store = create_persistent_store(db_path, table_name="snippets_episodic")
     
     # Create policy
     if write_policy is None:

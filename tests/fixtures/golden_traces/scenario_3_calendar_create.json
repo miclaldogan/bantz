@@ -1,0 +1,13 @@
+{
+  "scenario": "calendar_create",
+  "user_input": "saat 4 için bir toplantı oluştur",
+  "expected_trace": {
+    "route": "calendar",
+    "calendar_intent": "create",
+    "confidence_min": 0.7,
+    "tool_plan_len_min": 1,
+    "requires_confirmation": true,
+    "confirmation_prompt_exists": true
+  },
+  "description": "Calendar create - should require confirmation before execution"
+}

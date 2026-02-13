@@ -2,7 +2,7 @@
 
 This module provides deterministic formatting for Jarvis persona responses.
 Key principles:
-- "Efendim" max 1x per response (not in every line)
+- "Efendim" max 1x per response (not in every line) — Issue #429
 - Empathy before menu (one human sentence)
 - Natural, conversational menu labels
 - Variation bank with deterministic selection (hash-based, not random)
@@ -15,7 +15,113 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
+
+
+# ─────────────────────────────────────────────────────────────────
+# Efendim Frequency Control — Issue #429
+# ─────────────────────────────────────────────────────────────────
+
+# Case-insensitive pattern matching "efendim" as a standalone word
+_EFENDIM_RE = re.compile(r"\befendim\b", re.IGNORECASE)
+
+# Positions where the single allowed "efendim" is preferred (priority order)
+_EFENDIM_PREFERRED_POS = ("start", "end")  # beginning of response or end
+
+
+class EfendimPosition(str, Enum):
+    """Where the single allowed 'efendim' should appear."""
+    START = "start"
+    END = "end"
+    FIRST_FOUND = "first_found"
+
+
+@dataclass(frozen=True)
+class EfendimConfig:
+    """Configuration for efendim frequency control."""
+    max_per_turn: int = 1
+    preferred_position: EfendimPosition = EfendimPosition.START
+
+
+def limit_efendim(
+    text: str,
+    max_count: int = 1,
+    preferred_position: EfendimPosition = EfendimPosition.START,
+) -> str:
+    """
+    Post-process LLM response to limit 'efendim' occurrences.
+
+    Rules:
+    - At most *max_count* occurrences per response (default 1).
+    - The retained instance is at *preferred_position*
+      (``START`` keeps first, ``END`` keeps last).
+    - Extra occurrences are stripped with a leading/trailing comma+space cleanup.
+
+    Examples::
+
+        >>> limit_efendim("Merhaba efendim, nasılsınız efendim?")
+        'Merhaba efendim, nasılsınız?'
+        >>> limit_efendim("Efendim etkinlik oluşturuldu efendim.", preferred_position=EfendimPosition.END)
+        'Etkinlik oluşturuldu efendim.'
+    """
+    if not text:
+        return text
+
+    matches = list(_EFENDIM_RE.finditer(text))
+    if len(matches) <= max_count:
+        return text
+
+    # Decide which occurrences to keep
+    if preferred_position == EfendimPosition.END:
+        keep_indices = {m.start() for m in matches[-max_count:]}
+    else:  # START or FIRST_FOUND
+        keep_indices = {m.start() for m in matches[:max_count]}
+
+    # Build result by removing non-kept occurrences
+    result = text
+    # Process from end to start to preserve indices
+    for match in reversed(matches):
+        if match.start() not in keep_indices:
+            before = result[: match.start()]
+            after = result[match.end():]
+
+            # Clean up surrounding punctuation/space:
+            #   ", efendim," → ","   "efendim, " → ""   " efendim." → "."
+            # Remove trailing comma+space or leading comma+space around the gap
+            before = before.rstrip()
+            if before.endswith(","):
+                # "Merhaba efendim," → remove trailing comma, after starts with space
+                pass  # keep comma, strip leading space from after
+            after = after.lstrip()
+            if after.startswith(","):
+                after = after[1:].lstrip()
+
+            # Re-join
+            if before and after:
+                # Ensure single space between parts
+                if before[-1] in ".!?":
+                    result = before + " " + after
+                else:
+                    result = before + " " + after
+            elif before:
+                result = before
+            else:
+                # efendim was at start
+                result = after.capitalize() if after else ""
+
+    # Final cleanup: double spaces, space before punctuation
+    result = re.sub(r"\s+", " ", result).strip()
+    result = re.sub(r"\s+([,.!?])", r"\1", result)
+    return result
+
+
+def count_efendim(text: str) -> int:
+    """Count occurrences of 'efendim' in text."""
+    if not text:
+        return 0
+    return len(_EFENDIM_RE.findall(text))
 
 
 def _pick_variant(variants: list[str], seed: str) -> str:
@@ -23,12 +129,15 @@ def _pick_variant(variants: list[str], seed: str) -> str:
     
     Same seed always returns same variant (test-stable).
     Different seeds give variety (no robot feel).
+    
+    Uses SHA-256 instead of MD5 for better security practices.
     """
     if not variants:
         return ""
     if len(variants) == 1:
         return variants[0]
-    h = int(hashlib.md5(seed.encode()).hexdigest(), 16)
+    # Use SHA-256 instead of MD5 for security best practices
+    h = int(hashlib.sha256(seed.encode()).hexdigest(), 16)
     return variants[h % len(variants)]
 
 
@@ -232,6 +341,8 @@ class JarvisVoice:
             return "Hangisi? (1/2/3/0)"
         if menu_id == "free_slots":
             return "Hangi boşluk? (1/2/3 veya 0)"
+        if menu_id == "conflict_slots":
+            return "Hangisi uygun? (1/2/3 veya 0)"
         if menu_id == "unknown":
             return "Takvim için 1, sohbet için 2."
         return "Hangisini tercih edersin?"
@@ -251,20 +362,26 @@ class VoiceStyle:
 
     @staticmethod
     def strip_emoji(text: str) -> str:
-        """Remove emoji from text."""
+        """Remove emoji from text.
+        
+        Uses non-overlapping Unicode ranges to avoid CodeQL security warnings.
+        Covers most common emoji blocks without character class overlap.
+        """
         if not text:
             return ""
-        emoji_pattern = re.compile(
-            "["
-            "\U0001F600-\U0001F64F"
-            "\U0001F300-\U0001F5FF"
-            "\U0001F680-\U0001F6FF"
-            "\U0001F900-\U0001F9FF"
-            "\U00002702-\U000027B0"
-            "]+",
-            flags=re.UNICODE,
-        )
-        return emoji_pattern.sub("", text).strip()
+        # Use separate patterns to avoid overlapping ranges (CodeQL alerts #21-23)
+        # Each block is processed independently
+        patterns = [
+            r"[\U0001F600-\U0001F64F]",  # Emoticons
+            r"[\U0001F300-\U0001F5FF]",  # Symbols & Pictographs
+            r"[\U0001F680-\U0001F6FF]",  # Transport & Map
+            r"[\U0001F900-\U0001F9FF]",  # Supplemental Symbols
+            r"[\U00002702-\U000027B0]",  # Dingbats
+        ]
+        result = text
+        for pattern in patterns:
+            result = re.sub(pattern, "", result, flags=re.UNICODE)
+        return result.strip()
 
     @staticmethod
     def limit_sentences(text: str, max_sentences: int = 2) -> str:
@@ -299,6 +416,5 @@ class VoiceStyle:
         return result
 
 
-# Convenience aliases
+# Convenience alias
 JARVIS = JarvisVoice
-JARVIS = VoiceStyle

@@ -1,11 +1,12 @@
-"""
-DOCX document parser.
+"""DOCX document parser.
 
-Uses python-docx for DOCX text extraction.
+Prefers `python-docx` when available, but includes a lightweight fallback
+implementation that extracts text directly from the DOCX ZIP container.
 """
 
 import io
-from typing import Optional
+import zipfile
+import xml.etree.ElementTree as ET
 
 from bantz.document.parsers.base import DocumentParser, ParseResult
 
@@ -36,8 +37,39 @@ class DOCXParser(DocumentParser):
     
     @property
     def is_available(self) -> bool:
-        """Check if python-docx is available."""
-        return self._docx is not None
+        """DOCX parsing is always available (fallback is built-in)."""
+        return True
+
+    def _parse_with_fallback(self, data: bytes) -> tuple[str, dict]:
+        """Extract text from DOCX bytes without external dependencies."""
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(data))
+        except Exception as e:
+            raise ValueError(f"Failed to open DOCX as zip: {e}") from e
+
+        try:
+            xml_bytes = zf.read("word/document.xml")
+        except KeyError as e:
+            raise ValueError("DOCX is missing word/document.xml") from e
+
+        try:
+            root = ET.fromstring(xml_bytes)
+        except Exception as e:
+            raise ValueError(f"Failed to parse DOCX XML: {e}") from e
+
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        paragraphs: list[str] = []
+
+        for p in root.findall(".//w:body//w:p", ns):
+            parts: list[str] = []
+            for t in p.findall(".//w:t", ns):
+                if t.text:
+                    parts.append(t.text)
+            line = "".join(parts).strip()
+            if line:
+                paragraphs.append(line)
+
+        return "\n\n".join(paragraphs), {}
     
     async def parse(self, data: bytes) -> ParseResult:
         """
@@ -51,13 +83,7 @@ class DOCXParser(DocumentParser):
             
         Raises:
             ValueError: If DOCX cannot be parsed.
-            ImportError: If python-docx is not available.
         """
-        if not self.is_available:
-            raise ImportError(
-                "python-docx is not available. Install it: pip install python-docx"
-            )
-        
         if not self.can_parse(data):
             raise ValueError("Data does not appear to be a valid DOCX")
         
@@ -65,35 +91,41 @@ class DOCXParser(DocumentParser):
         metadata = {}
         
         try:
-            doc = self._docx.Document(io.BytesIO(data))
-            
-            # Extract core properties
-            if doc.core_properties:
-                props = doc.core_properties
-                if props.author:
-                    metadata["author"] = props.author
-                if props.title:
-                    metadata["title"] = props.title
-                if props.created:
-                    metadata["created"] = props.created.isoformat()
-                if props.modified:
-                    metadata["modified"] = props.modified.isoformat()
-            
-            # Extract paragraphs
-            for para in doc.paragraphs:
-                if para.text.strip():
-                    text_parts.append(para.text)
-            
-            # Extract tables
-            for table in doc.tables:
-                for row in table.rows:
-                    row_text = []
-                    for cell in row.cells:
-                        if cell.text.strip():
-                            row_text.append(cell.text.strip())
-                    if row_text:
-                        text_parts.append(" | ".join(row_text))
-                        
+            if self._docx is not None:
+                doc = self._docx.Document(io.BytesIO(data))
+
+                # Extract core properties
+                if doc.core_properties:
+                    props = doc.core_properties
+                    if props.author:
+                        metadata["author"] = props.author
+                    if props.title:
+                        metadata["title"] = props.title
+                    if props.created:
+                        metadata["created"] = props.created.isoformat()
+                    if props.modified:
+                        metadata["modified"] = props.modified.isoformat()
+
+                # Extract paragraphs
+                for para in doc.paragraphs:
+                    if para.text.strip():
+                        text_parts.append(para.text)
+
+                # Extract tables
+                for table in doc.tables:
+                    for row in table.rows:
+                        row_text = []
+                        for cell in row.cells:
+                            if cell.text.strip():
+                                row_text.append(cell.text.strip())
+                        if row_text:
+                            text_parts.append(" | ".join(row_text))
+            else:
+                fallback_text, fallback_meta = self._parse_with_fallback(data)
+                if fallback_text.strip():
+                    text_parts.append(fallback_text)
+                metadata.update(fallback_meta)
+
         except Exception as e:
             raise ValueError(f"Failed to parse DOCX: {e}") from e
         

@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from bantz.learning.profile import UserProfile
+from bantz.learning.profile import BehavioralProfile as UserProfile
 
 
 class ProfileStorage:

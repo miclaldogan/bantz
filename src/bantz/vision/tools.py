@@ -356,6 +356,90 @@ def create_ocr_tool(
     )
 
 
+def create_vision_ocr_tool() -> VisionTool:
+    """Create the Google Vision OCR tool."""
+
+    def handler(
+        image_path: str,
+    ) -> Dict[str, Any]:
+        """Extract text using Google Cloud Vision API."""
+        from bantz.vision.google_vision import vision_ocr
+
+        text = vision_ocr(image_path)
+        return {"text": text}
+
+    return VisionTool(
+        name="vision_ocr",
+        description="Google Vision ile OCR yap. PNG/JPG/PDF destekler.",
+        handler=handler,
+        parameters=[
+            ToolParameter(
+                name="image_path",
+                type="file",
+                description="Resim/PDF dosya yolu",
+                required=True,
+            ),
+        ],
+        requires_file=True,
+    )
+
+
+def create_vision_describe_tool() -> VisionTool:
+    """Create the Google Vision describe tool (labels + logos + faces)."""
+
+    def handler(
+        image_path: str,
+        max_labels: int = 10,
+        include_faces: bool = True,
+        include_logos: bool = True,
+    ) -> Dict[str, Any]:
+        from bantz.vision.google_vision import get_default_google_vision_client
+
+        client = get_default_google_vision_client()
+        return client.describe_path(
+            image_path,
+            max_labels=max_labels,
+            include_faces=include_faces,
+            include_logos=include_logos,
+        )
+
+    return VisionTool(
+        name="vision_describe",
+        description="Google Vision ile görseli etiketle (labels) ve opsiyonel logo/yüz tespiti yap.",
+        handler=handler,
+        parameters=[
+            ToolParameter(
+                name="image_path",
+                type="file",
+                description="Resim/PDF dosya yolu",
+                required=True,
+            ),
+            ToolParameter(
+                name="max_labels",
+                type="integer",
+                description="Maksimum label sayısı",
+                required=False,
+                default=10,
+            ),
+            ToolParameter(
+                name="include_faces",
+                type="boolean",
+                description="Yüz tespiti dahil et",
+                required=False,
+                default=True,
+            ),
+            ToolParameter(
+                name="include_logos",
+                type="boolean",
+                description="Logo tespiti dahil et",
+                required=False,
+                default=True,
+            ),
+        ],
+        requires_file=True,
+    )
+
+
 def create_understand_error_tool(
     screen_understanding: Any = None,
     vision_llm: Any = None,
@@ -616,6 +700,10 @@ def get_vision_tools(
         tools.append(create_summarize_document_tool(document_analyzer))
         tools.append(create_ocr_tool(document_analyzer))
         tools.append(create_extract_tables_tool(document_analyzer))
+
+    # Google Vision tools (call-time configured via env vars)
+    tools.append(create_vision_ocr_tool())
+    tools.append(create_vision_describe_tool())
     
     # Image tools
     if vision_llm:
@@ -673,6 +761,8 @@ VISION_TOOLS = [
     "read_document",
     "summarize_document",
     "ocr",
+    "vision_ocr",
+    "vision_describe",
     "understand_error",
     "capture_screenshot",
     "compare_images",

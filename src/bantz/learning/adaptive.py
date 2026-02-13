@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from bantz.learning.profile import UserProfile
+from bantz.learning.profile import BehavioralProfile as UserProfile
 
 
 class VerbosityLevel(Enum):
@@ -446,23 +446,29 @@ class AdaptiveResponse:
         return result
     
     def _remove_emojis(self, text: str) -> str:
-        """Remove emojis from text."""
+        """Remove emojis from text.
+        
+        Uses non-overlapping Unicode ranges to avoid CodeQL security warnings.
+        Covers most common emoji blocks without character class overlap.
+        """
         import re
         
-        # Common emoji patterns
-        emoji_pattern = re.compile(
-            "["
-            "\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map symbols
-            "\U0001F1E0-\U0001F1FF"  # flags
-            "\U00002702-\U000027B0"  # dingbats
-            "\U0001F900-\U0001F9FF"  # supplemental symbols
-            "]+",
-            flags=re.UNICODE,
-        )
+        # Use separate patterns to avoid overlapping ranges (CodeQL alerts #17-20)
+        # Each block is processed independently for safety
+        patterns = [
+            r"[\U0001F600-\U0001F64F]",  # Emoticons
+            r"[\U0001F300-\U0001F5FF]",  # Symbols & Pictographs
+            r"[\U0001F680-\U0001F6FF]",  # Transport & Map
+            r"[\U0001F1E0-\U0001F1FF]",  # Flags
+            r"[\U00002702-\U000027B0]",  # Dingbats
+            r"[\U0001F900-\U0001F9FF]",  # Supplemental Symbols
+        ]
         
-        return emoji_pattern.sub('', text).strip()
+        result = text
+        for pattern in patterns:
+            result = re.sub(pattern, '', result, flags=re.UNICODE)
+        
+        return result.strip()
 
 
 def create_adaptive_response(

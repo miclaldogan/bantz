@@ -216,11 +216,11 @@ class Router:
             skip_preview = bool(parsed.slots.get("skip_preview", False))
 
             try:
-                from bantz.agent.builtin_tools import build_default_registry
+                from bantz.agent.builtin_tools import build_planner_registry
                 from bantz.agent.core import Agent
                 from bantz.agent.planner import Planner
 
-                tools = build_default_registry()
+                tools = build_planner_registry()
                 agent = Agent(planner=Planner(), tools=tools)
 
                 task_id = f"agent-{len(self._agent_history) + 1}"
@@ -471,11 +471,11 @@ class Router:
 
             # Delegate to agent_run logic
             try:
-                from bantz.agent.builtin_tools import build_default_registry
+                from bantz.agent.builtin_tools import build_planner_registry
                 from bantz.agent.core import Agent
                 from bantz.agent.planner import Planner
 
-                tools = build_default_registry()
+                tools = build_planner_registry()
                 agent = Agent(planner=Planner(), tools=tools)
 
                 task_id = f"agent-{len(self._agent_history) + 1}"
@@ -2126,6 +2126,16 @@ class Router:
     # Dispatch single action
     # ─────────────────────────────────────────────────────────────────
     def _dispatch(self, *, intent: str, slots: dict, ctx: ConversationContext, in_queue: bool) -> RouterResult:
+        # ── Issue #420: Try modular handler registry first ────────────
+        from bantz.router.handler_registry import get_handler
+        from bantz.router.handlers import ensure_registered
+        ensure_registered()
+
+        handler = get_handler(intent)
+        if handler is not None:
+            return handler(intent=intent, slots=slots, ctx=ctx, router=self, in_queue=in_queue)
+
+        # ── Fallback: intents not yet extracted (news, page_*, etc.) ──
         follow_up = "" if in_queue else " Başka ne yapayım?"
         search_follow = "" if in_queue else " Ne arayayım?"
 
@@ -2348,8 +2358,8 @@ class Router:
         if intent == "page_summarize":
             from bantz.skills.summarizer import PageSummarizer
             from bantz.llm.persona import JarvisPersona
-            from bantz.llm.ollama_client import OllamaClient
             from bantz.browser.extension_bridge import get_bridge
+            from bantz.llm import create_quality_client
             
             persona = JarvisPersona()
             
@@ -2364,7 +2374,7 @@ class Router:
             
             # Create LLM client and summarizer
             try:
-                llm = OllamaClient()
+                llm = create_quality_client()
                 summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
                 
                 # Store in context for follow-up commands
@@ -2392,8 +2402,8 @@ class Router:
         if intent == "page_summarize_detailed":
             from bantz.skills.summarizer import PageSummarizer
             from bantz.llm.persona import JarvisPersona
-            from bantz.llm.ollama_client import OllamaClient
             from bantz.browser.extension_bridge import get_bridge
+            from bantz.llm import create_quality_client
             
             persona = JarvisPersona()
             
@@ -2423,7 +2433,7 @@ class Router:
                 )
             
             try:
-                llm = OllamaClient()
+                llm = create_quality_client()
                 summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
                 ctx.set_page_summarizer(summarizer)
                 
@@ -2448,8 +2458,8 @@ class Router:
         if intent == "page_question":
             from bantz.skills.summarizer import PageSummarizer
             from bantz.llm.persona import JarvisPersona
-            from bantz.llm.ollama_client import OllamaClient
             from bantz.browser.extension_bridge import get_bridge
+            from bantz.llm import create_quality_client
             
             persona = JarvisPersona()
             question = str(slots.get("question", "")).strip()
@@ -2475,7 +2485,7 @@ class Router:
                     )
                 
                 try:
-                    llm = OllamaClient()
+                    llm = create_quality_client()
                     summarizer = PageSummarizer(extension_bridge=bridge, llm_client=llm)
                     ctx.set_page_summarizer(summarizer)
                 except Exception as e:

@@ -1,0 +1,232 @@
+# ═══════════════════════════════════════════════════════════════════
+# BANTZ — Environment Configuration Reference
+# ═══════════════════════════════════════════════════════════════════
+# Copy to ~/.config/bantz/env and customize.
+# Lines starting with # are comments. Uncomment to override defaults.
+# ═══════════════════════════════════════════════════════════════════
+
+
+# ─── Core ────────────────────────────────────────────────────────
+BANTZ_LANGUAGE=tr                          # Default language code
+BANTZ_TIMEZONE=Europe/Istanbul             # Default timezone
+BANTZ_POLICY=config/policy.json            # Policy engine config
+BANTZ_LOG=artifacts/logs/bantz.log.jsonl   # Structured log file
+BANTZ_CONFIG_DIR=~/.config/bantz           # Base config directory
+# BANTZ_SESSION=default                    # Session name
+# BANTZ_SESSION_ID=                        # Session UUID for context tracking
+# BANTZ_SESSION_FILE=~/.config/bantz/last_session.json
+# BANTZ_WORKSPACE=                         # Workspace root for code tools
+# BANTZ_CONTACTS_PATH=                     # Contacts JSON store path
+
+
+# ─── LLM — Fast Tier (vLLM) ─────────────────────────────────────
+BANTZ_VLLM_URL=http://localhost:8001
+BANTZ_VLLM_MODEL=Qwen/Qwen2.5-3B-Instruct-AWQ
+# BANTZ_VLLM_BASE=http://localhost:8001    # Alias used by bench/autotune
+
+# ─── LLM — Quality Tier (vLLM) ──────────────────────────────────
+# BANTZ_VLLM_QUALITY_URL=http://127.0.0.1:8002
+# BANTZ_VLLM_QUALITY_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ
+
+
+# ─── Gemini / Cloud ─────────────────────────────────────────────
+# GEMINI_API_KEY=
+# GOOGLE_API_KEY=                          # Alias for GEMINI_API_KEY
+# BANTZ_GEMINI_API_KEY=                    # Bantz-namespaced alias
+BANTZ_GEMINI_MODEL=gemini-2.0-flash
+BANTZ_CLOUD_MODE=local                     # local | cloud
+# BANTZ_CLOUD_ENABLED=false                # Enable any cloud provider calls
+# BANTZ_LOCAL_ONLY=false                   # Force local-only mode
+# BANTZ_CLOUD_REDACT=true                  # Redact PII before cloud calls
+# BANTZ_CLOUD_MAX_CHARS=12000              # Max chars sent to cloud
+# BANTZ_FINALIZE_WITH_GEMINI=true          # Gemini as voice finalizer
+
+# Quality provider selection: vllm | gemini
+# QUALITY_PROVIDER=vllm
+# QUALITY_MODEL=gemini-2.0-flash
+# BANTZ_QUALITY_FALLBACK_TO_FAST=true      # Fallback to fast if quality unavailable
+# BANTZ_QUALITY_AVAIL_TIMEOUT=1.0          # Seconds to probe quality endpoint
+
+
+# ─── Tiering / Quality Gating ───────────────────────────────────
+# BANTZ_TIER_MODE=1                        # Enable two-tier routing (1=on, 0=off)
+# BANTZ_TIER_FORCE=auto                    # Force tier: fast | quality | auto
+# BANTZ_TIER_FORCE_FINALIZER=auto          # Force finalizer tier
+# BANTZ_TIER_DEBUG=0                       # Tier debug logging
+# BANTZ_TIER_METRICS=0                     # Tier metrics collection
+
+# Quality gating thresholds
+# BANTZ_TIER_QUALITY_THRESHOLD=1.8         # Score threshold for quality tier
+# BANTZ_TIER_FAST_MAX_THRESHOLD=0.8        # Score ceiling for fast-only
+# BANTZ_TIER_MIN_COMPLEXITY_FOR_QUALITY=3  # Min complexity score
+# BANTZ_TIER_MIN_WRITING_FOR_QUALITY=3     # Min writing score
+# BANTZ_TIER_QUALITY_RATE_LIMIT=30         # Max quality calls per window
+# BANTZ_TIER_RATE_WINDOW_SECONDS=60        # Rate limit window (seconds)
+# BANTZ_TIER_FINALIZER_MODE=auto           # Finalizer mode: auto | always_quality
+# BANTZ_TIER_BYPASS_PATTERNS=              # Comma-separated intents to bypass gating
+# BANTZ_TIER_FORCE_QUALITY_PATTERNS=       # Comma-separated intents to force quality
+# BANTZ_TIER_SCORE_WEIGHTS=complexity=0.35,writing=0.45,risk=0.20
+
+
+# ─── QoS (per-tier timeouts & token limits) ─────────────────────
+# BANTZ_QOS_FAST_TIMEOUT_S=20.0
+# BANTZ_QOS_QUALITY_TIMEOUT_S=90.0
+# BANTZ_QOS_FAST_MAX_TOKENS=256
+# BANTZ_QOS_QUALITY_MAX_TOKENS=512
+
+
+# ─── TTFT Monitoring ────────────────────────────────────────────
+# BANTZ_TTFT_ROUTER_THRESHOLD_MS=1000      # Router TTFT alert threshold (ms)
+# BANTZ_TTFT_FINALIZER_THRESHOLD_MS=2000   # Finalizer TTFT alert threshold (ms)
+
+
+# ─── LLM Misc ───────────────────────────────────────────────────
+# BANTZ_LLM_METRICS=0                      # Enable LLM-level metrics
+# BANTZ_LLM_METRICS_FILE=~/.cache/bantz/llm_metrics.jsonl
+# BANTZ_LLM_REWRITE=1                      # LLM-based rewrite fallback
+# BANTZ_TOKEN_METHOD=                       # Token counting method override
+# BANTZ_READY_FILE=~/.cache/bantz/ready.json
+
+
+# ─── Voice / Audio ──────────────────────────────────────────────
+BANTZ_ACTIVE_LISTEN_TTL_S=90               # Active listen timeout (seconds)
+BANTZ_SILENCE_TO_WAKE_S=30                 # Silence before returning to wake
+# BANTZ_IDLE_SLEEP_ENABLED=false            # Enable idle-sleep state
+# BANTZ_IDLE_SLEEP_TIMEOUT_S=300            # Idle sleep timeout (seconds)
+# BANTZ_AUDIO_INPUT_DEVICE=default          # Audio input device ID
+
+
+# ─── Wake Word ──────────────────────────────────────────────────
+BANTZ_WAKE_WORDS=hey bantz,bantz,jarvis
+BANTZ_WAKE_ENGINE=vosk                     # vosk | porcupine
+BANTZ_WAKE_SENSITIVITY=0.5
+# BANTZ_WAKE_WORD=1                        # Enable/disable wake word detection
+
+
+# ─── TTS (Text-to-Speech) ───────────────────────────────────────
+# BANTZ_TTS=1                              # Enable TTS (1=on, 0=off)
+# BANTZ_TTS_BACKEND=piper                  # piper | espeak
+# BANTZ_TTS_VOICE=                         # TTS voice name
+# BANTZ_TTS_RATE=1.0                       # Speech rate (0.5–2.0)
+# BANTZ_TTS_PITCH=1.0                      # Pitch (0.5–2.0)
+# BANTZ_TTS_VOLUME=1.0                     # Volume (0.0–1.0)
+# BANTZ_PIPER_MODEL=                       # Piper TTS model path
+
+
+# ─── ASR (Speech Recognition) ───────────────────────────────────
+# BANTZ_WHISPER_MODEL=base                 # Whisper model size
+# BANTZ_ASR_CACHE_DIR=                     # ASR model cache directory
+# BANTZ_ASR_ALLOW_DOWNLOAD=0               # Allow ASR model auto-download
+
+
+# ─── Greetings / Morning Briefing ───────────────────────────────
+# BANTZ_BOOT_GREETING=true                 # Enable boot greeting
+# BANTZ_GREETING_TEXT=                      # Custom greeting text
+# BANTZ_MORNING_TEXT=                       # Custom morning greeting
+# BANTZ_EVENING_TEXT=                       # Custom evening greeting
+# BANTZ_QUIET_HOURS_START=00:00            # Quiet hours start (HH:MM)
+# BANTZ_QUIET_HOURS_END=07:00              # Quiet hours end (HH:MM)
+BANTZ_MORNING_BRIEFING=false
+BANTZ_BRIEFING_HOUR=08
+# BANTZ_BRIEFING_INCLUDE_NEWS=true
+# BANTZ_BRIEFING_INCLUDE_CALENDAR=true
+# BANTZ_BRIEFING_INCLUDE_SYSTEM=false
+
+
+# ─── Personality / UX ───────────────────────────────────────────
+# BANTZ_PERSONALITY=jarvis                 # Personality preset name
+# BANTZ_USER_NAME=                         # User's display name
+# BANTZ_CONFIRMATION_MODE=dangerous        # dangerous | always | never
+# BANTZ_VERBOSITY=short                    # short | normal | long
+# BANTZ_REPLY_LENGTH=normal                # short | normal | long
+# BANTZ_CONFIRM_WRITES=ask                 # always | ask | never
+
+
+# ─── NLU ────────────────────────────────────────────────────────
+# BANTZ_HYBRID_NLU=1                       # Enable hybrid NLU (0 to disable)
+
+
+# ─── Router / Brain ─────────────────────────────────────────────
+# BANTZ_ROUTER_CONTEXT_LEN=                # Override router context window
+# BANTZ_ROUTER_BOOST_FLOOR=0.3             # Min intent-boost confidence floor
+# BANTZ_PROMPT_VARIANT=                    # Force prompt variant (A, B, etc.)
+# BANTZ_MISROUTE_DATASET=~/.cache/bantz/datasets/router_misroutes.jsonl
+
+
+# ─── Memory / Context ───────────────────────────────────────────
+# BANTZ_MEMORY_DB=~/.bantz/memory.db       # User memory SQLite path
+# BANTZ_MEMORY_DB_PATH=~/.bantz/memory.db  # Memory store DB path (alternate)
+# BANTZ_MEMORY_MAX_RECALL=5                # Max items to recall per turn
+# BANTZ_MEMORY_MAX_SESSIONS=5              # Max sessions to keep
+# BANTZ_MEMORY_MAX_TURNS=20                # Max conversation turns retained
+# BANTZ_MEMORY_MAX_TOKENS=800              # Token budget for memory injection
+# BANTZ_MEMORY_PII_FILTER=true             # PII filtering in memory
+# BANTZ_PROFILE_PATH=~/.bantz/profile.json # User profile JSON
+# BANTZ_LOCATION=                          # User location for context prompts
+# BANTZ_DEFAULT_LOCATION=                  # Fallback location
+
+
+# ─── API Server ─────────────────────────────────────────────────
+# BANTZ_API_TOKEN=                         # Bearer token for API auth
+# BANTZ_RATE_LIMIT_RPM=30                  # Rate limit (requests per minute)
+# BANTZ_CORS_ORIGINS=                      # Comma-separated CORS origins
+
+
+# ─── Google Services ────────────────────────────────────────────
+# BANTZ_GOOGLE_CLIENT_SECRET=              # Path to OAuth2 client_secret.json
+# BANTZ_GOOGLE_TOKEN_PATH=                 # Path to OAuth2 token file
+# BANTZ_GOOGLE_CALENDAR_ID=                # Google Calendar ID to use
+# BANTZ_GOOGLE_SERVICE_ACCOUNT=            # Service account JSON path
+# GOOGLE_APPLICATION_CREDENTIALS=          # Standard GCP SA credentials
+
+# Gmail-specific
+# BANTZ_GMAIL_CLIENT_SECRET=               # Gmail-specific client_secret.json
+# BANTZ_GMAIL_TOKEN_PATH=~/.config/bantz/google/gmail_token.json
+# BANTZ_GMAIL_TEMPLATES_PATH=              # Gmail search templates path
+
+
+# ─── Metrics ────────────────────────────────────────────────────
+# BANTZ_TURN_METRICS=1                     # Enable per-turn metrics
+# BANTZ_TURN_METRICS_FILE=                 # Turn metrics output path
+
+
+# ─── Privacy / Security ─────────────────────────────────────────
+# BANTZ_REDACT_PII=true                    # Enable PII redaction
+# BANTZ_POLICY_AUDIT_PATH=                 # Policy audit log path
+
+
+# ─── News Skill ─────────────────────────────────────────────────
+# BANTZ_NEWS_CACHE_TTL=1800                # News cache TTL (seconds)
+# BANTZ_NEWS_MAX_ITEMS=3                   # Max news items per briefing
+# BANTZ_NEWS_CATEGORIES=ai,tech,turkey     # Comma-separated categories
+
+
+# ─── Skills / Plugins ───────────────────────────────────────────
+# BANTZ_SKILLS_DIR=                        # Extra skills directory to scan
+
+
+# ─── Vision ─────────────────────────────────────────────────────
+# BANTZ_VISION_MONTHLY_QUOTA=              # Monthly vision API quota
+# BANTZ_VISION_QUOTA_PATH=                 # Vision quota state file
+
+
+# ─── Hotkeys / Controls ─────────────────────────────────────────
+# BANTZ_PTT_KEY=ctrl+space                 # Push-to-talk hotkey
+# BANTZ_MUTE_KEY=ctrl+shift+m              # Mute hotkey
+# BANTZ_STATUS_KEY=ctrl+shift+s            # Status hotkey
+# BANTZ_HOTKEYS_ENABLED=true               # Enable global hotkeys
+
+
+# ─── UI Toggles ─────────────────────────────────────────────────
+# BANTZ_OVERLAY=1                          # Enable overlay UI
+# BANTZ_PANEL=0                            # Enable side panel UI
+# BANTZ_BROWSER=1                          # Enable browser automation
+
+
+# ─── Calendar Idempotency ───────────────────────────────────────
+# BANTZ_IDEMPOTENCY_STORE=                 # Calendar idempotency store path
+
+
+# ─── Debug ───────────────────────────────────────────────────────
+# BANTZ_DEBUG=0                            # Enable debug mode (1=on)
+# BANTZ_DEBUG_TIERS=0                      # Tier-specific debug logging

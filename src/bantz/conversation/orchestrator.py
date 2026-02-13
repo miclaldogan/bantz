@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional, Protocol
@@ -29,6 +30,14 @@ from bantz.conversation.fsm import (
 from bantz.conversation.feedback import FeedbackRegistry, FeedbackType
 from bantz.conversation.context import ConversationContext, TurnInfo
 from bantz.conversation.bargein import BargeInHandler
+from bantz.core.latency_budget import (
+    LatencyBudgetConfig,
+    LatencyTracker,
+    Phase,
+    DegradationAction,
+    load_budget_from_yaml,
+    should_skip_finalizer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +157,9 @@ class ConversationOrchestrator:
         self._event_bus = event_bus
         self._config = config or OrchestratorConfig()
         
+        # Latency budget tracking (Issue #427)
+        self._latency_tracker = LatencyTracker(load_budget_from_yaml())
+        
         # State
         self._active = False
         self._processing = False
@@ -238,6 +250,9 @@ class ConversationOrchestrator:
         self._processing = True
         self._total_utterances += 1
         
+        # Start latency-budget pipeline run (Issue #427)
+        pipeline_run = self._latency_tracker.start_pipeline()
+        
         try:
             # Add user turn to context
             user_turn = self._context.add_user_turn(text)
@@ -253,14 +268,21 @@ class ConversationOrchestrator:
             if self._config.speak_thinking:
                 await self.speak_feedback(FeedbackType.THINKING)
             
-            # Route utterance
+            # ── Router phase ─────────────────────────────────
             response = ""
             if self._router:
                 try:
+                    _t0 = time.monotonic()
                     result = await asyncio.wait_for(
                         self._router.route(text, self._context),
                         timeout=self._config.thinking_timeout_s
                     )
+                    _router_ms = (time.monotonic() - _t0) * 1000
+                    rec = self._latency_tracker.record_phase(
+                        pipeline_run, Phase.ROUTER, _router_ms,
+                    )
+                    if rec.exceeded and rec.feedback_phrase:
+                        asyncio.create_task(self.speak_feedback(FeedbackType.THINKING))
                     response = str(result) if result else ""
                 except asyncio.TimeoutError:
                     logger.error("Router timeout")
@@ -288,6 +310,10 @@ class ConversationOrchestrator:
             await self._fsm.transition(TRIGGER_SPEAKING_DONE)
             
             self._successful_responses += 1
+            
+            # Finalize latency budget run (Issue #427)
+            self._latency_tracker.finish_pipeline(pipeline_run)
+            
             return response
             
         except Exception as e:
@@ -391,6 +417,7 @@ class ConversationOrchestrator:
                 else 0.0
             ),
             "conversation_turns": self._context.turn_count,
+            "latency": self._latency_tracker.dashboard(),
         }
     
     def reset_context(self) -> None:
