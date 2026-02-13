@@ -387,6 +387,25 @@ class VLLMOpenAIClient(LLMClient):
             return resp
         
         except Exception as e:
+            # Issue #1104: Classify OpenAI typed exceptions first, then
+            # fall back to string matching for generic exceptions.
+            try:
+                from openai import RateLimitError, AuthenticationError, APITimeoutError
+                if isinstance(e, RateLimitError):
+                    raise LLMConnectionError(
+                        f"vLLM rate_limited (429). Retry later."
+                    ) from e
+                if isinstance(e, AuthenticationError):
+                    raise LLMConnectionError(
+                        f"vLLM authentication failed. Check VLLM_API_KEY."
+                    ) from e
+                if isinstance(e, APITimeoutError):
+                    raise LLMTimeoutError(
+                        f"vLLM request timeout ({self.timeout_seconds}s). Model yüklenirken zaman aşımı?"
+                    ) from e
+            except ImportError:
+                pass
+
             error_msg = str(e).lower()
             
             # Classify error type
