@@ -158,7 +158,7 @@ class RecoveryManager:
 
     def __init__(
         self,
-        vllm_url: str = "http://127.0.0.1:8001/health",
+        vllm_url: str = "http://127.0.0.1:11434/v1/models",
         warmup_timeout_s: float = 30.0,
         on_ready_callback: Optional[Callable[[], None]] = None,
     ) -> None:

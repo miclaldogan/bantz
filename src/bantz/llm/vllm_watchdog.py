@@ -58,7 +58,7 @@ def _default_vllm_url() -> str:
 class WatchdogConfig:
     """Configuration for the vLLM watchdog."""
     vllm_url: str = field(default_factory=_default_vllm_url)
-    health_endpoint: str = "/health"
+    health_endpoint: str = "/v1/models"
     check_interval: float = 10.0       # seconds between checks
     failure_threshold: int = 3          # consecutive failures before restart
     max_restarts: int = 3               # max auto-restart attempts
