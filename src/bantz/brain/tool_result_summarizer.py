@@ -70,9 +70,21 @@ def _prepare_tool_results_for_finalizer(
     """Prepare tool results for finalizer prompt with token budget control.
 
     Issue #354: Finalizer prompts can overflow context when tool results are large.
+    Issue #1219: Dynamic budget — single-content tools (gmail.get_message)
+    get a higher budget to avoid losing mail body details.
     """
     if not tool_results:
         return [], False
+
+    # Issue #1219: Increase budget for content-detail tools
+    _DETAIL_TOOLS = {"gmail.get_message", "gmail.get_thread"}
+    has_detail = any(
+        r.get("tool") in _DETAIL_TOOLS and r.get("success", False)
+        for r in tool_results
+    )
+    if has_detail and max_tokens <= 2000:
+        max_tokens = 4000  # 2x budget for detail content
+        logger.info("[Issue #1219] Increased token budget to %d for detail tool", max_tokens)
 
     from bantz.llm.token_utils import estimate_tokens_json
 

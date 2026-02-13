@@ -259,8 +259,17 @@ class QualityFinalizer:
             else "default"
         )
 
+        # Issue #1219: Increase token budget for detail-content tools
+        _DETAIL_TOOLS = {"gmail.get_message", "gmail.get_thread"}
+        _has_detail = any(
+            r.get("tool") in _DETAIL_TOOLS
+            for r in (ctx.tool_results or [])
+            if r.get("success", False)
+        )
+        _prompt_budget = 5000 if _has_detail else 3500
+
         builder = PromptBuilder(
-            token_budget=3500,
+            token_budget=_prompt_budget,
             experiment="issue191_orchestrator_finalizer",
         )
         built = builder.build_finalizer_prompt(
