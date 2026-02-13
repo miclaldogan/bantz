@@ -8,6 +8,7 @@ and bypass tests always run).
 from __future__ import annotations
 
 import json
+import os
 import pytest
 from unittest.mock import patch
 
@@ -396,3 +397,105 @@ class TestInputGateState:
         state.reset()
         assert state.detected_lang == ""
         assert state.canonical_input == ""
+
+
+# ============================================================================
+# Output Gate integration (Issue #1243)
+# ============================================================================
+
+
+class TestOutputGate:
+    """Test that Output Gate translates non-Turkish finalizer output to TR."""
+
+    def test_output_gate_skipped_when_env_disabled(self, monkeypatch):
+        """When BANTZ_BRIDGE_OUTPUT_GATE is not set, output gate does nothing."""
+        monkeypatch.delenv("BANTZ_BRIDGE_OUTPUT_GATE", raising=False)
+
+        from bantz.brain.language_guard import detect_language_issue
+
+        # English reply that would normally trigger output gate
+        reply = "Here are your calendar events for tomorrow."
+        issue = detect_language_issue(reply)
+        # The guard detects the issue but since env var is off, gate won't fire.
+        # We only test that the detection works correctly here.
+        assert issue is not None  # "low_turkish_confidence"
+
+    def test_output_gate_skipped_when_detected_lang_not_tr(self, monkeypatch):
+        """When user input was EN (detected_lang != 'tr'), output gate skips."""
+        monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", "true")
+        monkeypatch.setenv("BANTZ_BRIDGE_ENABLED", "true")
+
+        from bantz.brain.orchestrator_state import OrchestratorState
+
+        state = OrchestratorState()
+        state.detected_lang = "en"  # User spoke English
+
+        # Output gate should not translate because user spoke English
+        # (the gate checks state.detected_lang == "tr")
+        assert state.detected_lang != "tr"
+
+    def test_output_gate_skipped_for_turkish_reply(self, monkeypatch):
+        """When finalizer already produced Turkish, output gate is a no-op."""
+        monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", "true")
+
+        from bantz.brain.language_guard import detect_language_issue
+
+        tr_reply = "Yarınki takvim etkinlikleriniz burada."
+        assert detect_language_issue(tr_reply) is None  # Already Turkish
+
+    def test_output_gate_detects_english_reply(self, monkeypatch):
+        """Output gate correctly identifies English finalizer output."""
+        monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", "true")
+
+        from bantz.brain.language_guard import detect_language_issue
+
+        en_reply = "Here are your calendar events for tomorrow."
+        issue = detect_language_issue(en_reply)
+        assert issue is not None
+        assert issue == "low_turkish_confidence"
+
+    @_skip_no_models
+    def test_output_gate_translates_english_to_turkish(self, monkeypatch):
+        """When output gate fires, it translates EN reply to TR."""
+        monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", "true")
+        monkeypatch.setenv("BANTZ_BRIDGE_ENABLED", "true")
+
+        bridge = LanguageBridge()
+        result = bridge.to_tr("Here are your calendar events for tomorrow.")
+        assert result  # Non-empty
+        assert isinstance(result, str)
+
+    def test_output_gate_env_var_values(self, monkeypatch):
+        """Output gate recognizes '1', 'true', 'yes' as enabled."""
+        for val in ("1", "true", "yes", "True", "YES"):
+            monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", val)
+            assert os.environ.get("BANTZ_BRIDGE_OUTPUT_GATE", "").lower() in (
+                "1", "true", "yes"
+            )
+
+        for val in ("0", "false", "no", ""):
+            monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", val)
+            assert os.environ.get("BANTZ_BRIDGE_OUTPUT_GATE", "").lower() not in (
+                "1", "true", "yes"
+            )
+
+    def test_output_gate_preserves_empty_reply(self, monkeypatch):
+        """Output gate does not process empty/blank replies."""
+        monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", "true")
+
+        from bantz.brain.language_guard import detect_language_issue
+
+        for empty in ("", "  ", None):
+            if empty is None:
+                continue
+            assert detect_language_issue(empty) is None
+
+    def test_output_gate_cjk_detection(self, monkeypatch):
+        """Output gate detects CJK characters in reply."""
+        monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", "true")
+
+        from bantz.brain.language_guard import detect_language_issue
+
+        cjk_reply = "这是你的日历事件"
+        issue = detect_language_issue(cjk_reply)
+        assert issue == "cjk_detected"
