@@ -1045,8 +1045,11 @@ class OrchestratorLoop:
         # Issue #938: Run NLU slot extraction BEFORE LLM router
         # Extracts Turkish time/date, URLs, app names, queries, positions
         # and injects them as pre-parsed hints so the 3B model doesn't hallucinate.
+        # Issue #1255: NLU patterns are Turkish — run on original TR text
+        # when bridge is active, not on the EN-translated router input.
+        _nlu_input = state.current_user_input or user_input
         try:
-            _nlu_slots = self._slot_extractor.extract_all(user_input)
+            _nlu_slots = self._slot_extractor.extract_all(_nlu_input)
             if _nlu_slots:
                 _flat_slots = self._slot_extractor.to_flat_dict(_nlu_slots)
                 # Serialize datetime objects to ISO strings for JSON compat

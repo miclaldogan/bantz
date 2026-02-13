@@ -191,6 +191,17 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
         key=len, reverse=True,
     ))
 
+    # Issue #1255: Period-of-day mappings for Turkish
+    _PERIOD_OF_DAY: dict[str, tuple[int, int]] = {
+        "sabah": (9, 0),
+        "öğle": (12, 0),
+        "öğlen": (12, 0),
+        "öğleden sonra": (14, 0),
+        "akşamüstü": (17, 0),
+        "akşam": (18, 0),
+        "gece": (21, 0),
+    }
+
     for pattern, offset in day_offsets.items():
         if re.search(pattern, text_lower):
             target_time = base_time + timedelta(days=offset)
@@ -216,6 +227,19 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
                 if 1 <= hour <= 6 and base_time.hour >= 12:
                     hour += 12
                 target_time = target_time.replace(hour=hour, minute=minute, second=0)
+            else:
+                # Issue #1255: Check period-of-day words when no explicit
+                # "saat X" is given.  E.g. "yarın sabah" → 09:00,
+                # "yarın akşam" → 18:00.
+                # Check multi-word periods first (longest match)
+                _period_matched = False
+                for _period_phrase, (_ph, _pm) in sorted(
+                    _PERIOD_OF_DAY.items(), key=lambda x: len(x[0]), reverse=True
+                ):
+                    if _period_phrase in text_lower:
+                        target_time = target_time.replace(hour=_ph, minute=_pm, second=0)
+                        _period_matched = True
+                        break
             
             raw = re.search(pattern, text_lower)
             return TimeSlot(
