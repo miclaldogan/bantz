@@ -653,7 +653,9 @@ def parse_intent(text: str) -> Parsed:
             return Parsed(intent="browser_search", slots={"query": query})
 
     # browser_open: "instagram'ı aç", "twitter aç", "github.com aç", "wikipedia aç", "duck aç"
-    m = re.search(r"\b(instagram|twitter|facebook|youtube|github|linkedin|reddit|twitch|spotify|netflix|whatsapp|telegram|discord|wikipedia|vikipedi|amazon|ebay|stackoverflow|stack\s*overflow|duck|duckduckgo|chatgpt|claude|gemini|perplexity)\b['\s]*(ı|i|'?y[ıi])?\s*(aç|başlat)?", t)
+    # Issue #1058: action verb (aç|başlat) is now REQUIRED — just mentioning
+    # a site name (e.g. "instagram güzel") must NOT trigger browser_open.
+    m = re.search(r"\b(instagram|twitter|facebook|youtube|github|linkedin|reddit|twitch|spotify|netflix|whatsapp|telegram|discord|wikipedia|vikipedi|amazon|ebay|stackoverflow|stack\s*overflow|duck|duckduckgo|chatgpt|claude|gemini|perplexity)\b['\s]*(ı|i|'?y[ıi])?\s*(aç|başlat)", t)
     if m:
         site = m.group(1).lower().replace(" ", "")
         urls = {
