@@ -266,7 +266,18 @@ class QualityFinalizer:
             for r in (ctx.tool_results or [])
             if r.get("success", False)
         )
-        _prompt_budget = 5000 if _has_detail else 3500
+        _base_budget = 5000 if _has_detail else 3500
+
+        # Issue #1253: Cap prompt budget so prompt + max_tokens fits in
+        # the model's context window.  QualityFinalizer uses max_tokens=512.
+        _ctx_window = _get_context_window(self._llm)
+        _max_prompt = _ctx_window - 512 - _CONTEXT_SAFETY_MARGIN
+        _prompt_budget = min(_base_budget, max(1500, _max_prompt))
+        if _prompt_budget < _base_budget:
+            logger.info(
+                "[QUALITY_FINALIZER] Prompt budget capped %d→%d (ctx=%d)",
+                _base_budget, _prompt_budget, _ctx_window,
+            )
 
         builder = PromptBuilder(
             token_budget=_prompt_budget,
@@ -392,9 +403,13 @@ class FastFinalizer:
         ])
 
         if ctx.tool_results:
+            # Issue #1253: Cap tool result budget based on context window.
+            # FastFinalizer uses max_tokens=256 for completion.
+            _ctx_window = _get_context_window(self._llm)
+            _tool_budget = min(1500, max(500, _ctx_window - 256 - _CONTEXT_SAFETY_MARGIN - 1500))
             finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
                 ctx.tool_results,
-                max_tokens=1500,
+                max_tokens=_tool_budget,
             )
             if was_truncated:
                 logger.info("[FAST_FINALIZER] Tool results truncated to fit budget")
@@ -1046,6 +1061,38 @@ _FINALIZER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=2, thread_name_prefix="finalizer",
 )
 
+# Issue #1253: Default context window used when model does not expose its own.
+_DEFAULT_CONTEXT_WINDOW = 4096
+# Minimum completion tokens — below this the model cannot produce useful output.
+_MIN_COMPLETION_TOKENS = 64
+# Safety margin to avoid off-by-one / estimation errors.
+_CONTEXT_SAFETY_MARGIN = 64
+
+
+def _get_context_window(llm: Any) -> int:
+    """Best-effort extraction of the model's context window size.
+
+    Checks (in order):
+    1. ``llm.get_model_context_length()`` (vLLM client)
+    2. ``llm.context_window`` attribute
+    3. Falls back to ``_DEFAULT_CONTEXT_WINDOW``
+    """
+    try:
+        if hasattr(llm, "get_model_context_length"):
+            ctx = llm.get_model_context_length()
+            if ctx and int(ctx) > 0:
+                return int(ctx)
+    except Exception:
+        pass
+    try:
+        ctx = getattr(llm, "context_window", None)
+        if ctx and int(ctx) > 0:
+            return int(ctx)
+    except Exception:
+        pass
+    return _DEFAULT_CONTEXT_WINDOW
+
+
 def _safe_complete(
     llm: LLMCompletionProtocol, prompt: str, *, timeout: float = 0, **kwargs: Any
 ) -> Optional[str]:
@@ -1057,7 +1104,44 @@ def _safe_complete(
 
     Issue #947: When *timeout* > 0, the call is wrapped in a ThreadPoolExecutor
     so a hung Gemini API does not block the entire turn indefinitely.
+
+    Issue #1253: Context-window guard — dynamically reduces ``max_tokens``
+    or truncates the prompt so that ``prompt_tokens + max_tokens`` never
+    exceeds the model's context window.
     """
+    # --- Issue #1253: Context-window guard ---
+    from bantz.brain.prompt_engineering import estimate_tokens
+
+    context_window = _get_context_window(llm)
+    max_tokens = int(kwargs.get("max_tokens", 256))
+    prompt_tokens = estimate_tokens(prompt)
+    total = prompt_tokens + max_tokens + _CONTEXT_SAFETY_MARGIN
+
+    if total > context_window:
+        available = context_window - prompt_tokens - _CONTEXT_SAFETY_MARGIN
+        if available >= _MIN_COMPLETION_TOKENS:
+            # Enough room — just shrink max_tokens
+            kwargs["max_tokens"] = available
+            logger.info(
+                "[FINALIZER] Context guard: reduced max_tokens %d→%d "
+                "(prompt=%d, ctx=%d)",
+                max_tokens, available, prompt_tokens, context_window,
+            )
+        else:
+            # Prompt itself is too large — truncate it
+            safe_prompt_budget = context_window - _MIN_COMPLETION_TOKENS - _CONTEXT_SAFETY_MARGIN
+            if safe_prompt_budget > 200:
+                # Rough char-based trim (estimate_tokens ≈ len/4)
+                target_chars = safe_prompt_budget * 4
+                if len(prompt) > target_chars:
+                    prompt = prompt[:target_chars]
+                    logger.warning(
+                        "[FINALIZER] Context guard: prompt truncated to ~%d tokens "
+                        "(ctx=%d)",
+                        safe_prompt_budget, context_window,
+                    )
+            kwargs["max_tokens"] = _MIN_COMPLETION_TOKENS
+
     def _do_complete() -> str:
         try:
             return llm.complete_text(prompt=prompt, **kwargs)
