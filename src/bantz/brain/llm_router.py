@@ -1265,10 +1265,14 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
     # ── Issue #LLM-quality: Route detection from Turkish user input ─────────
     _ROUTE_KEYWORDS: dict[str, list[str]] = {
         "calendar": [
-            "etkinlik", "takvim", "randevu", "toplantı", "plan",
+            "etkinlik", "takvim", "randevu", "toplantı",
             "saat", "yarın", "bugün", "akşam", "sabah", "öğle",
-            "ekle", "iptal", "oluştur", "planla", "ne yapıyoruz",
+            "ekle", "oluştur", "planla", "ne yapıyoruz",
             "programım", "programda", "gündem",
+            # Issue #1071: Replaced generic "plan" and "iptal" with
+            # multi-word patterns to avoid false positives.
+            "takvim planı", "günlük plan", "haftalık plan",
+            "etkinlik iptal", "randevu iptal", "toplantı iptal",
         ],
         "gmail": [
             "mail", "e-posta", "eposta", "mesaj", "gönder",
