@@ -570,11 +570,25 @@ class FinalizationPipeline:
         if error_reply is not None:
             return replace(output, assistant_reply=error_reply, finalizer_model="none(error)")
 
+        # --- Issue #1089: Skip empty-data guard for pending_confirmation ----
+        # When a tool returns pending_confirmation=True, the result is not
+        # "empty data" — it's a confirmation prompt that must reach the user.
+        _has_pending_confirmation = any(
+            isinstance(r.get("raw_result"), dict)
+            and r["raw_result"].get("pending_confirmation")
+            for r in (ctx.tool_results or [])
+        )
+
         # --- Early exit: tools succeeded but returned empty data (#628) -----
         # Prevents Gemini from hallucinating calendar events or emails when
         # the underlying API returned an empty result set.
         route = (output.route or "").strip().lower()
-        if route in ("calendar", "gmail") and ctx.tool_results and _tool_data_is_empty(ctx.tool_results):
+        if (
+            route in ("calendar", "gmail")
+            and ctx.tool_results
+            and not _has_pending_confirmation
+            and _tool_data_is_empty(ctx.tool_results)
+        ):
             cal_intent = (output.calendar_intent or "").strip().lower()
             ctx.state.update_trace(
                 finalizer_guard="empty_data",
