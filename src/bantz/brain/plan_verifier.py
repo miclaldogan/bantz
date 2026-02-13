@@ -52,6 +52,14 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(oku|read|aç|open)\b", re.IGNORECASE),
     re.compile(r"\b(takvim|calendar|toplantı|meeting|randevu)\b", re.IGNORECASE),
     re.compile(r"\b(saat kaç|what time|tarih|date)\b", re.IGNORECASE),
+    re.compile(r"\b(kontrol\s*et|planımız|plan\s*var|etkinlik|ne\s*var)\b", re.IGNORECASE),
+    re.compile(r"\b(mailleri?|son\s*mail|gelen\s*kutusu|inbox)\b", re.IGNORECASE),
+    re.compile(r"\b(ne\s*yazıyor|ne\s*diyor|ne\s*gelmiş|var\s*mı)\b", re.IGNORECASE),
+    re.compile(r"\b(ara|bul|search|find|kontrol)\b", re.IGNORECASE),
+    re.compile(r"\b(özetle|özetler?\s*m[iı]s[iı]n|özetl[ea]|summarize|summary)\b", re.IGNORECASE),
+    re.compile(r"\b(yaz|yazar?\s*m[iı]s[iı]n|yazd[ıi]r|write|compose|draft)\b", re.IGNORECASE),
+    re.compile(r"\b(cevapla|yan[ıi]tla|reply|respond)\b", re.IGNORECASE),
+    re.compile(r"\b(hat[ıi]rlat|remind|alarm|bildir)\b", re.IGNORECASE),
 ]
 
 # ── Issue #1002: Calendar write intents that should have date/time ───
