@@ -616,12 +616,19 @@ class FinalizationPipeline:
                 r.get("tool") in write_tools and r.get("success", False)
                 for r in ctx.tool_results
             )
-            if has_write:
+            # Issue #1215: Also use deterministic path for calendar.list_events
+            # so event details (title + time) are shown and not hallucinated.
+            read_tools = {"calendar.list_events", "calendar.find_free_slots", "calendar.find_event"}
+            has_read = any(
+                r.get("tool") in read_tools and r.get("success", False)
+                for r in ctx.tool_results
+            )
+            if has_write or has_read:
                 from bantz.brain.tool_result_summarizer import _build_tool_success_summary
                 det_reply = _build_tool_success_summary(ctx.tool_results)
                 ctx.state.update_trace(
                     finalizer_used=False,
-                    finalizer_strategy="deterministic_calendar_write",
+                    finalizer_strategy="deterministic_calendar",
                 )
                 return replace(output, assistant_reply=det_reply, finalizer_model="none(deterministic_calendar)")
 
