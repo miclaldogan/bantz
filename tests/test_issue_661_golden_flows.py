@@ -36,6 +36,34 @@ from bantz.agent.tools import ToolRegistry, Tool
 from bantz.core.events import EventBus
 from bantz.routing.preroute import PreRouter, IntentCategory, LocalResponseGenerator
 
+# Capture pristine _VALID_TOOLS at import time before any test mutates it.
+_PRISTINE_VALID_TOOLS = frozenset(JarvisLLMOrchestrator._VALID_TOOLS)
+_PRISTINE_SYSTEM_PROMPT = (
+    JarvisLLMOrchestrator._SYSTEM_PROMPT_CORE
+    + JarvisLLMOrchestrator._SYSTEM_PROMPT_DETAIL
+    + JarvisLLMOrchestrator._SYSTEM_PROMPT_EXAMPLES
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset_router_class_state():
+    """Restore class-level _VALID_TOOLS and SYSTEM_PROMPT before AND after each test.
+
+    OrchestratorLoop.__init__ calls sync_valid_tools which narrows
+    _VALID_TOOLS to the intersection with the test registry. Without
+    this fixture, subsequent tests with different registries get an
+    empty _VALID_TOOLS.
+
+    We restore BEFORE and AFTER to handle the case where earlier test
+    modules (in the full suite) have already corrupted _VALID_TOOLS
+    before this module's first test runs.
+    """
+    JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+    yield
+    JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Shared helpers

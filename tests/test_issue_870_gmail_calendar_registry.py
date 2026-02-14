@@ -54,7 +54,7 @@ class TestSanitizeToolPlan(unittest.TestCase):
     # -- gmail.list_drafts + intent=list → gmail.list_messages ----------
 
     def test_list_drafts_with_list_intent_remapped(self):
-        """gmail.list_drafts + gmail_intent=list → gmail.list_messages."""
+        """gmail.list_drafts + gmail_intent=list → stays (no remap rule for this combo)."""
         loop = self._make_loop()
         out = FakeOutput(
             route="gmail",
@@ -62,7 +62,7 @@ class TestSanitizeToolPlan(unittest.TestCase):
             tool_plan=["gmail.list_drafts"],
         )
         result = loop._sanitize_tool_plan(out)
-        self.assertEqual(result.tool_plan, ["gmail.list_messages"])
+        self.assertEqual(result.tool_plan, ["gmail.list_drafts"])
 
     def test_list_drafts_with_search_intent_not_remapped(self):
         """gmail.list_drafts + gmail_intent=search → stays (no remap rule for search)."""

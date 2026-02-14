@@ -23,20 +23,43 @@ from bantz.brain.orchestrator_state import OrchestratorState
 from bantz.agent.tools import ToolRegistry, Tool
 from bantz.core.events import EventBus
 
+# Capture pristine class-level state BEFORE any test narrows it
+_PRISTINE_VALID_TOOLS = frozenset(JarvisLLMOrchestrator._VALID_TOOLS)
+_PRISTINE_SYSTEM_PROMPT = JarvisLLMOrchestrator.SYSTEM_PROMPT
+
+
+@pytest.fixture(autouse=True)
+def _restore_orchestrator_class_state():
+    """Restore _VALID_TOOLS and SYSTEM_PROMPT before AND after each test.
+
+    sync_valid_tools() narrows _VALID_TOOLS at class level. Tests that use an
+    empty ToolRegistry (e.g. scenario 1) delete calendar tools, breaking
+    subsequent tests.
+    """
+    JarvisLLMOrchestrator._VALID_TOOLS = set(_PRISTINE_VALID_TOOLS)
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+    yield
+    JarvisLLMOrchestrator._VALID_TOOLS = set(_PRISTINE_VALID_TOOLS)
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+
 
 # ========================================================================
 # Mock Tools
 # ========================================================================
 
-def mock_list_events(time_min: str = "", time_max: str = "", **kwargs) -> dict:
-    """Mock calendar.list_events tool."""
+def mock_list_events(window_hint: str = "", date: str = "", query: str = "", **kwargs) -> dict:
+    """Mock calendar.list_events tool.
+
+    Note: build_tool_params strips time_min/time_max from calendar.list_events
+    and only passes: date, window_hint, query, max_results, title.
+    """
     return {
         "items": [
             {
                 "id": "evt1",
                 "summary": "Team Meeting",
-                "start": {"dateTime": time_min or "2026-01-30T10:00:00+03:00"},
-                "end": {"dateTime": time_min or "2026-01-30T11:00:00+03:00"},
+                "start": {"dateTime": "2026-01-30T10:00:00+03:00"},
+                "end": {"dateTime": "2026-01-30T11:00:00+03:00"},
             }
         ],
         "count": 1,
@@ -65,10 +88,12 @@ def build_mock_tool_registry() -> ToolRegistry:
         parameters={
             "type": "object",
             "properties": {
-                "time_min": {"type": "string", "description": "Start time (ISO)"},
-                "time_max": {"type": "string", "description": "End time (ISO)"},
+                "window_hint": {"type": "string", "description": "Time window hint (today, evening, week)"},
+                "date": {"type": "string", "description": "Date (ISO)"},
+                "query": {"type": "string", "description": "Search query"},
+                "max_results": {"type": "integer", "description": "Max results"},
             },
-            "required": ["time_min", "time_max"],
+            "required": [],
         },
         function=mock_list_events,
     )
@@ -323,7 +348,7 @@ def test_scenario_4_calendar_query_evening():
     
     mock_llm = MockLLMClient(mock_responses)
     orchestrator = JarvisLLMOrchestrator(llm=mock_llm)
-    tools = ToolRegistry()
+    tools = build_mock_tool_registry()
     event_bus = EventBus()
     config = OrchestratorConfig(debug=True)
     
@@ -375,7 +400,7 @@ def test_scenario_5_calendar_query_week():
     
     mock_llm = MockLLMClient(mock_responses)
     orchestrator = JarvisLLMOrchestrator(llm=mock_llm)
-    tools = ToolRegistry()
+    tools = build_mock_tool_registry()
     event_bus = EventBus()
     config = OrchestratorConfig(debug=True)
     
@@ -429,7 +454,7 @@ def test_multi_turn_state_persistence():
     
     mock_llm = MockLLMClient(mock_responses)
     orchestrator = JarvisLLMOrchestrator(llm=mock_llm)
-    tools = ToolRegistry()
+    tools = build_mock_tool_registry()
     event_bus = EventBus()
     config = OrchestratorConfig(debug=True, enable_preroute=False)
     
@@ -474,7 +499,7 @@ def test_confirmation_firewall():
     
     mock_llm = MockLLMClient(mock_responses)
     orchestrator = JarvisLLMOrchestrator(llm=mock_llm)
-    tools = ToolRegistry()
+    tools = build_mock_tool_registry()
     event_bus = EventBus()
     config = OrchestratorConfig(
         debug=True,

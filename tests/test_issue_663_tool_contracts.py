@@ -156,7 +156,9 @@ class TestFaz2_TypeCoercion:
         params = {"name": "  "}
         ok, msg = reg.validate_call("test.tool", params)
         assert ok
-        assert params["name"] is None  # coerced in-place
+        # Issue #1174: validate_call works on a shallow copy,
+        # so the caller's original dict is NOT mutated.
+        assert params["name"] == "  "
 
     def test_enum_validation(self):
         """Issue #663: enum fields should reject invalid values."""
@@ -259,7 +261,7 @@ class TestFaz3_Idempotency:
             end="2026-02-10T15:00:00+03:00",
         )
         assert isinstance(key, str)
-        assert len(key) == 16
+        assert len(key) == 32  # SHA-256 hex digest truncated to 32 chars
 
 
 # ═══════════════════════════════════════════════════════════════════

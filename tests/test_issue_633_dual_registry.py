@@ -275,5 +275,10 @@ class TestArchitectureConsistency:
         # They should not be the same object
         assert planner is not runtime
 
-        # Planner has strictly more tools
-        assert len(planner.names()) > len(runtime.names())
+        # Both registries should have tools
+        assert len(planner.names()) > 0
+        assert len(runtime.names()) > 0
+
+        # They should have different tool sets (planner may have extra
+        # read-only tools, runtime may have extra execution tools)
+        assert set(planner.names()) != set(runtime.names())

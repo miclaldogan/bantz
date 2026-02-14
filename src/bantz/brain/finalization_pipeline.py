@@ -1042,7 +1042,7 @@ def _tool_data_is_empty(tool_results: list[dict[str, Any]]) -> bool:
             for k, v in raw.items():
                 if k in _META_KEYS:
                     continue
-                if v is not None and v != "" and v != [] and v != {}:
+                if v is not None and v != "" and v != [] and v != {} and v != 0 and v is not False:
                     return False
     return True
 
@@ -1261,6 +1261,12 @@ def _safe_complete(
         else:
             text = _do_complete()
     except Exception as exc:
+        # Re-raise LLMClientError so _try_quality can record the error code
+        # in the trace (Issue #215).  FastFinalizer.finalize() has its own
+        # try/except so this is safe for the fast path.
+        from bantz.llm.base import LLMClientError
+        if isinstance(exc, LLMClientError):
+            raise
         logger.warning("[FINALIZER] LLM call failed: %s", exc)
         return None
     return str(text or "").strip() or None

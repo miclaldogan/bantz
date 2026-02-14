@@ -174,7 +174,50 @@
     "system.sudo":              "destructive",
 
     "database.delete":          "destructive",
-    "database.update":          "destructive"
+    "database.update":          "destructive",
+
+    "browser_back":             "safe",
+    "browser_click":            "moderate",
+    "browser_detail":           "safe",
+    "browser_info":             "safe",
+    "browser_open":             "moderate",
+    "browser_scan":             "safe",
+    "browser_scroll_down":      "safe",
+    "browser_scroll_up":        "safe",
+    "browser_search":           "safe",
+    "browser_type":             "moderate",
+    "browser_wait":             "safe",
+
+    "calendar.apply_plan_draft":"moderate",
+    "calendar.plan_events_from_draft": "moderate",
+
+    "clipboard_get":            "moderate",
+    "clipboard_set":            "moderate",
+
+    "code_format":              "moderate",
+    "code_replace_function":    "moderate",
+
+    "file_create":              "moderate",
+    "file_edit":                "moderate",
+    "file_read":                "safe",
+    "file_search":              "safe",
+    "file_undo":                "moderate",
+    "file_write":               "moderate",
+
+    "pc_hotkey":                "moderate",
+    "pc_mouse_click":           "moderate",
+    "pc_mouse_move":            "safe",
+    "pc_mouse_scroll":          "safe",
+
+    "project_info":             "safe",
+    "project_search_symbol":    "safe",
+    "project_symbols":          "safe",
+    "project_tree":             "safe",
+
+    "terminal_background":      "moderate",
+    "terminal_background_kill": "destructive",
+    "terminal_background_list": "safe",
+    "terminal_run":             "moderate"
   },
 
   "always_confirm_tools": [

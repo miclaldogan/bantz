@@ -158,26 +158,26 @@ def mock_orchestrator():
 
 @pytest.fixture
 def mock_tools_large_events():
-    """Mock tool registry that returns 200 calendar events."""
+    """Mock tool registry that returns 200 large email results."""
     registry = ToolRegistry()
     
-    def list_many_events():
+    def list_many_emails():
         return [
             {
-                "id": f"event_{i}",
-                "title": f"Meeting {i}",
-                "description": f"Long description for meeting {i} " * 20,  # Make it large
-                "start": f"2024-01-{i%28+1:02d}T10:00:00",
-                "end": f"2024-01-{i%28+1:02d}T11:00:00",
+                "id": f"msg_{i}",
+                "subject": f"Email Thread {i}",
+                "snippet": f"Long email body for message {i} " * 20,  # Make it large
+                "from": f"person{i}@example.com",
+                "date": f"2024-01-{i%28+1:02d}T10:00:00",
             }
-            for i in range(1, 201)  # 200 events
+            for i in range(1, 201)  # 200 emails
         ]
     
     registry.register(
         Tool(
-            name="calendar.list_events",
-            description="List calendar events",
-            function=list_many_events,
+            name="gmail.list_messages",
+            description="List email messages",
+            function=list_many_emails,
             parameters={},
         )
     )
@@ -186,7 +186,7 @@ def mock_tools_large_events():
 
 
 def test_finalizer_handles_large_tool_results(mock_orchestrator, mock_tools_large_events, caplog, monkeypatch):
-    """Finalizer should handle 200 events by using budget control."""
+    """Finalizer should handle 200 results by using budget control."""
     # Issue #647: tiering is ON by default; calendar queries go to fast path.
     # Force quality so the mock finalizer LLM is actually invoked.
     monkeypatch.setenv("BANTZ_TIER_FORCE_FINALIZER", "quality")
@@ -195,9 +195,10 @@ def test_finalizer_handles_large_tool_results(mock_orchestrator, mock_tools_larg
     
     # Create a mock finalizer LLM
     mock_finalizer = Mock()
-    mock_finalizer.complete_text = Mock(return_value="Efendim, 200 etkinlik buldum.")
+    mock_finalizer.complete_text = Mock(return_value="Efendim, 200 sonuç buldum.")
     mock_finalizer.model_name = "test-finalizer"
     mock_finalizer.backend_name = "test-backend"
+    mock_finalizer._timeout_seconds = 30.0
     
     loop = OrchestratorLoop(
         orchestrator=mock_orchestrator,
@@ -207,13 +208,14 @@ def test_finalizer_handles_large_tool_results(mock_orchestrator, mock_tools_larg
     )
     
     # Mock orchestrator output with tool plan
+    # Use gmail route — allowed by safety guard, no deterministic guard (Issue #1215)
     output = OrchestratorOutput(
-        route="calendar",
-        calendar_intent="list_events",
+        route="gmail",
+        calendar_intent=None,
         slots={},
         confidence=0.9,
-        tool_plan=["calendar.list_events"],
-        assistant_reply="Checking your calendar...",
+        tool_plan=["gmail.list_messages"],
+        assistant_reply="Checking emails...",
     )
     
     state = OrchestratorState()
@@ -228,7 +230,7 @@ def test_finalizer_handles_large_tool_results(mock_orchestrator, mock_tools_larg
     # Call finalization
     with caplog.at_level("INFO"):
         final_output = loop._llm_finalization_phase(
-            user_input="Önümüzdeki ay ne toplantılarım var?",
+            user_input="E-postalarımı listele",
             orchestrator_output=output,
             tool_results=tool_results,
             state=state,
@@ -247,12 +249,12 @@ def test_finalizer_handles_large_tool_results(mock_orchestrator, mock_tools_larg
     else:
         prompt = call_args.args[0]
     
-    # The prompt should NOT contain all 200 events (truncated)
-    # Count how many "event_" appear in the prompt
-    event_count = prompt.count("event_")
+    # The prompt should NOT contain all 200 results (truncated)
+    # Count how many "msg_" appear in the prompt
+    result_count = prompt.count("msg_")
     
     # Should be significantly less than 200 (budget control working)
-    assert event_count < 50, f"Expected < 50 events in prompt, found {event_count}"
+    assert result_count < 50, f"Expected < 50 results in prompt, found {result_count}"
 
 
 def test_fast_finalize_uses_budget_control(mock_orchestrator, mock_tools_large_events, caplog):
@@ -267,11 +269,11 @@ def test_fast_finalize_uses_budget_control(mock_orchestrator, mock_tools_large_e
     )
     
     output = OrchestratorOutput(
-        route="calendar",
-        calendar_intent="list_events",
+        route="gmail",
+        calendar_intent=None,
         slots={},
         confidence=0.9,
-        tool_plan=["calendar.list_events"],
+        tool_plan=["gmail.list_messages"],
         assistant_reply="Checking...",
     )
     

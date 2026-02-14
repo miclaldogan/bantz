@@ -36,7 +36,8 @@ def test_agent_plan_validates_required_params():
 
 
 def test_agent_execute_retries_then_fails():
-    from bantz.tools.metadata import register_tool_risk, ToolRisk
+    from bantz.tools.metadata import register_tool_risk, ToolRisk, TOOL_REGISTRY
+    _orig_browser_open = TOOL_REGISTRY.get("browser_open")
     register_tool_risk("browser_open", ToolRisk.SAFE)
 
     reg = ToolRegistry()
@@ -65,9 +66,11 @@ def test_agent_execute_retries_then_fails():
     assert task.state.value == "failed"
     assert calls["n"] == 2  # 1 try + 1 retry
 
-    # Cleanup: remove test tool from global registry
-    from bantz.tools.metadata import TOOL_REGISTRY
-    TOOL_REGISTRY.pop("browser_open", None)
+    # Cleanup: restore original registry state for browser_open
+    if _orig_browser_open is not None:
+        TOOL_REGISTRY["browser_open"] = _orig_browser_open
+    else:
+        TOOL_REGISTRY.pop("browser_open", None)
 
 
 def test_planner_parse_json_object_tolerates_wrapped_output():

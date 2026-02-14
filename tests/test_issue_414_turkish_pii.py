@@ -25,10 +25,10 @@ from bantz.brain.memory_lite import PIIFilter
 
 class TestTCKimlik:
     @pytest.mark.parametrize("tc_no", [
-        "12345678901",
-        "99876543210",
-        "10000000000",
-        "55512345678",
+        "12345678950",
+        "99876543292",
+        "10000000078",
+        "55512345606",
     ])
     def test_tc_kimlik_detected(self, tc_no):
         text = f"TC Kimlik No: {tc_no}"
@@ -37,10 +37,10 @@ class TestTCKimlik:
         assert tc_no not in result
 
     def test_tc_kimlik_in_sentence(self):
-        text = "Kullanıcının TC kimlik numarası 12345678901 olarak kayıtlı."
+        text = "Kullanıcının TC kimlik numarası 12345678950 olarak kayıtlı."
         result = PIIFilter.filter(text)
         assert "<TC_KIMLIK>" in result
-        assert "12345678901" not in result
+        assert "12345678950" not in result
 
     def test_tc_kimlik_leading_zero_rejected(self):
         """TC Kimlik cannot start with 0."""
@@ -193,22 +193,22 @@ class TestPlaka:
 
 class TestLocaleFiltering:
     def test_locale_auto_applies_all(self):
-        text = "TC: 12345678901, Phone: +90 532 123 45 67, Email: a@b.com"
+        text = "TC: 12345678950, Phone: +90 532 123 45 67, Email: a@b.com"
         result = PIIFilter.filter(text, locale="auto")
         assert "<TC_KIMLIK>" in result
         assert "<TR_PHONE>" in result
         assert "<EMAIL>" in result
 
     def test_locale_tr_applies_turkish(self):
-        text = "TC: 12345678901"
+        text = "TC: 12345678950"
         result = PIIFilter.filter(text, locale="tr")
         assert "<TC_KIMLIK>" in result
 
     def test_locale_en_skips_turkish(self):
-        text = "TC: 12345678901, Email: a@b.com"
+        text = "TC: 12345678950, Email: a@b.com"
         result = PIIFilter.filter(text, locale="en")
         assert "<TC_KIMLIK>" not in result
-        assert "12345678901" in result
+        assert "12345678950" in result
         assert "<EMAIL>" in result
 
     def test_locale_en_keeps_international(self):
@@ -217,7 +217,7 @@ class TestLocaleFiltering:
         assert "<SSN>" in result
 
     def test_disabled_returns_original(self):
-        text = "TC: 12345678901"
+        text = "TC: 12345678950"
         result = PIIFilter.filter(text, enabled=False)
         assert result == text
 
@@ -263,7 +263,7 @@ class TestBackwardCompatibility:
 class TestCombinedAndEdgeCases:
     def test_multiple_pii_types(self):
         text = (
-            "Ad: Ahmet, TC: 12345678901, Tel: +90 532 123 45 67, "
+            "Ad: Ahmet, TC: 12345678950, Tel: +90 532 123 45 67, "
             "IBAN: TR330006100519786457841326, Adres: Atatürk Mahallesi"
         )
         result = PIIFilter.filter(text)
@@ -282,5 +282,5 @@ class TestCombinedAndEdgeCases:
 
     def test_filter_is_classmethod(self):
         """Verify filter can be called without instantiation."""
-        result = PIIFilter.filter("test 12345678901")
+        result = PIIFilter.filter("test 12345678950")
         assert "<TC_KIMLIK>" in result

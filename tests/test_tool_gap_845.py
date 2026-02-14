@@ -38,10 +38,10 @@ class TestRegistryCompleteness:
         assert len(reg.names()) >= 40
 
     def test_runtime_registry_has_69_tools(self):
-        """Full coverage: 69 runtime tools."""
+        """Full coverage: 76 runtime tools (expanded from original 69)."""
         from bantz.agent.registry import build_default_registry
         reg = build_default_registry()
-        assert len(reg.names()) == 69
+        assert len(reg.names()) == 76
 
     def test_no_null_handlers(self):
         """Every registered tool must have a real function handler."""

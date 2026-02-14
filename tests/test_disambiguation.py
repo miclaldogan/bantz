@@ -25,7 +25,7 @@ def _calendar_tool_results(n: int = 3) -> list[dict]:
         for i in range(1, n + 1)
     ]
     return [{"tool": "calendar.list_events", "success": True,
-             "raw_result": events, "result_summary": str(events)}]
+             "result": events, "result_summary": str(events)}]
 
 
 def _email_tool_results(n: int = 2) -> list[dict]:
@@ -36,7 +36,7 @@ def _email_tool_results(n: int = 2) -> list[dict]:
         for i in range(1, n + 1)
     ]
     return [{"tool": "gmail.list_messages", "success": True,
-             "raw_result": msgs, "result_summary": str(msgs)}]
+             "result": msgs, "result_summary": str(msgs)}]
 
 
 # ── DisambiguationDialog.check_tool_results ──────────────────────

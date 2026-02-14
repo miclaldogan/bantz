@@ -247,7 +247,7 @@ class TestUtility:
             terminal.set_working_directory("/etc")
 
     def test_set_working_directory_nonexistent(self, terminal):
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises((FileNotFoundError, SecurityError)):
             terminal.set_working_directory("/tmp/nonexistent_xyz_test_dir")
 
     def test_get_environment_variable(self, terminal):

@@ -2856,11 +2856,14 @@ class OrchestratorLoop:
     
     def _extract_action_taken(self, output: OrchestratorOutput) -> str:
         """Extract action taken (1-3 words)."""
-        if output.tool_plan:
+        if output.tool_plan and isinstance(output.tool_plan, list):
             # Summarize tools
-            tool_names = [t.split(".")[-1] for t in output.tool_plan[:2]]  # First 2
-            tools_str = ", ".join(tool_names)
-            return f"called {tools_str}"
+            try:
+                tool_names = [str(t).rsplit(".", 1)[-1] for t in output.tool_plan[:2]]
+                tools_str = ", ".join(tool_names)
+                return f"called {tools_str}"
+            except Exception:
+                return "called tools"
         elif output.ask_user:
             return "asked for clarification"
         elif output.assistant_reply:
