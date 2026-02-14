@@ -300,6 +300,14 @@ class OrchestratorLoop:
             max_workers=4, thread_name_prefix="bantz-tool",
         )
 
+        # Issue #1288: Ingest Store — cache tool results with TTL + dedup
+        try:
+            from bantz.data.ingest_bridge import IngestBridge
+            self._ingest_bridge: Any = IngestBridge.create_default()
+        except Exception as _isx:
+            logger.warning("[ORCHESTRATOR] IngestBridge init failed: %s", _isx)
+            self._ingest_bridge = None
+
         # Issue #900: Sync router _VALID_TOOLS with actual ToolRegistry
         # Issue #1275: Pass registry reference for route-based schema injection
         try:
@@ -339,11 +347,17 @@ class OrchestratorLoop:
         }
 
     def close(self) -> None:
-        """Shut down the shared tool executor. Safe to call multiple times."""
+        """Shut down the shared tool executor and data stores. Safe to call multiple times."""
         try:
             self._tool_executor.shutdown(wait=False)
         except Exception:
             pass
+        # Issue #1288: Close ingest store
+        if getattr(self, "_ingest_bridge", None) is not None:
+            try:
+                self._ingest_bridge.close()
+            except Exception:
+                pass
 
     def __del__(self) -> None:
         self.close()
@@ -2307,6 +2321,20 @@ class OrchestratorLoop:
                     "elapsed_ms": elapsed_ms,
                 })
 
+                # Issue #1288: Ingest successful tool results into cache store
+                if bool(tool_returned_ok) and getattr(self, "_ingest_bridge", None):
+                    try:
+                        self._ingest_bridge.on_tool_result(
+                            tool_name=tool_name,
+                            params=params,
+                            result=result,
+                            elapsed_ms=elapsed_ms,
+                            success=True,
+                            summary=result_summary,
+                        )
+                    except Exception as _ing_err:
+                        logger.debug("[INGEST] Failed to cache %s: %s", tool_name, _ing_err)
+
                 # Add to state
                 state.add_tool_result(tool_name, result, success=bool(tool_returned_ok))
                 
@@ -2737,6 +2765,19 @@ class OrchestratorLoop:
             logger.debug(f"  Memory-lite: {len(self.memory)} turns")
             logger.debug(f"  Conversation Turns: {len(state.conversation_history)}")
             logger.debug(f"  Tool Results: {len(state.last_tool_results)}")
+
+        # Issue #1288: Log ingest store stats for this turn
+        if getattr(self, "_ingest_bridge", None) is not None:
+            try:
+                ingest_stats = self._ingest_bridge.reset_turn_stats()
+                if ingest_stats["ingested"] or ingest_stats["cache_hits"]:
+                    logger.debug(
+                        "[INGEST] Turn stats: %d ingested, %d cache hits",
+                        ingest_stats["ingested"], ingest_stats["cache_hits"],
+                    )
+                    state.update_trace(ingest_stats=ingest_stats)
+            except Exception:
+                pass
 
         # Advance turn counter (used by memory-lite summaries)
         state.turn_count += 1
