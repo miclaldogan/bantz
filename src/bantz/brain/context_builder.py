@@ -116,7 +116,7 @@ class ContextBuilder:
         # 3. Personality block
         self._inject_personality(context_parts, um_facts)
 
-        # 4. Recent conversation (last 2 turns, PII-redacted)
+        # 4. Recent conversation (adaptive compaction, PII-redacted) — Issue #1278
         self._inject_conversation_history(conversation_history, context_parts)
 
         # 5. Recent tool results
@@ -292,19 +292,45 @@ class ContextBuilder:
         conversation_history: list[dict[str, Any]],
         context_parts: list[str],
     ) -> None:
-        """Add last 2 turns of conversation history."""
+        """Add conversation history with adaptive compaction (Issue #1278).
+
+        Last 3 turns are included verbatim; older turns are shown as
+        compact one-line summaries.  PII redaction is applied to all.
+        Previously hardcoded to ``[-2:]``.
+        """
         if not conversation_history:
             return
 
+        # Issue #1278: Split into compacted (older) and raw (recent) turns
+        raw_tail = 3
+        n = len(conversation_history)
+        tail_start = max(0, n - raw_tail)
+
         conv_lines = ["RECENT_CONVERSATION:"]
-        for turn in conversation_history[-2:]:
+
+        # Older turns — compact summaries
+        for turn in conversation_history[:tail_start]:
             user_text = str(turn.get("user", ""))[:100]
-            asst_text = str(turn.get("assistant", ""))[:150]
+            asst_text = str(turn.get("assistant", ""))[:80]
 
             if self._pii_filter:
                 try:
                     from bantz.privacy.redaction import redact_pii
+                    user_text = redact_pii(user_text)
+                    asst_text = redact_pii(asst_text)
+                except Exception:
+                    pass
 
+            conv_lines.append(f"  [past] U: {user_text} → A: {asst_text}")
+
+        # Recent turns — full detail
+        for turn in conversation_history[tail_start:]:
+            user_text = str(turn.get("user", ""))[:200]
+            asst_text = str(turn.get("assistant", ""))[:300]
+
+            if self._pii_filter:
+                try:
+                    from bantz.privacy.redaction import redact_pii
                     user_text = redact_pii(user_text)
                     asst_text = redact_pii(asst_text)
                 except Exception:

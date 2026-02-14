@@ -303,7 +303,7 @@ class OrchestratorState:
     
     # Last N tool results (kept short for context window)
     last_tool_results: list[dict[str, Any]] = field(default_factory=list)
-    max_tool_results: int = 3  # Keep only last 3 tool results
+    max_tool_results: int = 5  # Issue #1278: Keep last 5 tool results (was 3)
     
     # Pending confirmations (FIFO queue for multiple destructive tools)
     pending_confirmations: list[dict[str, Any]] = field(default_factory=list)
@@ -316,7 +316,7 @@ class OrchestratorState:
     
     # Conversation history (last N turns)
     conversation_history: list[dict[str, str]] = field(default_factory=list)
-    max_history_turns: int = 3  # Keep only last 3 turns
+    max_history_turns: int = 8  # Issue #1278: Keep last 8 turns (was 3)
 
     # Turn counter (used by memory-lite summaries)
     turn_count: int = 0
@@ -459,6 +459,59 @@ class OrchestratorState:
         if len(self.conversation_history) > self.max_history_turns:
             self.conversation_history = self.conversation_history[-self.max_history_turns:]
     
+    # ------------------------------------------------------------------
+    # Issue #1278: Adaptive conversation compaction
+    # ------------------------------------------------------------------
+
+    def compact_conversation_history(
+        self,
+        *,
+        raw_tail: int = 3,
+        max_summary_chars_per_turn: int = 120,
+        token_budget: int = 0,
+    ) -> list[dict[str, str]]:
+        """Return conversation history with adaptive compaction.
+
+        The most recent *raw_tail* turns are returned verbatim.
+        Older turns are compacted into one-line summaries to save tokens.
+
+        If *token_budget* > 0, the compacted list is further trimmed
+        so that its estimated token cost stays within budget.
+
+        Returns a new list — does NOT mutate ``self.conversation_history``.
+        """
+        history = self.conversation_history
+        if not history:
+            return []
+
+        n = len(history)
+        tail_start = max(0, n - raw_tail)
+
+        compacted: list[dict[str, str]] = []
+
+        # Older turns → summarised
+        for turn in history[:tail_start]:
+            user_text = str(turn.get("user", ""))[:max_summary_chars_per_turn]
+            asst_text = str(turn.get("assistant", ""))[:max_summary_chars_per_turn]
+            compacted.append({
+                "user": user_text,
+                "assistant": asst_text,
+                "_compacted": "true",
+            })
+
+        # Recent turns → verbatim
+        for turn in history[tail_start:]:
+            compacted.append(dict(turn))
+
+        # Token budget enforcement
+        if token_budget > 0:
+            from bantz.llm.token_utils import estimate_tokens_json
+            while compacted and estimate_tokens_json(compacted) > token_budget:
+                # Drop oldest compacted turn first
+                compacted.pop(0)
+
+        return compacted
+
     def update_rolling_summary(self, new_summary: str) -> None:
         """Update rolling summary (LLM-generated each turn)."""
         self.rolling_summary = new_summary.strip()
@@ -501,6 +554,9 @@ class OrchestratorState:
 
         NOTE: result_raw is intentionally excluded — only the lightweight
         result_summary is sent to the LLM to save context window budget.
+
+        Issue #1278: Uses adaptive compaction — last 3 turns raw, older
+        turns summarised.  Falls back to raw list when ≤3 turns.
         """
         safe_results = [
             {
@@ -510,9 +566,11 @@ class OrchestratorState:
             }
             for r in self.last_tool_results
         ]
+        # Issue #1278: adaptive compaction instead of hardcoded [-2:]
+        compacted_history = self.compact_conversation_history(raw_tail=3)
         ctx = {
             "rolling_summary": self.rolling_summary,
-            "recent_conversation": self.conversation_history[-2:] if self.conversation_history else [],
+            "recent_conversation": compacted_history,
             "last_tool_results": safe_results,
             "pending_confirmation": self.peek_pending_confirmation(),
             "pending_confirmations": list(self.pending_confirmations),

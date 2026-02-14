@@ -1214,9 +1214,9 @@ class OrchestratorLoop:
             session_context = self._session_ctx_caches[sid].get_or_build()
             state.session_context = session_context
         
-        # Issue #339: Add recent conversation for anaphora / multi-turn
+        # Issue #339 + #1278: Add recent conversation with adaptive compaction
         if state.conversation_history:
-            session_context["recent_conversation"] = state.conversation_history[-3:]
+            session_context["recent_conversation"] = state.compact_conversation_history(raw_tail=3)
 
         # Issue #407: Merge preroute hint into session_context
         if _preroute_hint:

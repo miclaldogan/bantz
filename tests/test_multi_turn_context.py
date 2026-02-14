@@ -78,7 +78,11 @@ class TestMultiTurnContextMemory:
         assert recent[1]["assistant"] == "John Smith ile toplantınız var."
     
     def test_recent_conversation_limited_to_last_3_turns(self, orchestrator_loop):
-        """Test that only last 3 turns are included."""
+        """Test that all turns are included with adaptive compaction (Issue #1278).
+
+        With 5 turns and raw_tail=3, we get 2 compacted + 3 raw = 5 entries.
+        Older turns are compacted (marked with ``_compacted``), recent are verbatim.
+        """
         state = OrchestratorState()
         state.max_history_turns = 10  # Increase limit to test our own limiting
         
@@ -106,14 +110,21 @@ class TestMultiTurnContextMemory:
         
         result, new_state = orchestrator_loop.process_turn("test", state)
         
-        # Only last 3 turns should be in session_context
+        # Issue #1278: All 5 turns present (2 compacted + 3 raw)
         recent = captured_session_context.get("recent_conversation", [])
-        assert len(recent) == 3
+        assert len(recent) == 5
         
-        # Should be last 3: turns 2, 3, 4
-        assert recent[0]["user"] == "user message 2"
-        assert recent[1]["user"] == "user message 3"
-        assert recent[2]["user"] == "user message 4"
+        # First 2 are compacted older turns
+        assert recent[0]["user"] == "user message 0"
+        assert recent[0].get("_compacted") == "true"
+        assert recent[1]["user"] == "user message 1"
+        assert recent[1].get("_compacted") == "true"
+
+        # Last 3 are raw recent turns
+        assert recent[2]["user"] == "user message 2"
+        assert recent[2].get("_compacted") is None
+        assert recent[3]["user"] == "user message 3"
+        assert recent[4]["user"] == "user message 4"
     
     def test_empty_conversation_history(self, orchestrator_loop):
         """Test that empty conversation doesn't break session_context."""
