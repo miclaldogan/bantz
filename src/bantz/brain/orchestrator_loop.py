@@ -1501,7 +1501,9 @@ class OrchestratorLoop:
 
         # Issue #607: Post-route correction for email sending.
         # The 3B router can misroute send-intents to smalltalk/unknown.
-        output = self._post_route_correction_email_send(user_input, output)
+        # Use original Turkish text — email send patterns are Turkish.
+        _email_text = state.current_user_input or user_input
+        output = self._post_route_correction_email_send(_email_text, output)
 
         # Issue #1212: Anaphoric follow-up recovery.
         # When user says "nelermiş onlar", "bunları özetle" etc. after a tool
@@ -1764,13 +1766,18 @@ class OrchestratorLoop:
         # Issue #907: Static plan verification
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         from bantz.brain.plan_verifier import infer_route_from_tools
+        # Use the original Turkish user input for plan verification, since
+        # _has_tool_indicators() patterns are Turkish.  ``user_input`` here
+        # is the English bridge-translated text which would cause false
+        # ``tool_plan_no_indicators`` warnings.
+        _verify_text = state.current_user_input or user_input
         plan_ok, plan_errors = verify_plan(
             output.__dict__ if hasattr(output, "__dict__") else vars(output),
-            user_input,
+            _verify_text,
             JarvisLLMOrchestrator._VALID_TOOLS,
         )
         if not plan_ok:
-            logger.warning("[PLAN_VERIFIER] errors=%s input=%.60s", plan_errors, user_input)
+            logger.warning("[PLAN_VERIFIER] errors=%s input=%.60s", plan_errors, _verify_text)
             # Separate correctable errors from hard errors
             _correctable = {"route_tool_mismatch", "smalltalk_with_tools", "route_intent_mismatch"}
             correctable = [e for e in plan_errors if any(e.startswith(c) for c in _correctable)]
@@ -1817,12 +1824,15 @@ class OrchestratorLoop:
 
         # Issue #1214: Keyword-based route recovery when LLM routes to
         # smalltalk/unknown with no tool_plan but input has tool indicators.
+        # Use original Turkish text — _detect_route_from_input uses Turkish
+        # keyword patterns that won't match English bridge-translated text.
+        _kw_recovery_text = state.current_user_input or user_input
         if (
             output.route in ("smalltalk", "unknown")
             and not output.tool_plan
             and not output.raw_output.get("preroute_complete")
         ):
-            kw_route = self.orchestrator._detect_route_from_input(user_input)
+            kw_route = self.orchestrator._detect_route_from_input(_kw_recovery_text)
             if kw_route not in ("smalltalk", "unknown"):
                 resolved_tool = self.orchestrator._resolve_tool_from_intent(
                     kw_route, "none", "none",
@@ -1830,7 +1840,7 @@ class OrchestratorLoop:
                 if resolved_tool:
                     logger.info(
                         "[Issue #1214] Recovering misrouted %s→%s tool=%s for '%.40s'",
-                        output.route, kw_route, resolved_tool, user_input,
+                        output.route, kw_route, resolved_tool, _kw_recovery_text,
                     )
                     output = replace(
                         output,

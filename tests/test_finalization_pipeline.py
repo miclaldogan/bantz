@@ -461,12 +461,32 @@ class TestDecideFinalizationTier:
 
 class TestFinalizationPipeline:
     def test_ask_user_early_exit(self):
-        """ask_user → question becomes assistant_reply."""
+        """ask_user with no tools → question becomes assistant_reply."""
         pipeline = FinalizationPipeline()
         output = _make_output(ask_user=True, question="Hangi saat?", assistant_reply="")
-        ctx = _make_ctx(orchestrator_output=output)
+        ctx = _make_ctx(orchestrator_output=output, tool_results=[])
         result = pipeline.run(ctx)
         assert result.assistant_reply == "Hangi saat?"
+
+    def test_ask_user_with_successful_tools_uses_results(self):
+        """ask_user=True but tools succeeded → show tool results, not question."""
+        pipeline = FinalizationPipeline()
+        output = _make_output(
+            ask_user=True,
+            question="Etkinliklerinizi kontrol etmek ister misiniz?",
+            assistant_reply="",
+            route="calendar",
+            calendar_intent="query",
+            tool_plan=["calendar.list_events"],
+        )
+        ctx = _make_ctx(
+            orchestrator_output=output,
+            tool_results=[{"tool": "calendar.list_events", "success": True, "result": "2 etkinlik"}],
+        )
+        result = pipeline.run(ctx)
+        # Should NOT return the ask_user question — should use deterministic tool results
+        assert result.assistant_reply != "Etkinliklerinizi kontrol etmek ister misiniz?"
+        assert result.finalizer_model != "none(ask_user)"
 
     def test_hard_failure_early_exit(self):
         """Hard failure → deterministic error message."""

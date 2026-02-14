@@ -646,7 +646,16 @@ class FinalizationPipeline:
             )
 
         # --- Early exit: ask_user with no reply -----------------------------
-        if output.ask_user and output.question and not output.assistant_reply:
+        # Only exit early when no tools have been executed successfully.
+        # If tools ran and succeeded, continue to the deterministic/quality
+        # path so the user sees actual tool results instead of the LLM's
+        # politeness question (3B model often sets ask_user=True even when
+        # it already routed to the correct tool).
+        _has_successful_tools = bool(
+            ctx.tool_results
+            and any(r.get("success", False) for r in ctx.tool_results)
+        )
+        if output.ask_user and output.question and not output.assistant_reply and not _has_successful_tools:
             return replace(output, assistant_reply=output.question, finalizer_model="none(ask_user)")
 
         # --- Early exit: hard tool failures ---------------------------------
@@ -824,7 +833,7 @@ class FinalizationPipeline:
                 finalizer_used=False,
             )
             should_fast_finalize = (
-                (not output.ask_user)
+                (not output.ask_user or _has_successful_tools)
                 and (
                     bool(ctx.tool_results)
                     or not (output.assistant_reply or "").strip()
