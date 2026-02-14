@@ -228,10 +228,16 @@ class SafetyGuard:
             
             # Check field types (basic validation)
             properties = schema.get("properties", {})
+            # Strip unknown fields to prevent tool execution errors.
+            # The 3B model often sends router output fields (natural_query,
+            # text, title) as tool params — these must be removed.
+            _unknown_fields = [fld for fld in params if fld not in properties]
+            for fld in _unknown_fields:
+                logger.warning(f"Unknown field '{fld}' in tool '{tool.name}' — stripped")
+                del params[fld]
             for fld, value in params.items():
                 if fld not in properties:
-                    logger.warning(f"Unknown field '{fld}' in tool '{tool.name}'")
-                    continue
+                    continue  # already stripped above
                 
                 field_schema = properties[fld]
                 expected_type = field_schema.get("type")

@@ -796,6 +796,87 @@ def extract_position(text: str) -> Optional[Slot]:
 
 
 # ============================================================================
+# Calendar Title Extraction
+# ============================================================================
+
+# Turkish noise words that should NOT be extracted as event titles.
+_TITLE_STOP_WORDS = frozenset({
+    "bir", "ekle", "koy", "yap", "oluştur", "ekler", "koyar",
+    "ekleyebilir", "misin", "musun", "olsun", "lütfen",
+    "sabah", "akşam", "öğle", "gece", "yarın", "bugün", "dün",
+    "saat", "saate", "saatte", "için", "de", "da", "bu", "şu",
+    "bana", "benim", "bize", "bizim", "takvime", "takvimime",
+    "sen", "bak", "bakalım", "bakalom", "dostum", "efendim",
+    "sana", "etkinlik", "etkinliği", "event",
+    # Time reference words (dative/accusative suffixed numbers)
+    "bire", "ikiye", "üçe", "dörde", "beşe", "altıya", "yediye",
+    "sekize", "dokuza", "ona", "onbire", "onikiye",
+    "birde", "ikide", "üçte", "dörtte", "beşte", "altıda",
+    "yedide", "sekizde", "dokuzda", "onda", "onbirde", "onikide",
+})
+
+# Pattern: "<title> ekle/koy/oluştur" — extract the noun before the action verb.
+# Also handles: "X etkinliği ekle", "bir X ekle", "X toplantısı koy"
+_TITLE_ACTION_PATTERN = re.compile(
+    r"(?:^|[\s,]+)"                            # start or whitespace
+    r"(?:bir\s+)?"                             # optional "bir"
+    r"([\wçğıöşüÇĞİÖŞÜ]+(?:\s+[\wçğıöşüÇĞİÖŞÜ]+)?)"  # 1-2 word noun phrase
+    r"\s+"                                     # space before verb
+    r"(?:etkinliği?\s+|toplantısı?\s+)?"       # optional "etkinliği/toplantısı"
+    r"(?:ekle|koy|oluştur|yap)\b",             # action verb
+    re.IGNORECASE,
+)
+
+# Fallback: "ekle: X" or after time "... X ekle" where X is between time and verb
+_TITLE_AFTER_TIME_PATTERN = re.compile(
+    r"(?:saat\w*\s+\S+|dokuza|ona|sekize|yediye|altıya|beşe|dörde|üçe|ikiye|bire|\d{1,2}(?:[:.]\d{2})?(?:'[td]e|'[td]a)?)\s+"
+    r"(?:bir\s+)?"
+    r"([\wçğıöşüÇĞİÖŞÜ]+(?:\s+[\wçğıöşüÇĞİÖŞÜ]+)?)"
+    r"\s+(?:ekle|koy|oluştur|yap)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_event_title(text: str) -> Optional[str]:
+    """Extract calendar event title from Turkish input.
+
+    Handles patterns like:
+    - "kahvaltı ekle" → "Kahvaltı"
+    - "sabah saat dokuza kahvaltı ekle" → "Kahvaltı"
+    - "toplantı koy yarın 3'e" → "Toplantı"
+    - "bir yemek ekle" → "Yemek"
+
+    Returns None if no valid title found.
+    """
+    t = (text or "").strip().lower()
+    if not t:
+        return None
+
+    # Try the after-time pattern first (more specific)
+    m = _TITLE_AFTER_TIME_PATTERN.search(t)
+    if m:
+        candidate = m.group(1).strip()
+        words = set(candidate.split())
+        if words - _TITLE_STOP_WORDS:
+            # At least one non-stop word
+            clean = " ".join(w for w in candidate.split() if w not in _TITLE_STOP_WORDS)
+            if clean:
+                return clean.capitalize()
+
+    # Try the general action pattern
+    m = _TITLE_ACTION_PATTERN.search(t)
+    if m:
+        candidate = m.group(1).strip()
+        words = set(candidate.split())
+        if words - _TITLE_STOP_WORDS:
+            clean = " ".join(w for w in candidate.split() if w not in _TITLE_STOP_WORDS)
+            if clean:
+                return clean.capitalize()
+
+    return None
+
+
+# ============================================================================
 # Slot Extractor (Main Class)
 # ============================================================================
 
@@ -862,6 +943,11 @@ class SlotExtractor:
         position_slot = extract_position(text)
         if position_slot:
             slots["position"] = position_slot.value
+
+        # Extract calendar event title
+        title = extract_event_title(text)
+        if title:
+            slots["title"] = title
         
         return slots
     

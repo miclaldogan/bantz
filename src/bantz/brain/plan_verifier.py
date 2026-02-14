@@ -47,15 +47,18 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(oluştur|ekle|yarat|create|add)\b", re.IGNORECASE),
     re.compile(r"\b(sil|kaldır|delete|remove|cancel)\b", re.IGNORECASE),
     re.compile(r"\b(güncelle|değiştir|update|change|modify|move)\b", re.IGNORECASE),
-    re.compile(r"\b(listele|göster|bak|list|show)\b", re.IGNORECASE),
+    # Turkish agglutinative forms: bak→bakalım/bakalom, göster→gösterir
+    re.compile(r"\b(listele|göster\w*|bak\w*|list|show)\b", re.IGNORECASE),
     re.compile(r"\b(gönder|yolla|send|e-?posta)\b", re.IGNORECASE),
     re.compile(r"\b(oku|read|aç|open)\b", re.IGNORECASE),
     re.compile(r"\b(takvim|calendar|toplantı|meeting|randevu)\b", re.IGNORECASE),
     re.compile(r"\b(saat\s*kaç\w*|what time|tarih|date)\b", re.IGNORECASE),
-    re.compile(r"\b(kontrol\s*et|planımız|plan\s*var|etkinlik|ne\s*var)\b", re.IGNORECASE),
+    # Turkish suffixed forms: planımız/planımı/planım, etkinlik/etkinlikleri
+    re.compile(r"\b(kontrol\s*et|plan\w*|etkinlik\w*|ne\s*var)\b", re.IGNORECASE),
     # Temporal / schedule query indicators
-    re.compile(r"\b(bugün|yarın|dün|bu\s*hafta|bu\s*ay|geçen\s*hafta|gelecek\s*hafta)\b", re.IGNORECASE),
-    re.compile(r"\b(neler|ne\s*yapacağız|ne\s*yapıyoruz|programım|ajanda)\b", re.IGNORECASE),
+    # Turkish suffixed: bugün→bugünkü, yarın→yarınki, dün→dünkü
+    re.compile(r"\b(bugün\w*|yarın\w*|dün\w*|bu\s*hafta|bu\s*ay|geçen\s*hafta|gelecek\s*hafta)\b", re.IGNORECASE),
+    re.compile(r"\b(neler|ne\s*yapacağız|ne\s*yapıyoruz|program\w*|ajanda)\b", re.IGNORECASE),
     re.compile(r"\b(incele|incel[ea]\w*|gözden\s*geçir)\b", re.IGNORECASE),
     re.compile(r"\b(mailleri?|son\s*mail|gelen\s*kutusu|inbox)\b", re.IGNORECASE),
     re.compile(r"\b(ne\s*yazıyor|ne\s*diyor|ne\s*gelmiş|var\s*mı)\b", re.IGNORECASE),
@@ -66,12 +69,17 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(hat[ıi]rlat|remind|alarm|bildir)\b", re.IGNORECASE),
     # Common Turkish mail/message words (with suffixes)
     re.compile(r"\bmail[a-zıüöğçş]*\b", re.IGNORECASE),
-    re.compile(r"\b(mesaj|mesajlar[ıi]?|ileti)\b", re.IGNORECASE),
+    # Turkish suffixed: posta→postalar/postalarım, mesaj→mesajları
+    re.compile(r"\b(posta\w*|mesaj\w*|ileti\w*)\b", re.IGNORECASE),
     re.compile(r"\b(görüntüle|görüntüleyebil|söyle|söyler?\s*m[iı]s[iı]n)\b", re.IGNORECASE),
     re.compile(r"\b(okunmuş|okunmam[ıi]ş|okunan|okunmayan|unread)\b", re.IGNORECASE),
     re.compile(r"\b(at|atma[nk]?[ıi]?|diyelim|de)\b", re.IGNORECASE),
     re.compile(r"\b(konu|adres[a-zıüöğçş]*)\b", re.IGNORECASE),
     re.compile(r"\b(kontro[lr]|kontorl)\b", re.IGNORECASE),  # common typo tolerance
+    # Action verbs missing from original list
+    re.compile(r"\b(anlat\w*|anlatır?\s*m[iı]s[iı]n)\b", re.IGNORECASE),
+    # Adjectives that imply tool context
+    re.compile(r"\b(önemli|acil|yıldızlı|okunmamış)\b", re.IGNORECASE),
 ]
 
 # ── Issue #1002: Calendar write intents that should have date/time ───
