@@ -1060,6 +1060,25 @@ ASSISTANT (sadece JSON):"""
                 sections_used["dialog"] = used
                 remaining = max(0, remaining - used)
 
+        # Issue #1276: Inject active entity context for cross-turn slot tracking
+        # Placed after dialog summary, before retrieved memory (medium priority).
+        # Budget: ~100 tokens max, only present when an active entity exists.
+        if session_context and remaining > 50:
+            _entity_ctx = None
+            if isinstance(session_context, dict):
+                _entity_ctx = session_context.pop("active_entity", None)
+            if _entity_ctx:
+                entity_header = "ACTIVE_ENTITY (önceki turda oluşturulan/değiştirilen varlık):\n"
+                entity_overhead = _estimate_tokens(entity_header) + 1
+                entity_allow = min(100, max(0, remaining - entity_overhead))
+                entity_str = str(_entity_ctx)
+                entity_trimmed = _trim_to_tokens(entity_str, entity_allow)
+                if entity_trimmed:
+                    lines.append(f"{entity_header}{entity_trimmed}\n")
+                    used = entity_overhead + _estimate_tokens(entity_trimmed)
+                    sections_used["entity"] = used
+                    remaining = max(0, remaining - used)
+
         # Add retrieved memories (priority: medium)
         memory_budget = min(section_budgets.get("memory", remaining // 2), remaining)
         if retrieved_memory and memory_budget > 0:

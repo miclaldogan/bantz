@@ -7,12 +7,288 @@ for LLM-first orchestrator architecture.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from bantz.brain.anaphora import ReferenceTable
     from bantz.brain.disambiguation import DisambiguationRequest
+
+logger = logging.getLogger(__name__)
+
+# ── Issue #1276: Cross-Turn Slot Tracking ────────────────────────────
+# EntitySlot holds a tracked entity (calendar event, gmail message, etc.)
+# that can be referenced in follow-up turns via pronouns or ordinals.
+# SlotRegistry manages active entities with TTL-based expiry.
+
+# Mapping from tool name (prefix) to entity type
+_TOOL_ENTITY_TYPE_MAP: dict[str, str] = {
+    "calendar.create_event": "calendar_event",
+    "calendar.update_event": "calendar_event",
+    "calendar.get_event": "calendar_event",
+    "calendar.list_events": "calendar_events",
+    "gmail.send": "gmail_message",
+    "gmail.reply": "gmail_message",
+    "gmail.read_message": "gmail_message",
+    "gmail.list_messages": "gmail_messages",
+    "gmail.smart_search": "gmail_messages",
+    "system.": "system",
+}
+
+# Keys to extract from tool results as entity slots
+_ENTITY_SLOT_KEYS: dict[str, list[str]] = {
+    "calendar_event": ["id", "summary", "start", "end", "location", "htmlLink", "all_day"],
+    "calendar_events": ["events"],
+    "gmail_message": ["message_id", "id", "to", "subject", "from"],
+    "gmail_messages": ["messages"],
+    "system": [],
+}
+
+# Default TTL (number of turns before entity expires)
+_ENTITY_TTL: int = 5
+
+
+@dataclass
+class EntitySlot:
+    """A tracked entity that can be referenced across turns.
+
+    Holds structured data (id + slots) extracted from tool results
+    so follow-up turns like "saatini değiştir" can resolve to the
+    concrete entity without re-querying.
+    """
+
+    entity_type: str            # e.g. "calendar_event", "gmail_message"
+    entity_id: Optional[str]    # primary key (event_id, message_id, …)
+    slots: dict[str, Any]       # extracted fields (summary, start, end, …)
+    source_tool: str            # tool that produced this entity
+    created_at_turn: int        # turn number when entity was created
+    ttl: int = _ENTITY_TTL      # turns until auto-expiry
+
+    @property
+    def age(self) -> int:
+        """Return how many turns old relative to creation (set externally)."""
+        return 0  # computed by SlotRegistry
+
+    def is_expired(self, current_turn: int) -> bool:
+        """Check if entity has exceeded its TTL."""
+        return (current_turn - self.created_at_turn) >= self.ttl
+
+    def to_prompt_dict(self) -> dict[str, Any]:
+        """Compact representation for LLM prompt injection."""
+        d: dict[str, Any] = {"type": self.entity_type}
+        if self.entity_id:
+            d["id"] = self.entity_id
+        # Only include non-empty slots
+        compact_slots = {k: v for k, v in self.slots.items() if v}
+        if compact_slots:
+            d.update(compact_slots)
+        return d
+
+
+class SlotRegistry:
+    """Registry for cross-turn entity tracking (Issue #1276).
+
+    Maintains an *active entity* (the most recently created/modified entity)
+    and a small history of recent entities for multi-entity workflows.
+
+    Active entity is injected into the LLM prompt so follow-up turns
+    (e.g. "saatini 5'e değiştir") can resolve to the concrete entity_id.
+    """
+
+    def __init__(self, max_entities: int = 10, default_ttl: int = _ENTITY_TTL):
+        self._active: Optional[EntitySlot] = None
+        self._entities: dict[str, EntitySlot] = {}  # keyed by entity_id
+        self._max_entities = max_entities
+        self._default_ttl = default_ttl
+
+    # ── Public API ───────────────────────────────────────────────────
+
+    def register(self, entity: EntitySlot) -> None:
+        """Register a new entity and set it as active."""
+        self._active = entity
+        if entity.entity_id:
+            self._entities[entity.entity_id] = entity
+            # Evict oldest if over capacity
+            if len(self._entities) > self._max_entities:
+                oldest_key = min(
+                    self._entities,
+                    key=lambda k: self._entities[k].created_at_turn,
+                )
+                del self._entities[oldest_key]
+        logger.debug(
+            "[SlotRegistry] Registered entity: type=%s id=%s tool=%s",
+            entity.entity_type, entity.entity_id, entity.source_tool,
+        )
+
+    def get_active(self) -> Optional[EntitySlot]:
+        """Return the currently active entity (may be None or expired)."""
+        return self._active
+
+    def get_by_id(self, entity_id: str) -> Optional[EntitySlot]:
+        """Lookup entity by its primary key."""
+        return self._entities.get(entity_id)
+
+    def expire_stale(self, current_turn: int) -> int:
+        """Remove entities that have exceeded their TTL.
+
+        Returns the number of expired entities.
+        """
+        expired_keys = [
+            k for k, e in self._entities.items()
+            if e.is_expired(current_turn)
+        ]
+        for k in expired_keys:
+            del self._entities[k]
+        if self._active and self._active.is_expired(current_turn):
+            logger.debug(
+                "[SlotRegistry] Active entity expired: type=%s id=%s (turn %d, created %d, ttl %d)",
+                self._active.entity_type, self._active.entity_id,
+                current_turn, self._active.created_at_turn, self._active.ttl,
+            )
+            self._active = None
+        return len(expired_keys)
+
+    def to_prompt_block(self) -> str:
+        """Render active entity as a compact prompt block for LLM injection.
+
+        Target: ~50-100 tokens to stay within context budget.
+        Returns empty string if no active entity.
+        """
+        if not self._active:
+            return ""
+        d = self._active.to_prompt_dict()
+        try:
+            block = json.dumps(d, ensure_ascii=False)
+        except (TypeError, ValueError):
+            block = str(d)
+        # Hard cap at 400 chars (~100 tokens)
+        if len(block) > 400:
+            block = block[:400] + "…"
+        return block
+
+    def clear(self) -> None:
+        """Clear all tracked entities."""
+        self._active = None
+        self._entities.clear()
+
+    @property
+    def active_entity_type(self) -> str:
+        """Return the type of the active entity, or empty string."""
+        return self._active.entity_type if self._active else ""
+
+    @property
+    def active_entity_id(self) -> Optional[str]:
+        """Return the ID of the active entity, or None."""
+        return self._active.entity_id if self._active else None
+
+    def __len__(self) -> int:
+        return len(self._entities)
+
+    def __repr__(self) -> str:
+        active_id = self._active.entity_id if self._active else None
+        return f"<SlotRegistry active={active_id} total={len(self._entities)}>"
+
+
+def extract_entity_from_tool_result(
+    tool_name: str,
+    result_raw: Any,
+    current_turn: int,
+    ttl: int = _ENTITY_TTL,
+) -> Optional[EntitySlot]:
+    """Extract an EntitySlot from a successful tool result.
+
+    Inspects the tool name to determine entity type and extracts
+    relevant fields (id, summary, start, end, etc.) from the raw result.
+
+    Returns None if the tool is not entity-producing or result is invalid.
+    """
+    # Determine entity type from tool name
+    entity_type: Optional[str] = None
+    for prefix, etype in _TOOL_ENTITY_TYPE_MAP.items():
+        if tool_name == prefix or tool_name.startswith(prefix):
+            entity_type = etype
+            break
+    if not entity_type:
+        return None
+
+    if not isinstance(result_raw, dict):
+        return None
+
+    # Skip failed results
+    if not result_raw.get("ok", True):
+        return None
+
+    # Determine entity_id and slots based on type
+    entity_id: Optional[str] = None
+    slots: dict[str, Any] = {}
+
+    slot_keys = _ENTITY_SLOT_KEYS.get(entity_type, [])
+
+    if entity_type == "calendar_event":
+        entity_id = str(result_raw.get("id") or result_raw.get("event_id") or "")
+        for key in slot_keys:
+            val = result_raw.get(key)
+            if val is not None:
+                slots[key] = val
+
+    elif entity_type == "calendar_events":
+        # For list results, track the list itself but don't set a single entity_id
+        events = result_raw.get("events")
+        if isinstance(events, list) and events:
+            # Store first event as entity_id for quick reference
+            first = events[0] if events else {}
+            entity_id = str(first.get("id") or first.get("event_id") or "") if isinstance(first, dict) else None
+            slots["count"] = len(events)
+            # Store compact summaries (max 5)
+            slots["items"] = [
+                {
+                    "id": ev.get("id", ""),
+                    "summary": ev.get("summary", ""),
+                    "start": ev.get("start", ""),
+                }
+                for ev in events[:5]
+                if isinstance(ev, dict)
+            ]
+
+    elif entity_type == "gmail_message":
+        entity_id = str(
+            result_raw.get("message_id")
+            or result_raw.get("id")
+            or ""
+        )
+        for key in slot_keys:
+            val = result_raw.get(key)
+            if val is not None:
+                slots[key] = val
+
+    elif entity_type == "gmail_messages":
+        messages = result_raw.get("messages")
+        if isinstance(messages, list) and messages:
+            first = messages[0] if messages else {}
+            entity_id = str(first.get("id") or "") if isinstance(first, dict) else None
+            slots["count"] = len(messages)
+            slots["items"] = [
+                {
+                    "id": m.get("id", ""),
+                    "from": m.get("from", ""),
+                    "subject": m.get("subject", ""),
+                }
+                for m in messages[:5]
+                if isinstance(m, dict)
+            ]
+
+    if not entity_id:
+        return None
+
+    return EntitySlot(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        slots=slots,
+        source_tool=tool_name,
+        created_at_turn=current_turn,
+        ttl=ttl,
+    )
 
 
 @dataclass
@@ -81,6 +357,11 @@ class OrchestratorState:
     # iterations so the LLM can see what happened and decide next action.
     react_observations: list[dict[str, Any]] = field(default_factory=list)
     react_iteration: int = 0  # current ReAct iteration within a turn
+
+    # Issue #1276: Cross-turn entity/slot tracking
+    # SlotRegistry holds entities extracted from tool results so follow-up
+    # turns can resolve pronouns ("saatini değiştir") to concrete entity IDs.
+    slot_registry: SlotRegistry = field(default_factory=SlotRegistry)
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue).
@@ -239,6 +520,10 @@ class OrchestratorState:
         # Issue #1273: Include ReAct observations if mid-loop
         if self.react_observations:
             ctx["react_observations"] = list(self.react_observations)
+        # Issue #1276: Include active entity context for cross-turn slot tracking
+        entity_block = self.slot_registry.to_prompt_block()
+        if entity_block:
+            ctx["entity_context"] = entity_block
         return ctx
     
     def reset(self) -> None:
@@ -263,3 +548,4 @@ class OrchestratorState:
         self.canonical_input = ""
         self.react_observations = []
         self.react_iteration = 0
+        self.slot_registry.clear()
