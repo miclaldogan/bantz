@@ -764,3 +764,125 @@ class RunTracker:
                 params.append(val)
         where = ("WHERE " + " AND ".join(parts)) if parts else ""
         return where, params
+
+    # ── Sync API (for orchestrator integration) ───────────────────
+
+    def initialise_sync(self) -> None:
+        """Synchronous version of :meth:`initialise`.
+
+        Identical logic but callable from sync code (no event loop needed).
+        """
+        path = Path(self._db_path)
+        if str(path) != ":memory:":
+            path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(
+            str(path),
+            check_same_thread=False,
+            isolation_level="DEFERRED",
+        )
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.executescript(_SCHEMA_SQL)
+        self._conn.commit()
+        logger.info("[RunTracker] DB ready at %s (sync)", self._db_path)
+
+    def start_run(
+        self,
+        user_input: str,
+        session_id: Optional[str] = None,
+    ) -> Run:
+        """Create a pending run row and return the :class:`Run` to fill.
+
+        The caller should populate ``run.route``, ``run.intent``, etc.
+        during execution and call :meth:`end_run` when done.
+        """
+        run = Run(
+            run_id=str(uuid4()),
+            user_input=user_input,
+            session_id=session_id,
+        )
+        run._tracker = self
+        self._save_run_sync(run)
+        return run
+
+    def end_run(self, run: Run, *, status: Optional[str] = None) -> None:
+        """Finalise a tracked run — compute latency, set status, persist."""
+        run.latency_ms = int((time.monotonic() - run._start) * 1000)
+        if status:
+            run.status = status
+        elif run.status == "pending":
+            run.status = "success"
+        self._save_run_sync(run)
+
+    def record_tool_call(
+        self,
+        run_id: str,
+        tool_name: str,
+        params: Optional[Dict[str, Any]] = None,
+        *,
+        result: Any = None,
+        result_summary: Optional[str] = None,
+        error: Optional[str] = None,
+        latency_ms: int = 0,
+        confirmation: str = "auto",
+        status: Optional[str] = None,
+    ) -> ToolCall:
+        """Record a completed tool call in one shot (sync).
+
+        Returns the persisted :class:`ToolCall`.
+        """
+        raw = ""
+        if result is not None:
+            raw = json.dumps(result, default=str) if not isinstance(result, str) else result
+        result_hash = hashlib.sha256(raw.encode()).hexdigest()[:16] if raw else None
+
+        if not result_summary and raw:
+            result_summary = raw[:500] if len(raw) <= 500 else raw[:497] + "..."
+
+        tc = ToolCall(
+            call_id=str(uuid4()),
+            run_id=run_id,
+            tool_name=tool_name,
+            params=json.dumps(params, default=str) if params else None,
+            result_hash=result_hash if not error else None,
+            result_summary=result_summary,
+            latency_ms=latency_ms,
+            status=status or ("error" if error else "success"),
+            error=error,
+            confirmation=confirmation,
+        )
+        self._save_tool_call_sync(tc)
+        return tc
+
+    def _save_run_sync(self, run: Run) -> None:
+        conn = self._ensure_conn()
+        conn.execute(
+            """INSERT OR REPLACE INTO runs
+               (run_id, user_input, route, intent, final_output, model,
+                total_tokens, latency_ms, status, error, session_id, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                run.run_id, run.user_input, run.route, run.intent,
+                run.final_output, run.model, run.total_tokens,
+                run.latency_ms, run.status, run.error,
+                run.session_id, run.created_at,
+            ),
+        )
+        conn.commit()
+
+    def _save_tool_call_sync(self, tc: ToolCall) -> None:
+        conn = self._ensure_conn()
+        conn.execute(
+            """INSERT OR REPLACE INTO tool_calls
+               (call_id, run_id, tool_name, params, result_hash,
+                result_summary, latency_ms, status, error,
+                confirmation, retry_count, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                tc.call_id, tc.run_id, tc.tool_name, tc.params,
+                tc.result_hash, tc.result_summary, tc.latency_ms,
+                tc.status, tc.error, tc.confirmation, tc.retry_count,
+                tc.created_at,
+            ),
+        )
+        conn.commit()
