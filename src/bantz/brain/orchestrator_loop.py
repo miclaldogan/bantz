@@ -72,6 +72,73 @@ def _turkish_lower(s: str) -> str:
     return s.lower().replace("\u0307", "")
 
 
+# ── Issue #event-time-ref: Turkish time reference → hour mapping ─────
+_TR_WORD_TO_HOUR: dict[str, int] = {
+    "bir": 1, "iki": 2, "üç": 3, "dört": 4, "beş": 5, "altı": 6,
+    "yedi": 7, "sekiz": 8, "dokuz": 9, "on": 10, "onbir": 11, "oniki": 12,
+    "on bir": 11, "on iki": 12,
+}
+# Matches: "9'daki", "9daki", "dokuzda", "dokuzdaki", "3'teki", "üçteki"
+_TIME_REF_RE = re.compile(
+    r"(?:(\d{1,2})\s*[''']?\s*(?:da|de|te|ta|daki|deki|taki|teki)\w*)"
+    r"|(?:(bir|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on\s*bir|on\s*iki|on)\s*"
+    r"(?:da|de|te|ta|daki|deki|taki|teki)\w*)",
+    re.IGNORECASE,
+)
+
+
+def _resolve_event_by_time_ref(
+    user_input: str,
+    listed_events: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Resolve a Turkish time reference to an event from the listed events.
+
+    Matches "9'daki etkinliği", "dokuzdaki toplantıyı" etc. against event
+    start times.  Returns the matching event dict or None.
+    """
+    if not listed_events:
+        return None
+    text = _turkish_lower(user_input or "")
+    m = _TIME_REF_RE.search(text)
+    if not m:
+        return None
+
+    target_hour: int | None = None
+    if m.group(1):  # numeric: "9'daki"
+        try:
+            target_hour = int(m.group(1))
+        except ValueError:
+            return None
+    elif m.group(2):  # word: "dokuzda"
+        word = m.group(2).strip()
+        target_hour = _TR_WORD_TO_HOUR.get(word)
+
+    if target_hour is None:
+        return None
+
+    # Normalize hour to 24h — assume business hours (8-22)
+    # If target_hour < 8, assume PM (e.g. 3 → 15)
+    if target_hour < 8:
+        target_hour += 12
+
+    # Match against listed events by start hour
+    for ev in listed_events:
+        start = ev.get("start") or ""
+        # start can be ISO datetime "2025-01-15T09:00:00+03:00" or dict
+        if isinstance(start, dict):
+            start = start.get("dateTime") or start.get("date") or ""
+        if not isinstance(start, str):
+            continue
+        # Extract hour from ISO string
+        t_match = re.search(r"T(\d{2}):\d{2}", start)
+        if t_match:
+            event_hour = int(t_match.group(1))
+            if event_hour == target_hour:
+                return ev
+
+    return None
+
+
 def _fuzzy_token_match(keyword: str, text: str, threshold: float = 0.75) -> bool:
     """Check if *keyword* fuzzy-matches any word in *text*.
 
@@ -1489,9 +1556,20 @@ class OrchestratorLoop:
         # NLU slots (Turkish time parser etc.) are authoritative — LLM slots
         # are overridden only for keys that NLU confidently extracted.
         _nlu_merged = session_context.get("nlu_slots") or {}
-        if _nlu_merged and output.slots is not None:
+        if _nlu_merged:
+            # Ensure slots dict exists — LLM may return slots=None
+            if output.slots is None:
+                output = replace(output, slots={})
+            # Known LLM default titles that should be treated as empty
+            _TITLE_DEFAULTS = {"etkinlik", "event", "meeting", "toplantı etkinliği"}
             for _nk, _nv in _nlu_merged.items():
-                if _nk not in output.slots or not output.slots[_nk]:
+                _existing = output.slots.get(_nk)
+                _treat_empty = not _existing
+                # For "title": also override if LLM returned a generic default
+                if _nk == "title" and isinstance(_existing, str):
+                    if _existing.strip().lower() in _TITLE_DEFAULTS:
+                        _treat_empty = True
+                if _nk not in output.slots or _treat_empty:
                     output.slots[_nk] = _nv
             if "time" in _nlu_merged:
                 # Time from NLU's Turkish parser is more reliable than LLM guess
@@ -1504,6 +1582,35 @@ class OrchestratorLoop:
         # Use original Turkish text — email send patterns are Turkish.
         _email_text = state.current_user_input or user_input
         output = self._post_route_correction_email_send(_email_text, output)
+
+        # Issue #gmail-to: Gmail slot enrichment — when LLM correctly routes
+        # to gmail/send but fails to extract the email address from user input
+        # into gmail.to, regex-extract it here BEFORE plan_verifier blocks it.
+        if (
+            getattr(output, "route", "") == "gmail"
+            and getattr(output, "gmail_intent", "") in ("send", "create_draft", "forward")
+        ):
+            _gmail_obj = dict(getattr(output, "gmail", None) or {})
+            if not _gmail_obj.get("to"):
+                _extracted_email = extract_first_email(_email_text)
+                if _extracted_email:
+                    _gmail_obj["to"] = _extracted_email
+                    _slots = dict(output.slots or {})
+                    _slots.setdefault("to", _extracted_email)
+                    output = replace(output, gmail=_gmail_obj, slots=_slots)
+                    logger.info(
+                        "[GMAIL_ENRICH] Extracted to=%s from user input",
+                        _extracted_email,
+                    )
+            # Also enrich subject from user input if missing
+            if not _gmail_obj.get("subject"):
+                from bantz.brain.post_route_corrections import extract_subject_hint
+                _subj = extract_subject_hint(_email_text)
+                if _subj:
+                    _gmail_obj["subject"] = _subj
+                    _slots = dict(output.slots or {})
+                    _slots.setdefault("subject", _subj)
+                    output = replace(output, gmail=_gmail_obj, slots=_slots)
 
         # Issue #1212: Anaphoric follow-up recovery.
         # When user says "nelermiş onlar", "bunları özetle" etc. after a tool
@@ -1690,6 +1797,7 @@ class OrchestratorLoop:
             and output.route == "calendar"
             and output.calendar_intent in ("cancel", "modify", "query")
         ):
+            _event_resolved = False
             try:
                 from bantz.brain.calendar_intent import parse_hash_ref_index
                 _ref_idx = parse_hash_ref_index(user_input)
@@ -1716,8 +1824,40 @@ class OrchestratorLoop:
                                 "resolved_event_id": _ref_event_id,
                             },
                         )
+                        _event_resolved = True
             except Exception as _ref_exc:
                 logger.debug("[Issue #1224] Calendar ref resolution failed: %s", _ref_exc)
+
+            # Issue #event-time-ref: Time-based event resolution.
+            # When user says "9'daki etkinliği iptal et" (the event at 9),
+            # extract the hour from Turkish text and match against listed
+            # events' start times.
+            if not _event_resolved:
+                _time_ref_text = state.current_user_input or user_input
+                _resolved_event = _resolve_event_by_time_ref(
+                    _time_ref_text, state.calendar_listed_events,
+                )
+                if _resolved_event:
+                    _rev_id = _resolved_event.get("id") or _resolved_event.get("event_id")
+                    if _rev_id:
+                        logger.info(
+                            "[EVENT_TIME_REF] Resolved time ref → event_id=%s summary=%s",
+                            _rev_id, _resolved_event.get("summary", ""),
+                        )
+                        _new_slots = {**(output.slots or {}), "event_id": _rev_id}
+                        _rev_title = _resolved_event.get("summary") or _resolved_event.get("title") or ""
+                        if _rev_title:
+                            _new_slots.setdefault("title", _rev_title)
+                        output = replace(
+                            output,
+                            slots=_new_slots,
+                            raw_output={
+                                **output.raw_output,
+                                "calendar_ref_resolved": True,
+                                "resolved_event_id": _rev_id,
+                                "time_ref_resolved": True,
+                            },
+                        )
 
         if self.config.debug:
             logger.debug(f"[ORCHESTRATOR] LLM Decision:")
@@ -1762,6 +1902,48 @@ class OrchestratorLoop:
 
         # Issue #870: Sanitize tool_plan — remap hallucinated/mismatched tools
         output = self._sanitize_tool_plan(output)
+
+        # Issue #calendar-misroute: Calendar post-route correction.
+        # When the 3B model routes a clear calendar intent to a wrong domain
+        # (gmail, smalltalk, unknown) WITH wrong tools, the plan_verifier
+        # will catch route_tool_mismatch but infer_route_from_tools will
+        # suggest the wrong domain (based on wrong tools).  Fix it here by
+        # detecting calendar keywords and overriding route+tools.
+        _cal_check_text = state.current_user_input or user_input
+        if output.route in ("smalltalk", "unknown", "gmail"):
+            _kw_route = self.orchestrator._detect_route_from_input(_cal_check_text)
+            if _kw_route == "calendar":
+                # Calendar keywords dominate — override route and tool_plan
+                _cal_intent = "create"  # default; refine if we can
+                _cancel_words = {"iptal", "sil", "kaldır", "vazgeç"}
+                _query_words = {"ne var", "neler", "göster", "listele", "kontrol"}
+                _cal_check_lower = _cal_check_text.lower()
+                _cal_tokens = set(re.split(r"[^a-zçğıöşü]+", _cal_check_lower))
+                if _cal_tokens & _cancel_words:
+                    _cal_intent = "cancel"
+                elif _cal_tokens & _query_words or "ne var" in _cal_check_lower:
+                    _cal_intent = "query"
+                _cal_tool = self.orchestrator._resolve_tool_from_intent(
+                    "calendar", _cal_intent, "none",
+                )
+                if _cal_tool:
+                    logger.info(
+                        "[CALENDAR_MISROUTE] Overriding route=%s→calendar "
+                        "intent=%s tool=%s for '%.40s'",
+                        output.route, _cal_intent, _cal_tool, _cal_check_text,
+                    )
+                    output = replace(
+                        output,
+                        route="calendar",
+                        calendar_intent=_cal_intent,
+                        tool_plan=[_cal_tool],
+                        confidence=max(output.confidence, 0.5),
+                        raw_output={
+                            **output.raw_output,
+                            "calendar_misroute_recovery": True,
+                            "original_route": output.route,
+                        },
+                    )
 
         # Issue #907: Static plan verification
         from bantz.brain.llm_router import JarvisLLMOrchestrator

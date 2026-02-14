@@ -65,6 +65,18 @@ def _reset_router_class_state():
     JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
 
 
+@pytest.fixture(autouse=True)
+def _disable_bridge_for_golden_flows(monkeypatch):
+    """Disable language bridge in golden flow tests.
+
+    These tests use mock LLMs with Turkish keyword matching.  The bridge
+    singleton can be cached from earlier tests, translating Turkish to
+    English and breaking the keyword match.  Disable both gates.
+    """
+    monkeypatch.setenv("BANTZ_BRIDGE_INPUT_GATE", "0")
+    monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", "0")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Shared helpers
 # ═══════════════════════════════════════════════════════════════════════════

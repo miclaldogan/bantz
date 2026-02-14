@@ -249,10 +249,23 @@ class SafetyGuard:
                         return False, f"Field '{fld}' must be integer, got bool"
                     if isinstance(value, str):
                         # LLM often returns "30" instead of 30 — coerce gracefully
-                        try:
-                            params[fld] = int(value)
-                        except (ValueError, TypeError):
-                            return False, f"Field '{fld}' must be integer, got non-numeric string"
+                        # Issue #duration: Also handle "H:MM" / "HH:MM" time-format
+                        # strings for duration fields (e.g. "0:30" → 30 minutes).
+                        _coerced = False
+                        if ":" in value:
+                            _parts = value.strip().split(":")
+                            if len(_parts) == 2:
+                                try:
+                                    _h, _m = int(_parts[0]), int(_parts[1])
+                                    params[fld] = _h * 60 + _m
+                                    _coerced = True
+                                except (ValueError, TypeError):
+                                    pass
+                        if not _coerced:
+                            try:
+                                params[fld] = int(value)
+                            except (ValueError, TypeError):
+                                return False, f"Field '{fld}' must be integer, got non-numeric string"
                     elif not isinstance(value, int):
                         return False, f"Field '{fld}' must be integer, got {type(value).__name__}"
                 elif expected_type == "number" and (isinstance(value, bool) or not isinstance(value, (int, float))):

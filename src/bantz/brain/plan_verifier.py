@@ -51,8 +51,9 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(listele|göster\w*|bak\w*|list|show)\b", re.IGNORECASE),
     re.compile(r"\b(gönder|yolla|send|e-?posta)\b", re.IGNORECASE),
     re.compile(r"\b(oku|read|aç|open)\b", re.IGNORECASE),
-    re.compile(r"\b(takvim|calendar|toplantı|meeting|randevu)\b", re.IGNORECASE),
-    re.compile(r"\b(saat\s*kaç\w*|what time|tarih|date)\b", re.IGNORECASE),
+    re.compile(r"\b(takvim|calendar|toplantı\w*|meeting|randevu)\b", re.IGNORECASE),
+    # Typo tolerance: "saat kaö" for "saat kaç"
+    re.compile(r"\b(saat\s*ka[çö]\w*|what time|tarih|date)\b", re.IGNORECASE),
     # Turkish suffixed forms: planımız/planımı/planım, etkinlik/etkinlikleri
     re.compile(r"\b(kontrol\s*et|plan\w*|etkinlik\w*|ne\s*var)\b", re.IGNORECASE),
     # Temporal / schedule query indicators
@@ -80,6 +81,14 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(anlat\w*|anlatır?\s*m[iı]s[iı]n)\b", re.IGNORECASE),
     # Adjectives that imply tool context
     re.compile(r"\b(önemli|acil|yıldızlı|okunmamış)\b", re.IGNORECASE),
+    # Cancel/delete with suffixes: iptal→iptal et, iptali
+    re.compile(r"\b(iptal\w*|vazgeç\w*)\b", re.IGNORECASE),
+    # Follow-up / continuation verbs
+    re.compile(r"\b(devam\s*et|detay\w*|ayrıntı\w*)\b", re.IGNORECASE),
+    # Number + Turkish suffix for calendar event refs: "9'daki", "3teki"
+    re.compile(r"\b\d{1,2}\s*[''']?\s*(?:da|de|ta|te|daki|deki|taki|teki)\w*\b", re.IGNORECASE),
+    # Declarative calendar intent: "olacak" (will be/happen)
+    re.compile(r"\b(olacak|olacağım|olacağız|var\w*)\b", re.IGNORECASE),
 ]
 
 # ── Issue #1002: Calendar write intents that should have date/time ───
