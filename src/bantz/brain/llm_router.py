@@ -279,6 +279,9 @@ class OrchestratorOutput:
     # "done" = single-shot (default), "needs_more_info" = continue after tool execution
     status: str = "done"
 
+    # Issue #1279: Hierarchical task decomposition — raw subtask list from LLM
+    subtasks: list[dict[str, Any]] = field(default_factory=list)
+
     @property
     def intent(self) -> str:
         """Generic intent accessor across all routes.
@@ -440,7 +443,11 @@ SAAT: 1-6="sabah" yoksa PM (bir→13, iki→14, üç→15, dört→16, beş→17
     _SYSTEM_PROMPT_DETAIL = """
 GMAIL: gmail.list_messages query="from:X subject:Y after:YYYY/MM/DD". gmail.smart_search natural_query Türkçe ("yıldızlı","sosyal","promosyonlar","önemli").
 SYSTEM: "saat kaç"→time.now, "cpu/ram"→system.status.
-SAAT: beşe→17:00, sabah beşte→05:00, akşam altıda→18:00, öğlen→12:00, gece onbirde→23:00."""
+SAAT: beşe→17:00, sabah beşte→05:00, akşam altıda→18:00, öğlen→12:00, gece onbirde→23:00.
+
+ÇOK ADIMLI GÖREVLER (Issue #1279): Karmaşık istekler için "subtasks" listesi ekle:
+"subtasks":[{"id":1,"goal":"açıklama","tool":"tool_adı","params":{},"depends_on":[]},{"id":2,"goal":"..","tool":"..","params":{"dynamic":true,"from_result_of":1},"depends_on":[1]}]
+Max 5 subtask. Basit isteklerde subtasks ekleme (tool_plan yeter). Sadece birden fazla araç sırayla gerekliyse kullan."""
 
     # ── EXAMPLES BLOCK (~200 tokens) ─── stripped first ─────────────────
     _SYSTEM_PROMPT_EXAMPLES = """
@@ -2067,6 +2074,11 @@ ASSISTANT (sadece JSON):"""
         if _react_status not in ("done", "needs_more_info"):
             _react_status = "done"
 
+        # Issue #1279: Extract subtasks for hierarchical task decomposition
+        _raw_subtasks = parsed.get("subtasks") or []
+        if not isinstance(_raw_subtasks, list):
+            _raw_subtasks = []
+
         return OrchestratorOutput(
             route=route,
             calendar_intent=calendar_intent,
@@ -2085,6 +2097,7 @@ ASSISTANT (sadece JSON):"""
             reasoning_summary=reasoning_summary,
             raw_output=parsed,
             status=_react_status,
+            subtasks=_raw_subtasks,
         )
 
     def _fallback_output(self, user_input: str, error: str) -> OrchestratorOutput:
