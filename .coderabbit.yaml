@@ -1,0 +1,95 @@
+# CodeRabbit Configuration
+# Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
+# Install: https://github.com/marketplace/coderabbitai
+
+language: "tr"  # Review dilini Türkçe yap (İngilizce istersen "en" yap)
+
+reviews:
+  # Her PR'da otomatik review başlat
+  auto_review:
+    enabled: true
+    # Draft PR'ları inceleme, sadece ready olanları
+    drafts: false
+    # Base branch'ler — sadece dev ve main'e açılan PR'ları incele
+    base_branches:
+      - "dev"
+      - "main"
+      - "master"
+
+  # Review profili — assertive = daha detaylı, chill = sadece önemli şeyler
+  profile: "assertive"
+
+  # Yüksek düzey özet oluştur
+  high_level_summary: true
+  # PR açıklamasına summary ekle
+  auto_title_placeholder: "[CodeRabbit]"
+
+  # Poem (şiir) eklemesin 😄
+  poem: false
+
+  # Review scope — nelere baksın
+  request_changes_workflow: true
+  collapse_walkthrough: false
+  sequence_diagrams: true
+
+  # Path filtreleri — bunları incelemesin
+  path_filters:
+    - "!artifacts/**"
+    - "!docs/benchmarks/**"
+    - "!**/*.png"
+    - "!**/*.svg"
+    - "!**/*.jpg"
+    - "!**/*.ico"
+    - "!**/package-lock.json"
+    - "!**/yarn.lock"
+
+  # Path-specific instructions
+  path_instructions:
+    - path: "src/bantz/brain/**"
+      instructions: |
+        Bu dizin Bantz'ın beyin katmanıdır (orchestrator, router, finalizer).
+        - Thread-safety kritik: threading.Lock kullanımını kontrol et
+        - Tüm LLM çağrıları try/except ile sarılmalı
+        - orchestrator_loop.py değişikliklerinde dikkatli ol, production kodu
+    - path: "src/bantz/data/**"
+      instructions: |
+        Data platform katmanı. SQLite-backed, WAL journal mode.
+        - Thread-safety kontrol et (self._lock kullanımı)
+        - TTL ve expires_at hesaplamalarını doğrula
+        - Fingerprint hesaplamaları deterministic olmalı (sort_keys=True)
+    - path: "src/bantz/skills/**"
+      instructions: |
+        Tool/skill modülleri. Her skill bir tool_schema döner.
+        - Google API rate limit handling kontrol et
+        - Credential/token bilgileri hardcoded olmamalı
+        - Her public fonksiyon docstring'e sahip olmalı
+    - path: "tests/**"
+      instructions: |
+        Test dosyaları. pytest + pytest-asyncio kullanılıyor.
+        - Mock'lar doğru scope'da olmalı (function/class/module)
+        - Async testler @pytest.mark.asyncio ile işaretlenmeli
+        - Flaky test riski varsa belirt
+    - path: "config/**"
+      instructions: |
+        Konfigürasyon dosyaları. Hassas bilgi içermemeli.
+        - Secrets/tokens/passwords olmamalı
+        - Example dosyalar (.example) güncel olmalı
+
+chat:
+  auto_reply: true
+
+# Öğrenme — reviewer feedback'inden öğrensin
+knowledge_base:
+  learnings:
+    scope: "auto"       # PR'lardaki 👍/👎'den öğren
+  jira:
+    project_keys: []    # Jira kullanmıyoruz şu an
+  linear:
+    team_keys: []       # Linear kullanmıyoruz şu an
+
+# Tonalite
+tone_instructions: |
+  Türkçe review yap. Kısa ve net ol.
+  Kritik bug/security bulduğunda "🚨 KRİTİK:" prefix'i kullan.
+  Küçük stil önerileri için "💡 Öneri:" prefix'i kullan.
+  Her review'un sonunda "Genel Değerlendirme: ✅/⚠️/❌" ver.

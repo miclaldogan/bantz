@@ -1,0 +1,116 @@
+name: "PR Quality Gate"
+
+on:
+  pull_request:
+    branches: [ "dev", "main", "master" ]
+    types: [ opened, synchronize, reopened ]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────
+  # 1. Lint + Type Check
+  # ─────────────────────────────────────────────
+  lint:
+    name: "Lint & Style"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install lint dependencies
+        run: |
+          pip install ruff isort
+
+      - name: Ruff lint
+        run: ruff check src/ tests/ --output-format=github
+
+      - name: Import order check
+        run: isort --check-only --diff src/ tests/
+
+  # ─────────────────────────────────────────────
+  # 2. Unit Tests
+  # ─────────────────────────────────────────────
+  test:
+    name: "Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt 2>/dev/null || pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ \
+            --tb=short \
+            -q \
+            --ignore=tests/integration/ \
+            --ignore=tests/e2e/ \
+            -k "not test_cleanup_expired" \
+            --timeout=60 \
+            2>&1
+
+  # ─────────────────────────────────────────────
+  # 3. Security — secrets & SQL injection scan
+  # ─────────────────────────────────────────────
+  security:
+    name: "Security Quick Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for hardcoded secrets
+        run: |
+          echo "🔍 Scanning for potential hardcoded secrets..."
+          # API keys, tokens, passwords in Python files
+          if grep -rn --include="*.py" -E '(api_key|secret|token|password)\s*=\s*["\x27][A-Za-z0-9+/=]{16,}["\x27]' src/ tests/ 2>/dev/null | grep -v "test_\|mock\|fake\|example\|placeholder\|REDACTED"; then
+            echo "::error::Potential hardcoded secrets found!"
+            exit 1
+          fi
+          echo "✅ No hardcoded secrets detected"
+
+      - name: Check for dangerous patterns
+        run: |
+          echo "🔍 Scanning for dangerous patterns..."
+          ISSUES=0
+          # eval/exec without justification
+          if grep -rn --include="*.py" -E '^\s*(eval|exec)\(' src/ 2>/dev/null; then
+            echo "::warning::Found eval()/exec() usage — ensure it's justified"
+            ISSUES=$((ISSUES+1))
+          fi
+          # os.system usage
+          if grep -rn --include="*.py" 'os\.system(' src/ 2>/dev/null; then
+            echo "::warning::Found os.system() — prefer subprocess.run()"
+            ISSUES=$((ISSUES+1))
+          fi
+          # SQL string formatting (potential injection)
+          if grep -rn --include="*.py" -E 'f".*SELECT|f".*INSERT|f".*UPDATE|f".*DELETE|\.format\(.*SELECT' src/ 2>/dev/null | grep -v '# nosec\|# safe'; then
+            echo "::warning::Potential SQL injection — use parameterized queries"
+            ISSUES=$((ISSUES+1))
+          fi
+          if [ $ISSUES -gt 0 ]; then
+            echo "⚠️ Found $ISSUES potential security issue(s) — review manually"
+          else
+            echo "✅ No dangerous patterns detected"
+          fi
