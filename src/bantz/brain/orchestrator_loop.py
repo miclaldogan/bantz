@@ -2549,9 +2549,9 @@ class OrchestratorLoop:
         # the finalizer usually produces Turkish output (via Gemini prompt).
         # However, when the fast/quality finalizer returns English or
         # mixed-language text, the Output Gate translates it back to TR.
-        # Gated by BANTZ_BRIDGE_OUTPUT_GATE env var (default: false).
+        # Gated by BANTZ_BRIDGE_OUTPUT_GATE env var (default: enabled).
         if (
-            os.environ.get("BANTZ_BRIDGE_OUTPUT_GATE", "").lower()
+            os.environ.get("BANTZ_BRIDGE_OUTPUT_GATE", "1").lower()
             in ("1", "true", "yes")
             and state.detected_lang == "tr"
         ):
