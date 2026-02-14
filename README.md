@@ -27,7 +27,7 @@
 
 ## What is Bantz?
 
-Bantz is a **local-first AI assistant** that runs on your Linux desktop and actually *does things* — manages your calendar, reads your email, controls your browser, runs system commands, and more. It connects a fast local LLM (Ollama) with 75+ registered tools through a structured brain pipeline.
+**Bantz is in active early development.** But here what Bantz is -> Bantz is a **local-first AI assistant** that runs on your Linux desktop and actually *does things* — manages your calendar, reads your email, controls your browser, runs system commands, and more. It connects a fast local LLM (Ollama) with 75+ registered tools through a structured brain pipeline.
 
 Unlike cloud-only assistants, Bantz keeps your data local. Unlike chatbots, Bantz executes real actions with a confirmation firewall for anything destructive.
 
