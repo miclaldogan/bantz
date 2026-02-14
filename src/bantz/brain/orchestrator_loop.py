@@ -262,9 +262,18 @@ class OrchestratorLoop:
             self._memory_tracer = None
 
         # Initialize safety guard (Issue #140)
+        # Issue #1291: Policy Engine v2 — risk tiers, presets, redaction
+        _policy_v2 = None
+        try:
+            from bantz.policy.engine_v2 import PolicyEngineV2
+            _policy_v2 = PolicyEngineV2()
+        except Exception as _pv2_err:
+            logger.debug("[ORCHESTRATOR] PolicyEngineV2 init failed: %s", _pv2_err)
+
         if self.config.enable_safety_guard:
             self.safety_guard = SafetyGuard(
-                policy=self.config.security_policy or ToolSecurityPolicy()
+                policy=self.config.security_policy or ToolSecurityPolicy(),
+                policy_engine_v2=_policy_v2,
             )
         else:
             self.safety_guard = None

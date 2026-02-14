@@ -151,16 +151,40 @@ class SafetyGuard:
         self,
         policy: Optional[ToolSecurityPolicy] = None,
         policy_engine: Optional[PolicyEngine] = None,
+        policy_engine_v2: Optional[Any] = None,
         audit_log_path: Optional[Path] = None,
         audit_retention_days: int = 90,
         sanitizer: Optional[ArgSanitizer] = None,
     ):
         self.policy = policy or ToolSecurityPolicy()
         self.policy_engine = policy_engine
+        self.policy_engine_v2 = policy_engine_v2  # Issue #1291
         self._audit_retention_days = audit_retention_days
         self._audit_logger: Optional[Any] = None
         self._audit_log_path = audit_log_path
         self._sanitizer = sanitizer or ArgSanitizer()
+
+    # ── Issue #1291: PolicyEngineV2 integration ──
+
+    def evaluate_policy(
+        self,
+        tool_name: str,
+        params: Optional[dict[str, Any]] = None,
+        session_id: str = "default",
+    ) -> Optional[Any]:
+        """Evaluate tool via PolicyEngineV2 if available.
+
+        Returns a PolicyDecision or None if v2 engine is not configured.
+        """
+        if self.policy_engine_v2 is None:
+            return None
+        try:
+            return self.policy_engine_v2.evaluate(
+                tool_name, params or {}, session_id=session_id,
+            )
+        except Exception as exc:
+            logger.debug("[SafetyGuard] PolicyEngineV2.evaluate failed: %s", exc)
+            return None
 
     def _get_audit_logger(self) -> Any:
         """Lazily initialize the persistent audit logger (Issue #423)."""
