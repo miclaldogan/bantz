@@ -16,6 +16,8 @@ def _freeze_calendar_dates(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(calendar_tools, "_date_today", lambda: "2026-02-09")
     monkeypatch.setattr(calendar_tools, "_date_tomorrow", lambda: "2026-02-10")
     monkeypatch.setattr(calendar_tools, "_date_yesterday", lambda: "2026-02-08")
+    # Prevent past-time guard from shifting dates (Issue #1212)
+    monkeypatch.setattr(calendar_tools, "_is_past", lambda d, t: False)
 
 
 def _mock_list_events(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
