@@ -72,7 +72,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          for req in requirements/base.txt requirements/dev.txt requirements/llm.txt requirements/system.txt; do
+          for req in requirements/base.txt requirements/dev.txt requirements/llm.txt requirements/system.txt requirements/security.txt; do
             if [ -f "$req" ]; then
               pip install -r "$req" 2>/dev/null || echo "⚠️ Some deps in $req failed — continuing"
             fi
