@@ -40,6 +40,7 @@ from bantz.llm.base import (
     LLMClient,
     LLMMessage,
     LLMResponse,
+    LLMToolCall,
     LLMConnectionError,
     LLMModelNotFoundError,
     LLMTimeoutError,
@@ -238,6 +239,8 @@ class VLLMOpenAIClient(LLMClient):
         max_tokens: int = 512,
         response_format: Optional[dict[str, Any]] = None,
         stop: Optional[List[str]] = None,
+        tools: Optional[List[dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
     ) -> str:
         """Chat completion (simple string response)."""
         response = self.chat_detailed(
@@ -246,6 +249,8 @@ class VLLMOpenAIClient(LLMClient):
             max_tokens=max_tokens,
             response_format=response_format,
             stop=stop,
+            tools=tools,
+            tool_choice=tool_choice,
         )
         return response.content
     
@@ -258,6 +263,8 @@ class VLLMOpenAIClient(LLMClient):
         seed: Optional[int] = None,
         response_format: Optional[dict[str, Any]] = None,
         stop: Optional[List[str]] = None,
+        tools: Optional[List[dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
     ) -> LLMResponse:
         """Chat completion with detailed metadata."""
         client = self._get_client()
@@ -281,6 +288,7 @@ class VLLMOpenAIClient(LLMClient):
                     client, openai_messages,
                     temperature=temperature, max_tokens=max_tokens,
                     seed=seed, response_format=response_format, stop=stop,
+                    tools=tools, tool_choice=tool_choice,
                 )
             except (LLMConnectionError, LLMTimeoutError) as e:
                 last_exc = e
@@ -308,6 +316,8 @@ class VLLMOpenAIClient(LLMClient):
         seed: Optional[int],
         response_format: Optional[dict[str, Any]],
         stop: Optional[List[str]],
+        tools: Optional[List[dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
     ) -> LLMResponse:
         """Execute a single chat request (extracted for retry logic)."""
         t0 = time.perf_counter()
@@ -318,6 +328,10 @@ class VLLMOpenAIClient(LLMClient):
                 kwargs["response_format"] = response_format
             if stop is not None:
                 kwargs["stop"] = stop
+            # Issue #1274: Structured Tool Calling
+            if tools is not None:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = tool_choice or "auto"
 
             completion = client.chat.completions.create(
                 model=self.model,
@@ -333,6 +347,29 @@ class VLLMOpenAIClient(LLMClient):
             # Extract response
             choice = completion.choices[0]
             content = choice.message.content or ""
+
+            # Issue #1274: Parse tool_calls from structured response
+            parsed_tool_calls: Optional[List[LLMToolCall]] = None
+            if hasattr(choice.message, "tool_calls") and choice.message.tool_calls:
+                parsed_tool_calls = []
+                for tc in choice.message.tool_calls:
+                    try:
+                        args_raw = tc.function.arguments
+                        if isinstance(args_raw, str):
+                            args_dict = json.loads(args_raw) if args_raw.strip() else {}
+                        elif isinstance(args_raw, dict):
+                            args_dict = args_raw
+                        else:
+                            args_dict = {}
+                    except (json.JSONDecodeError, AttributeError):
+                        args_dict = {}
+                    parsed_tool_calls.append(LLMToolCall(
+                        id=getattr(tc, "id", "") or "",
+                        name=tc.function.name,
+                        arguments=args_dict,
+                    ))
+                if not parsed_tool_calls:
+                    parsed_tool_calls = None
             
             usage_dict: dict[str, Any] | None = None
             try:
@@ -359,6 +396,7 @@ class VLLMOpenAIClient(LLMClient):
                 tokens_used=total_tokens,
                 finish_reason=choice.finish_reason or "stop",
                 usage=usage_dict,
+                tool_calls=parsed_tool_calls,
             )
 
             # Track TTFT (approximate for non-streaming)
@@ -585,6 +623,40 @@ class VLLMOpenAIClient(LLMClient):
             messages.append(LLMMessage(role="system", content=system_prompt))
         messages.append(LLMMessage(role="user", content=prompt))
         return self.chat(messages, temperature=temperature, max_tokens=max_tokens, stop=stop)
+
+    def chat_with_tools(
+        self,
+        messages: List[LLMMessage],
+        *,
+        tools: List[dict[str, Any]],
+        temperature: float = 0.0,
+        max_tokens: int = 512,
+        tool_choice: str = "auto",
+    ) -> LLMResponse:
+        """Chat completion with structured tool calling (Issue #1274).
+
+        Sends ``tools`` in OpenAI format and returns an ``LLMResponse``
+        whose ``tool_calls`` field is populated when the model selects a
+        tool.  Falls back to ``content`` when the model responds with
+        plain text (e.g. smalltalk).
+
+        Args:
+            messages: Conversation messages.
+            tools: OpenAI-format tool definitions.
+            temperature: Sampling temperature. Default 0.0 for routing.
+            max_tokens: Max completion tokens.
+            tool_choice: ``"auto"`` | ``"none"`` | ``"required"``.
+
+        Returns:
+            ``LLMResponse`` — check ``response.tool_calls`` first.
+        """
+        return self.chat_detailed(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
     
     @property
     def model_name(self) -> str:

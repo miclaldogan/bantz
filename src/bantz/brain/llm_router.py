@@ -872,6 +872,24 @@ ASSISTANT (sadece JSON):"""
         # ── Issue #LLM-quality: Stop tokens to prevent 3B model from
         # continuing past JSON (generating examples, explanations, etc.)
         _stop_tokens = ["\nUSER:", "\n\nUSER:", "\nÖRNEK", "\n---"]
+
+        # ── Issue #1274: Structured Tool Calling ─────────────────────────
+        # When feature flag is enabled and a clear route is detected, try
+        # the native tool calling path first, bypassing JSON repair.
+        _structured_enabled = os.getenv("BANTZ_STRUCTURED_TOOLS", "0").strip().lower() in ("1", "true", "yes", "on")
+        if _structured_enabled and self._tool_registry is not None:
+            _struct_result = self._try_structured_tool_call(
+                user_input=user_input,
+                session_context=session_context,
+                prompt=prompt,
+                call_temperature=call_temperature,
+                call_max_tokens=call_max_tokens,
+            )
+            if _struct_result is not None:
+                self._consecutive_failures = 0
+                return _struct_result
+
+        # ── Legacy text-based path ───────────────────────────────────────
         
         try:
             raw_text = self._llm.complete_text(
@@ -960,6 +978,271 @@ ASSISTANT (sadece JSON):"""
 
         # Validate and extract
         return self._extract_output(parsed, raw_text=raw_text, user_input=user_input, repaired=was_repaired)
+
+    # ------------------------------------------------------------------
+    # Issue #1274: Structured Tool Calling — native Ollama tools API
+    # ------------------------------------------------------------------
+    def _try_structured_tool_call(
+        self,
+        *,
+        user_input: str,
+        session_context: Optional[dict[str, Any]],
+        prompt: str,
+        call_temperature: float,
+        call_max_tokens: int,
+    ) -> Optional[OrchestratorOutput]:
+        """Attempt structured tool calling via Ollama's native tools API.
+
+        Returns an ``OrchestratorOutput`` on success, or ``None`` to fall
+        through to the legacy text-based path.
+
+        The method:
+        1. Detects the likely route via ``_detect_schema_route()``
+        2. Gets OpenAI-format tool schemas for that route
+        3. Calls the LLM with ``tools`` parameter
+        4. If the LLM responds with ``tool_calls``, builds output directly
+        5. Otherwise returns ``None`` (fallback to text path)
+        """
+        if self._tool_registry is None:
+            return None
+
+        # Detect route to select relevant tools
+        detected_route = self._detect_schema_route(user_input, session_context)
+        if not detected_route:
+            return None  # No clear route (e.g. smalltalk) → text path
+
+        # Get OpenAI-format tool schemas for this route
+        tools_schema = self._tool_registry.as_openai_tools_for_route(
+            detected_route,
+            valid_tools=self._VALID_TOOLS,
+        )
+        if not tools_schema:
+            return None  # No tools for this route
+
+        # Check if the LLM client supports tools
+        if not hasattr(self._llm, "chat_with_tools"):
+            return None
+
+        try:
+            from bantz.llm.base import LLMMessage
+
+            messages = [
+                LLMMessage(role="system", content=self._build_system_prompt()),
+                LLMMessage(role="user", content=prompt),
+            ]
+            response = self._llm.chat_with_tools(
+                messages,
+                tools=tools_schema,
+                temperature=call_temperature,
+                max_tokens=call_max_tokens,
+                tool_choice="auto",
+            )
+        except Exception as exc:
+            logger.info(
+                "[structured_tools] LLM call with tools failed, falling back to text: %s",
+                str(exc)[:200],
+            )
+            return None
+
+        # If the model returned tool_calls, extract output directly
+        if response.tool_calls:
+            result = self._extract_from_tool_calls(
+                response.tool_calls,
+                content=response.content,
+                user_input=user_input,
+                detected_route=detected_route,
+            )
+            logger.info(
+                "[structured_tools] SUCCESS route=%s tool=%s confidence=%.2f",
+                result.route,
+                result.tool_plan,
+                result.confidence,
+            )
+            return result
+
+        # Model responded with text (no tool call) — e.g. smalltalk or
+        # declined to use tools.  Try to parse the text content as JSON
+        # using existing pipeline (fall through to legacy path).
+        if response.content:
+            logger.info(
+                "[structured_tools] Model responded with text (no tool_calls), "
+                "falling back to legacy parse. content=%s…",
+                response.content[:80],
+            )
+        return None
+
+    def _extract_from_tool_calls(
+        self,
+        tool_calls: list,
+        *,
+        content: str,
+        user_input: str,
+        detected_route: str,
+    ) -> OrchestratorOutput:
+        """Build ``OrchestratorOutput`` from native tool_calls response.
+
+        Issue #1274: When the LLM uses structured tool calling, we
+        bypass the entire JSON repair pipeline and build the output
+        deterministically from the tool call data.
+
+        Args:
+            tool_calls: List of ``LLMToolCall`` objects.
+            content: Message content (may contain assistant reply).
+            user_input: Original user input.
+            detected_route: Route detected for tool selection.
+
+        Returns:
+            ``OrchestratorOutput`` with high confidence.
+        """
+        # Take the first tool call as primary
+        primary = tool_calls[0]
+        tool_name = str(primary.name).strip()
+        tool_args = primary.arguments if isinstance(primary.arguments, dict) else {}
+
+        # Build tool plan from all tool calls
+        tool_plan = []
+        tool_plan_with_args = []
+        for tc in tool_calls:
+            name = str(tc.name).strip()
+            args = tc.arguments if isinstance(tc.arguments, dict) else {}
+            if name and name in self._VALID_TOOLS:
+                tool_plan.append(name)
+                tool_plan_with_args.append({"name": name, "args": args})
+            else:
+                logger.warning("[structured_tools] Unknown tool '%s' in tool_calls, dropped", name)
+
+        # Derive route from tool name prefix (e.g. "gmail.send" → "gmail")
+        route = detected_route
+        if "." in tool_name:
+            prefix = tool_name.split(".", 1)[0]
+            if prefix in ("calendar", "gmail", "system", "contacts", "browser",
+                          "pc_control", "file", "terminal", "code"):
+                route = prefix
+
+        # Derive intents from tool name
+        calendar_intent = "none"
+        gmail_intent = "none"
+        if route == "calendar":
+            calendar_intent = self._infer_intent_from_tool(tool_name, "calendar")
+        elif route == "gmail":
+            gmail_intent = self._infer_intent_from_tool(tool_name, "gmail")
+
+        # Slots from primary tool args
+        slots: dict[str, Any] = {}
+        _SLOT_KEYS = {"date", "time", "duration", "title", "window_hint",
+                       "query", "event_id", "to", "subject", "body"}
+        for key, value in tool_args.items():
+            if key in _SLOT_KEYS:
+                slots[key] = value
+
+        # Gmail extras
+        gmail_obj: dict[str, Any] = {}
+        if route == "gmail":
+            _GMAIL_KEYS = {"to", "subject", "body", "label", "category",
+                           "natural_query", "search_term", "query", "max_results",
+                           "message_id", "thread_id"}
+            for key, value in tool_args.items():
+                if key in _GMAIL_KEYS:
+                    gmail_obj[key] = value
+
+        # Requires confirmation — check Tool registry
+        requires_confirmation = False
+        confirmation_prompt = ""
+        if self._tool_registry is not None and tool_plan:
+            tool_def = self._tool_registry.get(tool_plan[0])
+            if tool_def is not None:
+                requires_confirmation = bool(tool_def.requires_confirmation)
+            if requires_confirmation:
+                confirmation_prompt = f"{tool_plan[0]} çalıştırılsın mı?"
+
+        # Confidence is high for structured calls (no JSON repair needed)
+        confidence = 0.95
+
+        # Assistant reply from content (if any)
+        assistant_reply = (content or "").strip()
+
+        # Clear LLM reply for deterministic tools (same logic as _extract_output)
+        _DETERMINISTIC_TOOLS = {"time.now", "system.status"}
+        if assistant_reply and tool_plan and any(t in _DETERMINISTIC_TOOLS for t in tool_plan):
+            assistant_reply = ""
+
+        return OrchestratorOutput(
+            route=route,
+            calendar_intent=calendar_intent,
+            slots=slots,
+            confidence=confidence,
+            tool_plan=tool_plan,
+            tool_plan_with_args=tool_plan_with_args,
+            assistant_reply=assistant_reply,
+            gmail_intent=gmail_intent,
+            gmail=gmail_obj,
+            ask_user=False,
+            question="",
+            requires_confirmation=requires_confirmation,
+            confirmation_prompt=confirmation_prompt,
+            memory_update="",
+            reasoning_summary=[],
+            raw_output={"_structured_tool_call": True, "tool_calls": [
+                {"name": tc.name, "args": tc.arguments} for tc in tool_calls
+            ]},
+            status="done",
+        )
+
+    @staticmethod
+    def _infer_intent_from_tool(tool_name: str, route: str) -> str:
+        """Infer calendar/gmail intent from tool name.
+
+        Issue #1274: When using structured tool calling, the LLM doesn't
+        produce an intent field.  Derive it deterministically from the
+        tool name.
+
+        Examples:
+            calendar.create_event → create
+            calendar.list_events → query
+            gmail.send → send
+            gmail.list_messages → list
+        """
+        if "." not in tool_name:
+            return "none"
+        action = tool_name.split(".", 1)[1]  # e.g. "create_event", "send"
+
+        if route == "calendar":
+            _INTENT_MAP = {
+                "create_event": "create",
+                "modify_event": "modify",
+                "cancel_event": "cancel",
+                "delete_event": "cancel",
+                "list_events": "query",
+                "get_event": "query",
+                "free_slots": "query",
+            }
+            return _INTENT_MAP.get(action, "query")
+
+        if route == "gmail":
+            _INTENT_MAP = {
+                "send": "send",
+                "list_messages": "list",
+                "smart_search": "search",
+                "read_message": "read",
+                "read": "read",
+                "delete": "delete",
+                "trash": "delete",
+                "mark_read": "read",
+                "mark_unread": "read",
+                "create_draft": "send",
+                "reply": "send",
+                "forward": "send",
+                "list_labels": "list",
+                "get_label": "list",
+                "add_label": "list",
+                "remove_label": "list",
+                "star": "list",
+                "unstar": "list",
+                "archive": "list",
+            }
+            return _INTENT_MAP.get(action, "list")
+
+        return "none"
 
     def _build_prompt(
         self,

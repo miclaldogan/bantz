@@ -216,6 +216,95 @@ class ToolRegistry:
             "risk_level": tool.risk_level,
         }
 
+    # ------------------------------------------------------------------
+    # Issue #1274: OpenAI-format tool schemas for structured tool calling
+    # ------------------------------------------------------------------
+    def as_openai_tools(
+        self,
+        *,
+        tool_names: set[str] | frozenset[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return all tools in OpenAI ``tools`` format for chat completions.
+
+        Each entry is::
+
+            {
+              "type": "function",
+              "function": {
+                "name": "gmail.send",
+                "description": "E-posta gönderir",
+                "parameters": { ... JSON Schema ... }
+              }
+            }
+
+        Args:
+            tool_names: If provided, only include tools whose name is
+                in this set.  Pass ``_VALID_TOOLS`` from the router to
+                keep prompt and registry in sync.
+
+        Returns:
+            List of OpenAI-compatible tool definitions.
+        """
+        result: list[dict[str, Any]] = []
+        for name in self.names():
+            if tool_names is not None and name not in tool_names:
+                continue
+            tool = self._tools[name]
+            # Ensure parameters is a valid object schema
+            params = tool.parameters or {"type": "object", "properties": {}}
+            if "type" not in params:
+                params = {**params, "type": "object"}
+            result.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "parameters": params,
+                },
+            })
+        return result
+
+    def as_openai_tools_for_route(
+        self,
+        route: str,
+        *,
+        valid_tools: frozenset[str] | set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return OpenAI-format tool schemas filtered by route prefix.
+
+        Issue #1274: Used by the router to send only the relevant tools
+        for the detected route, keeping the ``tools`` array small (4-19
+        entries instead of 76+).
+
+        Args:
+            route: Route prefix (e.g. ``"gmail"``, ``"calendar"``).
+            valid_tools: Optional set of valid tool names to further
+                filter.
+
+        Returns:
+            List of OpenAI-compatible tool definitions for the route.
+        """
+        prefix = f"{route}."
+        result: list[dict[str, Any]] = []
+        for name in self.names():
+            if not name.startswith(prefix):
+                continue
+            if valid_tools is not None and name not in valid_tools:
+                continue
+            tool = self._tools[name]
+            params = tool.parameters or {"type": "object", "properties": {}}
+            if "type" not in params:
+                params = {**params, "type": "object"}
+            result.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "parameters": params,
+                },
+            })
+        return result
+
     def validate_call(self, name: str, params: dict[str, Any]) -> tuple[bool, str]:
         tool = self.get(name)
         if not tool:
