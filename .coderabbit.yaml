@@ -2,32 +2,32 @@
 # Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
 # Install: https://github.com/marketplace/coderabbitai
 
-language: "tr"  # Review dilini Türkçe yap (İngilizce istersen "en" yap)
+language: "en"  # Review language (set to "tr" for Turkish)
 
 reviews:
-  # Her PR'da otomatik review başlat
+  # Automatically start review on each PR
   auto_review:
     enabled: true
-    # Draft PR'ları inceleme, sadece ready olanları
+    # Skip draft PRs, only review ready ones
     drafts: false
-    # Base branch'ler — sadece dev ve main'e açılan PR'ları incele
+    # Only review PRs targeting these branches
     base_branches:
       - "dev"
       - "main"
       - "master"
 
-  # Review profili — assertive = daha detaylı, chill = sadece önemli şeyler
+  # Review profile — assertive = detailed, chill = only important issues
   profile: "assertive"
 
-  # Yüksek düzey özet oluştur
+  # Generate high-level summary
   high_level_summary: true
-  # PR açıklamasına summary ekle
+  # Add summary to PR description
   auto_title_placeholder: "[CodeRabbit]"
 
-  # Poem (şiir) eklemesin 😄
+  # No poems please
   poem: false
 
-  # Review scope — nelere baksın
+  # Review scope
   request_changes_workflow: true
   collapse_walkthrough: false
   sequence_diagrams: true
@@ -47,49 +47,49 @@ reviews:
   path_instructions:
     - path: "src/bantz/brain/**"
       instructions: |
-        Bu dizin Bantz'ın beyin katmanıdır (orchestrator, router, finalizer).
-        - Thread-safety kritik: threading.Lock kullanımını kontrol et
-        - Tüm LLM çağrıları try/except ile sarılmalı
-        - orchestrator_loop.py değişikliklerinde dikkatli ol, production kodu
+        This directory contains Bantz's brain layer (orchestrator, router, finalizer).
+        - Thread-safety is critical: check usage of threading.Lock
+        - All LLM calls should be wrapped in try/except
+        - Be careful with changes in orchestrator_loop.py, it's production code
     - path: "src/bantz/data/**"
       instructions: |
-        Data platform katmanı. SQLite-backed, WAL journal mode.
-        - Thread-safety kontrol et (self._lock kullanımı)
-        - TTL ve expires_at hesaplamalarını doğrula
-        - Fingerprint hesaplamaları deterministic olmalı (sort_keys=True)
+        Data platform layer. SQLite-backed, WAL journal mode.
+        - Check thread-safety (usage of self._lock)
+        - Verify TTL and expires_at calculations
+        - Fingerprint calculations should be deterministic (sort_keys=True)
     - path: "src/bantz/skills/**"
       instructions: |
-        Tool/skill modülleri. Her skill bir tool_schema döner.
-        - Google API rate limit handling kontrol et
-        - Credential/token bilgileri hardcoded olmamalı
-        - Her public fonksiyon docstring'e sahip olmalı
+        Tool/skill modules. Each skill returns a tool_schema.
+        - Check Google API rate limit handling
+        - Credentials/tokens should not be hardcoded
+        - Each public function should have a docstring
     - path: "tests/**"
       instructions: |
-        Test dosyaları. pytest + pytest-asyncio kullanılıyor.
-        - Mock'lar doğru scope'da olmalı (function/class/module)
-        - Async testler @pytest.mark.asyncio ile işaretlenmeli
-        - Flaky test riski varsa belirt
+        Test files. Using pytest + pytest-asyncio.
+        - Mocks should be at the correct scope (function/class/module)
+        - Async tests must be decorated with @pytest.mark.asyncio
+        - Flag any flaky test risks
     - path: "config/**"
       instructions: |
-        Konfigürasyon dosyaları. Hassas bilgi içermemeli.
-        - Secrets/tokens/passwords olmamalı
-        - Example dosyalar (.example) güncel olmalı
+        Configuration files. Must not contain sensitive data.
+        - No secrets/tokens/passwords
+        - Example files (.example) should be up to date
 
 chat:
   auto_reply: true
 
-# Öğrenme — reviewer feedback'inden öğrensin
+# Learning — learn from reviewer feedback
 knowledge_base:
   learnings:
-    scope: "auto"       # PR'lardaki 👍/👎'den öğren
+    scope: "auto"       # Learn from 👍/👎 on PRs
   jira:
-    project_keys: []    # Jira kullanmıyoruz şu an
+    project_keys: []    # Not using Jira currently
   linear:
-    team_keys: []       # Linear kullanmıyoruz şu an
+    team_keys: []       # Not using Linear currently
 
 # Tonalite
 tone_instructions: |
-  Türkçe review yap. Kısa ve net ol.
-  Kritik bug/security bulduğunda "🚨 KRİTİK:" prefix'i kullan.
-  Küçük stil önerileri için "💡 Öneri:" prefix'i kullan.
-  Her review'un sonunda "Genel Değerlendirme: ✅/⚠️/❌" ver.
+  Review in English. Be concise and clear.
+  Use "🚨 CRITICAL:" prefix for critical bug/security issues.
+  Use "💡 SUGGESTION:" prefix for minor style suggestions.
+  At the end of each review, provide "Overall Assessment: ✅/⚠️/❌".
