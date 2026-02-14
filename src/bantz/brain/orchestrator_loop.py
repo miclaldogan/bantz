@@ -21,7 +21,7 @@ from typing import Any, Optional
 
 from bantz.agent.tools import ToolRegistry
 from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
-from bantz.brain.orchestrator_state import OrchestratorState
+from bantz.brain.orchestrator_state import OrchestratorState, extract_entity_from_tool_result
 from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
 from bantz.brain.memory_lite import DialogSummaryManager, CompactSummary
 from bantz.core.events import EventBus, EventType
@@ -943,6 +943,12 @@ class OrchestratorLoop:
             except Exception:
                 pass
 
+            # Issue #1276: Extract entity slots from tool results for cross-turn tracking
+            try:
+                self._extract_and_register_entities(tool_results, state)
+            except Exception as _entity_exc:
+                logger.debug("[Issue #1276] Entity extraction failed (non-fatal): %s", _entity_exc)
+
             all_tool_results.extend(tool_results)
 
             # ── OBSERVE ──
@@ -1246,6 +1252,15 @@ class OrchestratorLoop:
                 )
         except Exception as _slot_exc:
             logger.debug("[NLU] Slot extraction failed (non-fatal): %s", _slot_exc)
+
+        # Issue #1276: Inject active entity context into session_context
+        # so the LLM can resolve follow-up references ("saatini değiştir")
+        try:
+            entity_block = state.slot_registry.to_prompt_block()
+            if entity_block:
+                session_context["active_entity"] = entity_block
+        except Exception as _ent_exc:
+            logger.debug("[Issue #1276] Entity context injection failed (non-fatal): %s", _ent_exc)
 
         # Call orchestrator with enhanced summary + session context
         output = self.orchestrator.route(
@@ -2306,6 +2321,41 @@ class OrchestratorLoop:
                 for ev in events
                 if isinstance(ev, dict)
             ]
+
+    @staticmethod
+    def _extract_and_register_entities(
+        tool_results: list[dict[str, Any]],
+        state: OrchestratorState,
+    ) -> None:
+        """Issue #1276: Extract entities from tool results and register in SlotRegistry.
+
+        Called after tool execution in both _react_execute_loop and _update_state_phase.
+        Only the *last* entity-producing result becomes the active entity, so follow-up
+        turns naturally reference the most recent action.
+        """
+        for tr in tool_results:
+            if not tr.get("success", False):
+                continue
+            tool_name = tr.get("tool", "")
+            raw = tr.get("raw_result") or tr.get("result_raw")
+            if raw is None:
+                # Try parsing result string as JSON
+                result_str = tr.get("result", "")
+                if isinstance(result_str, str):
+                    try:
+                        raw = json.loads(result_str)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                else:
+                    raw = result_str
+
+            entity = extract_entity_from_tool_result(
+                tool_name=tool_name,
+                result_raw=raw,
+                current_turn=state.turn_count,
+            )
+            if entity is not None:
+                state.slot_registry.register(entity)
     
     def _update_state_phase(
         self,
@@ -2427,6 +2477,19 @@ class OrchestratorLoop:
 
         # Advance turn counter (used by memory-lite summaries)
         state.turn_count += 1
+
+        # Issue #1276: Expire stale entities and extract from this turn's results
+        try:
+            expired = state.slot_registry.expire_stale(state.turn_count)
+            if expired:
+                logger.debug("[Issue #1276] Expired %d stale entities at turn %d", expired, state.turn_count)
+        except Exception as _exp_exc:
+            logger.debug("[Issue #1276] Entity expiry failed (non-fatal): %s", _exp_exc)
+
+        try:
+            self._extract_and_register_entities(tool_results, state)
+        except Exception as _ext_exc:
+            logger.debug("[Issue #1276] Entity extraction in update_state failed (non-fatal): %s", _ext_exc)
 
         # Issue #1212: Track last successful tool + route for follow-up context
         for r in reversed(tool_results):
