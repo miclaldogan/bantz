@@ -12,7 +12,6 @@ Principle: "LLM controls everything, but executor enforces guardrails"
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -20,7 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from bantz.agent.tools import Tool, ToolRegistry
+from bantz.agent.tools import Tool
 from bantz.brain.arg_sanitizer import ArgSanitizer
 from bantz.policy.engine import PolicyEngine
 
@@ -494,7 +493,6 @@ class SafetyGuard:
 
             if removed > 0:
                 # Rewrite log with only kept entries
-                import threading
                 with audit_logger._lock:
                     with open(audit_logger.log_path, "w", encoding="utf-8") as f:
                         for entry in kept:

@@ -16,9 +16,6 @@ Covers:
 
 import json
 import os
-import tempfile
-from pathlib import Path
-from typing import Any, Dict
 from unittest.mock import patch
 
 import pytest
@@ -648,8 +645,8 @@ class TestPackageExports:
             PolicyEngineV2,
             PolicyPreset,
             RiskTier,
-            redact_sensitive,
-            redact_value,
+            redact_sensitive,  # noqa: F401
+            redact_value,  # noqa: F401
         )
 
         assert PolicyDecision is not None
