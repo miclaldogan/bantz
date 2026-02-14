@@ -22,6 +22,7 @@ from typing import Any, Optional
 from bantz.agent.tools import ToolRegistry
 from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
 from bantz.brain.orchestrator_state import OrchestratorState, extract_entity_from_tool_result
+from bantz.brain.reflection import reflect, ReflectionConfig, ReflectionResult
 from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
 from bantz.brain.memory_lite import DialogSummaryManager, CompactSummary
 from bantz.core.events import EventBus, EventType
@@ -625,6 +626,15 @@ class OrchestratorLoop:
                     trace_id=_trace_id,
                 )
 
+                # Phase 2.75: Self-Reflection (Issue #1277)
+                # Semantic verification: does the result satisfy the user's request?
+                try:
+                    reflection = self._reflection_phase(
+                        user_input, orchestrator_output, tool_results, state,
+                    )
+                except Exception as _ref_exc:
+                    logger.debug("[Issue #1277] Reflection failed (non-fatal): %s", _ref_exc)
+
                 # Phase 3: LLM Finalization (generate final response with tool results)
                 final_output = self._llm_finalization_phase(
                     user_input,
@@ -785,6 +795,13 @@ class OrchestratorLoop:
                 # Second execution pass: execute only the confirmed tool.
                 tool_results_2 = self._execute_tools_phase(orchestrator_output, state)
                 tool_results_2 = self._verify_results_phase(tool_results_2, state)
+                # Issue #1277: Reflection on confirmation-path results
+                try:
+                    self._reflection_phase(
+                        user_input, orchestrator_output, tool_results_2, state,
+                    )
+                except Exception:
+                    pass
                 final_output = self._llm_finalization_phase(
                     user_input,
                     orchestrator_output,
@@ -2186,6 +2203,67 @@ class OrchestratorLoop:
             user_input=user_input,
             original_user_input=original_user_input,
         )
+
+    # ── Issue #1277: Self-Reflection Phase ───────────────────────────
+
+    def _reflection_phase(
+        self,
+        user_input: str,
+        orchestrator_output: OrchestratorOutput,
+        tool_results: list[dict[str, Any]],
+        state: OrchestratorState,
+    ) -> ReflectionResult:
+        """Phase 2.75: Self-Reflection — semantic verification of tool results.
+
+        Checks whether tool results actually satisfy the user's request.
+        Only triggered when heuristics detect a likely problem (error,
+        empty result, low confidence).
+
+        When not satisfied:
+        - Annotates state.trace with reflection metadata
+        - Injects reflection reason into tool_results so the finalizer
+          can produce a more informative response
+
+        Returns the ReflectionResult for the caller to act on.
+        """
+        # Get the planner LLM for the reflection call
+        planner_llm = getattr(self.orchestrator, "_llm", None)
+        if planner_llm is None:
+            return ReflectionResult(triggered=False)
+
+        reflection = reflect(
+            user_input=user_input,
+            tool_results=tool_results,
+            confidence=orchestrator_output.confidence,
+            llm=planner_llm,
+        )
+
+        # Record in trace (telemetry)
+        state.update_trace(reflection=reflection.to_trace_dict())
+
+        # Publish event for monitoring
+        self.event_bus.publish("reflection.result", reflection.to_trace_dict())
+
+        if reflection.triggered and not reflection.satisfied:
+            logger.info(
+                "[Issue #1277] Reflection unsatisfied: reason=%s action=%s",
+                reflection.reason[:80],
+                reflection.corrective_action[:80] if reflection.corrective_action else "none",
+            )
+            # Annotate tool_results so the finalizer knows about the issue
+            tool_results.append({
+                "tool": "_reflection",
+                "success": True,
+                "result": reflection.reason,
+                "result_summary": f"[Reflection] {reflection.reason}",
+                "result_raw": {
+                    "satisfied": False,
+                    "reason": reflection.reason,
+                    "corrective_action": reflection.corrective_action,
+                },
+            })
+
+        return reflection
     
     def _llm_finalization_phase(
         self,
