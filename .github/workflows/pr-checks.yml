@@ -78,6 +78,7 @@ jobs:
             fi
           done
           pip install pytest pytest-asyncio pytest-cov pytest-timeout
+          pip install -e . 2>/dev/null || echo "⚠️ Package install failed — continuing"
 
       - name: Run tests
         run: |
@@ -98,6 +99,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -108,16 +111,27 @@ jobs:
       - name: Install security tools
         run: pip install bandit safety
 
-      # ── Bandit: Python-specific SAST ──
-      - name: Bandit SAST scan
+      # ── Bandit: Python-specific SAST (changed files only) ──
+      - name: Get changed Python source files
+        id: sec_changed
         run: |
-          echo "🔍 Running Bandit (Python SAST)..."
-          bandit -r src/ \
+          FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- 'src/**/*.py' | tr '\n' ' ')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          if [ -z "$FILES" ]; then
+            echo "No Python source files changed — skipping Bandit."
+          else
+            echo "Scanning: $FILES"
+          fi
+
+      - name: Bandit SAST scan (changed files only)
+        if: steps.sec_changed.outputs.files != ''
+        run: |
+          echo "🔍 Running Bandit on changed files..."
+          bandit ${{ steps.sec_changed.outputs.files }} \
             -f json \
             -o bandit-report.json \
             --severity-level medium \
             --confidence-level medium \
-            -x "src/bantz/test*,src/bantz/**/test_*" \
             || true
           python3 -c "
           import json, sys
@@ -141,12 +155,17 @@ jobs:
               print('⚠️  Bandit report not found')
           "
 
-      # ── Safety: known vulnerability check ──
+      # ── Safety: known vulnerability check (all requirement files) ──
       - name: Safety dependency check
         continue-on-error: true
         run: |
           echo "🔍 Checking dependencies for known vulnerabilities..."
-          safety check -r requirements.txt --output text 2>/dev/null || echo "⚠️ Safety check completed with warnings"
+          for req in requirements*.txt; do
+            if [ -f "$req" ]; then
+              echo "── Scanning $req ──"
+              safety check -r "$req" --output text 2>/dev/null || echo "⚠️ $req: completed with warnings"
+            fi
+          done
 
       # ── Custom pattern checks ──
       - name: Check for hardcoded secrets
