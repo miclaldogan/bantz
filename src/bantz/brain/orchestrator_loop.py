@@ -620,11 +620,41 @@ class OrchestratorLoop:
                 final_output = orchestrator_output
                 tool_results = []
             else:
-                # ── Issue #1273: ReAct Loop (Düşün → Yap → Gözlemle → Tekrar Düşün)
-                tool_results = self._react_execute_loop(
-                    orchestrator_output, state, _router_input,
-                    trace_id=_trace_id,
-                )
+                # ── Issue #1279: Check for hierarchical task decomposition
+                _use_subtask = False
+                if orchestrator_output.subtasks:
+                    try:
+                        from bantz.brain.task_planner import build_plan, is_decomposition_candidate
+                        if is_decomposition_candidate(
+                            orchestrator_output.tool_plan,
+                            orchestrator_output.status,
+                        ) or orchestrator_output.subtasks:
+                            _plan = build_plan(
+                                orchestrator_output.subtasks,
+                                valid_tools=getattr(self.orchestrator, '_VALID_TOOLS', None),
+                            )
+                            if not _plan.is_empty:
+                                state.subtask_plan = _plan
+                                _use_subtask = True
+                                logger.info(
+                                    "[Issue #1279] Subtask plan built: %d subtasks",
+                                    len(_plan.subtasks),
+                                )
+                    except Exception as _decomp_exc:
+                        logger.debug("[Issue #1279] Subtask plan build failed: %s", _decomp_exc)
+
+                if _use_subtask:
+                    # ── Issue #1279: Subtask execution loop
+                    tool_results = self._subtask_execute_loop(
+                        orchestrator_output, state, _router_input,
+                        trace_id=_trace_id,
+                    )
+                else:
+                    # ── Issue #1273: ReAct Loop (Düşün → Yap → Gözlemle → Tekrar Düşün)
+                    tool_results = self._react_execute_loop(
+                        orchestrator_output, state, _router_input,
+                        trace_id=_trace_id,
+                    )
 
                 # Phase 2.75: Self-Reflection (Issue #1277)
                 # Semantic verification: does the result satisfy the user's request?
@@ -1020,6 +1050,161 @@ class OrchestratorLoop:
                 len(state.react_observations),
                 time.time() - _react_start,
             )
+
+        return all_tool_results
+
+    # ------------------------------------------------------------------
+    # Issue #1279: Subtask Execution Loop
+    # ------------------------------------------------------------------
+
+    def _subtask_execute_loop(
+        self,
+        orchestrator_output: "OrchestratorOutput",
+        state: OrchestratorState,
+        router_input: str,
+        trace_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """Execute a hierarchical subtask plan (Issue #1279).
+
+        Iterates through the DAG-ordered subtask plan, executing each
+        subtask's tool and collecting results.  Dynamic params are
+        resolved from previous subtask results.
+
+        On subtask failure, dependent subtasks are automatically cancelled.
+        Integrates with ReAct observations for LLM visibility.
+
+        Returns:
+            Accumulated ``tool_results`` list across all subtasks.
+        """
+        from dataclasses import replace as dc_replace
+        from bantz.brain.task_planner import resolve_params
+
+        plan = state.subtask_plan
+        if plan is None or plan.is_empty:
+            return []
+
+        _start = time.time()
+        _SUBTASK_TIMEOUT_S = float(os.getenv("BANTZ_SUBTASK_TIMEOUT_S", "30.0"))
+
+        all_tool_results: list[dict[str, Any]] = []
+        state.react_observations = []
+        state.react_iteration = 0
+
+        subtask_idx = 0
+        while True:
+            subtask = plan.next_subtask()
+            if subtask is None:
+                break
+
+            subtask_idx += 1
+            state.react_iteration = subtask_idx
+
+            # Time guard
+            if time.time() - _start > _SUBTASK_TIMEOUT_S:
+                logger.warning(
+                    "[Subtask] Timeout after %.1fs at subtask %d — cancelling remaining",
+                    time.time() - _start, subtask.id,
+                )
+                plan.cancel_remaining()
+                break
+
+            # Confirmation guard
+            if state.has_pending_confirmation():
+                logger.info("[Subtask] Pending confirmation — pausing subtask %d", subtask.id)
+                break
+
+            # Mark running
+            subtask.status = "running"
+            logger.info(
+                "[Subtask] Executing subtask %d/%d: %s → %s",
+                subtask_idx, len(plan.subtasks), subtask.goal, subtask.tool,
+            )
+
+            # Resolve dynamic params
+            resolved = resolve_params(subtask, plan.get_results())
+
+            # Build a single-tool OrchestratorOutput for this subtask
+            _sub_output = dc_replace(
+                orchestrator_output,
+                tool_plan=[subtask.tool],
+                tool_plan_with_args=[{"name": subtask.tool, "args": resolved}],
+                status="done",  # Each subtask is single-shot
+                subtasks=[],
+            )
+
+            # Execute via existing tool execution phase
+            tool_results = self._execute_tools_phase(_sub_output, state)
+
+            # Verify results
+            tool_results = self._verify_results_phase(tool_results, state)
+
+            # Enforce result size limits
+            try:
+                from bantz.brain.tool_result_limiter import enforce_result_size_limits
+                tool_results = enforce_result_size_limits(tool_results, trace_id=trace_id)
+            except Exception:
+                pass
+
+            # Calendar context
+            try:
+                self._save_calendar_context(tool_results, state)
+            except Exception:
+                pass
+
+            # Entity extraction
+            try:
+                self._extract_and_register_entities(tool_results, state)
+            except Exception:
+                pass
+
+            all_tool_results.extend(tool_results)
+
+            # Determine success/failure
+            _success = any(tr.get("success", False) for tr in tool_results) if tool_results else False
+            _summary = "; ".join(
+                tr.get("result_summary", "")[:150] for tr in tool_results
+            )
+
+            if _success:
+                plan.complete_subtask(
+                    subtask.id,
+                    result={
+                        "tool": subtask.tool,
+                        "result_summary": _summary,
+                        "success": True,
+                        "tool_results": tool_results,
+                    },
+                )
+            else:
+                _error = "; ".join(
+                    tr.get("error", "unknown") for tr in tool_results
+                ) if tool_results else "no_results"
+                plan.complete_subtask(subtask.id, error=_error)
+                logger.warning("[Subtask] Subtask %d failed: %s", subtask.id, _error[:100])
+
+            # Record observation
+            state.react_observations.append({
+                "iteration": subtask_idx,
+                "subtask_id": subtask.id,
+                "goal": subtask.goal,
+                "tool": subtask.tool,
+                "result_summary": _summary[:300],
+                "success": _success,
+            })
+
+        # Record trace
+        state.trace["subtask_execution"] = {
+            "total_subtasks": len(plan.subtasks),
+            "done": plan.done_count,
+            "failed": plan.failed_count,
+            "pending": plan.pending_count,
+            "elapsed_ms": int((time.time() - _start) * 1000),
+        }
+        logger.info(
+            "[Subtask] Completed: %d done, %d failed, %d pending out of %d subtasks (%.1fs)",
+            plan.done_count, plan.failed_count, plan.pending_count,
+            len(plan.subtasks), time.time() - _start,
+        )
 
         return all_tool_results
 

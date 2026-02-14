@@ -362,6 +362,11 @@ class OrchestratorState:
     # SlotRegistry holds entities extracted from tool results so follow-up
     # turns can resolve pronouns ("saatini değiştir") to concrete entity IDs.
     slot_registry: SlotRegistry = field(default_factory=SlotRegistry)
+
+    # Issue #1279: Hierarchical task decomposition — active subtask plan
+    # Holds the current SubtaskPlan during multi-step execution.
+    # Cleared at the start of each new turn (not carried across turns).
+    subtask_plan: Any = field(default=None)  # Optional[SubtaskPlan]
     
     def add_tool_result(self, tool_name: str, result: Any, success: bool = True) -> None:
         """Add a tool result to state (FIFO queue).
@@ -582,6 +587,11 @@ class OrchestratorState:
         entity_block = self.slot_registry.to_prompt_block()
         if entity_block:
             ctx["entity_context"] = entity_block
+        # Issue #1279: Include subtask progress if mid-plan
+        if self.subtask_plan is not None and not self.subtask_plan.is_empty:
+            progress = self.subtask_plan.to_progress_block()
+            if progress:
+                ctx["subtask_progress"] = progress
         return ctx
     
     def reset(self) -> None:
@@ -607,3 +617,4 @@ class OrchestratorState:
         self.react_observations = []
         self.react_iteration = 0
         self.slot_registry.clear()
+        self.subtask_plan = None
