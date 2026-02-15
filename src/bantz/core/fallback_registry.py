@@ -21,6 +21,15 @@ from typing import Any, Callable, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+def _get_event_bus_safe():
+    """Get the EventBus singleton without import-time side effects."""
+    try:
+        from bantz.core.events import get_event_bus
+        return get_event_bus()
+    except Exception:
+        return None
+
+
 class FallbackStrategy(str, Enum):
     """Supported fallback strategies."""
 
@@ -271,6 +280,7 @@ class FallbackRegistry:
                 message=f"No fallback defined for '{service}'",
             )
             self._history.append(result)
+            self._emit_fallback_event(result)
             return result
 
         logger.info(
@@ -327,7 +337,24 @@ class FallbackRegistry:
                 )
 
         self._history.append(result)
+
+        # Publish FALLBACK_EXECUTED event (best-effort)
+        self._emit_fallback_event(result)
+
         return result
+
+    def _emit_fallback_event(self, result: FallbackResult) -> None:
+        """Publish a FALLBACK_EXECUTED event (best-effort)."""
+        bus = _get_event_bus_safe()
+        if bus is not None:
+            try:
+                bus.publish(
+                    event_type="system.fallback_executed",
+                    data=result.to_dict(),
+                    source="fallback_registry",
+                )
+            except Exception as exc:
+                logger.debug("[FallbackRegistry] Event publish failed: %s", exc)
 
     @property
     def history(self) -> list[FallbackResult]:

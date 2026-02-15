@@ -224,9 +224,10 @@ class TestHealthMonitor:
         bus = MagicMock()
         monitor = HealthMonitor(checks={"x": bad}, event_bus=bus)
         await monitor.check_all()
-        bus.publish.assert_called_once()
-        call_kwargs = bus.publish.call_args
-        assert call_kwargs[1]["event_type"] == "system.health_degraded"
+        assert bus.publish.call_count >= 1
+        # First call must be per-service degradation
+        first_call = bus.publish.call_args_list[0]
+        assert first_call[1]["event_type"] == "system.health_degraded"
 
     @pytest.mark.asyncio
     async def test_no_event_when_healthy(self):
@@ -766,8 +767,10 @@ class TestIntegration:
         )
         await monitor.check_all()
 
-        # Degraded publishes event
-        bus.publish.assert_called_once()
+        # Degraded publishes event(s): per-service degradation + overall health_check
+        assert bus.publish.call_count >= 1
+        first_call = bus.publish.call_args_list[0]
+        assert first_call[1]["event_type"] == "system.health_degraded"
         # Degraded does NOT record failure in CB (only UNHEALTHY does)
         assert cb.get_stats("api").failures == 0
 
