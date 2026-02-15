@@ -18,6 +18,23 @@ from bantz.brain.orchestrator_state import OrchestratorState
 from bantz.brain.safety_guard import ToolSecurityPolicy
 from bantz.core.events import EventBus
 
+_PRISTINE_VALID_TOOLS = frozenset(JarvisLLMOrchestrator._VALID_TOOLS)
+_PRISTINE_SYSTEM_PROMPT = (
+    JarvisLLMOrchestrator._SYSTEM_PROMPT_CORE
+    + JarvisLLMOrchestrator._SYSTEM_PROMPT_DETAIL
+    + JarvisLLMOrchestrator._SYSTEM_PROMPT_EXAMPLES
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset_router_state():
+    """Restore class-level state before/after each test."""
+    JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+    yield
+    JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+
 
 # ============================================================================
 # Mock LLM

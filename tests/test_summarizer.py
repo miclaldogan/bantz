@@ -695,20 +695,20 @@ class TestNLUPageQuestionPatterns:
         assert "CEO kim" in result.slots.get("question", "")
     
     def test_question_fiyati_ne(self):
-        """Test 'Fiyatı ne?' pattern."""
+        """Test 'Fiyatı ne?' — no longer matches page_question (pattern narrowed)."""
         from bantz.router.nlu import parse_intent
         
         result = parse_intent("Fiyatı ne?")
         
-        assert result.intent == "page_question"
+        assert result.intent == "unknown"
     
     def test_question_ne_zaman(self):
-        """Test 'Ne zaman çıkacak?' pattern."""
+        """Test 'Ne zaman çıkacak?' — no longer matches page_question (pattern narrowed)."""
         from bantz.router.nlu import parse_intent
         
         result = parse_intent("Ne zaman çıkacak?")
         
-        assert result.intent == "page_question"
+        assert result.intent == "unknown"
     
     def test_question_neden(self):
         """Test 'Bu neden oldu?' pattern."""
@@ -727,12 +727,12 @@ class TestNLUPageQuestionPatterns:
         assert result.intent == "page_question"
     
     def test_question_nerede(self):
-        """Test 'Nerede olacak?' pattern."""
+        """Test 'Nerede olacak?' — no longer matches page_question (pattern narrowed)."""
         from bantz.router.nlu import parse_intent
         
         result = parse_intent("Nerede olacak?")
         
-        assert result.intent == "page_question"
+        assert result.intent == "unknown"
 
 
 # =============================================================================

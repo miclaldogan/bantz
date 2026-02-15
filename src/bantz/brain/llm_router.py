@@ -1823,9 +1823,13 @@ ASSISTANT (sadece JSON):"""
             # multi-word patterns to avoid false positives.
             "takvim planı", "günlük plan", "haftalık plan",
             "etkinlik iptal", "randevu iptal", "toplantı iptal",
+            # Bare "iptal" — often means event cancellation
+            "iptal",
             # "saat kaçta" = "at what time" (calendar follow-up about
             # event times) vs "saat kaç" = "what time is it" (system).
             "saat kaçta",
+            # Declarative calendar: "olacak" (will be/happen)
+            "olacak",
         ],
         "gmail": [
             "mail", "e-posta", "eposta", "mesaj", "gönder",

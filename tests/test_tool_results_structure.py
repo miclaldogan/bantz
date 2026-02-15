@@ -224,10 +224,12 @@ def test_finalizer_uses_raw_result(mock_orchestrator, mock_tools, monkeypatch):
     config = OrchestratorConfig()
     
     # Create a mock finalizer LLM that will be called
-    mock_finalizer = Mock()
+    mock_finalizer = Mock(spec=[])
     mock_finalizer.complete_text = Mock(return_value="Efendim, 50 etkinlik buldum.")
     mock_finalizer.model_name = "test-finalizer"
     mock_finalizer.backend_name = "test-backend"
+    mock_finalizer.get_model_context_length = Mock(return_value=32000)
+    mock_finalizer.context_window = 32000
     
     loop = OrchestratorLoop(
         orchestrator=mock_orchestrator,
@@ -236,10 +238,11 @@ def test_finalizer_uses_raw_result(mock_orchestrator, mock_tools, monkeypatch):
         finalizer_llm=mock_finalizer,  # ✅ Provide finalizer LLM
     )
     
-    # Mock orchestrator output
+    # Mock orchestrator output — use route="unknown" to bypass deterministic
+    # calendar guard (Issue #1215) so the quality finalizer is actually invoked.
     output = OrchestratorOutput(
-        route="calendar",
-        calendar_intent="list_events",
+        route="unknown",
+        calendar_intent="none",
         slots={},
         confidence=0.9,
         tool_plan=["calendar.list_events"],

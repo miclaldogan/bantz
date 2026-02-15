@@ -33,7 +33,7 @@ class TestOrchestratorOutputSchema:
     def test_schema_route_enum(self) -> None:
         """Route should be enum of valid routes."""
         route_prop = ORCHESTRATOR_OUTPUT_SCHEMA["properties"]["route"]
-        assert route_prop["enum"] == ["calendar", "gmail", "smalltalk", "system", "unknown"]
+        assert route_prop["enum"] == ["calendar", "gmail", "smalltalk", "system", "wiki", "chat", "unknown"]
 
     def test_schema_confidence_range(self) -> None:
         """Confidence should be 0.0-1.0."""
@@ -299,9 +299,9 @@ class TestRouterJsonParsing:
         result = router._extract_output(parsed, raw_text="")
         
         assert result.route == "calendar"
-        assert result.calendar_intent == "none"  # Default
+        assert result.calendar_intent == "query"  # Default for calendar route
         assert result.confidence == 0.8
-        assert result.tool_plan == []  # Default
+        assert result.tool_plan == ["calendar.list_events"]  # Default for calendar+query
         assert result.slots == {}  # Default
 
 

@@ -240,10 +240,10 @@ class TestConfidenceScorerRecency:
             )
         ]
         score = scorer._score_recency(sources)
-        assert score == 0.8  # Per-source: ≤30 days → 0.8
+        assert score == pytest.approx(0.8)  # Per-source: ≤30 days → 0.8
     
     def test_old_sources_low_score(self):
-        """Sources over 365 days get low score (per-source aging)."""
+        """Sources over 90 days get lower score (per-source aging)."""
         reference = datetime(2024, 6, 1)
         scorer = ConfidenceScorer(reference_date=reference)
         
@@ -257,7 +257,7 @@ class TestConfidenceScorerRecency:
             )
         ]
         score = scorer._score_recency(sources)
-        assert score == 0.6  # Per-source: ≤90 days → 0.6
+        assert score == pytest.approx(0.4)  # Per-source: >90 days → 0.4
     
     def test_no_dated_sources_neutral(self):
         """Sources without dates get neutral score."""

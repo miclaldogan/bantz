@@ -14,6 +14,23 @@ from bantz.brain.llm_router import (
     _trim_to_tokens,
 )
 
+_PRISTINE_VALID_TOOLS = frozenset(JarvisLLMOrchestrator._VALID_TOOLS)
+_PRISTINE_SYSTEM_PROMPT = (
+    JarvisLLMOrchestrator._SYSTEM_PROMPT_CORE
+    + JarvisLLMOrchestrator._SYSTEM_PROMPT_DETAIL
+    + JarvisLLMOrchestrator._SYSTEM_PROMPT_EXAMPLES
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset_router_state():
+    """Restore class-level state before/after each test."""
+    JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+    yield
+    JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+
 
 class TestPromptBudgetConfig:
     """Tests for PromptBudgetConfig dataclass."""
@@ -21,8 +38,8 @@ class TestPromptBudgetConfig:
     def test_default_config(self) -> None:
         """Test default budget config values."""
         cfg = PromptBudgetConfig()
-        assert cfg.context_length == 1024
-        assert cfg.completion_reserve == 256
+        assert cfg.context_length == 4096
+        assert cfg.completion_reserve == 768
         assert cfg.safety_margin == 32
 
     def test_for_context_1024(self) -> None:

@@ -51,7 +51,8 @@ def _make_get_response(
 
 
 def _mock_gmail_service(*, list_execute: dict, get_execute_by_id: dict[str, dict]) -> Mock:
-    """Build a chained mock that supports users().messages().list/get().execute()."""
+    """Build a chained mock that supports users().messages().list/get().execute()
+    and batch HTTP requests used by gmail_list_messages."""
 
     service = Mock(name="gmail_service")
     users = service.users.return_value
@@ -61,13 +62,36 @@ def _mock_gmail_service(*, list_execute: dict, get_execute_by_id: dict[str, dict
     list_req.execute.return_value = list_execute
     messages.list.return_value = list_req
 
-    def _get_side_effect(*, userId, id, format, metadataHeaders):  # noqa: A002
+    def _get_side_effect(*, userId, id, format="metadata", metadataHeaders=None):  # noqa: A002
         _ = (userId, format, metadataHeaders)
         req = Mock(name=f"get_req_{id}")
         req.execute.return_value = get_execute_by_id[str(id)]
+        # Tag the request with its response for batch simulation
+        req._response = get_execute_by_id[str(id)]
+        req._request_id = str(id)
         return req
 
     messages.get.side_effect = _get_side_effect
+
+    # Support batch HTTP requests (gmail_list_messages uses batch API)
+    def _new_batch_http_request(callback):
+        batch = Mock(name="batch")
+        batch._requests = []
+        batch._callback = callback
+
+        def _add(request, request_id=None):
+            batch._requests.append((request_id, request))
+
+        def _execute():
+            for request_id, request in batch._requests:
+                response = getattr(request, '_response', {})
+                batch._callback(request_id, response, None)
+
+        batch.add = _add
+        batch.execute = _execute
+        return batch
+
+    service.new_batch_http_request = _new_batch_http_request
 
     return service
 

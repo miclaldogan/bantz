@@ -403,7 +403,8 @@ class TestRedaction:
     def test_turkish_id(self):
         from bantz.privacy.redaction import redact_pii
 
-        result = redact_pii("TC numaram 12345678901")
+        # TC Kimlik: 11 digits, first digit 1-9, last digit even
+        result = redact_pii("TC numaram 12345678900")
         assert "[TC_KIMLIK]" in result
 
     def test_credit_card(self):

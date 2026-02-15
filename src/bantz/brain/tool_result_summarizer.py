@@ -262,6 +262,9 @@ def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
 
     for r in tool_results:
         tool_name = str(r.get("tool") or "")
+        # Skip internal/synthetic tools (e.g. _reflection)
+        if tool_name.startswith("_"):
+            continue
         raw = r.get("raw_result")
         success = r.get("success", False)
 

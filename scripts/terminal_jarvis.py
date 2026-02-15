@@ -152,7 +152,7 @@ def _is_confirmation_yes(text: str) -> bool:
     
     # Exact match for common confirmations
     # Issue #316: Added 'ekle', 'yap', 'koy', 'kaydet' as action confirmations
-    yes_tokens = {"evet", "e", "ok", "tamam", "onay", "onaylıyorum", "kabul", "yes", "y", "olur", "peki", "ekle", "yap", "koy", "kaydet"}
+    yes_tokens = {"evet", "e", "ok", "tamam", "onay", "onaylıyorum", "kabul", "yes", "y", "olur", "peki", "ekle", "yap", "koy", "kaydet", "sil", "gönder"}
     if t in yes_tokens:
         return True
     

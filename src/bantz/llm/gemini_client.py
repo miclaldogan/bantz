@@ -579,8 +579,12 @@ class GeminiClient(LLMClient):
                                    _attempt, _max_stream_retries, _wait, exc)
                     time.sleep(_wait)
                     continue
+                if isinstance(exc, requests.Timeout):
+                    raise LLMTimeoutError(
+                        f"Gemini timeout after {_max_stream_retries} retries reason=timeout"
+                    ) from exc
                 raise LLMConnectionError(
-                    f"Gemini stream connection failed after {_max_stream_retries} attempts"
+                    f"Gemini connection_error after {_max_stream_retries} retries reason=connection_error"
                 ) from exc
 
         if r is None:
