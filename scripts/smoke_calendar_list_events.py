@@ -82,22 +82,22 @@ def _window_next(hours: int) -> TimeWindow:
 
 
 def _print_setup_help() -> None:
-    print("Google Calendar OAuth kurulumu gerekli.")
+    print("Google Calendar OAuth setup required.")
     print()
-    print("1) Google deps kur:")
+    print("1) Install Google deps:")
     print("   pip install -e '.[calendar]'")
     print()
-    print("2) OAuth client secret dosyanı koy:")
-    print(f"   Varsayılan: {DEFAULT_CLIENT_SECRET_PATH}")
-    print("   veya env ile:")
+    print("2) Place your OAuth client secret file:")
+    print(f"   Default: {DEFAULT_CLIENT_SECRET_PATH}")
+    print("   or via env:")
     print("   export BANTZ_GOOGLE_CLIENT_SECRET=~/.config/bantz/google/client_secret.json")
     print()
-    print("3) Token cache path (opsiyonel):")
-    print(f"   Varsayılan: {DEFAULT_TOKEN_PATH}")
+    print("3) Token cache path (optional):")
+    print(f"   Default: {DEFAULT_TOKEN_PATH}")
     print("   export BANTZ_GOOGLE_TOKEN_PATH=~/.config/bantz/google/token.json")
     print()
-    print("4) Calendar ID (opsiyonel):")
-    print(f"   Varsayılan: {DEFAULT_CALENDAR_ID}")
+    print("4) Calendar ID (optional):")
+    print(f"   Default: {DEFAULT_CALENDAR_ID}")
     print("   export BANTZ_GOOGLE_CALENDAR_ID=primary")
 
 
@@ -121,14 +121,14 @@ def main() -> int:
     if not Path(secret_path).exists():
         _print_setup_help()
         print()
-        print(f"Hata: client_secret.json bulunamadı: {secret_path}")
+        print(f"Error: client_secret.json not found: {secret_path}")
         return 2
 
     if args.time_min or args.time_max:
         tmn = args.time_min
         tmx = args.time_max
         if tmn is None:
-            print("Hata: --time-max kullanıyorsan --time-min de ver (veya --today/--evening kullan).")
+            print("Error: --time-max requires --time-min (or use --today/--evening).")
             return 2
     else:
         if args.today:

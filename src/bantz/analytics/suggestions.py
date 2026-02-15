@@ -155,7 +155,7 @@ class SmartSuggestions:
             confidence = count / total if total > 0 else 0
             suggestions.append(Suggestion(
                 intent=intent,
-                reason=f"Genellikle '{current_intent}' sonrası kullanılıyor",
+                reason=f"Usually used after '{current_intent}'",
                 confidence=confidence,
                 display_text=self._intent_to_display(intent),
                 metadata={"sequence_count": count},
@@ -208,7 +208,7 @@ class SmartSuggestions:
                 if intent not in seen and len(suggestions) < limit:
                     suggestions.append(Suggestion(
                         intent=intent,
-                        reason=f"{time_slot} zamanı için öneriliyor",
+                        reason=f"Suggested for {time_slot} time",
                         confidence=0.7,
                         display_text=self._intent_to_display(intent),
                     ))
@@ -220,7 +220,7 @@ class SmartSuggestions:
         return [
             Suggestion(
                 intent=intent,
-                reason=f"{time_slot} zamanı için öneriliyor",
+                reason=f"Suggested for {time_slot} time",
                 confidence=0.5,
                 display_text=self._intent_to_display(intent),
             )
@@ -250,7 +250,7 @@ class SmartSuggestions:
         return [
             Suggestion(
                 intent=intent,
-                reason=f"En çok kullanılan ({count} kez)",
+                reason=f"Most used ({count} times)",
                 confidence=count / total if total > 0 else 0,
                 display_text=self._intent_to_display(intent),
                 metadata={"usage_count": count},

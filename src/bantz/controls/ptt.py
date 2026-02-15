@@ -86,7 +86,7 @@ class PTTController:
 
         self._state = PTTState.HELD
         self._press_time = time.time()
-        logger.info("🎤 PTT basıldı — dinleniyor...")
+        logger.info("🎤 PTT pressed — listening...")
 
         if self._on_start:
             try:
@@ -120,7 +120,7 @@ class PTTController:
         self._state = PTTState.PROCESSING
         self._press_count += 1
         self._total_hold_ms += hold_ms
-        logger.info("🎤 PTT bırakıldı — işleniyor (%.0fms)", hold_ms)
+        logger.info("🎤 PTT released — processing (%.0fms)", hold_ms)
 
         if self._on_stop:
             try:

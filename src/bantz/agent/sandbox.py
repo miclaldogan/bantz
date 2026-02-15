@@ -210,7 +210,7 @@ class SandboxExecutor:
         logger.info("[Sandbox] DRY-RUN: %s (cwd=%s)", command, workdir)
         return ExecutionResult(
             command=command,
-            stdout=f"[DRY-RUN] Komut simüle edildi: {command}",
+            stdout=f"[DRY-RUN] Command simulated: {command}",
             stderr="",
             return_code=0,
             duration_ms=0.0,
@@ -246,7 +246,7 @@ class SandboxExecutor:
                 return ExecutionResult(
                     command=command,
                     stdout="",
-                    stderr="Komut zaman aşımına uğradı.",
+                    stderr="Command timed out.",
                     return_code=-1,
                     duration_ms=timeout * 1000,
                     sandbox_mode="none",

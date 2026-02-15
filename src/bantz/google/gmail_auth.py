@@ -292,8 +292,8 @@ def get_gmail_credentials(
                 scope_hint = ""
 
             raise RuntimeError(
-                "Gmail OAuth yetkilendirmesi gerekli (token yok/uyumsuz). "
-                f"Gmail araçlarını kullanmadan önce '{auth_cmd}' ile yetkilendirme yapın. "
+                "Gmail OAuth authorization required (token missing/incompatible). "
+                f"Authorize with '{auth_cmd}' before using Gmail tools. "
                 f"client_secret={mask_path(str(secret_path))} token={mask_path(str(cfg.token_path))}{scope_hint}"
             )
         flow = InstalledAppFlow.from_client_secrets_file(str(secret_path), scopes=requested_scopes)

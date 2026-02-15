@@ -1,6 +1,6 @@
 """Data models for the messaging pipeline.
 
-Issue #1294: Kontrollü Mesajlaşma
+Issue #1294: Controlled Messaging
 """
 
 from __future__ import annotations

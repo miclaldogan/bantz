@@ -1,6 +1,6 @@
 """Batch draft manager — bulk draft generation and review.
 
-Issue #1294: Kontrollü Mesajlaşma — toplu yanıt hazırlama.
+Issue #1294: Controlled Messaging — batch reply preparation.
 """
 
 from __future__ import annotations

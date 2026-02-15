@@ -482,7 +482,7 @@ class TestMicState:
 
         assert MicState.LISTENING.label_tr == "DİNLENİYOR"
         assert MicState.IDLE.label_tr == "HAZIR"
-        assert MicState.PROCESSING.label_tr == "İŞLENİYOR"
+        assert MicState.PROCESSING.label_tr == "PROCESSING"
 
     def test_icons(self):
         from bantz.privacy.indicator import MicState

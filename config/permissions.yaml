@@ -437,7 +437,7 @@ redact_fields:
 
 # ── Editable Fields (Issue #1291) ────────────────────────────
 # Per-tool fields that users may edit before confirming (HIGH risk only).
-# Fields listed here appear as "[DÜZENLENEBİLİR]" in the confirmation UI.
+# Fields listed here appear as "[EDITABLE]" in the confirmation UI.
 
 editable_fields:
   calendar.delete_event:

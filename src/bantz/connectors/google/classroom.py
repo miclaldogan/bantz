@@ -196,7 +196,7 @@ class ClassroomConnector(GoogleConnector):
                 ))
             return courses
         except Exception as exc:
-            logger.error("Dersler alınamadı: %s", exc)
+            logger.error("Failed to fetch courses: %s", exc)
             raise
 
     async def list_coursework(
@@ -243,7 +243,7 @@ class ClassroomConnector(GoogleConnector):
                 ))
             return assignments
         except Exception as exc:
-            logger.error("Ödevler alınamadı (ders %s): %s", course_id, exc)
+            logger.error("Failed to fetch assignments (course %s): %s", course_id, exc)
             raise
 
     async def get_submission_status(
@@ -291,7 +291,7 @@ class ClassroomConnector(GoogleConnector):
             return submissions
         except Exception as exc:
             logger.error(
-                "Teslim durumları alınamadı (ders %s): %s", course_id, exc,
+                "Failed to fetch submission statuses (course %s): %s", course_id, exc,
             )
             raise
 
@@ -320,7 +320,7 @@ class ClassroomConnector(GoogleConnector):
                 count=len(courses),
             )
         except Exception as exc:
-            return self._err("Dersler alınamadı: %s" % exc)
+            return self._err("Failed to fetch courses: %s" % exc)
 
     def _list_coursework_tool(self, course_id: str, **_kw: Any) -> dict:
         """Sync tool handler for listing assignments."""
@@ -331,7 +331,7 @@ class ClassroomConnector(GoogleConnector):
                 count=len(assignments),
             )
         except Exception as exc:
-            return self._err("Ödevler alınamadı: %s" % exc)
+            return self._err("Failed to fetch assignments: %s" % exc)
 
     def _submission_status_tool(
         self,
@@ -349,7 +349,7 @@ class ClassroomConnector(GoogleConnector):
                 count=len(submissions),
             )
         except Exception as exc:
-            return self._err("Teslim durumları alınamadı: %s" % exc)
+            return self._err("Failed to fetch submission statuses: %s" % exc)
 
     # ── ToolSchema registration ─────────────────────────────────
 
@@ -358,13 +358,13 @@ class ClassroomConnector(GoogleConnector):
         return [
             ToolSchema(
                 name="google.classroom.courses",
-                description="Google Classroom derslerini listele.",
+                description="List Google Classroom courses.",
                 parameters={
                     "type": "object",
                     "properties": {
                         "state": {
                             "type": "string",
-                            "description": "Ders durumu filtresi (ACTIVE, ARCHIVED)",
+                            "description": "Course state filter (ACTIVE, ARCHIVED)",
                         },
                     },
                 },
@@ -373,13 +373,13 @@ class ClassroomConnector(GoogleConnector):
             ),
             ToolSchema(
                 name="google.classroom.coursework",
-                description="Google Classroom dersindeki ödevleri listele.",
+                description="List assignments in a Google Classroom course.",
                 parameters={
                     "type": "object",
                     "properties": {
                         "course_id": {
                             "type": "string",
-                            "description": "Ders ID",
+                            "description": "Course ID",
                         },
                     },
                     "required": ["course_id"],
@@ -389,17 +389,17 @@ class ClassroomConnector(GoogleConnector):
             ),
             ToolSchema(
                 name="google.classroom.submissions",
-                description="Google Classroom ödev teslim durumlarını getir.",
+                description="Get Google Classroom assignment submission statuses.",
                 parameters={
                     "type": "object",
                     "properties": {
                         "course_id": {
                             "type": "string",
-                            "description": "Ders ID",
+                            "description": "Course ID",
                         },
                         "coursework_id": {
                             "type": "string",
-                            "description": "Ödev ID (opsiyonel, tüm ödevler için boş bırakın)",
+                            "description": "Assignment ID (optional, leave empty for all)",
                         },
                     },
                     "required": ["course_id"],

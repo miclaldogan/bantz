@@ -26,44 +26,44 @@ def add_proactive_subparser(subparsers: Any) -> None:
     """Add 'proactive' subcommand to CLI parser."""
     p = subparsers.add_parser(
         "proactive",
-        help="Proaktif zeka motoru yönetimi",
-        description="Proaktif kontrolleri listele, çalıştır ve bildirim politikasını yönet.",
+        help="Proactive engine management",
+        description="List, run proactive checks and manage notification policy.",
     )
     sub = p.add_subparsers(dest="proactive_action")
     sub.required = True
 
     # status
-    status_p = sub.add_parser("status", help="Motor durumunu göster")
-    status_p.add_argument("--json", action="store_true", dest="as_json", help="JSON çıktı")
+    status_p = sub.add_parser("status", help="Show engine status")
+    status_p.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
 
     # list
-    list_p = sub.add_parser("list", help="Tüm proaktif kontrolleri listele")
-    list_p.add_argument("--json", action="store_true", dest="as_json", help="JSON çıktı")
+    list_p = sub.add_parser("list", help="List all proactive checks")
+    list_p.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
 
     # run
-    run_p = sub.add_parser("run", help="Kontrol çalıştır")
-    run_p.add_argument("name", nargs="?", default=None, help="Kontrol adı")
-    run_p.add_argument("--all", action="store_true", help="Tüm kontrolleri çalıştır")
+    run_p = sub.add_parser("run", help="Run a check")
+    run_p.add_argument("name", nargs="?", default=None, help="Check name")
+    run_p.add_argument("--all", action="store_true", help="Run all checks")
 
     # history
-    hist_p = sub.add_parser("history", help="Son kontrol sonuçlarını göster")
-    hist_p.add_argument("name", nargs="?", default=None, help="Kontrol adı (opsiyonel)")
-    hist_p.add_argument("-n", "--limit", type=int, default=10, help="Maksimum sonuç sayısı")
+    hist_p = sub.add_parser("history", help="Show recent check results")
+    hist_p.add_argument("name", nargs="?", default=None, help="Check name (optional)")
+    hist_p.add_argument("-n", "--limit", type=int, default=10, help="Maximum number of results")
 
     # policy
-    policy_p = sub.add_parser("policy", help="Bildirim politikasını göster/ayarla")
-    policy_p.add_argument("--json", action="store_true", dest="as_json", help="JSON çıktı")
-    policy_p.add_argument("--set", nargs=2, metavar=("KEY", "VALUE"), help="Politika ayarı değiştir")
+    policy_p = sub.add_parser("policy", help="Show/set notification policy")
+    policy_p.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
+    policy_p.add_argument("--set", nargs=2, metavar=("KEY", "VALUE"), help="Change policy setting")
 
     # dnd
-    dnd_p = sub.add_parser("dnd", help="Rahatsız Etme modunu aç/kapat")
-    dnd_p.add_argument("mode", choices=["on", "off"], help="on veya off")
+    dnd_p = sub.add_parser("dnd", help="Toggle Do Not Disturb mode")
+    dnd_p.add_argument("mode", choices=["on", "off"], help="on or off")
 
     # notifications
-    notif_p = sub.add_parser("notifications", help="Bildirimleri göster")
-    notif_p.add_argument("--unread", action="store_true", help="Sadece okunmamış")
-    notif_p.add_argument("--clear", action="store_true", help="Tümünü temizle")
-    notif_p.add_argument("--json", action="store_true", dest="as_json", help="JSON çıktı")
+    notif_p = sub.add_parser("notifications", help="Show notifications")
+    notif_p.add_argument("--unread", action="store_true", help="Unread only")
+    notif_p.add_argument("--clear", action="store_true", help="Clear all")
+    notif_p.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
 
 
 def handle_proactive_command(args: argparse.Namespace) -> int:
@@ -82,7 +82,7 @@ def handle_proactive_command(args: argparse.Namespace) -> int:
 
     handler = handlers.get(action)
     if handler is None:
-        print(f"Bilinmeyen komut: {action}", file=sys.stderr)
+        print(f"Unknown command: {action}", file=sys.stderr)
         return 1
 
     return handler(args)
@@ -112,15 +112,15 @@ def _cmd_status(args: argparse.Namespace) -> int:
         print(json.dumps(status, indent=2, ensure_ascii=False))
         return 0
 
-    running = "✅ Çalışıyor" if status["running"] else "⏸️ Durdurulmuş"
-    print(f"\n🧠 Proaktif Zeka Motoru — {running}")
-    print(f"   Kontroller: {status['enabled_checks']}/{status['total_checks']} aktif")
-    print(f"   Bildirim kuyruğu: {status['notification_queue_size']} bildirim")
-    print(f"   Okunmamış: {status['unread_notifications']}")
-    print(f"   DND: {'Açık' if status['dnd'] else 'Kapalı'}")
+    running = "✅ Running" if status["running"] else "⏸️ Stopped"
+    print(f"\n🧠 Proactive Engine — {running}")
+    print(f"   Checks: {status['enabled_checks']}/{status['total_checks']} active")
+    print(f"   Notification queue: {status['notification_queue_size']} notifications")
+    print(f"   Unread: {status['unread_notifications']}")
+    print(f"   DND: {'On' if status['dnd'] else 'Off'}")
 
     if status["checks"]:
-        print(f"\n   {'Kontrol':<25} {'Durum':<10} {'Son Çalışma':<20} {'Sonraki':<20}")
+        print(f"\n   {'Check':<25} {'Status':<10} {'Last Run':<20} {'Next':<20}")
         print(f"   {'─' * 75}")
         for c in status["checks"]:
             state = "✅" if c["enabled"] else "⏸️"
@@ -142,10 +142,10 @@ def _cmd_list(args: argparse.Namespace) -> int:
         return 0
 
     if not checks:
-        print("\n📭 Kayıtlı proaktif kontrol yok.\n")
+        print("\n📭 No registered proactive checks.\n")
         return 0
 
-    print(f"\n🧠 Proaktif Kontroller ({len(checks)} adet):\n")
+    print(f"\n🧠 Proactive Checks ({len(checks)} total):\n")
     for check in checks:
         state = "✅" if check.enabled else "⏸️"
         schedule_info = check.schedule.to_dict()
@@ -153,22 +153,22 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
         schedule_desc = stype
         if tod := schedule_info.get("time_of_day"):
-            schedule_desc = f"Her gün {tod}"
+            schedule_desc = f"Daily at {tod}"
         elif interval := schedule_info.get("interval_seconds"):
             if interval >= 3600:
-                schedule_desc = f"Her {interval // 3600} saat"
+                schedule_desc = f"Every {interval // 3600} hours"
             else:
-                schedule_desc = f"Her {interval // 60} dakika"
+                schedule_desc = f"Every {interval // 60} minutes"
         elif event := schedule_info.get("event_type"):
             schedule_desc = f"Event: {event}"
 
         print(f"  {state} {check.name}")
         print(f"     {check.description}")
-        print(f"     Zamanlama: {schedule_desc}")
+        print(f"     Schedule: {schedule_desc}")
         if check.required_tools:
-            print(f"     Araçlar: {', '.join(check.required_tools)}")
+            print(f"     Tools: {', '.join(check.required_tools)}")
         if check.tags:
-            print(f"     Etiketler: {', '.join(check.tags)}")
+            print(f"     Tags: {', '.join(check.tags)}")
         print()
 
     return 0

@@ -1,17 +1,17 @@
 """Calendar event cache for immediate visibility of new events.
 
-Issue #315: Yeni eklenen etkinlik list_events'te görünmüyor
+Issue #315: Newly added event not visible in list_events
 
 Problem:
-- Google Calendar API'de create sonrası list'te görünme gecikmesi olabiliyor
-- Kullanıcı "toplantı koy" dedikten hemen sonra "bugün için planım var mı" dediğinde
-  yeni etkinlik görünmeyebiliyor
+- Google Calendar API may have a delay showing list results after create
+- When user says "add meeting" then immediately asks "what's my plan for today"
+  the new event may not appear
 
-Çözüm:
-- Yeni oluşturulan event'leri in-memory cache'de tutuyoruz
-- list_events sonuçlarına cache'deki event'leri merge ediyoruz
-- Cache TTL: 5 dakika (API sync edilince gereksiz hale gelir)
-- Session-scoped: Terminal kapanınca cache temizlenir
+Solution:
+- Keep newly created events in an in-memory cache
+- Merge cached events into list_events results
+- Cache TTL: 5 minutes (becomes unnecessary once API syncs)
+- Session-scoped: cache clears when terminal closes
 """
 
 from __future__ import annotations

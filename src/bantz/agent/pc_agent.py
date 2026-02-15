@@ -1,6 +1,6 @@
 """PC Agent — file operations, app management, clipboard, system info.
 
-Issue #1295: PC Agent + CodingAgent — bilgisayar yönetim agent'ı.
+Issue #1295: PC Agent + CodingAgent — PC management agent.
 """
 
 from __future__ import annotations
@@ -124,7 +124,7 @@ class PCAgent:
         """Get detailed information about a file."""
         target = Path(path).expanduser().resolve()
         if not target.exists():
-            return {"ok": False, "error": f"Dosya bulunamadı: {path}"}
+            return {"ok": False, "error": f"File not found: {path}"}
 
         try:
             stat = target.stat()
@@ -155,7 +155,7 @@ class PCAgent:
         """
         target = Path(source_dir).expanduser().resolve()
         if not target.is_dir():
-            return {"ok": False, "error": f"Dizin bulunamadı: {source_dir}"}
+            return {"ok": False, "error": f"Directory not found: {source_dir}"}
 
         moves: list[dict[str, str]] = []
         for entry in target.iterdir():
@@ -228,11 +228,11 @@ class PCAgent:
             )
             if result.returncode == 0:
                 return {"ok": True, "content": result.stdout}
-            return {"ok": False, "error": "Panoya erişilemedi."}
+            return {"ok": False, "error": "Clipboard access failed."}
         except FileNotFoundError:
-            return {"ok": False, "error": "xclip kurulu değil."}
+            return {"ok": False, "error": "xclip not installed."}
         except subprocess.TimeoutExpired:
-            return {"ok": False, "error": "Pano zaman aşımı."}
+            return {"ok": False, "error": "Clipboard timeout."}
 
     async def clipboard_set(self, content: str) -> dict[str, Any]:
         """Set clipboard content."""
@@ -244,9 +244,9 @@ class PCAgent:
             proc.communicate(input=content.encode("utf-8"), timeout=5)
             return {"ok": True, "length": len(content)}
         except FileNotFoundError:
-            return {"ok": False, "error": "xclip kurulu değil."}
+            return {"ok": False, "error": "xclip not installed."}
         except subprocess.TimeoutExpired:
-            return {"ok": False, "error": "Pano zaman aşımı."}
+            return {"ok": False, "error": "Clipboard timeout."}
 
     # ── System Info ──────────────────────────────────────────────
 

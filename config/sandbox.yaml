@@ -28,12 +28,12 @@ safety:
   # These are added ON TOP of the built-in blocked patterns.
   extra_blocked: []
   #  - pattern: "dangerous_command"
-  #    reason: "Tehlikeli komut"
+  #    reason: "Dangerous command"
 
   # Extra dry-run-required patterns
   extra_dry_run: []
   #  - pattern: "risky_command"
-  #    reason: "Riskli — simülasyon gerekli"
+  #    reason: "Risky — simulation required"
 
 # ── PC Agent ─────────────────────────────────────────────────────────
 pc_agent:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vLLM PoC - Test OpenAI-compatible endpoint.
 
-Issue #132: vLLM PoC — Tek modelle OpenAI-compatible server ayağa kaldır
+Issue #132: vLLM PoC — Spin up OpenAI-compatible server with a single model
 
 Usage:
     # Terminal 1: Start vLLM server

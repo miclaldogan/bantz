@@ -10,7 +10,7 @@ Usage::
     tracker = RunTracker()
     await tracker.initialise()
 
-    async with tracker.track_run("yarınki toplantıları göster") as run:
+    async with tracker.track_run("show tomorrow's meetings") as run:
         run.route = "calendar"
         run.intent = "list_events"
 
@@ -18,7 +18,7 @@ Usage::
             result = await call_tool(...)
             tc.set_result(result)
 
-        run.final_output = "Yarın 3 toplantın var..."
+        run.final_output = "You have 3 meetings tomorrow..."
         run.model = "qwen2.5-3b"
         run.total_tokens = 420
 

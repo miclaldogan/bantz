@@ -1,6 +1,6 @@
 """Abstract channel connector interface.
 
-Issue #1294: Kanal-bağımsız mesajlaşma — her kanal bu ABC'yi implemente eder.
+Issue #1294: Channel-agnostic messaging — every channel implements this ABC.
 """
 
 from __future__ import annotations

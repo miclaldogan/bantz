@@ -255,7 +255,7 @@ class QueryClarifier:
     # ─────────────────────────────────────────────────────────────
     
     def analyze_query(self, query: str, intent: str = "") -> QueryAnalysis:
-        """Sorguyu analiz et, netleştirme gerekiyor mu?
+        """Analyze query — is clarification needed?
         
         Args:
             query: User query

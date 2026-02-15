@@ -1,15 +1,15 @@
-"""OpenCode Coding Skill — kod yazma, düzenleme, proje oluşturma (Issue #846).
+"""OpenCode Coding Skill — code writing, editing, project creation (Issue #846).
 
-Kullanıcı "kod yaz", "script oluştur", "bu kodu incele" gibi
-komutlar verdiğinde çalışan entegre coding skill.
+Integrated coding skill that runs when the user gives commands
+like "write code", "create script", "review this code".
 
-Özellikler
-──────────
-- Kod yazma / düzenleme (CodingToolExecutor üzerinden)
-- Proje scaffold: Python / Node.js / HTML şablonları
-- Kod inceleme: ast analiz + öneriler
-- Sandbox çalıştırma: güvenli subprocess ile kod çalıştırma
-- Intent tanıma: coding.* intent pattern'leri
+Features
+────────
+- Code writing / editing (via CodingToolExecutor)
+- Project scaffold: Python / Node.js / HTML templates
+- Code review: AST analysis + suggestions
+- Sandbox execution: safe subprocess code execution
+- Intent recognition: coding.* intent patterns
 """
 
 from __future__ import annotations

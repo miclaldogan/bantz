@@ -613,10 +613,10 @@ class TestMockSystemTray:
         voice_called = []
         
         tray = MockSystemTray()
-        tray.set_menu_item_action("Sesli Komut", lambda: voice_called.append(True))
+        tray.set_menu_item_action("Voice Command", lambda: voice_called.append(True))
         tray.show()
         
-        tray.select_menu_item("Sesli Komut")
+        tray.select_menu_item("Voice Command")
         
         assert len(voice_called) == 1
     

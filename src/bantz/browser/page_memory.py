@@ -28,21 +28,21 @@ class PageMemory:
 
     def summary(self, max_items: int = 25) -> str:
         """Human-readable summary for Bantz to present."""
-        lines = [f"Sayfa: {self.title}", f"URL: {self.url}", ""]
+        lines = [f"Page: {self.title}", f"URL: {self.url}", ""]
         if not self.elements:
-            lines.append("Tıklanabilir öğe bulunamadı.")
+            lines.append("No clickable elements found.")
         else:
             shown = self.elements[:max_items]
             for el in shown:
                 text = el.text[:40] + "…" if len(el.text) > 40 else el.text
                 if el.role == "input":
-                    lines.append(f"  [{el.index}] ({el.input_type or 'input'}) {text or '(boş)'}")
+                    lines.append(f"  [{el.index}] ({el.input_type or 'input'}) {text or '(empty)'}")
                 elif el.role == "link" and el.href:
                     lines.append(f"  [{el.index}] (link) {text} → {el.href[:50]}")
                 else:
                     lines.append(f"  [{el.index}] ({el.role}) {text}")
             if len(self.elements) > max_items:
-                lines.append(f"  ... ve {len(self.elements) - max_items} öğe daha")
+                lines.append(f"  ... and {len(self.elements) - max_items} more elements")
         return "\n".join(lines)
 
     def find_by_index(self, idx: int) -> Optional[PageElement]:

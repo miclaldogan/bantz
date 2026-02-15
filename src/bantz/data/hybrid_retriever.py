@@ -14,7 +14,7 @@ which is fast and dependency-free.
 Usage::
 
     retriever = HybridRetriever(graph_store)
-    results = await retriever.recall("Ali ile ilgili her şey")
+    results = await retriever.recall("everything about Ali")
     # [{"node": GraphNode(...), "score": 0.85, "path": ["Ali → SENT → Email"]}]
 """
 

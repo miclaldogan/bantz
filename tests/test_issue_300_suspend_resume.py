@@ -253,7 +253,7 @@ class TestPidGuard:
         pid_file.write_text(str(os.getpid()))
 
         guard = PidGuard(path=pid_file)
-        with pytest.raises(PidGuardError, match="zaten çalışıyor"):
+        with pytest.raises(PidGuardError, match="already running"):
             guard.acquire()
 
     def test_context_manager(self, tmp_path):

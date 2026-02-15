@@ -381,7 +381,7 @@ class TestCheckGates:
         gates = [LatencyGate(phase="router_ms", percentile=95, max_ms=500.0)]
         results = check_gates(path, gates=gates, min_samples=5)
         assert results[0].passed  # skipped due to insufficient samples
-        assert "Yetersiz" in results[0].detail
+        assert "Insufficient" in results[0].detail
 
     def test_missing_phase_in_records(self, tmp_path):
         from bantz.metrics.gates import LatencyGate, check_gates

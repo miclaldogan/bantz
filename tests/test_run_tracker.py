@@ -513,7 +513,7 @@ class TestMetricsReporter:
         reporter = MetricsReporter(tracker)
         text = await reporter.generate_report(period_hours=24)
         assert "Bantz Metrics" in text
-        assert "Toplam" in text
+        assert "Total" in text
 
     @pytest.mark.asyncio
     async def test_report_with_data(self, tracker):
@@ -528,7 +528,7 @@ class TestMetricsReporter:
         reporter = MetricsReporter(tracker)
         text = await reporter.generate_report(period_hours=24)
         assert "gmail.search" in text
-        assert "Başarılı" in text
+        assert "Successful" in text
 
     @pytest.mark.asyncio
     async def test_report_with_errors(self, tracker):
@@ -538,7 +538,7 @@ class TestMetricsReporter:
 
         reporter = MetricsReporter(tracker)
         text = await reporter.generate_report(period_hours=24)
-        assert "Hatalar" in text or "Hatalı" in text
+        assert "Errors" in text or "Recent Errors" in text
 
 
 # ── Period Parsing ────────────────────────────────────────────────

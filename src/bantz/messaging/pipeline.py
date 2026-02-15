@@ -1,6 +1,6 @@
 """Messaging pipeline — read → draft → confirm → send.
 
-Issue #1294: Kontrollü Mesajlaşma — kanal-bağımsız mesajlaşma pipeline'ı.
+Issue #1294: Controlled Messaging — channel-agnostic messaging pipeline.
 """
 
 from __future__ import annotations
@@ -135,12 +135,12 @@ class MessagingPipeline:
         channel_key = message.channel.value
         manager = self._batch_managers.get(channel_key)
         if manager is None:
-            raise ValueError(f"Kanal kayıtlı değil: {channel_key}")
+            raise ValueError(f"Channel not registered: {channel_key}")
 
         batch = await manager.generate_drafts([message], instruction)
         if batch.drafts:
             return batch.drafts[0]
-        raise RuntimeError("Taslak oluşturulamadı.")
+        raise RuntimeError("Failed to create draft.")
 
     async def draft_replies(
         self,

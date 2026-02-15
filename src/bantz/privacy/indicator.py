@@ -48,11 +48,11 @@ class MicState(str, Enum):
         labels = {
             MicState.IDLE: "HAZIR",
             MicState.LISTENING: "DİNLENİYOR",
-            MicState.PROCESSING: "İŞLENİYOR",
-            MicState.SPEAKING: "KONUŞUYOR",
-            MicState.ERROR: "HATA",
+            MicState.PROCESSING: "PROCESSING",
+            MicState.SPEAKING: "SPEAKING",
+            MicState.ERROR: "ERROR",
         }
-        return labels.get(self, "BİLİNMİYOR")
+        return labels.get(self, "UNKNOWN")
 
     @property
     def icon(self) -> str:

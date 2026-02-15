@@ -31,7 +31,7 @@ class PiperTTS:
         if not text:
             return
         if not self.cfg.model_path:
-            raise RuntimeError("Piper model_path boş. Bir .onnx voice modeli ver.")
+            raise RuntimeError("Piper model_path is empty. Provide an .onnx voice model.")
 
         piper_path = shutil.which(self.cfg.piper_bin) or self.cfg.piper_bin
 
@@ -57,7 +57,7 @@ class PiperTTS:
 
             player = shutil.which("paplay") or shutil.which("aplay")
             if not player:
-                raise RuntimeError("Ses çalıcı bulunamadı (paplay/aplay).")
+                raise RuntimeError("Audio player not found (paplay/aplay).")
 
             # Play and WAIT for completion before cleanup
             player_proc = subprocess.Popen(
