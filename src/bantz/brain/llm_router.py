@@ -1672,14 +1672,10 @@ ASSISTANT (sadece JSON):"""
             and a repair pass was needed to obtain valid JSON.
         """
 
-        from bantz.brain.json_protocol import (
-            extract_first_json_object,
-            repair_common_json_issues,
-            validate_orchestrator_output,
-            apply_orchestrator_defaults,
-            balance_truncated_json,
-        )
-
+        from bantz.brain.json_protocol import (balance_truncated_json,
+                                               extract_first_json_object,
+                                               repair_common_json_issues,
+                                               validate_orchestrator_output)
         # Issue #594: schema-level repair/validation (field-by-field)
         from bantz.brain.router_validation import repair_router_output
 
@@ -1944,7 +1940,13 @@ ASSISTANT (sadece JSON):"""
         elif route == "gmail":
             return self._TOOL_LOOKUP.get((route, gmail_intent))
         elif route == "system":
-            return self._TOOL_LOOKUP.get((route, "none"))
+            # Issue #1312: Try specific intent first, fall back to default.
+            # Previously always returned ("system", "none") → "time.now",
+            # ignoring intents like "status".
+            return (
+                self._TOOL_LOOKUP.get((route, calendar_intent))
+                or self._TOOL_LOOKUP.get((route, "none"))
+            )
         return None
 
     def _extract_output(
@@ -1968,7 +1970,7 @@ ASSISTANT (sadece JSON):"""
 
         # ── Issue #421: Detect route/intent before normalization ─────────
         pre_route = str(parsed.get("route") or "unknown").strip().lower()
-        pre_intent = str(parsed.get("calendar_intent") or "none").strip().lower()
+        _pre_intent = str(parsed.get("calendar_intent") or "none").strip().lower()
 
         # Apply defaults for missing/invalid fields
         normalized = apply_orchestrator_defaults(parsed)
@@ -2502,7 +2504,8 @@ class HybridJarvisLLMOrchestrator:
             }
 
             try:
-                from bantz.brain.prompt_engineering import PromptBuilder, build_session_context
+                from bantz.brain.prompt_engineering import (
+                    PromptBuilder, build_session_context)
 
                 effective_session_context = session_context or build_session_context()
                 seed = str((effective_session_context or {}).get("session_id") or "default")
