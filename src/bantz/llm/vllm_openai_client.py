@@ -33,19 +33,13 @@ import logging
 import os
 import threading
 import time
-from typing import List, Optional, Iterator, Any
 from dataclasses import dataclass
+from typing import Any, Iterator, List, Optional
 
-from bantz.llm.base import (
-    LLMClient,
-    LLMMessage,
-    LLMResponse,
-    LLMToolCall,
-    LLMConnectionError,
-    LLMModelNotFoundError,
-    LLMTimeoutError,
-    LLMInvalidResponseError,
-)
+from bantz.llm.base import (LLMClient, LLMConnectionError,
+                            LLMInvalidResponseError, LLMMessage,
+                            LLMModelNotFoundError, LLMResponse,
+                            LLMTimeoutError, LLMToolCall)
 
 logger = logging.getLogger(__name__)
 
@@ -428,7 +422,8 @@ class VLLMOpenAIClient(LLMClient):
             # Issue #1104: Classify OpenAI typed exceptions first, then
             # fall back to string matching for generic exceptions.
             try:
-                from openai import RateLimitError, AuthenticationError, APITimeoutError
+                from openai import (APITimeoutError, AuthenticationError,
+                                    RateLimitError)
                 if isinstance(e, RateLimitError):
                     raise LLMConnectionError(
                         "vLLM rate_limited (429). Retry later."

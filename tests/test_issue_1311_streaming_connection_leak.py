@@ -16,15 +16,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from bantz.llm.base import (
-    LLMMessage,
-    LLMConnectionError,
-    LLMTimeoutError,
-    LLMInvalidResponseError,
-)
-from bantz.llm.vllm_openai_client import VLLMOpenAIClient
+from bantz.llm.base import (LLMConnectionError, LLMInvalidResponseError,
+                            LLMMessage, LLMTimeoutError)
 from bantz.llm.gemini_client import GeminiClient
-
+from bantz.llm.vllm_openai_client import VLLMOpenAIClient
 
 # ======================================================================
 # Helpers

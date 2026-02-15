@@ -2,31 +2,20 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import os
+import time
 from dataclasses import dataclass
 from typing import Iterator, List, Optional
 
 import requests
 
-from bantz.llm.base import (
-    LLMClient,
-    LLMMessage,
-    LLMResponse,
-    LLMConnectionError,
-    LLMModelNotFoundError,
-    LLMTimeoutError,
-    LLMInvalidResponseError,
-)
-
-from bantz.llm.privacy import redact_for_cloud, minimize_for_cloud
-from bantz.llm.quota_tracker import (
-    QuotaTracker,
-    QuotaExceeded,
-    CircuitBreaker,
-    CircuitOpen,
-)
-
+from bantz.llm.base import (LLMClient, LLMConnectionError,
+                            LLMInvalidResponseError, LLMMessage,
+                            LLMModelNotFoundError, LLMResponse,
+                            LLMTimeoutError)
+from bantz.llm.privacy import minimize_for_cloud, redact_for_cloud
+from bantz.llm.quota_tracker import (CircuitBreaker, CircuitOpen,
+                                     QuotaExceeded, QuotaTracker)
 
 logger = logging.getLogger(__name__)
 metrics_logger = logging.getLogger("bantz.llm.metrics")
