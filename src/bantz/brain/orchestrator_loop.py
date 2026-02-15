@@ -2785,8 +2785,8 @@ class OrchestratorLoop:
         # mixed-language text, the Output Gate translates it back to TR.
         # Gated by BANTZ_BRIDGE_OUTPUT_GATE env var (default: enabled).
         if (
-            os.environ.get("BANTZ_BRIDGE_OUTPUT_GATE", "1").lower()
-            in ("1", "true", "yes")
+            os.getenv("BANTZ_BRIDGE_OUTPUT_GATE", "1").strip().lower()
+            in ("1", "true", "yes", "on")
             and state.detected_lang == "tr"
         ):
             _reply = finalized.assistant_reply or ""

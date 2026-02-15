@@ -80,7 +80,7 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     # Action verbs missing from original list
     re.compile(r"\b(anlat\w*|anlatır?\s*m[iı]s[iı]n)\b", re.IGNORECASE),
     # Adjectives that imply tool context
-    re.compile(r"\b(önemli|acil|yıldızlı|okunmamış)\b", re.IGNORECASE),
+    re.compile(r"\b(önemli|acil|yıldızlı)\b", re.IGNORECASE),
     # Cancel/delete with suffixes: iptal→iptal et, iptali
     re.compile(r"\b(iptal\w*|vazgeç\w*)\b", re.IGNORECASE),
     # Follow-up / continuation verbs

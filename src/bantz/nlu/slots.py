@@ -820,7 +820,7 @@ _TITLE_STOP_WORDS = frozenset({
 _TITLE_ACTION_PATTERN = re.compile(
     r"(?:^|[\s,]+)"                            # start or whitespace
     r"(?:bir\s+)?"                             # optional "bir"
-    r"([\wçğıöşüÇĞİÖŞÜ]+(?:\s+[\wçğıöşüÇĞİÖŞÜ]+)?)"  # 1-2 word noun phrase
+    r"(\w+(?:\s+\w+)?)"                       # 1-2 word noun phrase
     r"\s+"                                     # space before verb
     r"(?:etkinliği?\s+|toplantısı?\s+)?"       # optional "etkinliği/toplantısı"
     r"(?:ekle|koy|oluştur|yap)\b",             # action verb
@@ -831,7 +831,7 @@ _TITLE_ACTION_PATTERN = re.compile(
 _TITLE_AFTER_TIME_PATTERN = re.compile(
     r"(?:saat\w*\s+\S+|dokuza|ona|sekize|yediye|altıya|beşe|dörde|üçe|ikiye|bire|\d{1,2}(?:[:.]\d{2})?(?:'[td]e|'[td]a)?)\s+"
     r"(?:bir\s+)?"
-    r"([\wçğıöşüÇĞİÖŞÜ]+(?:\s+[\wçğıöşüÇĞİÖŞÜ]+)?)"
+    r"(\w+(?:\s+\w+)?)"
     r"\s+(?:ekle|koy|oluştur|yap)\b",
     re.IGNORECASE,
 )

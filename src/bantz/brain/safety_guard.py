@@ -234,11 +234,9 @@ class SafetyGuard:
             # text, title) as tool params — these must be removed.
             _unknown_fields = [fld for fld in params if fld not in properties]
             for fld in _unknown_fields:
-                logger.warning(f"Unknown field '{fld}' in tool '{tool.name}' — stripped")
+                logger.warning("Unknown field '%s' in tool '%s' — stripped", fld, tool.name)
                 del params[fld]
             for fld, value in params.items():
-                if fld not in properties:
-                    continue  # already stripped above
                 
                 field_schema = properties[fld]
                 expected_type = field_schema.get("type")
