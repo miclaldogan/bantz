@@ -2,7 +2,7 @@
 name: secret-manager
 version: 0.1.0
 author: Bantz Team
-description: "🔐 Secret Manager — KeePass/Bitwarden CLI ile güvenli parola yönetimi."
+description: "🔐 Secret Manager — secure password management via KeePass/Bitwarden CLI."
 icon: 🔐
 status: planned
 tags:
@@ -15,62 +15,62 @@ dependencies:
     status: partial
 
 triggers:
-  - pattern: "(?i)(şifre|parola|password|secret|key).*(neydi|getir|bul|göster|kopyala)"
+  - pattern: "(?i)(password|secret|key|credential).*(what|get|find|show|copy)"
     intent: secret.retrieve
     examples:
-      - "Ali'nin server şifresi neydi"
-      - "AWS access key'i getir"
-      - "o parolayı bul"
+      - "what was the server password"
+      - "get the AWS access key"
+      - "find that password"
     priority: 90
 
-  - pattern: "(?i)(şifre|parola).*(oluştur|üret|generate)"
+  - pattern: "(?i)(password|secret).*(create|generate)"
     intent: secret.generate
     examples:
-      - "güçlü bir şifre üret"
-      - "16 karakterlik parola oluştur"
+      - "generate a strong password"
+      - "create a 16-character password"
     priority: 75
 
 tools:
   - name: secret.retrieve
-    description: "Güvenli parola/secret retrieval — onay gerektirir"
+    description: "Secure password/secret retrieval — requires confirmation"
     handler: system
     risk: high
     confirm: true
     parameters:
       - name: query
         type: string
-        description: "Aranacak secret adı veya açıklaması"
+        description: "Secret name or description to search"
       - name: vault
         type: string
-        description: "Vault adı (varsayılan: default)"
+        description: "Vault name (default: default)"
 
   - name: secret.generate
-    description: "Güçlü parola üretici"
+    description: "Strong password generator"
     handler: system
     risk: low
     parameters:
       - name: length
         type: integer
-        description: "Parola uzunluğu (varsayılan: 20)"
+        description: "Password length (default: 20)"
       - name: charset
         type: string
-        description: "Karakter seti: alphanumeric, full, pin"
+        description: "Character set: alphanumeric, full, pin"
         enum: ["alphanumeric", "full", "pin"]
 
   - name: secret.list
-    description: "Vault'taki secret listesi (isimleri, değerleri DEĞİL)"
+    description: "List vault entries (names only, NOT values)"
     handler: system
     risk: medium
     parameters:
       - name: vault
         type: string
-        description: "Vault adı"
+        description: "Vault name"
       - name: filter
         type: string
-        description: "İsim filtresi"
+        description: "Name filter"
 
 notes: |
-  Faz G+ özelliği. HIGH risk — policy engine tam olarak aktif olmalı.
-  Clipboard'a kopyalama → 30sn sonra otomatik temizleme.
+  Phase G+ feature. HIGH risk — policy engine must be fully active.
+  Clipboard copy → auto-clear after 30 seconds.
   KeePass: keepassxc-cli | Bitwarden: bw CLI.
-  Secret değerleri ASLA log'lanmamalı, event bus'a yazılmamalı.
+  Secret values must NEVER be logged or published to event bus.

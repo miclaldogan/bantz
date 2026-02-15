@@ -1,6 +1,6 @@
 """Secret Manager skill — secure credential retrieval and generation.
 
-Issue #1299: Gelecek Yetenekler — Faz G+
+Issue #1299: Future Capabilities — Phase G+
 
 Status: PLANNED — skeleton only.
 Dependencies: Policy Engine (EPIC 4).

@@ -1,6 +1,6 @@
 """Context-aware music suggester — calendar + time-based recommendations.
 
-Issue #1296: Müzik Kontrolü — Context-Aware Suggestions.
+Issue #1296: Music Control — Context-Aware Suggestions.
 
 Suggests music genres/playlists based on:
 - Calendar context (meeting → mute, deep work → lo-fi, exercise → EDM)
@@ -45,38 +45,30 @@ DEFAULT_CALENDAR_MOODS: dict[str, list[str] | None] = {
     # None means "don't suggest music"
     "deep work": ["lo-fi beats", "ambient", "classical"],
     "focus": ["lo-fi beats", "ambient", "classical"],
-    "çalışma": ["lo-fi beats", "ambient", "classical"],
-    "odaklanma": ["lo-fi beats", "ambient"],
+    "work": ["lo-fi beats", "ambient", "classical"],
+    "concentrate": ["lo-fi beats", "ambient"],
     "coding": ["lo-fi beats", "synthwave", "electronic"],
-    "programlama": ["lo-fi beats", "synthwave"],
+    "programming": ["lo-fi beats", "synthwave"],
     "meeting": None,
-    "toplantı": None,
-    "görüşme": None,
+    "conference": None,
     "call": None,
-    "arama": None,
+    "phone": None,
     "interview": None,
-    "mülakat": None,
-    "lunch": ["Turkish pop", "chill", "bossa nova"],
-    "öğle": ["Turkish pop", "chill"],
-    "yemek": ["Turkish pop", "chill", "jazz"],
+    "lunch": ["pop", "chill", "bossa nova"],
+    "meal": ["pop", "chill", "jazz"],
     "exercise": ["workout", "EDM", "rock", "hip-hop"],
-    "egzersiz": ["workout", "EDM", "rock"],
-    "spor": ["workout", "EDM", "rock"],
+    "gym": ["workout", "EDM", "rock"],
+    "sport": ["workout", "EDM", "rock"],
     "yoga": ["ambient", "meditation", "nature sounds"],
     "meditation": ["ambient", "meditation", "nature sounds"],
-    "meditasyon": ["ambient", "meditation"],
     "study": ["classical", "lo-fi beats", "ambient"],
-    "ders": ["classical", "lo-fi beats"],
+    "class": ["classical", "lo-fi beats"],
     "reading": ["classical", "jazz", "ambient"],
-    "okuma": ["classical", "jazz"],
     "relax": ["chill", "jazz", "acoustic"],
-    "dinlenme": ["chill", "jazz", "acoustic"],
-    "party": ["pop", "dance", "Turkish pop"],
-    "parti": ["pop", "dance", "Turkish pop"],
+    "rest": ["chill", "jazz", "acoustic"],
+    "party": ["pop", "dance", "EDM"],
     "creative": ["indie", "alternative", "jazz"],
-    "yaratıcı": ["indie", "alternative"],
     "writing": ["classical", "ambient", "piano"],
-    "yazı": ["classical", "ambient", "piano"],
 }
 
 DEFAULT_TIME_MOODS: dict[str, list[str]] = {
@@ -120,14 +112,14 @@ class MusicSuggester:
                     # Meeting/call — don't suggest music
                     return MusicSuggestion(
                         genres=[],
-                        reason=f"'{event_title}' sırasında müzik önerilmiyor.",
+                        reason=f"Music not recommended during '{event_title}'.",
                         context_type="calendar",
                         event_title=event_title,
                         confidence=0.9,
                     )
                 return MusicSuggestion(
                     genres=genres,
-                    reason=f"'{event_title}' için uygun müzik önerisi.",
+                    reason=f"Music suggestion based on '{event_title}'.",
                     context_type="calendar",
                     event_title=event_title,
                     confidence=0.8,
@@ -145,19 +137,19 @@ class MusicSuggester:
 
         if 5 <= hour < 8:
             period = "early_morning"
-            reason = "Günaydın! Sabah için sakin müzik."
+            reason = "Good morning! Calm music for early hours."
         elif 8 <= hour < 12:
             period = "morning"
-            reason = "Güne enerjik başlamak için."
+            reason = "Energetic music to start the day."
         elif 12 <= hour < 17:
             period = "afternoon"
-            reason = "Öğleden sonra enerjini yüksek tut."
+            reason = "Keep your energy up this afternoon."
         elif 17 <= hour < 21:
             period = "evening"
-            reason = "Akşam rahatlama vakti."
+            reason = "Time to relax this evening."
         else:
             period = "night"
-            reason = "Gece için sakin melodiler."
+            reason = "Calm melodies for the night."
 
         genres = self._time_moods.get(period, ["chill"])
         return MusicSuggestion(

@@ -37,8 +37,8 @@ class FallbackConfig:
 
     service: str
     strategy: FallbackStrategy
-    message_tr: str            # Turkish message for the user
-    message_en: str = ""       # English fallback (optional)
+    message: str               # User-facing fallback message
+    message_en: str = ""       # Deprecated alias (kept for compat)
     max_cache_age_s: int = 0   # Max staleness for cache fallback (seconds)
     fallback_model: str = ""   # Alternative model for model_downgrade
     fallback_fn: Optional[Callable[..., Any]] = None  # Custom fallback callable
@@ -47,7 +47,7 @@ class FallbackConfig:
         d: Dict[str, Any] = {
             "service": self.service,
             "strategy": self.strategy.value,
-            "message_tr": self.message_tr,
+            "message": self.message,
         }
         if self.max_cache_age_s:
             d["max_cache_age_s"] = self.max_cache_age_s
@@ -88,7 +88,7 @@ def _cache_fallback(service: str, cache_dir: Path, max_age: int) -> FallbackResu
                 service=service,
                 strategy=FallbackStrategy.CACHE,
                 success=False,
-                message="Önbellek dosyası bulunamadı",
+                message="Cache file not found",
             )
 
         stat = cache_file.stat()
@@ -98,7 +98,7 @@ def _cache_fallback(service: str, cache_dir: Path, max_age: int) -> FallbackResu
                 service=service,
                 strategy=FallbackStrategy.CACHE,
                 success=False,
-                message=f"Önbellek çok eski ({age_s:.0f}s > {max_age}s)",
+                message=f"Cache too old ({age_s:.0f}s > {max_age}s)",
             )
 
         with open(cache_file) as f:
@@ -109,7 +109,7 @@ def _cache_fallback(service: str, cache_dir: Path, max_age: int) -> FallbackResu
             strategy=FallbackStrategy.CACHE,
             success=True,
             data=data,
-            message=f"Önbellekten yanıt verildi ({age_s:.0f}s eski)",
+            message=f"Served from cache ({age_s:.0f}s old)",
         )
     except Exception as exc:
         return FallbackResult(
@@ -131,7 +131,7 @@ def _sqlite_fallback(service: str) -> FallbackResult:
                 service=service,
                 strategy=FallbackStrategy.SQLITE,
                 success=False,
-                message="SQLite veritabanı bulunamadı",
+                message="SQLite database not found",
             )
 
         conn = sqlite3.connect(str(db_path), timeout=5)
@@ -142,7 +142,7 @@ def _sqlite_fallback(service: str) -> FallbackResult:
             service=service,
             strategy=FallbackStrategy.SQLITE,
             success=True,
-            message="SQLite veritabanına yönlendirildi",
+            message="Redirected to SQLite database",
         )
     except Exception as exc:
         return FallbackResult(
@@ -163,7 +163,7 @@ def _model_downgrade(
             service=service,
             strategy=FallbackStrategy.MODEL_DOWNGRADE,
             success=False,
-            message="Yedek model tanımlı değil",
+            message="No fallback model defined",
         )
 
     return FallbackResult(
@@ -171,7 +171,7 @@ def _model_downgrade(
         strategy=FallbackStrategy.MODEL_DOWNGRADE,
         success=True,
         data={"model": fallback_model},
-        message=f"Model değiştirildi: {fallback_model}",
+        message=f"Model switched to: {fallback_model}",
     )
 
 
@@ -182,31 +182,31 @@ _DEFAULT_CONFIGS: Dict[str, FallbackConfig] = {
     "ollama": FallbackConfig(
         service="ollama",
         strategy=FallbackStrategy.MODEL_DOWNGRADE,
-        message_tr="LLM servisi yanıt vermiyor, daha küçük model deneniyor.",
+        message="LLM service is not responding, trying a smaller model.",
         max_cache_age_s=0,
         fallback_model="qwen2.5-coder:3b",
     ),
     "google": FallbackConfig(
         service="google",
         strategy=FallbackStrategy.CACHE,
-        message_tr="Google API erişilemiyor, önbellekteki veriler kullanılıyor.",
+        message="Google API unreachable, serving cached data.",
         max_cache_age_s=3600,  # 1 hour
     ),
     "neo4j": FallbackConfig(
         service="neo4j",
         strategy=FallbackStrategy.SQLITE,
-        message_tr="Graf veritabanı erişilemiyor, SQLite'a geri dönülüyor.",
+        message="Graph database unreachable, falling back to SQLite.",
     ),
     "weather": FallbackConfig(
         service="weather",
         strategy=FallbackStrategy.CACHE,
-        message_tr="Hava durumu servisi yanıt vermiyor, son bilinen veriler kullanılıyor.",
+        message="Weather service not responding, using last known data.",
         max_cache_age_s=7200,  # 2 hours
     ),
     "spotify": FallbackConfig(
         service="spotify",
         strategy=FallbackStrategy.GRACEFUL_ERROR,
-        message_tr="Spotify erişilemiyor, müzik kontrol edilemiyor.",
+        message="Spotify unreachable, cannot control music.",
     ),
 }
 
@@ -268,7 +268,7 @@ class FallbackRegistry:
                 service=service,
                 strategy=FallbackStrategy.NONE,
                 success=False,
-                message=f"'{service}' için fallback tanımlı değil",
+                message=f"No fallback defined for '{service}'",
             )
             self._history.append(result)
             return result
@@ -297,14 +297,14 @@ class FallbackRegistry:
                 service=service,
                 strategy=FallbackStrategy.GRACEFUL_ERROR,
                 success=True,
-                message=config.message_tr,
+                message=config.message,
             )
         else:  # NONE
             result = FallbackResult(
                 service=service,
                 strategy=FallbackStrategy.NONE,
                 success=False,
-                message="Fallback stratejisi yok",
+                message="No fallback strategy",
             )
 
         # Custom handler override
@@ -316,14 +316,14 @@ class FallbackRegistry:
                     strategy=strategy,
                     success=True,
                     data=custom_data,
-                    message="Özel fallback çalıştırıldı",
+                    message="Custom fallback executed",
                 )
             except Exception as exc:
                 result = FallbackResult(
                     service=service,
                     strategy=strategy,
                     success=False,
-                    message=f"Özel fallback başarısız: {exc}",
+                    message=f"Custom fallback failed: {exc}",
                 )
 
         self._history.append(result)

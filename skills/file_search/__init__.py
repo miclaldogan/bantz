@@ -1,6 +1,6 @@
 """Semantic File Search skill — local file indexing and semantic retrieval.
 
-Issue #1299: Gelecek Yetenekler — Faz G+
+Issue #1299: Future Capabilities — Phase G+
 
 Status: PLANNED — skeleton only.
 Dependencies: Ingest Store (EPIC 1).

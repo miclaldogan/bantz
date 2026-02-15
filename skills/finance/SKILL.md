@@ -2,7 +2,7 @@
 name: finance
 version: 0.1.0
 author: Bantz Team
-description: "💰 Finans takibi — banka mail'lerinden harcama analizi, bütçe takibi."
+description: "💰 Finance Tracker — expense analysis from bank emails, budget tracking."
 icon: 💰
 status: planned
 tags:
@@ -17,63 +17,63 @@ dependencies:
     status: partial
 
 triggers:
-  - pattern: "(?i)(harcama|gider|bütçe|finans|para|maaş|fatura).*(özet|rapor|analiz|ne kadar|listele)"
+  - pattern: "(?i)(expense|spending|budget|finance|money|salary|bill).*(summary|report|analysis|how much|list)"
     intent: finance.summary
     examples:
-      - "bu ayki harcamalarım ne kadar"
-      - "bütçe durumum nasıl"
-      - "fatura özetini çıkar"
-      - "en çok neye para harcıyorum"
+      - "how much did I spend this month"
+      - "what's my budget status"
+      - "show my bill summary"
+      - "what am I spending the most on"
     priority: 75
 
-  - pattern: "(?i)(banka|hesap|kredi|kart).*(bilgi|kontrol|hareket)"
+  - pattern: "(?i)(bank|account|credit|card).*(info|check|transactions)"
     intent: finance.bank
     examples:
-      - "banka hesap hareketlerim"
-      - "kredi kartı ekstresi"
+      - "show my bank transactions"
+      - "credit card statement"
     priority: 70
 
 tools:
   - name: finance.parse_expenses
-    description: "Banka mail'lerinden harcamaları parse et"
+    description: "Parse expenses from bank emails"
     handler: llm
     risk: medium
     parameters:
       - name: period
         type: string
-        description: "Dönem: this_month, last_month, this_week"
+        description: "Period: this_month, last_month, this_week"
         enum: ["this_month", "last_month", "this_week", "custom"]
       - name: source
         type: string
-        description: "Kaynak: gmail, manual"
+        description: "Source: gmail, manual"
         enum: ["gmail", "manual"]
 
   - name: finance.monthly_summary
-    description: "Aylık harcama özeti + kategori breakdown"
+    description: "Monthly expense summary with category breakdown"
     handler: llm
     parameters:
       - name: month
         type: string
-        description: "Ay (YYYY-MM formatı, boş = bu ay)"
+        description: "Month (YYYY-MM format, empty = current month)"
 
   - name: finance.budget_alert
-    description: "Bütçe aşım kontrolü ve uyarı"
+    description: "Budget threshold check and alerts"
     handler: llm
     parameters:
       - name: category
         type: string
-        description: "Harcama kategorisi (boş = tüm kategoriler)"
+        description: "Expense category (empty = all categories)"
 
   - name: finance.categorize
-    description: "Harcamayı kategorize et (yemek, ulaşım, eğlence, vb.)"
+    description: "Categorize an expense (food, transport, entertainment, etc.)"
     handler: llm
     parameters:
       - name: description
         type: string
-        description: "Harcama açıklaması"
+        description: "Expense description"
       - name: amount
         type: number
-        description: "Tutar (TL)"
+        description: "Amount (TRY)"
 
 graph_schema:
   nodes:
@@ -92,7 +92,7 @@ graph_schema:
       to: Merchant
 
 notes: |
-  Faz G+ özelliği. Banka mail'lerinden regex + LLM ile harcama parse'lama.
-  Ingest Store ve Gmail Enhanced EPIC'leri tamamlandıktan sonra aktive edilecek.
-  İlk versiyon: mail regex → harcama listesi → kategori LLM.
-  Sonraki versiyon: graf entegrasyonu ile merchant analizi.
+  Phase G+ feature. Parse expenses from bank emails using regex + LLM.
+  Will be activated after Ingest Store and Gmail Enhanced EPICs are complete.
+  First version: email regex → expense list → category LLM.
+  Next version: graph integration for merchant analysis.

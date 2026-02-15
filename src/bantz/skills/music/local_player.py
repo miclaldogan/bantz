@@ -1,6 +1,6 @@
 """Local MPRIS player backend — VLC, mpv, Rhythmbox, etc.
 
-Issue #1296: Müzik Kontrolü — D-Bus MPRIS protocol for local players.
+Issue #1296: Music Control — D-Bus MPRIS protocol for local players.
 
 Uses ``playerctl`` to communicate with any MPRIS2-compatible media player
 on the Linux desktop (VLC, mpv, Rhythmbox, Audacious, Lollypop, etc.).
@@ -75,8 +75,8 @@ class LocalPlayer(MusicPlayer):
             result = await self._cmd("play")
             if result["ok"]:
                 result["note"] = (
-                    f"Yerel player aramayı desteklemiyor. "
-                    f"Çalma devam ettiriliyor. Aranan: {query}"
+                    f"Local player does not support search. "
+                    f"Resuming playback. Query: {query}"
                 )
             return result
 
@@ -175,7 +175,7 @@ class LocalPlayer(MusicPlayer):
     async def _cmd(self, command: str, *args: str) -> dict[str, Any]:
         """Execute a playerctl command."""
         if not self._playerctl:
-            return {"ok": False, "error": "playerctl kurulu değil."}
+            return {"ok": False, "error": "playerctl is not installed."}
 
         cmd = ["playerctl"]
         if self._player_name:
@@ -199,13 +199,13 @@ class LocalPlayer(MusicPlayer):
                 return {"ok": True, "stdout": stdout_str}
             return {
                 "ok": False,
-                "error": stderr_str.strip() or f"playerctl {command} başarısız",
+                "error": stderr_str.strip() or f"playerctl {command} failed",
                 "stdout": stdout_str,
             }
         except asyncio.TimeoutError:
-            return {"ok": False, "error": "playerctl zaman aşımı"}
+            return {"ok": False, "error": "playerctl timed out"}
         except FileNotFoundError:
-            return {"ok": False, "error": "playerctl bulunamadı"}
+            return {"ok": False, "error": "playerctl not found"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

@@ -1,6 +1,6 @@
 """Report Generator skill — activity reporting and productivity analysis.
 
-Issue #1299: Gelecek Yetenekler — Faz G+
+Issue #1299: Future Capabilities — Phase G+
 
 Status: PLANNED — skeleton only.
 Dependencies: Observability (EPIC 3).
@@ -143,9 +143,9 @@ class PlaceholderReportGenerator(ReportGenerator):
         logger.info("[Reporter] weekly_report — stub mode")
         return Report(
             report_type="weekly",
-            title="Haftalık Rapor",
-            content="Rapor üretici henüz aktif değil. "
-            "Observability EPIC'i tamamlandıktan sonra aktive edilecek.",
+            title="Weekly Report",
+            content="Report generator is not yet active. "
+            "Will be activated after Observability EPIC is complete.",
         )
 
     def monthly_report(
@@ -154,8 +154,8 @@ class PlaceholderReportGenerator(ReportGenerator):
     ) -> Report:
         return Report(
             report_type="monthly",
-            title="Aylık Rapor",
-            content="Rapor üretici henüz aktif değil.",
+            title="Monthly Report",
+            content="Report generator is not yet active.",
         )
 
     def productivity_analysis(

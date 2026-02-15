@@ -1,4 +1,4 @@
-"""Tests for Issue #1299 — Gelecek Yetenekler (Future Capabilities).
+"""Tests for Issue #1299 — Future Capabilities.
 
 Covers all 6 planned skills with ABC contracts, data models,
 and placeholder implementations.
@@ -24,9 +24,9 @@ from skills.travel import Booking, PlaceholderTravelAssistant, Trip
 
 class TestExpenseCategory:
     def test_values(self):
-        assert ExpenseCategory.FOOD == "yemek"
-        assert ExpenseCategory.TRANSPORT == "ulaşım"
-        assert ExpenseCategory.OTHER == "diğer"
+        assert ExpenseCategory.FOOD == "food"
+        assert ExpenseCategory.TRANSPORT == "transport"
+        assert ExpenseCategory.OTHER == "other"
 
 
 class TestExpense:
@@ -34,7 +34,7 @@ class TestExpense:
         e = Expense(amount=150.0, category=ExpenseCategory.FOOD, merchant="Migros")
         d = e.to_dict()
         assert d["amount"] == 150.0
-        assert d["category"] == "yemek"
+        assert d["category"] == "food"
         assert d["merchant"] == "Migros"
         assert d["currency"] == "TRY"
 
@@ -42,7 +42,7 @@ class TestExpense:
 class TestBudgetAlert:
     def test_to_dict(self):
         alert = BudgetAlert(
-            category="yemek",
+            category="food",
             budget=2000.0,
             spent=2500.0,
             remaining=-500.0,
@@ -243,10 +243,10 @@ class TestPlaceholderTravel:
 
 class TestMedication:
     def test_to_dict(self):
-        med = Medication(name="Vitamin D", dose="1000IU", schedule="sabah")
+        med = Medication(name="Vitamin D", dose="1000IU", schedule="morning")
         d = med.to_dict()
         assert d["name"] == "Vitamin D"
-        assert d["schedule"] == "sabah"
+        assert d["schedule"] == "morning"
         assert d["active"] is True
 
 
@@ -277,9 +277,9 @@ class TestWaterConfig:
 class TestPlaceholderHealthReminder:
     def test_add_medication(self):
         hr = PlaceholderHealthReminder()
-        med = hr.add_medication("Aspirin", "akşam", "100mg")
+        med = hr.add_medication("Aspirin", "evening", "100mg")
         assert med.name == "Aspirin"
-        assert med.schedule == "akşam"
+        assert med.schedule == "evening"
 
     def test_setup_water_reminder(self):
         hr = PlaceholderHealthReminder()
@@ -335,13 +335,13 @@ class TestReport:
     def test_to_dict(self):
         report = Report(
             report_type="weekly",
-            title="Haftalık Rapor",
+            title="Weekly Report",
             period="2026-W07",
-            content="Rapor içeriği...",
+            content="Report content...",
         )
         d = report.to_dict()
         assert d["type"] == "weekly"
-        assert d["title"] == "Haftalık Rapor"
+        assert d["title"] == "Weekly Report"
 
     def test_to_dict_with_stats(self):
         report = Report(
@@ -360,7 +360,7 @@ class TestPlaceholderReporter:
         rg = PlaceholderReportGenerator()
         report = rg.weekly_report()
         assert report.report_type == "weekly"
-        assert "aktif değil" in report.content
+        assert "not yet active" in report.content
 
     def test_monthly_report(self):
         rg = PlaceholderReportGenerator()

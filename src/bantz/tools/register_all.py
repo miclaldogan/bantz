@@ -1988,18 +1988,27 @@ def _register_music(registry: "ToolRegistry") -> int:
 
             from bantz.skills.music.local_player import LocalPlayer
             from bantz.skills.music.spotify_player import SpotifyPlayer
+            from bantz.skills.music.ytmusic_player import YTMusicPlayer
 
             token = os.environ.get("BANTZ_SPOTIFY_TOKEN", "")
             spotify = SpotifyPlayer(access_token=token or None)
+            ytmusic = YTMusicPlayer(
+                auth_file=os.environ.get("BANTZ_YTMUSIC_AUTH"),
+                browser_player=os.environ.get(
+                    "BANTZ_YTMUSIC_BROWSER", "chromium",
+                ),
+            )
             local = LocalPlayer()
 
             if spotify.available:
                 _instances["player"] = spotify
+            elif ytmusic.available:
+                _instances["player"] = ytmusic
             elif local.available:
                 _instances["player"] = local
             else:
-                # Default to spotify (may fail gracefully)
-                _instances["player"] = spotify
+                # Default to ytmusic (may fail gracefully)
+                _instances["player"] = ytmusic
         return _instances["player"]
 
     def _get_suggester() -> Any:
@@ -2052,13 +2061,13 @@ def _register_music(registry: "ToolRegistry") -> int:
         registry,
         "music.play",
         (
-            "Müzik çal — sorguya göre şarkı/playlist başlat, "
-            "devam ettir veya URI ile çal."
+            "Play music — start a song/playlist by query, "
+            "resume, or play by URI."
         ),
         _obj(
-            ("query", "string", "Arama sorgusu (tür, şarkı adı, sanatçı)"),
-            ("playlist", "string", "Playlist adı"),
-            ("uri", "string", "Doğrudan Spotify/medya URI"),
+            ("query", "string", "Search query (genre, song name, artist)"),
+            ("playlist", "string", "Playlist name"),
+            ("uri", "string", "Direct Spotify/media URI"),
         ),
         _handle_music_play,
         risk="low",
@@ -2089,7 +2098,7 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.pause",
-        "Müziği duraklat.",
+        "Pause music.",
         _obj(required=[]),
         _handle_music_pause,
         risk="low",
@@ -2120,7 +2129,7 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.resume",
-        "Müziği devam ettir.",
+        "Resume music.",
         _obj(required=[]),
         _handle_music_resume,
         risk="low",
@@ -2151,7 +2160,7 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.next",
-        "Sonraki şarkıya geç.",
+        "Skip to next track.",
         _obj(required=[]),
         _handle_music_next,
         risk="low",
@@ -2182,7 +2191,7 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.prev",
-        "Önceki şarkıya dön.",
+        "Go to previous track.",
         _obj(required=[]),
         _handle_music_prev,
         risk="low",
@@ -2213,7 +2222,7 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.stop",
-        "Müziği durdur.",
+        "Stop music.",
         _obj(required=[]),
         _handle_music_stop,
         risk="low",
@@ -2259,9 +2268,9 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.volume",
-        "Ses seviyesini ayarla veya göster (0-100).",
+        "Set or show volume level (0-100).",
         _obj(
-            ("level", "integer", "Ses seviyesi (0-100). Negatif → mevcut seviyeyi göster."),
+            ("level", "integer", "Volume level (0-100). Negative → show current level."),
         ),
         _handle_music_volume,
         risk="low",
@@ -2292,7 +2301,7 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.status",
-        "Çalan müzik durumu — şarkı, sanatçı, ses seviyesi.",
+        "Current music status — track, artist, volume.",
         _obj(required=[]),
         _handle_music_status,
         risk="low",
@@ -2332,10 +2341,10 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.search",
-        "Şarkı ara — Spotify'da şarkı/sanatçı/albüm ara.",
+        "Search for music — find tracks/artists/albums.",
         _obj(
-            ("query", "string", "Arama sorgusu"),
-            ("limit", "integer", "Maksimum sonuç (varsayılan: 10)"),
+            ("query", "string", "Search query"),
+            ("limit", "integer", "Maximum results (default: 10)"),
             required=["query"],
         ),
         _handle_music_search,
@@ -2371,7 +2380,7 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.playlists",
-        "Playlist listele — Spotify playlist'lerini getir.",
+        "List playlists — get available playlists.",
         _obj(required=[]),
         _handle_music_playlists,
         risk="low",
@@ -2390,7 +2399,7 @@ def _register_music(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "music.suggest",
-        "Bağlama uygun müzik önerisi — takvim ve saat bazlı.",
+        "Context-aware music suggestion — based on calendar and time of day.",
         _obj(required=[]),
         _handle_music_suggest,
         risk="low",
@@ -2434,7 +2443,7 @@ def _register_health(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "system.health",
-        "Tüm servislerin sağlık kontrolünü yap ve rapor döndür.",
+        "Run health checks on all services and return aggregated report.",
         _obj(required=[]),
         _handle_health,
         risk="low",
@@ -2448,7 +2457,7 @@ def _register_health(registry: "ToolRegistry") -> int:
         from bantz.core.health_monitor import get_health_monitor
 
         if not service:
-            return {"ok": False, "error": "service parametresi gerekli"}
+            return {"ok": False, "error": "service parameter is required"}
 
         monitor = get_health_monitor()
 
@@ -2471,9 +2480,9 @@ def _register_health(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "system.health_service",
-        "Belirli bir servisin sağlık kontrolünü yap.",
+        "Check health of a specific service.",
         _obj(
-            ("service", "string", "Kontrol edilecek servis adı (sqlite, ollama, google)"),
+            ("service", "string", "Service name to check (sqlite, ollama, google)"),
             required=["service"],
         ),
         _handle_health_service,
@@ -2499,7 +2508,7 @@ def _register_health(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "system.circuit_breaker",
-        "Circuit breaker durumlarını listele.",
+        "List circuit breaker states for all domains.",
         _obj(required=[]),
         _handle_circuit_breaker,
         risk="low",
@@ -2525,9 +2534,9 @@ def _register_health(registry: "ToolRegistry") -> int:
     n += _reg(
         registry,
         "system.fallback",
-        "Servis fallback durumunu sorgula veya fallback çalıştır.",
+        "Query service fallback status or execute a fallback.",
         _obj(
-            ("service", "string", "Fallback çalıştırılacak servis adı (opsiyonel)"),
+            ("service", "string", "Service name for fallback execution (optional)"),
         ),
         _handle_fallback,
         risk="low",

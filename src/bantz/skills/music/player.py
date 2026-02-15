@@ -1,6 +1,6 @@
 """Abstract music player interface + shared data models.
 
-Issue #1296: Müzik Kontrolü — Player abstraction layer.
+Issue #1296: Music Control — Player abstraction layer.
 
 Provides:
 - ``Track`` dataclass for track metadata
@@ -60,7 +60,7 @@ class Track:
     def __str__(self) -> str:
         if self.artist:
             return f"{self.artist} — {self.title}"
-        return self.title or "(bilinmeyen parça)"
+        return self.title or "(unknown track)"
 
 
 @dataclass

@@ -2,7 +2,7 @@
 name: travel
 version: 0.1.0
 author: Bantz Team
-description: "✈️ Seyahat Asistanı — uçuş/otel/araç kiralama mail takibi ve takvim entegrasyonu."
+description: "✈️ Travel Assistant — flight/hotel/car rental email tracking and calendar integration."
 icon: ✈️
 status: planned
 tags:
@@ -14,57 +14,57 @@ tags:
 dependencies:
   - epic: "EPIC 5 — Gmail Enhanced"
     status: partial
-  - epic: "EPIC 2 — Graf Bellek"
+  - epic: "EPIC 2 — Graph Memory"
     status: pending
 
 triggers:
-  - pattern: "(?i)(seyahat|uçuş|gezi|tatil|otel|uçak).*(plan|bilgi|takvim|ne zaman|listele)"
+  - pattern: "(?i)(travel|flight|trip|vacation|hotel|plane).*(plan|info|calendar|when|list)"
     intent: travel.info
     examples:
-      - "seyahat planlarım ne"
-      - "uçuş bilgilerimi getir"
-      - "tatil takvimimi göster"
-      - "otel rezervasyonum var mı"
+      - "what are my travel plans"
+      - "get my flight info"
+      - "show my trip calendar"
+      - "do I have a hotel reservation"
     priority: 80
 
-  - pattern: "(?i)(check.?in|boarding|uçuş saati|otel giriş)"
+  - pattern: "(?i)(check.?in|boarding|flight time|hotel check)"
     intent: travel.reminder
     examples:
-      - "check-in saatim ne zaman"
-      - "uçuş saatimi hatırlat"
+      - "when is my check-in time"
+      - "remind me of my flight time"
     priority: 85
 
 tools:
   - name: travel.parse_bookings
-    description: "Mail'lerden uçuş/otel/araç kiralama bilgilerini parse et"
+    description: "Parse flight/hotel/car rental info from emails"
     handler: llm
     risk: medium
     parameters:
       - name: period
         type: string
-        description: "Dönem: upcoming, past_month, all"
+        description: "Period: upcoming, past_month, all"
         enum: ["upcoming", "past_month", "all"]
 
   - name: travel.create_itinerary
-    description: "Seyahat takvimi oluştur (Google Calendar'a ekle)"
+    description: "Create trip itinerary (add to Google Calendar)"
     handler: system
     risk: medium
     confirm: true
     parameters:
       - name: trip_name
         type: string
-        description: "Seyahat adı"
+        description: "Trip name"
 
   - name: travel.set_reminders
-    description: "Seyahat hatırlatmaları kur (check-in, uçuş, otel)"
+    description: "Set travel reminders (check-in, flight, hotel)"
     handler: system
     parameters:
       - name: trip_name
         type: string
-        description: "Seyahat adı"
+        description: "Trip name"
       - name: reminder_types
         type: array
-        description: "Hatırlatma tipleri: checkin, flight, hotel, car"
+        description: "Reminder types: checkin, flight, hotel, car"
 
 graph_schema:
   nodes:
@@ -88,7 +88,7 @@ graph_schema:
       to: Trip
 
 notes: |
-  Faz G+ özelliği. Yüksek karmaşıklık.
-  Gmail'den seyahat mail'lerini (uçak, otel, araç) multi-format parse.
-  Google Calendar'a otomatik itinerary oluşturma.
-  Proaktif hatırlatmalar: check-in (24h önce), uçuş (3h önce).
+  Phase G+ feature. High complexity.
+  Parse travel emails (flights, hotels, cars) in multi-format from Gmail.
+  Auto-create itinerary on Google Calendar.
+  Proactive reminders: check-in (24h before), flight (3h before).
