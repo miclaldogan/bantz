@@ -40,7 +40,7 @@ class MetricsReporter:
 
         # Header
         period_label = self._period_label(period_hours)
-        lines.append(f"📊 Bantz Metrics — Son {period_label}")
+        lines.append(f"📊 Bantz Metrics — Last {period_label}")
         lines.append("=" * 48)
 
         # Run stats
@@ -48,25 +48,25 @@ class MetricsReporter:
         lines.append("")
         lines.append("Runs")
         lines.append("-" * 32)
-        lines.append(f"  Toplam        : {rs['total']}")
-        lines.append(f"  Başarılı      : {rs['success']} ({rs['success_rate']}%)")
-        lines.append(f"  Hatalı        : {rs['errors']}")
+        lines.append(f"  Total         : {rs['total']}")
+        lines.append(f"  Successful    : {rs['success']} ({rs['success_rate']}%)")
+        lines.append(f"  Errors        : {rs['errors']}")
         if rs["timeouts"]:
             lines.append(f"  Timeout       : {rs['timeouts']}")
         if rs["cancelled"]:
-            lines.append(f"  İptal         : {rs['cancelled']}")
+            lines.append(f"  Cancelled     : {rs['cancelled']}")
         lines.append(f"  Ort. latency  : {rs['avg_latency_ms']:.0f} ms")
         lines.append(f"  Max latency   : {rs['max_latency_ms']} ms")
         if rs["total_tokens"]:
-            lines.append(f"  Toplam token  : {rs['total_tokens']:,}")
+            lines.append(f"  Total tokens  : {rs['total_tokens']:,}")
 
         # Tool stats
         ts = await self._tracker.tool_stats(since=since)
         if ts:
             lines.append("")
-            lines.append("Tool Kullanımı")
+            lines.append("Tool Usage")
             lines.append("-" * 48)
-            lines.append(f"  {'Tool':<30} {'Çağrı':>6} {'Ort ms':>8} {'Hata%':>6}")
+            lines.append(f"  {'Tool':<30} {'Calls':>6} {'Avg ms':>8} {'Err%':>6}")
             lines.append(f"  {'─' * 30} {'─' * 6} {'─' * 8} {'─' * 6}")
             for t in ts:
                 lines.append(
@@ -78,7 +78,7 @@ class MetricsReporter:
         slow = await self._tracker.slow_tools(threshold_ms=2000, since=since)
         if slow:
             lines.append("")
-            lines.append("Yavaş Toollar (>2s)")
+            lines.append("Slow Tools (>2s)")
             lines.append("-" * 48)
             for s in slow:
                 lines.append(
@@ -92,7 +92,7 @@ class MetricsReporter:
         errors = await self._tracker.error_breakdown(since=since, limit=5)
         if errors:
             lines.append("")
-            lines.append("Son Hatalar")
+            lines.append("Recent Errors")
             lines.append("-" * 48)
             for e in errors:
                 lines.append(f"  [{e['tool_name']}] {e['error']}")
@@ -101,7 +101,7 @@ class MetricsReporter:
         art = await self._tracker.artifact_stats(since=since)
         if art:
             lines.append("")
-            lines.append("Artifactlar")
+            lines.append("Artifacts")
             lines.append("-" * 32)
             for atype, count in sorted(art.items()):
                 lines.append(f"  {atype:<20} : {count}")
@@ -112,11 +112,11 @@ class MetricsReporter:
     @staticmethod
     def _period_label(hours: float) -> str:
         if hours <= 24:
-            return f"{hours:.0f} Saat"
+            return f"{hours:.0f} Hours"
         days = hours / 24
         if days <= 7:
-            return f"{days:.0f} Gün"
-        return f"{days:.0f} Gün"
+            return f"{days:.0f} Days"
+        return f"{days:.0f} Days"
 
 
 def _parse_period(period_str: str) -> float:

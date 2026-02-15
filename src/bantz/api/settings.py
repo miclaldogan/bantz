@@ -88,20 +88,20 @@ async def save_gemini_key(
     except Exception:
         return JSONResponse(
             status_code=400,
-            content={"ok": False, "error": "Geçersiz JSON body"},
+            content={"ok": False, "error": "Invalid JSON body"},
         )
 
     key = body.get("key", "").strip()
     if not key:
         return JSONResponse(
             status_code=400,
-            content={"ok": False, "error": "API key boş olamaz"},
+            content={"ok": False, "error": "API key cannot be empty"},
         )
 
     if not key.startswith("AIza"):
         return JSONResponse(
             status_code=400,
-            content={"ok": False, "error": "Geçersiz key formatı — AIza... ile başlamalı"},
+            content={"ok": False, "error": "Invalid key format — must start with AIza..."},
         )
 
     try:
@@ -120,13 +120,13 @@ async def save_gemini_key(
         os.environ["GOOGLE_API_KEY"] = key
 
         logger.info("Gemini API key stored in vault and injected to runtime (source=web_dashboard)")
-        return JSONResponse(content={"ok": True, "message": "Key kaydedildi ve aktifleştirildi"})
+        return JSONResponse(content={"ok": True, "message": "Key saved and activated"})
 
     except Exception as exc:
         logger.exception("Failed to store Gemini API key: %s", exc)
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "error": "Key kaydedilemedi — sunucu hatası. Loglara bakın."},
+            content={"ok": False, "error": "Failed to save key — server error. Check logs."},
         )
 
 

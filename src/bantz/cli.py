@@ -78,10 +78,10 @@ def paged_print(text: str, force_pager: bool = False) -> None:
         remaining = len(lines) - (i + page_size)
         if remaining > 0:
             try:
-                prompt = f"{Colors.DIM}--- {remaining} satır daha. Devam için Enter, atla için 'q' ---{Colors.RESET}"
+                prompt = f"{Colors.DIM}--- {remaining} more lines. Enter to continue, 'q' to skip ---{Colors.RESET}"
                 user_input = input(prompt).strip().lower()
                 if user_input in {'q', 'quit', 'skip', 'atla'}:
-                    print(f"{Colors.DIM}(atlandı){Colors.RESET}")
+                    print(f"{Colors.DIM}(skipped){Colors.RESET}")
                     break
             except (EOFError, KeyboardInterrupt):
                 print()
@@ -92,9 +92,9 @@ def print_hud(status: dict) -> None:
     """Print sticky HUD with current state."""
     c = Colors
     mode = status.get("mode", "normal")
-    browser = status.get("browser", "kapalı")
-    queue = "aktif" if status.get("queue_active") else "-"
-    pending = "⚠️ ONAY BEKLİYOR" if status.get("pending") else "-"
+    browser = status.get("browser", "off")
+    queue = "active" if status.get("queue_active") else "-"
+    pending = "⚠️ PENDING CONFIRM" if status.get("pending") else "-"
 
     # Truncate long URLs
     if len(browser) > 50:
@@ -115,20 +115,20 @@ def print_welcome() -> None:
 ║            Local Voice Assistant for Linux                ║
 ╚══════════════════════════════════════════════════════════╝{c.RESET}
 
-{c.DIM}Komutlar:{c.RESET}
-  • {c.GREEN}instagram aç{c.RESET} → Browser'da aç
-  • {c.GREEN}sayfayı tara{c.RESET} → Tıklanabilir öğeleri listele
-  • {c.GREEN}12'ye tıkla{c.RESET}  → Index ile tıkla
-  • {c.GREEN}geri dön{c.RESET}     → Önceki sayfa
-  • {c.GREEN}daha fazla{c.RESET}   → Sonraki 10 öğe
-    • {c.GREEN}agent: ...{c.RESET}    → Çok-adımlı agent planla ve çalıştır (örn: agent: YouTube'a git, Coldplay ara)
-    • {c.GREEN}agent durum{c.RESET}   → Agent progress göster
-    • {c.GREEN}agent geçmişi{c.RESET} → Son agent planı + adım durumları
-    • {c.GREEN}son 3 agent{c.RESET}   → Son N agent task listesi
-  • {c.GREEN}clear{c.RESET}        → Ekranı temizle
-  • {c.GREEN}exit{c.RESET}         → Çık
+{c.DIM}Commands:{c.RESET}
+  • {c.GREEN}instagram aç{c.RESET} → Open in browser
+  • {c.GREEN}sayfayı tara{c.RESET} → List clickable elements
+  • {c.GREEN}12'ye tıkla{c.RESET}  → Click by index
+  • {c.GREEN}geri dön{c.RESET}     → Previous page
+  • {c.GREEN}daha fazla{c.RESET}   → Next 10 elements
+    • {c.GREEN}agent: ...{c.RESET}    → Plan and run multi-step agent (e.g. agent: go to YouTube, search Coldplay)
+    • {c.GREEN}agent durum{c.RESET}   → Show agent progress
+    • {c.GREEN}agent geçmişi{c.RESET} → Last agent plan + step statuses
+    • {c.GREEN}son 3 agent{c.RESET}   → Last N agent task list
+  • {c.GREEN}clear{c.RESET}        → Clear screen
+  • {c.GREEN}exit{c.RESET}         → Quit
 
-{c.DIM}Çıkmak için: exit | quit | Ctrl+C{c.RESET}
+{c.DIM}To exit: exit | quit | Ctrl+C{c.RESET}
 """)
 
 

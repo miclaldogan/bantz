@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vLLM PoC - Mock server for testing without GPU.
 
-Issue #132: vLLM PoC — Tek modelle OpenAI-compatible server ayağa kaldır
+Issue #132: vLLM PoC — Spin up OpenAI-compatible server with a single model
 
 This mock server simulates vLLM responses for testing purposes when:
 - GPU not available

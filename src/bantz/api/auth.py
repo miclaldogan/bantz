@@ -100,7 +100,7 @@ async def require_auth(
         _audit_auth_failure(request, reason="missing_header")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header gerekli. Örnek: Authorization: Bearer <token>",
+            detail="Authorization header required. Example: Authorization: Bearer <token>",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -109,7 +109,7 @@ async def require_auth(
         _audit_auth_failure(request, reason="invalid_token")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Geçersiz API token.",
+            detail="Invalid API token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

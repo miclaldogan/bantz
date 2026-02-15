@@ -95,13 +95,13 @@ Intent = Literal[
     "overlay_move",
     "overlay_hide",
     # Query clarification intents (Issue #21)
-    "vague_search",           # Belirsiz arama: "şurada kaza olmuş"
-    "clarification_response", # Clarification yanıtı
+    "vague_search",           # Vague search: "there was an accident there"
+    "clarification_response", # Clarification response
     # Job control intents (Issue #31 - V2-1)
-    "job_pause",              # "bekle", "dur" → pause current job
-    "job_resume",             # "devam et", "devam" → resume paused job
-    "job_cancel",             # "iptal", "vazgeç" → cancel current job
-    "job_status",             # "ne yapıyorsun", "durum" → job status query
+    "job_pause",              # "wait", "hold" → pause current job
+    "job_resume",             # "continue", "go on" → resume paused job
+    "job_cancel",             # "cancel", "abort" → cancel current job
+    "job_status",             # "what are you doing", "status" → job status query
     "unknown",
 ]
 

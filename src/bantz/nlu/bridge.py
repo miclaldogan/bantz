@@ -37,7 +37,7 @@ from bantz.nlu.hybrid import HybridNLU, HybridConfig
 _nlu_instance: Optional[HybridNLU] = None
 _nlu_lock = threading.Lock()
 
-# Hybrid NLU varsayılan AÇIK.  Env-var ile kapatılabilir:
+# Hybrid NLU is ON by default.  Can be disabled via env-var:
 #   BANTZ_HYBRID_NLU=0  → legacy regex-only parse_intent
 _use_hybrid: bool = os.getenv("BANTZ_HYBRID_NLU", "1") not in ("0", "false", "False", "no")
 

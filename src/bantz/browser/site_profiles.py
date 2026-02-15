@@ -150,11 +150,11 @@ class ProfileActionExecutor:
         """
         action = profile.get_action(action_name)
         if not action:
-            return False, f"'{action_name}' action bulunamadı"
+            return False, f"Action '{action_name}' not found"
         
         steps = action.get("steps", [])
         if not steps:
-            return False, f"'{action_name}' için adım tanımlı değil"
+            return False, f"No steps defined for '{action_name}'"
         
         variables = variables or {}
         
@@ -198,10 +198,10 @@ class ProfileActionExecutor:
                 else:
                     logger.warning(f"Unknown action: {step_action}")
             
-            return True, f"'{action_name}' tamamlandı"
+            return True, f"'{action_name}' completed"
             
         except Exception as e:
-            return False, f"'{action_name}' başarısız: {e}"
+            return False, f"'{action_name}' failed: {e}"
     
     def _substitute(self, template: str, variables: Dict[str, str]) -> str:
         """Substitute ${var} placeholders in template."""
@@ -241,7 +241,7 @@ def execute_profile_action(
     """Convenience function to execute a profile action."""
     profile = get_profile_for_url(url)
     if not profile:
-        return False, f"'{url}' için profil bulunamadı"
+        return False, f"No profile found for '{url}'"
     
     executor = ProfileActionExecutor(page)
     return executor.execute_action(profile, action_name, variables)

@@ -827,7 +827,7 @@ class TestCLI:
         result = handle_skill_command(args)
         assert result == 0
         captured = capsys.readouterr()
-        assert "bulunamadı" in captured.out
+        assert "No loaded skills found" in captured.out
 
     def test_cmd_list_with_skills(self, skill_dir, capsys):
         from bantz.skills.declarative.cli import handle_skill_command
@@ -895,7 +895,7 @@ class TestCLI:
         result = handle_skill_command(args)
         assert result == 0
         captured = capsys.readouterr()
-        assert "oluşturuldu" in captured.out
+        assert "Skill created" in captured.out
 
         # Verify the file was created and is valid
         skill_file = tmp_path / "new-skill" / "SKILL.md"
@@ -913,7 +913,7 @@ class TestCLI:
         result = handle_skill_command(args)
         assert result == 0
         captured = capsys.readouterr()
-        assert "Geçerli" in captured.out
+        assert "Valid" in captured.out
 
     def test_cmd_validate_invalid(self, tmp_path, capsys):
         from bantz.skills.declarative.cli import handle_skill_command

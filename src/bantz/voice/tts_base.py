@@ -176,7 +176,7 @@ class PiperTTSAdapter(TTSBase):
         if not text:
             return
         if not self._model_path:
-            logger.warning("PiperTTS: model_path boş — falling back to print")
+            logger.warning("PiperTTS: model_path empty — falling back to print")
             print(f"🔊 {text}")
             return
 
@@ -209,7 +209,7 @@ class PiperTTSAdapter(TTSBase):
                 self._play_process.wait()
                 self._play_process = None
             else:
-                logger.warning("Ses çalıcı bulunamadı (paplay/aplay)")
+                logger.warning("Audio player not found (paplay/aplay)")
 
         except Exception as exc:
             logger.warning("PiperTTS speak failed: %s", exc)
@@ -255,9 +255,9 @@ def create_tts(settings: Optional[TTSSettings] = None) -> TTSBase:
     if s.backend in ("edge", "google"):
         # Future: Edge/Google TTS adapters
         logger.warning(
-            "TTS backend '%s' henüz desteklenmiyor — print fallback kullanılıyor", s.backend
+            "TTS backend '%s' not yet supported — using print fallback", s.backend
         )
         return PrintTTSFallback()
 
-    logger.warning("Bilinmeyen TTS backend: '%s' — print fallback", s.backend)
+    logger.warning("Unknown TTS backend: '%s' — print fallback", s.backend)
     return PrintTTSFallback()

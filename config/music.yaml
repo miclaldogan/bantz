@@ -1,5 +1,5 @@
 # ── Music Control Configuration ──────────────────────────────────────
-# Issue #1296: Müzik Kontrolü — Spotify/Local Player + Context-Aware Suggestions
+# Issue #1296: Music Control — Spotify/Local Player + Context-Aware Suggestions
 
 music:
   # Default player backend: spotify | mpris | auto

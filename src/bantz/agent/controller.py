@@ -1,8 +1,8 @@
-"""Agent Controller - Üst düzey agent akış kontrolü.
+"""Agent Controller — High-level agent flow control.
 
-Issue #22: Multi-Step Task Execution - Agent Framework
+Issue #22: Multi-Step Task Execution — Agent Framework
 
-JarvisPanel ile entegre, async execution destekli agent controller.
+Integrated with JarvisPanel, async execution support.
 """
 from __future__ import annotations
 
@@ -28,19 +28,19 @@ if TYPE_CHECKING:
 
 class StepStatusIcon(Enum):
     """Visual icons for step status."""
-    PENDING = "○"       # Bekliyor
-    IN_PROGRESS = "⏳"  # Çalışıyor
-    COMPLETED = "✓"     # Tamamlandı
-    FAILED = "✗"        # Başarısız
-    SKIPPED = "⊘"       # Atlandı
+    PENDING = "○"       # Pending
+    IN_PROGRESS = "⏳"  # In progress
+    COMPLETED = "✓"     # Completed
+    FAILED = "✗"        # Failed
+    SKIPPED = "⊘"       # Skipped
 
 
 STEP_STATUS_COLORS = {
-    "pending": "#888888",      # Gri
-    "running": "#FFD700",      # Altın sarısı (spinner)
-    "completed": "#00FF7F",    # Yeşil
-    "failed": "#FF4444",       # Kırmızı
-    "skipped": "#666666",      # Koyu gri
+    "pending": "#888888",      # Grey
+    "running": "#FFD700",      # Gold (spinner)
+    "completed": "#00FF7F",    # Green
+    "failed": "#FF4444",       # Red
+    "skipped": "#666666",      # Dark grey
 }
 
 
@@ -113,10 +113,10 @@ class ControllerContext:
 
 
 class AgentController:
-    """Üst düzey agent akış kontrolü.
+    """High-level agent flow control.
     
     Features:
-    - Panel entegrasyonu (plan gösterimi)
+    - Panel integration (plan display)
     - Async execution support
     - Confirmation flow
     - Cancel/Skip controls

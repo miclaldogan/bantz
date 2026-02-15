@@ -1,7 +1,7 @@
 """Bantz Session Server - Unix socket daemon.
 
-Tarayıcıyı ve context'i canlı tutar.
-CLI komutları socket üzerinden alır, sonuçları döner.
+Keeps browser and context alive.
+Receives CLI commands via socket, returns results.
 """
 from __future__ import annotations
 
@@ -107,7 +107,7 @@ def ensure_server_running(
     started = start_server_in_background(session_name=session_name, policy_path=policy_path, log_path=log_path)
     if not started:
         err = _format_err(_bg_server_errors.get(session_name, ""))
-        hint = " (ipuçu: terminalde 'bantz --serve --session {s}' deneyebilirsin)".format(s=session_name)
+        hint = " (hint: try 'bantz --serve --session {s}' in terminal)".format(s=session_name)
         return False, False, f"start_failed:{err}{hint}" if err else f"start_failed{hint}"
 
     # Wait for socket to come up.
@@ -120,12 +120,12 @@ def ensure_server_running(
         err = _bg_server_errors.get(session_name)
         if err:
             short = _format_err(err)
-            hint = " (ipuçu: 'bantz --serve --session {s}' ile hata çıktısını gör)".format(s=session_name)
+            hint = " (hint: run 'bantz --serve --session {s}' to see error output)".format(s=session_name)
             return False, True, f"crashed:{short}{hint}" if short else f"crashed{hint}"
 
         time.sleep(0.1)
 
-    return False, True, "timeout (ipuçu: 'bantz --serve --session {s}' ile manuel başlatıp logu gör)".format(s=session_name)
+    return False, True, "timeout (hint: start with 'bantz --serve --session {s}' and check logs)".format(s=session_name)
 
 
 class InboxStore:

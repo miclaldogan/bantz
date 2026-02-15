@@ -134,7 +134,7 @@ class CodingAgent:
         source_path = Path(source_file).expanduser().resolve()
         if not source_path.is_file():
             return CodeResult(
-                ok=False, error=f"Kaynak dosya bulunamadı: {source_file}"
+                ok=False, error=f"Source file not found: {source_file}"
             )
 
         try:
@@ -307,7 +307,7 @@ class CodingAgent:
         if not target.is_file():
             return ReviewResult(
                 ok=False,
-                error=f"Dosya bulunamadı: {file_path}",
+                error=f"File not found: {file_path}",
             )
 
         try:
@@ -318,7 +318,7 @@ class CodingAgent:
         if self._llm_fn is None:
             return ReviewResult(
                 ok=True,
-                summary="LLM olmadan temel analiz yapıldı.",
+                summary="Basic analysis done without LLM.",
                 suggestions=self._basic_review(code),
                 severity="info",
             )

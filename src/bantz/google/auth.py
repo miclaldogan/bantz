@@ -172,8 +172,8 @@ def get_credentials(
                 auth_cmd = "/auth calendar write"
 
             raise RuntimeError(
-                "Google OAuth yetkilendirmesi gerekli (token yok/uyumsuz ya da scope yetersiz). "
-                f"Takvim için '{auth_cmd}' çalıştırın veya 'bantz google auth calendar' kullanın. "
+                "Google OAuth authorization required (token missing/incompatible or insufficient scope). "
+                f"For calendar, run '{auth_cmd}' or use 'bantz google auth calendar'. "
                 f"client_secret={mask_path(str(cfg.client_secret_path))} token={mask_path(str(cfg.token_path))}{scope_hint}"
             )
 

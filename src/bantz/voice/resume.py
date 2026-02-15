@@ -9,12 +9,12 @@ a resume is detected and the recovery flow is triggered.
 RecoveryManager
 ---------------
 Orchestrates post-resume recovery:
-1. Log: "Suspend'den döndük, sistemleri kontrol ediyorum…"
+1. Log: "Resuming from suspend, checking systems…"
 2. Audio device re-enumeration
 3. vLLM health check
 4. Optional vLLM re-warmup (max 30s)
 5. FSM → WAKE_ONLY safe state
-6. Optional: "Tekrar hazırım efendim."
+6. Optional: "Ready again, sir."
 
 PidGuard
 --------
@@ -181,7 +181,7 @@ class RecoveryManager:
         4. FSM safe state transition
         5. Ready callback
         """
-        logger.info("🔄 Suspend'den döndük, sistemleri kontrol ediyorum...")
+        logger.info("🔄 Resuming from suspend, checking systems...")
         result = RecoveryResult()
         t0 = time.time()
 
@@ -199,14 +199,14 @@ class RecoveryManager:
 
         # Step 4: Ready notification
         if result.success:
-            logger.info("✅ Recovery tamamlandı (%.1fs). %s", result.warmup_elapsed_s, result.summary())
+            logger.info("✅ Recovery completed (%.1fs). %s", result.warmup_elapsed_s, result.summary())
             if self._on_ready:
                 try:
                     self._on_ready()
                 except Exception as exc:
                     logger.warning("Ready callback failed: %s", exc)
         else:
-            logger.warning("⚠ Recovery kısmen başarısız: %s", result.summary())
+            logger.warning("⚠ Recovery partially failed: %s", result.summary())
 
         return result
 
@@ -339,8 +339,8 @@ class PidGuard:
                 old_pid = int(self._path.read_text().strip())
                 if self._is_alive(old_pid):
                     raise PidGuardError(
-                        f"Bantz zaten çalışıyor (PID={old_pid}). "
-                        f"Durdurmak için: kill {old_pid}"
+                        f"Bantz already running (PID={old_pid}). "
+                        f"To stop: kill {old_pid}"
                     )
                 else:
                     logger.info(

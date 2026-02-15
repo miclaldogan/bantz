@@ -40,13 +40,13 @@ class VoiceStatus(str, Enum):
         labels = {
             VoiceStatus.WAKE_ONLY: "BEKLEMEDE",
             VoiceStatus.LISTENING: "DİNLİYOR",
-            VoiceStatus.PROCESSING: "İŞLENİYOR",
-            VoiceStatus.SPEAKING: "KONUŞUYOR",
+            VoiceStatus.PROCESSING: "PROCESSING",
+            VoiceStatus.SPEAKING: "SPEAKING",
             VoiceStatus.IDLE_SLEEP: "UYUYOR",
             VoiceStatus.MUTED: "SESSİZ",
-            VoiceStatus.ERROR: "HATA",
+            VoiceStatus.ERROR: "ERROR",
         }
-        return labels.get(self, "BİLİNMİYOR")
+        return labels.get(self, "UNKNOWN")
 
     @property
     def icon(self) -> str:

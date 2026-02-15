@@ -1,6 +1,6 @@
-"""Kontrollü Mesajlaşma — Read → Draft → Confirm → Send Pipeline.
+"""Controlled Messaging — Read → Draft → Confirm → Send Pipeline.
 
-Issue #1294: Kanal-bağımsız mesajlaşma katmanı.
+Issue #1294: Channel-agnostic messaging layer.
 """
 
 from __future__ import annotations

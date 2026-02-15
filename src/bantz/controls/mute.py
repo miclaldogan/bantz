@@ -68,14 +68,14 @@ class MuteController:
         self._last_toggle = time.time()
 
         if self._muted:
-            logger.info("🔇 Mikrofon kapatıldı")
+            logger.info("🔇 Microphone muted")
             if self._on_mute:
                 try:
                     self._on_mute()
                 except Exception as exc:
                     logger.warning("on_mute callback failed: %s", exc)
         else:
-            logger.info("🔊 Mikrofon açıldı")
+            logger.info("🔊 Microphone unmuted")
             if self._on_unmute:
                 try:
                     self._on_unmute()

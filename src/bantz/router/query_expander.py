@@ -1,6 +1,6 @@
-"""Query Expander - LLM ile sorgu genişletme (Issue #21).
+"""Query Expander — LLM-based query expansion (Issue #21).
 
-Sorguları bağlama göre genişletir ve ilgili sorular önerir.
+Expands queries based on context and suggests related queries.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from bantz.llm.base import LLMClientProtocol, LLMMessage
 
 @dataclass
 class ExpandedQuery:
-    """Genişletilmiş sorgu sonucu."""
+    """Expanded query result."""
     original: str
     expanded: str
     additions: List[str]
@@ -21,19 +21,19 @@ class ExpandedQuery:
 
 @dataclass
 class QuerySuggestion:
-    """Sorgu önerisi."""
+    """Query suggestion."""
     query: str
     reason: str
     relevance: float
 
 
 class QueryExpander:
-    """LLM ile sorgu genişletme.
+    """LLM-based query expansion.
     
     Features:
-    - Sorguyu bağlama göre genişlet
-    - İlgili sorgular öner
-    - Arama optimizasyonu
+    - Expand query based on context
+    - Suggest related queries
+    - Search optimization
     
     Usage:
         expander = QueryExpander(llm_client)

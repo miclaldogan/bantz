@@ -117,4 +117,4 @@ async def mark_inbox_read(
     """Mark an inbox item as read."""
     server = request.app.state.bantz_server
     updated = server._inbox.mark_read(item_id)
-    return {"ok": updated, "text": "OK" if updated else "Bulunamadı"}
+    return {"ok": updated, "text": "OK" if updated else "Not found"}

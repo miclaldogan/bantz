@@ -203,7 +203,7 @@ def check_gates(
                     actual_value=0.0,
                     sample_count=len(values),
                     passed=True,
-                    detail=f"Yetersiz örnek: {len(values)} < {min_samples} (atlandı)",
+                    detail=f"Insufficient samples: {len(values)} < {min_samples} (skipped)",
                 )
             )
             continue
@@ -217,7 +217,7 @@ def check_gates(
                 actual_value=actual,
                 sample_count=len(values),
                 passed=passed,
-                detail="" if passed else f"p{int(gate.percentile)} aşıldı: {actual:.0f}ms > {gate.max_ms:.0f}ms",
+                detail="" if passed else f"p{int(gate.percentile)} exceeded: {actual:.0f}ms > {gate.max_ms:.0f}ms",
             )
         )
 
@@ -248,7 +248,7 @@ def check_gates_from_records(
                     actual_value=0.0,
                     sample_count=len(values),
                     passed=True,
-                    detail=f"Yetersiz örnek: {len(values)} < {min_samples} (atlandı)",
+                    detail=f"Insufficient samples: {len(values)} < {min_samples} (skipped)",
                 )
             )
             continue
@@ -262,7 +262,7 @@ def check_gates_from_records(
                 actual_value=actual,
                 sample_count=len(values),
                 passed=passed,
-                detail="" if passed else f"p{int(gate.percentile)} aşıldı: {actual:.0f}ms > {gate.max_ms:.0f}ms",
+                detail="" if passed else f"p{int(gate.percentile)} exceeded: {actual:.0f}ms > {gate.max_ms:.0f}ms",
             )
         )
 
@@ -284,7 +284,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
 
     if not args:
-        print("Kullanım: python -m bantz.metrics.gates <turn_metrics.jsonl>", file=sys.stderr)
+        print("Usage: python -m bantz.metrics.gates <turn_metrics.jsonl>", file=sys.stderr)
         return 2
 
     path = args[0]
@@ -300,10 +300,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             all_passed = False
 
     if all_passed:
-        print("\n✅ Tüm latency gate'leri geçti.\n")
+        print("\n✅ All latency gates passed.\n")
         return 0
     else:
-        print("\n❌ Bazı gate'ler aşıldı — CI başarısız.\n")
+        print("\n❌ Some gates exceeded — CI failed.\n")
         return 1
 
 

@@ -260,7 +260,7 @@ class ActionPreviewWidget(QWidget):
     def _update_step_label(self):
         """Update step description label."""
         if self._steps and 0 <= self._current_step < len(self._steps):
-            step_text = f"Adım {self._current_step + 1}/{len(self._steps)}: {self._steps[self._current_step]}"
+            step_text = f"Step {self._current_step + 1}/{len(self._steps)}: {self._steps[self._current_step]}"
             self.step_label.setText(step_text)
         else:
             self.step_label.setText("")
