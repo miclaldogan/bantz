@@ -1944,7 +1944,13 @@ ASSISTANT (sadece JSON):"""
         elif route == "gmail":
             return self._TOOL_LOOKUP.get((route, gmail_intent))
         elif route == "system":
-            return self._TOOL_LOOKUP.get((route, "none"))
+            # Issue #1312: Try specific intent first, fall back to default.
+            # Previously always returned ("system", "none") → "time.now",
+            # ignoring intents like "status".
+            return (
+                self._TOOL_LOOKUP.get((route, calendar_intent))
+                or self._TOOL_LOOKUP.get((route, "none"))
+            )
         return None
 
     def _extract_output(
