@@ -258,6 +258,7 @@ class OrchestratorLoop:
         config: Optional[OrchestratorConfig] = None,
         finalizer_llm: Optional[Any] = None,
         audit_logger: Optional[Any] = None,
+        run_tracker: Optional[Any] = None,
     ):
         self.orchestrator = orchestrator
         self.tools = tools
@@ -265,6 +266,7 @@ class OrchestratorLoop:
         self.config = config or OrchestratorConfig()
         self.finalizer_llm = finalizer_llm
         self.audit_logger = audit_logger  # For tool execution auditing (Issue #160)
+        self.run_tracker = run_tracker  # Issue #1290: Observability
 
         # Issue #597: Cache FinalizationPipeline (avoid per-turn object allocation)
         self._finalization_pipeline: Any = None
@@ -529,6 +531,16 @@ class OrchestratorLoop:
             state.canonical_input = ""
 
         start_time = time.time()
+
+        # Issue #1290: Start observability run tracking
+        _obs_run = None
+        if self.run_tracker:
+            try:
+                _sid = getattr(state, "session_id", None) or str(id(state))
+                _obs_run = self.run_tracker.start_run(user_input, session_id=_sid)
+                state.trace["_obs_run_id"] = _obs_run.run_id
+            except Exception as _obs_err:
+                logger.debug("[OBS] start_run failed: %s", _obs_err)
 
         # Issue #417: Build session context once per turn (cached with TTL)
         # Issue #902: Per-session cache keyed by state identity
@@ -808,12 +820,50 @@ class OrchestratorLoop:
                 )
             except Exception as exc:
                 logger.debug("[MISROUTE] Recording failed: %s", exc)
-            
+
+            # Issue #1290: Record tool results + finalise observability run
+            if _obs_run and self.run_tracker:
+                try:
+                    for _tr in tool_results:
+                        _t_name = str(_tr.get("tool") or "")
+                        if not _t_name or _tr.get("pending_confirmation"):
+                            continue
+                        self.run_tracker.record_tool_call(
+                            run_id=_obs_run.run_id,
+                            tool_name=_t_name,
+                            params=_tr.get("params"),
+                            result=_tr.get("raw_result"),
+                            result_summary=_tr.get("result_summary"),
+                            error=str(_tr["error"]) if _tr.get("error") else None,
+                            latency_ms=_tr.get("elapsed_ms", 0),
+                            confirmation="user_approved" if _tr.get("confirmed") else "auto",
+                            status="success" if _tr.get("success") else "error",
+                        )
+                    _obs_run.route = final_output.route
+                    _obs_run.intent = final_output.calendar_intent
+                    _obs_run.final_output = (final_output.assistant_reply or "")[:2000]
+                    _obs_run.model = (
+                        getattr(self.orchestrator, "model_name", None)
+                        or getattr(self.orchestrator, "model", None)
+                        or ""
+                    )
+                    self.run_tracker.end_run(_obs_run)
+                except Exception:
+                    logger.debug("[OBS] end_run failed", exc_info=True)
+
             return final_output, state
         
         except Exception as e:
             logger.exception(f"Orchestrator turn failed: {e}")
             self.event_bus.publish(EventType.ERROR.value, {"error": str(e)})
+
+            # Issue #1290: Record error in observability
+            if _obs_run and self.run_tracker:
+                try:
+                    _obs_run.error = str(e)
+                    self.run_tracker.end_run(_obs_run, status="error")
+                except Exception:
+                    pass
             
             # Return fallback output
             from bantz.brain.llm_router import OrchestratorOutput
