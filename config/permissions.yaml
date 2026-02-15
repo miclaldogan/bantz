@@ -379,6 +379,27 @@ permissions:
     risk: "low"
     decision: "allow"
 
+  # ── Health & Degradation (Issue #1298) ─────────────────────
+  - tool: "system.health"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "system.health_service"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "system.circuit_breaker"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "system.fallback"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"

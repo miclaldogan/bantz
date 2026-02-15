@@ -10,11 +10,17 @@ States:
 - HALF_OPEN: Testing if service recovered
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Optional
+from __future__ import annotations
+
+import asyncio
+import logging
 import threading
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitState(Enum):
@@ -220,6 +226,78 @@ class CircuitBreaker:
         """List all tracked domains."""
         with self._lock:
             return list(self._stats.keys())
+
+    async def call(
+        self,
+        domain: str,
+        fn: Callable[..., Any],
+        *args: Any,
+        fallback: Callable[..., Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Execute *fn* through the circuit breaker.
+
+        If the circuit is open and a *fallback* is provided, the fallback
+        is called instead of raising.  Both sync and async callables are
+        supported for *fn* and *fallback*.
+
+        Raises ``CircuitOpenError`` when no fallback is available and the
+        circuit is open.
+        """
+        if self.is_open(domain):
+            logger.warning("[CB] Circuit OPEN for '%s'", domain)
+            if fallback is not None:
+                result = fallback(*args, **kwargs)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                return result
+            raise CircuitOpenError(domain)
+
+        try:
+            result = fn(*args, **kwargs)
+            if asyncio.iscoroutine(result):
+                result = await result
+            self.record_success(domain)
+            return result
+        except Exception:
+            self.record_failure(domain)
+            if self.is_open(domain) and fallback is not None:
+                fb = fallback(*args, **kwargs)
+                if asyncio.iscoroutine(fb):
+                    fb = await fb
+                return fb
+            raise
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize all domain states for health reporting."""
+        with self._lock:
+            out: dict[str, Any] = {}
+            for domain in list(self._stats):
+                self._check_half_open_transition(domain)
+                s = self._stats[domain]
+                out[domain] = {
+                    "state": s.state.value,
+                    "failures": s.failures,
+                    "successes": s.successes,
+                    "last_failure": (
+                        s.last_failure.isoformat() if s.last_failure else None
+                    ),
+                    "last_success": (
+                        s.last_success.isoformat() if s.last_success else None
+                    ),
+                    "opened_at": (
+                        s.opened_at.isoformat() if s.opened_at else None
+                    ),
+                }
+            return out
+
+
+class CircuitOpenError(Exception):
+    """Raised when a call is attempted on an open circuit with no fallback."""
+
+    def __init__(self, domain: str) -> None:
+        self.domain = domain
+        super().__init__(f"Circuit open for '{domain}'")
 
 
 # Singleton instance

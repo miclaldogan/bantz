@@ -121,6 +121,14 @@ class EventType(Enum):
     BANTZ_MESSAGE = "bantz_message"
     COMMAND_RESULT = "command_result"
 
+    # === Health & Degradation (Issue #1298) ===
+    HEALTH_CHECK = "system.health_check"          # Sağlık kontrolü yapıldı
+    HEALTH_DEGRADED = "system.health_degraded"    # Servis bozuldu
+    HEALTH_RECOVERED = "system.health_recovered"  # Servis düzeldi
+    CIRCUIT_OPENED = "system.circuit_opened"      # Circuit breaker açıldı
+    CIRCUIT_CLOSED = "system.circuit_closed"      # Circuit breaker kapandı
+    FALLBACK_EXECUTED = "system.fallback_executed" # Fallback çalıştırıldı
+
 
 @dataclass
 class Event:
