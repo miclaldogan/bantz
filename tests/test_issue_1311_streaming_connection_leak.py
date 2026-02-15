@@ -11,9 +11,7 @@ underlying HTTP connections/streams in all scenarios:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Iterator
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -24,8 +22,8 @@ from bantz.llm.base import (
     LLMTimeoutError,
     LLMInvalidResponseError,
 )
-from bantz.llm.vllm_openai_client import VLLMOpenAIClient, StreamChunk
-from bantz.llm.gemini_client import GeminiClient, GeminiStreamChunk
+from bantz.llm.vllm_openai_client import VLLMOpenAIClient
+from bantz.llm.gemini_client import GeminiClient
 
 
 # ======================================================================
