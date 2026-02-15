@@ -212,6 +212,117 @@ permissions:
     risk: "low"
     decision: "allow"
 
+  # ── Sandbox Agents (Issue #1295) ───────────────────────────
+  - tool: "sandbox.execute"
+    action: "execute"
+    risk: "high"
+    decision: "confirm"
+    conditions:
+      max_per_day: 100
+      max_per_session: 30
+
+  - tool: "sandbox.dry_run"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "sandbox.rollback"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "sandbox.checkpoints"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "safety.check"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.list_files"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.search_files"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.file_info"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.organize_files"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "pc.launch_app"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "pc.clipboard_get"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.clipboard_set"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "pc.system_info"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "coding.generate"
+    action: "write"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "coding.write_tests"
+    action: "write"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "coding.run_tests"
+    action: "execute"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "coding.git_status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "coding.git_diff"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "coding.git_commit"
+    action: "write"
+    risk: "high"
+    decision: "confirm"
+    conditions:
+      max_per_day: 50
+
+  - tool: "coding.git_log"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "coding.review"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"
@@ -286,3 +397,10 @@ editable_fields:
     - body
     - cc
     - bcc
+  sandbox.execute:
+    - command
+    - workdir
+    - timeout
+    - dry_run
+  coding.git_commit:
+    - message

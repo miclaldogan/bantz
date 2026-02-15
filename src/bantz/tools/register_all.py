@@ -44,6 +44,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_google_connectors(registry)
     count += _register_proactive(registry)
     count += _register_messaging(registry)
+    count += _register_sandbox_agents(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -1041,6 +1042,930 @@ def _register_messaging(registry: "ToolRegistry") -> int:
         "Mesajlaşma pipeline durumunu gösterir: aktif kanallar, özellikler.",
         _obj(required=[]),
         _handle_messaging_status,
+        risk="low",
+    )
+
+    return n
+
+
+# ── Sandbox Agents (Issue #1295) ─────────────────────────────────────
+
+def _register_sandbox_agents(registry: "ToolRegistry") -> int:
+    """Register sandbox execution, safety, PC agent, and coding agent tools."""
+    n = 0
+
+    # Lazy-initialised shared instances
+    _instances: dict[str, Any] = {}
+
+    def _get_sandbox() -> Any:
+        if "sandbox" not in _instances:
+            from bantz.agent.sandbox import SandboxExecutor
+
+            _instances["sandbox"] = SandboxExecutor(mode="none")
+        return _instances["sandbox"]
+
+    def _get_guardrails() -> Any:
+        if "guardrails" not in _instances:
+            from bantz.agent.safety import SafetyGuardrails
+
+            _instances["guardrails"] = SafetyGuardrails()
+        return _instances["guardrails"]
+
+    def _get_pc_agent() -> Any:
+        if "pc_agent" not in _instances:
+            from bantz.agent.pc_agent import PCAgent
+
+            _instances["pc_agent"] = PCAgent(
+                sandbox=_get_sandbox(),
+                guardrails=_get_guardrails(),
+            )
+        return _instances["pc_agent"]
+
+    def _get_coding_agent() -> Any:
+        if "coding_agent" not in _instances:
+            from bantz.agent.coding_agent import CodingAgent
+
+            _instances["coding_agent"] = CodingAgent(
+                sandbox=_get_sandbox(),
+            )
+        return _instances["coding_agent"]
+
+    # ── sandbox.execute ─────────────────────────────────────────
+    def _handle_sandbox_execute(
+        *,
+        command: str,
+        workdir: str = "",
+        timeout: int = 30,
+        dry_run: bool = False,
+        **_: Any,
+    ) -> dict:
+        """Execute a command in the sandbox."""
+        import asyncio
+
+        guardrails = _get_guardrails()
+        decision = guardrails.check(command)
+        if decision.blocked:
+            return {"ok": False, "error": decision.reason, "action": "blocked"}
+
+        if decision.action.value == "dry_run_first" and not dry_run:
+            dry_run = True
+
+        sandbox = _get_sandbox()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        sandbox.execute(
+                            command,
+                            workdir=workdir or None,
+                            timeout=timeout,
+                            dry_run=dry_run,
+                        ),
+                    ).result(timeout=timeout + 10)
+            else:
+                result = asyncio.run(
+                    sandbox.execute(
+                        command,
+                        workdir=workdir or None,
+                        timeout=timeout,
+                        dry_run=dry_run,
+                    )
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result.to_dict()
+
+    n += _reg(
+        registry,
+        "sandbox.execute",
+        (
+            "Sandbox ortamında komut çalıştır — güvenlik kontrollü, "
+            "zaman aşımlı, rollback destekli izole yürütme."
+        ),
+        _obj(
+            ("command", "string", "Çalıştırılacak shell komutu"),
+            ("workdir", "string", "Çalışma dizini (boş → home)"),
+            ("timeout", "integer", "Zaman aşımı (saniye, varsayılan 30)"),
+            ("dry_run", "boolean", "Sadece simülasyon (varsayılan false)"),
+            required=["command"],
+        ),
+        _handle_sandbox_execute,
+        risk="high",
+        confirm=True,
+    )
+
+    # ── sandbox.dry_run ─────────────────────────────────────────
+    def _handle_sandbox_dry_run(
+        *,
+        command: str,
+        workdir: str = "",
+        **_: Any,
+    ) -> dict:
+        """Dry-run simulation of a command."""
+        import asyncio
+
+        guardrails = _get_guardrails()
+        decision = guardrails.check(command)
+        if decision.blocked:
+            return {"ok": False, "error": decision.reason, "action": "blocked"}
+
+        sandbox = _get_sandbox()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        sandbox.execute(
+                            command, workdir=workdir or None, dry_run=True
+                        ),
+                    ).result(timeout=15)
+            else:
+                result = asyncio.run(
+                    sandbox.execute(
+                        command, workdir=workdir or None, dry_run=True
+                    )
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result.to_dict()
+
+    n += _reg(
+        registry,
+        "sandbox.dry_run",
+        "Komutu gerçekten çalıştırmadan simüle et — sonucu tahmin et.",
+        _obj(
+            ("command", "string", "Simüle edilecek komut"),
+            ("workdir", "string", "Çalışma dizini"),
+            required=["command"],
+        ),
+        _handle_sandbox_dry_run,
+        risk="low",
+    )
+
+    # ── sandbox.rollback ────────────────────────────────────────
+    def _handle_sandbox_rollback(
+        *, checkpoint_id: str, **_: Any
+    ) -> dict:
+        """Rollback to a checkpoint."""
+        import asyncio
+
+        sandbox = _get_sandbox()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    ok = pool.submit(
+                        asyncio.run, sandbox.rollback(checkpoint_id)
+                    ).result(timeout=10)
+            else:
+                ok = asyncio.run(sandbox.rollback(checkpoint_id))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {"ok": ok, "checkpoint_id": checkpoint_id}
+
+    n += _reg(
+        registry,
+        "sandbox.rollback",
+        "Önceki bir checkpoint'e geri dön — yıkıcı işlemi geri al.",
+        _obj(
+            ("checkpoint_id", "string", "Geri dönülecek checkpoint ID"),
+            required=["checkpoint_id"],
+        ),
+        _handle_sandbox_rollback,
+        risk="medium",
+        confirm=True,
+    )
+
+    # ── sandbox.checkpoints ─────────────────────────────────────
+    def _handle_sandbox_checkpoints(**_: Any) -> dict:
+        """List all sandbox checkpoints."""
+        sandbox = _get_sandbox()
+        return {
+            "ok": True,
+            "checkpoints": sandbox.get_checkpoints(),
+        }
+
+    n += _reg(
+        registry,
+        "sandbox.checkpoints",
+        "Tüm sandbox checkpoint'lerini listele — rollback geçmişi.",
+        _obj(required=[]),
+        _handle_sandbox_checkpoints,
+        risk="low",
+    )
+
+    # ── safety.check ────────────────────────────────────────────
+    def _handle_safety_check(
+        *, command: str, **_: Any
+    ) -> dict:
+        """Check command safety level."""
+        guardrails = _get_guardrails()
+        decision = guardrails.check(command)
+        return {
+            "ok": True,
+            "command": command,
+            "action": decision.action.value,
+            "reason": decision.reason,
+            "explanation": guardrails.explain(command),
+        }
+
+    n += _reg(
+        registry,
+        "safety.check",
+        (
+            "Komutun güvenlik seviyesini kontrol et — "
+            "blocked/dry_run_first/confirm/allow."
+        ),
+        _obj(
+            ("command", "string", "Kontrol edilecek komut"),
+            required=["command"],
+        ),
+        _handle_safety_check,
+        risk="low",
+    )
+
+    # ── pc.list_files ───────────────────────────────────────────
+    def _handle_pc_list_files(
+        *,
+        path: str,
+        pattern: str = "*",
+        recursive: bool = False,
+        include_hidden: bool = False,
+        **_: Any,
+    ) -> dict:
+        """List files in a directory."""
+        import asyncio
+
+        pc = _get_pc_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    files = pool.submit(
+                        asyncio.run,
+                        pc.list_files(
+                            path,
+                            pattern=pattern,
+                            recursive=recursive,
+                            include_hidden=include_hidden,
+                        ),
+                    ).result(timeout=15)
+            else:
+                files = asyncio.run(
+                    pc.list_files(
+                        path,
+                        pattern=pattern,
+                        recursive=recursive,
+                        include_hidden=include_hidden,
+                    )
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": True,
+            "count": len(files),
+            "files": [f.to_dict() for f in files[:100]],
+        }
+
+    n += _reg(
+        registry,
+        "pc.list_files",
+        "Dizindeki dosyaları listele — glob filtre, özyinelemeli arama.",
+        _obj(
+            ("path", "string", "Dizin yolu"),
+            ("pattern", "string", "Glob deseni (varsayılan: *)"),
+            ("recursive", "boolean", "Alt dizinlere in (varsayılan: false)"),
+            ("include_hidden", "boolean", "Gizli dosyaları dahil et"),
+            required=["path"],
+        ),
+        _handle_pc_list_files,
+        risk="low",
+    )
+
+    # ── pc.search_files ─────────────────────────────────────────
+    def _handle_pc_search_files(
+        *,
+        directory: str,
+        query: str,
+        max_results: int = 50,
+        **_: Any,
+    ) -> dict:
+        """Search files matching a query."""
+        import asyncio
+
+        pc = _get_pc_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    files = pool.submit(
+                        asyncio.run,
+                        pc.search_files(
+                            directory, query, max_results=max_results
+                        ),
+                    ).result(timeout=20)
+            else:
+                files = asyncio.run(
+                    pc.search_files(directory, query, max_results=max_results)
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": True,
+            "count": len(files),
+            "files": [f.to_dict() for f in files],
+        }
+
+    n += _reg(
+        registry,
+        "pc.search_files",
+        "Dosya ara — dizinde ada göre dosya bul.",
+        _obj(
+            ("directory", "string", "Arama yapılacak dizin"),
+            ("query", "string", "Arama sorgusu (dosya adı parçası)"),
+            ("max_results", "integer", "Maksimum sonuç (varsayılan: 50)"),
+            required=["directory", "query"],
+        ),
+        _handle_pc_search_files,
+        risk="low",
+    )
+
+    # ── pc.file_info ────────────────────────────────────────────
+    def _handle_pc_file_info(*, path: str, **_: Any) -> dict:
+        """Get detailed file information."""
+        import asyncio
+
+        pc = _get_pc_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    info = pool.submit(
+                        asyncio.run, pc.file_info(path)
+                    ).result(timeout=10)
+            else:
+                info = asyncio.run(pc.file_info(path))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return info
+
+    n += _reg(
+        registry,
+        "pc.file_info",
+        "Dosya detay bilgisi — boyut, izinler, değişiklik tarihi.",
+        _obj(
+            ("path", "string", "Dosya yolu"),
+            required=["path"],
+        ),
+        _handle_pc_file_info,
+        risk="low",
+    )
+
+    # ── pc.organize_files ───────────────────────────────────────
+    def _handle_pc_organize_files(
+        *,
+        source_dir: str,
+        by: str = "extension",
+        dry_run: bool = True,
+        **_: Any,
+    ) -> dict:
+        """Organize files in a directory."""
+        import asyncio
+
+        pc = _get_pc_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        pc.organize_files(source_dir, by=by, dry_run=dry_run),
+                    ).result(timeout=30)
+            else:
+                result = asyncio.run(
+                    pc.organize_files(source_dir, by=by, dry_run=dry_run)
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "pc.organize_files",
+        (
+            "Dosyaları düzenle — uzantı veya tarihe göre klasörlere ayır. "
+            "Varsayılan: simülasyon modu."
+        ),
+        _obj(
+            ("source_dir", "string", "Kaynak dizin"),
+            ("by", "string", "Düzenleme kriteri: extension | date"),
+            ("dry_run", "boolean", "Simülasyon modu (varsayılan: true)"),
+            required=["source_dir"],
+        ),
+        _handle_pc_organize_files,
+        risk="medium",
+        confirm=True,
+    )
+
+    # ── pc.launch_app ───────────────────────────────────────────
+    def _handle_pc_launch_app(
+        *,
+        app_name: str,
+        args: str = "",
+        **_: Any,
+    ) -> dict:
+        """Launch a desktop application."""
+        import asyncio
+
+        pc = _get_pc_agent()
+        arg_list = args.split() if args else None
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        pc.launch_app(app_name, arg_list),
+                    ).result(timeout=15)
+            else:
+                result = asyncio.run(pc.launch_app(app_name, arg_list))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "pc.launch_app",
+        "Uygulama başlat — masaüstü uygulamasını aç/çalıştır.",
+        _obj(
+            ("app_name", "string", "Uygulama adı veya komutu"),
+            ("args", "string", "Ek argümanlar (boşlukla ayrılmış)"),
+            required=["app_name"],
+        ),
+        _handle_pc_launch_app,
+        risk="medium",
+        confirm=True,
+    )
+
+    # ── pc.clipboard_get ────────────────────────────────────────
+    def _handle_pc_clipboard_get(**_: Any) -> dict:
+        """Get clipboard content."""
+        import asyncio
+
+        pc = _get_pc_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, pc.clipboard_get()
+                    ).result(timeout=5)
+            else:
+                result = asyncio.run(pc.clipboard_get())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "pc.clipboard_get",
+        "Pano içeriğini oku — mevcut clipboard içeriğini getir.",
+        _obj(required=[]),
+        _handle_pc_clipboard_get,
+        risk="low",
+    )
+
+    # ── pc.clipboard_set ────────────────────────────────────────
+    def _handle_pc_clipboard_set(
+        *, content: str, **_: Any
+    ) -> dict:
+        """Set clipboard content."""
+        import asyncio
+
+        pc = _get_pc_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, pc.clipboard_set(content)
+                    ).result(timeout=5)
+            else:
+                result = asyncio.run(pc.clipboard_set(content))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "pc.clipboard_set",
+        "Panoya yaz — verilen metni clipboard'a kopyala.",
+        _obj(
+            ("content", "string", "Panoya yazılacak metin"),
+            required=["content"],
+        ),
+        _handle_pc_clipboard_set,
+        risk="medium",
+    )
+
+    # ── pc.system_info ──────────────────────────────────────────
+    def _handle_pc_system_info(**_: Any) -> dict:
+        """Get system information."""
+        import asyncio
+
+        pc = _get_pc_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, pc.system_info()
+                    ).result(timeout=10)
+            else:
+                result = asyncio.run(pc.system_info())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "pc.system_info",
+        "Sistem bilgisi — CPU, RAM, disk, hostname, OS detayları.",
+        _obj(required=[]),
+        _handle_pc_system_info,
+        risk="low",
+    )
+
+    # ── coding.generate ─────────────────────────────────────────
+    def _handle_coding_generate(
+        *,
+        spec: str,
+        language: str = "python",
+        **_: Any,
+    ) -> dict:
+        """Generate code from a specification."""
+        import asyncio
+
+        agent = _get_coding_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        agent.generate_code(spec, language=language),
+                    ).result(timeout=60)
+            else:
+                result = asyncio.run(
+                    agent.generate_code(spec, language=language)
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": result.ok,
+            "code": result.code[:8192],
+            "language": result.language,
+            "syntax_valid": result.syntax_valid,
+            "error": result.error,
+        }
+
+    n += _reg(
+        registry,
+        "coding.generate",
+        "Kod üret — LLM ile doğal dilde tarif edilen kodu oluştur.",
+        _obj(
+            ("spec", "string", "Kod tanımı (doğal dilde)"),
+            ("language", "string", "Hedef dil (varsayılan: python)"),
+            required=["spec"],
+        ),
+        _handle_coding_generate,
+        risk="medium",
+    )
+
+    # ── coding.write_tests ──────────────────────────────────────
+    def _handle_coding_write_tests(
+        *,
+        source_file: str,
+        framework: str = "pytest",
+        **_: Any,
+    ) -> dict:
+        """Generate tests for a source file."""
+        import asyncio
+
+        agent = _get_coding_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        agent.write_tests(source_file, framework=framework),
+                    ).result(timeout=60)
+            else:
+                result = asyncio.run(
+                    agent.write_tests(source_file, framework=framework)
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": result.ok,
+            "code": result.code[:8192],
+            "file_path": result.file_path,
+            "syntax_valid": result.syntax_valid,
+            "error": result.error,
+        }
+
+    n += _reg(
+        registry,
+        "coding.write_tests",
+        "Test yaz — kaynak dosya için otomatik unit test üret.",
+        _obj(
+            ("source_file", "string", "Test yazılacak kaynak dosya yolu"),
+            ("framework", "string", "Test framework: pytest | unittest"),
+            required=["source_file"],
+        ),
+        _handle_coding_write_tests,
+        risk="medium",
+    )
+
+    # ── coding.run_tests ────────────────────────────────────────
+    def _handle_coding_run_tests(
+        *,
+        path: str = ".",
+        verbose: bool = True,
+        timeout: int = 120,
+        **_: Any,
+    ) -> dict:
+        """Run tests in the sandbox."""
+        import asyncio
+
+        agent = _get_coding_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        agent.run_tests(path, verbose=verbose, timeout=timeout),
+                    ).result(timeout=timeout + 15)
+            else:
+                result = asyncio.run(
+                    agent.run_tests(path, verbose=verbose, timeout=timeout)
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": result.ok,
+            "passed": result.passed,
+            "failed": result.failed,
+            "errors": result.errors,
+            "output": result.output[:4096],
+            "duration_ms": result.duration_ms,
+            "error": result.error,
+        }
+
+    n += _reg(
+        registry,
+        "coding.run_tests",
+        "Test çalıştır — sandbox'ta pytest/unittest çalıştır ve sonuçları raporla.",
+        _obj(
+            ("path", "string", "Test dosya/dizin yolu (varsayılan: .)"),
+            ("verbose", "boolean", "Detaylı çıktı (varsayılan: true)"),
+            ("timeout", "integer", "Zaman aşımı saniye (varsayılan: 120)"),
+        ),
+        _handle_coding_run_tests,
+        risk="medium",
+    )
+
+    # ── coding.git_status ───────────────────────────────────────
+    def _handle_coding_git_status(**_: Any) -> dict:
+        """Get git status."""
+        import asyncio
+
+        agent = _get_coding_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, agent.git_status()
+                    ).result(timeout=10)
+            else:
+                result = asyncio.run(agent.git_status())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "coding.git_status",
+        "Git durumu — workspace'teki değişiklikleri göster.",
+        _obj(required=[]),
+        _handle_coding_git_status,
+        risk="low",
+    )
+
+    # ── coding.git_diff ─────────────────────────────────────────
+    def _handle_coding_git_diff(
+        *, staged: bool = False, **_: Any
+    ) -> dict:
+        """Get git diff."""
+        import asyncio
+
+        agent = _get_coding_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, agent.git_diff(staged=staged)
+                    ).result(timeout=15)
+            else:
+                result = asyncio.run(agent.git_diff(staged=staged))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "coding.git_diff",
+        "Git fark — değişiklikleri (unstaged veya staged) göster.",
+        _obj(
+            ("staged", "boolean", "Staged değişiklikleri göster (varsayılan: false)"),
+        ),
+        _handle_coding_git_diff,
+        risk="low",
+    )
+
+    # ── coding.git_commit ───────────────────────────────────────
+    def _handle_coding_git_commit(
+        *,
+        message: str,
+        add_all: bool = True,
+        **_: Any,
+    ) -> dict:
+        """Create a git commit."""
+        import asyncio
+
+        agent = _get_coding_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        agent.git_commit(message, add_all=add_all),
+                    ).result(timeout=15)
+            else:
+                result = asyncio.run(
+                    agent.git_commit(message, add_all=add_all)
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "coding.git_commit",
+        "Git commit — değişiklikleri commit'le (mesaj ile).",
+        _obj(
+            ("message", "string", "Commit mesajı"),
+            ("add_all", "boolean", "Önce tüm değişiklikleri stage'le (varsayılan: true)"),
+            required=["message"],
+        ),
+        _handle_coding_git_commit,
+        risk="high",
+        confirm=True,
+    )
+
+    # ── coding.git_log ──────────────────────────────────────────
+    def _handle_coding_git_log(
+        *, count: int = 10, **_: Any
+    ) -> dict:
+        """Get recent git log."""
+        import asyncio
+
+        agent = _get_coding_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, agent.git_log(count=count)
+                    ).result(timeout=10)
+            else:
+                result = asyncio.run(agent.git_log(count=count))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "coding.git_log",
+        "Git geçmişi — son commit'leri listele.",
+        _obj(
+            ("count", "integer", "Gösterilecek commit sayısı (varsayılan: 10)"),
+        ),
+        _handle_coding_git_log,
+        risk="low",
+    )
+
+    # ── coding.review ───────────────────────────────────────────
+    def _handle_coding_review(
+        *, file_path: str, **_: Any
+    ) -> dict:
+        """Review code in a file."""
+        import asyncio
+
+        agent = _get_coding_agent()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, agent.code_review(file_path)
+                    ).result(timeout=60)
+            else:
+                result = asyncio.run(agent.code_review(file_path))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": result.ok,
+            "summary": result.summary,
+            "suggestions": result.suggestions,
+            "severity": result.severity,
+            "error": result.error,
+        }
+
+    n += _reg(
+        registry,
+        "coding.review",
+        "Kod inceleme — dosyayı analiz et, öneriler sun.",
+        _obj(
+            ("file_path", "string", "İncelenecek dosya yolu"),
+            required=["file_path"],
+        ),
+        _handle_coding_review,
         risk="low",
     )
 
