@@ -133,11 +133,48 @@ _SERVICE_REGISTRY: list[ServiceDefinition] = [
         default_token_path="~/.config/bantz/google/token.json",
         auth_module="bantz.google.auth",
     ),
+    # ── Issue #1292: New Google Suite connectors ──────────────
+    ServiceDefinition(
+        id="tasks",
+        name="Google Tasks",
+        icon="✅",
+        description_tr="Görev oluşturma, listeleme ve tamamlama",
+        scopes=[
+            "https://www.googleapis.com/auth/tasks",
+        ],
+        permissions_tr=[
+            "Görevlerinizi okuma ve listeleme",
+            "Yeni görev oluşturma",
+            "Görev tamamlama ve silme",
+        ],
+        token_path_key="BANTZ_GOOGLE_UNIFIED_TOKEN_PATH",
+        default_token_path="~/.config/bantz/google/google_unified_token.json",
+        auth_module="bantz.connectors.google.auth_manager",
+    ),
+    ServiceDefinition(
+        id="classroom",
+        name="Google Classroom",
+        icon="🎓",
+        description_tr="Ders, ödev ve teslim durumu takibi",
+        scopes=[
+            "https://www.googleapis.com/auth/classroom.courses.readonly",
+            "https://www.googleapis.com/auth/classroom.coursework.me",
+        ],
+        permissions_tr=[
+            "Derslerinizi görüntüleme",
+            "Ödev listesini okuma",
+            "Teslim durumlarınızı kontrol etme",
+        ],
+        token_path_key="BANTZ_GOOGLE_UNIFIED_TOKEN_PATH",
+        default_token_path="~/.config/bantz/google/google_unified_token.json",
+        auth_module="bantz.connectors.google.auth_manager",
+        optional=True,
+    ),
 ]
 
 # Future services (shown as "coming soon")
 _FUTURE_SERVICES: list[dict[str, str]] = [
-    {"id": "classroom", "name": "Google Classroom", "icon": "🎓", "desc": "Ödev kontrolü + deadline takibi"},
+    {"id": "keep", "name": "Google Keep", "icon": "📝", "desc": "Not oluşturma ve arama (Workspace hesabı gerekir)"},
     {"id": "drive", "name": "Google Drive", "icon": "📁", "desc": "Dosya arama ve paylaşım"},
     {"id": "whatsapp", "name": "WhatsApp", "icon": "💬", "desc": "Mesaj gönderme ve okuma"},
     {"id": "youtube", "name": "YouTube", "icon": "🎬", "desc": "Video arama ve özetleme"},

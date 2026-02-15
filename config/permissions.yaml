@@ -120,6 +120,61 @@ permissions:
     risk: "medium"
     decision: "confirm"
 
+  # ── Google Suite Connectors (Issue #1292) ───────────────────
+  - tool: "google.contacts.search"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "google.contacts.get"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "google.contacts.create"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "google.tasks.list"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "google.tasks.create"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+    conditions:
+      max_per_day: 30
+
+  - tool: "google.tasks.complete"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "google.tasks.delete"
+    action: "delete"
+    risk: "high"
+    decision: "confirm"
+    conditions:
+      max_per_day: 10
+
+  - tool: "google.keep.*"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "google.keep.create"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "google.classroom.*"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"

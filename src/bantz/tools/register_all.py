@@ -14,7 +14,7 @@ Usage
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from bantz.agent.tools import ToolRegistry
@@ -41,6 +41,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_calendar(registry)
     count += _register_system(registry)
     count += _register_time(registry)
+    count += _register_google_connectors(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -107,12 +108,17 @@ def _register_web(registry: "ToolRegistry") -> int:
 
 def _register_browser(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.browser_tools import (
-            browser_open_tool, browser_scan_tool, browser_click_tool,
-            browser_type_tool, browser_back_tool, browser_info_tool,
-            browser_detail_tool, browser_wait_tool, browser_search_tool,
-            browser_scroll_down_tool, browser_scroll_up_tool,
-        )
+        from bantz.tools.browser_tools import (browser_back_tool,
+                                               browser_click_tool,
+                                               browser_detail_tool,
+                                               browser_info_tool,
+                                               browser_open_tool,
+                                               browser_scan_tool,
+                                               browser_scroll_down_tool,
+                                               browser_scroll_up_tool,
+                                               browser_search_tool,
+                                               browser_type_tool,
+                                               browser_wait_tool)
     except ImportError as e:
         logger.warning(f"[ToolGap] browser import: {e}")
         return 0
@@ -163,10 +169,11 @@ def _register_browser(registry: "ToolRegistry") -> int:
 
 def _register_pc(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.pc_tools import (
-            pc_hotkey_tool, pc_type_tool, pc_mouse_move_tool, pc_mouse_click_tool,
-            pc_mouse_scroll_tool, clipboard_set_tool, clipboard_get_tool,
-        )
+        from bantz.tools.pc_tools import (clipboard_get_tool,
+                                          clipboard_set_tool, pc_hotkey_tool,
+                                          pc_mouse_click_tool,
+                                          pc_mouse_move_tool,
+                                          pc_mouse_scroll_tool, pc_type_tool)
     except ImportError as e:
         logger.warning(f"[ToolGap] pc import: {e}")
         return 0
@@ -200,10 +207,9 @@ def _register_pc(registry: "ToolRegistry") -> int:
 
 def _register_file(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.file_tools import (
-            file_read_tool, file_write_tool, file_edit_tool,
-            file_create_tool, file_undo_tool, file_search_tool,
-        )
+        from bantz.tools.file_tools import (file_create_tool, file_edit_tool,
+                                            file_read_tool, file_search_tool,
+                                            file_undo_tool, file_write_tool)
     except ImportError as e:
         logger.warning(f"[ToolGap] file import: {e}")
         return 0
@@ -242,10 +248,10 @@ def _register_file(registry: "ToolRegistry") -> int:
 
 def _register_terminal(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.terminal_tools import (
-            terminal_run_tool, terminal_background_tool,
-            terminal_background_list_tool, terminal_background_kill_tool,
-        )
+        from bantz.tools.terminal_tools import (terminal_background_kill_tool,
+                                                terminal_background_list_tool,
+                                                terminal_background_tool,
+                                                terminal_run_tool)
     except ImportError as e:
         logger.warning(f"[ToolGap] terminal import: {e}")
         return 0
@@ -271,11 +277,12 @@ def _register_terminal(registry: "ToolRegistry") -> int:
 
 def _register_code(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.code_tools import (
-            code_format_tool, code_replace_function_tool,
-            project_info_tool, project_tree_tool,
-            project_symbols_tool, project_search_symbol_tool,
-        )
+        from bantz.tools.code_tools import (code_format_tool,
+                                            code_replace_function_tool,
+                                            project_info_tool,
+                                            project_search_symbol_tool,
+                                            project_symbols_tool,
+                                            project_tree_tool)
     except ImportError as e:
         logger.warning(f"[ToolGap] code import: {e}")
         return 0
@@ -310,11 +317,12 @@ def _register_code(registry: "ToolRegistry") -> int:
 
 def _register_gmail(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.gmail_tools import (
-            gmail_unread_count_tool, gmail_list_messages_tool,
-            gmail_get_message_tool, gmail_send_tool,
-            gmail_smart_search_tool, gmail_list_categories_tool,
-        )
+        from bantz.tools.gmail_tools import (gmail_get_message_tool,
+                                             gmail_list_categories_tool,
+                                             gmail_list_messages_tool,
+                                             gmail_send_tool,
+                                             gmail_smart_search_tool,
+                                             gmail_unread_count_tool)
     except ImportError as e:
         logger.warning(f"[ToolGap] gmail import: {e}")
         return 0
@@ -349,14 +357,13 @@ def _register_gmail(registry: "ToolRegistry") -> int:
 def _register_gmail_extended(registry: "ToolRegistry") -> int:
     try:
         from bantz.tools.gmail_extended_tools import (
-            gmail_list_labels_tool, gmail_add_label_tool,
-            gmail_remove_label_tool, gmail_mark_read_tool,
-            gmail_mark_unread_tool, gmail_archive_tool,
-            gmail_batch_modify_tool, gmail_download_attachment_tool,
-            gmail_create_draft_tool, gmail_list_drafts_tool,
-            gmail_update_draft_tool, gmail_send_draft_tool,
-            gmail_delete_draft_tool, gmail_generate_reply_tool,
-        )
+            gmail_add_label_tool, gmail_archive_tool, gmail_batch_modify_tool,
+            gmail_create_draft_tool, gmail_delete_draft_tool,
+            gmail_download_attachment_tool, gmail_generate_reply_tool,
+            gmail_list_drafts_tool, gmail_list_labels_tool,
+            gmail_mark_read_tool, gmail_mark_unread_tool,
+            gmail_remove_label_tool, gmail_send_draft_tool,
+            gmail_update_draft_tool)
     except ImportError as e:
         logger.warning(f"[ToolGap] gmail_extended import: {e}")
         return 0
@@ -421,10 +428,10 @@ def _register_gmail_extended(registry: "ToolRegistry") -> int:
 
 def _register_contacts(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.contacts_tools import (
-            contacts_search_tool, contacts_get_tool,
-            contacts_list_tool, contacts_add_tool,
-        )
+        from bantz.tools.contacts_tools import (contacts_add_tool,
+                                                contacts_get_tool,
+                                                contacts_list_tool,
+                                                contacts_search_tool)
     except ImportError as e:
         logger.warning(f"[ToolGap] contacts import: {e}")
         return 0
@@ -462,12 +469,10 @@ def _register_coding_skill(registry: "ToolRegistry") -> int:
 
 def _register_calendar(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.calendar_tools import (
-            calendar_list_events_tool,
-            calendar_create_event_tool,
-            calendar_update_event_tool,
-            calendar_delete_event_tool,
-        )
+        from bantz.tools.calendar_tools import (calendar_create_event_tool,
+                                                calendar_delete_event_tool,
+                                                calendar_list_events_tool,
+                                                calendar_update_event_tool)
     except ImportError:
         return 0
 
@@ -506,11 +511,9 @@ def _register_calendar(registry: "ToolRegistry") -> int:
 
 def _register_system(registry: "ToolRegistry") -> int:
     try:
-        from bantz.tools.system_tools import (
-            system_status,
-            system_notify_tool,
-            system_screenshot_tool,
-        )
+        from bantz.tools.system_tools import (system_notify_tool,
+                                              system_screenshot_tool,
+                                              system_status)
     except ImportError:
         return 0
 
@@ -538,4 +541,106 @@ def _register_time(registry: "ToolRegistry") -> int:
     n += _reg(registry, "time.now", "Get current date and time.",
               _obj(("timezone", "string", "Timezone (default: local)")),
               time_now_tool)
+    return n
+
+
+# ── Google Suite Connectors (Issue #1292) ────────────────────────
+
+def _register_google_connectors(registry: "ToolRegistry") -> int:
+    """Register tools from all Google Suite connectors.
+
+    Uses the unified ``GoogleAuthManager`` to provide Contacts, Tasks,
+    Keep, and Classroom tools.  Fails gracefully if the auth manager
+    or dependencies are not available.
+    """
+    try:
+        from bantz.connectors.google.auth_manager import (get_auth_manager,
+                                                          setup_auth_manager)
+    except ImportError as e:
+        logger.warning("[ToolGap] google connectors import: %s", e)
+        return 0
+
+    # Get or create the auth manager (non-interactive for tool registration)
+    auth = get_auth_manager()
+    if auth is None:
+        try:
+            auth = setup_auth_manager(interactive=False)
+        except Exception as e:
+            logger.warning("[ToolGap] google auth manager setup: %s", e)
+            return 0
+
+    n = 0
+
+    # ── Contacts ────────────────────────────────────────────────
+    try:
+        from bantz.connectors.google.contacts import ContactsConnector
+
+        connector = ContactsConnector(auth)
+        for tool_schema in connector.get_tools():
+            n += _reg(
+                registry,
+                tool_schema.name,
+                tool_schema.description,
+                tool_schema.parameters,
+                tool_schema.handler,
+                risk=tool_schema.risk,
+                confirm=tool_schema.confirm,
+            )
+    except Exception as e:
+        logger.warning("[ToolGap] google contacts connector: %s", e)
+
+    # ── Tasks ───────────────────────────────────────────────────
+    try:
+        from bantz.connectors.google.tasks import TasksConnector
+
+        connector = TasksConnector(auth)
+        for tool_schema in connector.get_tools():
+            n += _reg(
+                registry,
+                tool_schema.name,
+                tool_schema.description,
+                tool_schema.parameters,
+                tool_schema.handler,
+                risk=tool_schema.risk,
+                confirm=tool_schema.confirm,
+            )
+    except Exception as e:
+        logger.warning("[ToolGap] google tasks connector: %s", e)
+
+    # ── Keep ────────────────────────────────────────────────────
+    try:
+        from bantz.connectors.google.keep import KeepConnector
+
+        connector = KeepConnector(auth)
+        for tool_schema in connector.get_tools():
+            n += _reg(
+                registry,
+                tool_schema.name,
+                tool_schema.description,
+                tool_schema.parameters,
+                tool_schema.handler,
+                risk=tool_schema.risk,
+                confirm=tool_schema.confirm,
+            )
+    except Exception as e:
+        logger.warning("[ToolGap] google keep connector: %s", e)
+
+    # ── Classroom ───────────────────────────────────────────────
+    try:
+        from bantz.connectors.google.classroom import ClassroomConnector
+
+        connector = ClassroomConnector(auth)
+        for tool_schema in connector.get_tools():
+            n += _reg(
+                registry,
+                tool_schema.name,
+                tool_schema.description,
+                tool_schema.parameters,
+                tool_schema.handler,
+                risk=tool_schema.risk,
+                confirm=tool_schema.confirm,
+            )
+    except Exception as e:
+        logger.warning("[ToolGap] google classroom connector: %s", e)
+
     return n
