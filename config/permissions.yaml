@@ -175,6 +175,17 @@ permissions:
     risk: "low"
     decision: "allow"
 
+  # ── Proactive Secretary (Issue #1293) ──────────────────────
+  - tool: "proactive.daily_brief"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "proactive.status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"

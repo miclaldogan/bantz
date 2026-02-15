@@ -42,6 +42,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_system(registry)
     count += _register_time(registry)
     count += _register_google_connectors(registry)
+    count += _register_proactive(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -642,5 +643,73 @@ def _register_google_connectors(registry: "ToolRegistry") -> int:
             )
     except Exception as e:
         logger.warning("[ToolGap] google classroom connector: %s", e)
+
+    return n
+
+
+# ── Proactive Secretary (#1293) ──────────────────────────────────────
+
+
+def _register_proactive(registry: "ToolRegistry") -> int:
+    """Register proactive secretary tools: on-demand brief + status."""
+    n = 0
+
+    # ── daily_brief tool ────────────────────────────────────────
+    def _handle_daily_brief(**kwargs: Any) -> dict:
+        """Generate and return the daily brief on demand."""
+        import asyncio
+
+        from bantz.proactive.engine import get_proactive_engine
+
+        engine = get_proactive_engine()
+        if engine is None or engine.brief_generator is None:
+            return {"ok": False, "error": "Proactive Secretary henüz başlatılmadı."}
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    brief = pool.submit(
+                        asyncio.run, engine.brief_generator.generate()
+                    ).result(timeout=30)
+            else:
+                brief = asyncio.run(engine.brief_generator.generate())
+            return {"ok": True, "brief": brief}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    n += _reg(
+        registry,
+        "proactive.daily_brief",
+        (
+            "Günlük brifing oluştur (sabah brief'i). "
+            "Takvim, mail, hava durumu, görevler ve öneriler içerir. "
+            "Kullanıcı 'brief'imi göster' dediğinde çağrılır."
+        ),
+        _obj(required=[]),
+        _handle_daily_brief,
+        risk="low",
+    )
+
+    # ── proactive.status tool ───────────────────────────────────
+    def _handle_proactive_status(**kwargs: Any) -> dict:
+        """Return the proactive engine status."""
+        from bantz.proactive.engine import get_proactive_engine
+
+        engine = get_proactive_engine()
+        if engine is None:
+            return {"ok": False, "error": "Proactive Engine başlatılmadı."}
+        return {"ok": True, **engine.get_status()}
+
+    n += _reg(
+        registry,
+        "proactive.status",
+        "Proaktif motorun durumunu gösterir: çalışan kontroller, bildirimler, politika.",
+        _obj(required=[]),
+        _handle_proactive_status,
+        risk="low",
+    )
 
     return n
