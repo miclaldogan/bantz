@@ -43,6 +43,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_time(registry)
     count += _register_google_connectors(registry)
     count += _register_proactive(registry)
+    count += _register_messaging(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -709,6 +710,337 @@ def _register_proactive(registry: "ToolRegistry") -> int:
         "Proaktif motorun durumunu gösterir: çalışan kontroller, bildirimler, politika.",
         _obj(required=[]),
         _handle_proactive_status,
+        risk="low",
+    )
+
+    return n
+
+
+# ── Messaging Pipeline (#1294) ──────────────────────────────────────
+
+
+def _register_messaging(registry: "ToolRegistry") -> int:
+    """Register kontrollü mesajlaşma tools: read, draft, send, thread."""
+    n = 0
+
+    # ── messaging.read_inbox ────────────────────────────────────
+    def _handle_read_inbox(
+        *,
+        channel: str = "email",
+        query: str = "",
+        max_results: int = 10,
+        unread_only: bool = False,
+        **_: Any,
+    ) -> dict:
+        """Read messages from a channel inbox."""
+        import asyncio
+
+        from bantz.messaging.gmail_channel import GmailChannel
+        from bantz.messaging.pipeline import MessagingPipeline
+
+        pipeline = MessagingPipeline()
+        pipeline.register_channel(GmailChannel())
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    msgs = pool.submit(
+                        asyncio.run,
+                        pipeline.read_inbox(
+                            channel,
+                            filter_query=query or None,
+                            max_results=int(max_results),
+                            unread_only=bool(unread_only),
+                        ),
+                    ).result(timeout=30)
+            else:
+                msgs = asyncio.run(
+                    pipeline.read_inbox(
+                        channel,
+                        filter_query=query or None,
+                        max_results=int(max_results),
+                        unread_only=bool(unread_only),
+                    )
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": True,
+            "messages": [
+                {
+                    "id": m.id,
+                    "from": m.sender,
+                    "subject": m.subject,
+                    "preview": m.preview,
+                    "date": m.timestamp.isoformat(),
+                    "unread": not m.is_read,
+                    "channel": m.channel.value,
+                }
+                for m in msgs
+            ],
+            "count": len(msgs),
+        }
+
+    n += _reg(
+        registry,
+        "messaging.read_inbox",
+        (
+            "Mesajları oku — belirtilen kanaldan (email, telegram, slack) veya "
+            "tüm kanallardan gelen mesajları listele. "
+            "Filtre, okunmamış ve kanal parametreleri desteklenir."
+        ),
+        _obj(
+            ("channel", "string", "Kanal: email, telegram, slack, all (varsayılan: email)"),
+            ("query", "string", "Arama filtresi"),
+            ("max_results", "integer", "Maks sonuç sayısı (varsayılan: 10)"),
+            ("unread_only", "boolean", "Sadece okunmamış (varsayılan: false)"),
+        ),
+        _handle_read_inbox,
+        risk="low",
+    )
+
+    # ── messaging.draft_reply ───────────────────────────────────
+    def _handle_draft_reply(
+        *,
+        to: str = "",
+        subject: str = "",
+        body_context: str = "",
+        instruction: str = "Kısa ve profesyonel yanıt yaz",
+        channel: str = "email",
+        **_: Any,
+    ) -> dict:
+        """Generate a draft reply for a message."""
+        from bantz.messaging.models import ChannelType, Draft
+
+        draft = Draft(
+            channel=(
+                ChannelType(channel)
+                if channel in [e.value for e in ChannelType]
+                else ChannelType.EMAIL
+            ),
+            to=to,
+            subject=(
+                f"Re: {subject}"
+                if subject and not subject.startswith("Re:")
+                else subject
+            ),
+            body=(
+                f"Merhaba,\n\n"
+                f"'{subject}' konulu mesajınız alındı. {body_context}\n\n"
+                f"İyi günler."
+            ),
+            instruction=instruction,
+        )
+        return {
+            "ok": True,
+            "draft": draft.as_display(),
+            "display_hint": (
+                f"📝 Taslak hazır:\n"
+                f"  Kime: {draft.to}\n"
+                f"  Konu: {draft.subject}\n"
+                f"  İçerik: {draft.body[:200]}"
+            ),
+        }
+
+    n += _reg(
+        registry,
+        "messaging.draft_reply",
+        (
+            "Mesaj taslağı oluştur — belirtilen kişiye yanıt taslağı hazırla. "
+            "LLM talimatına göre ton ve stil ayarlanır."
+        ),
+        _obj(
+            ("to", "string", "Alıcı adresi"),
+            ("subject", "string", "Konu"),
+            ("body_context", "string", "Yanıt bağlamı"),
+            ("instruction", "string", "LLM talimatı (ton, stil)"),
+            ("channel", "string", "Kanal (varsayılan: email)"),
+            required=["to", "subject"],
+        ),
+        _handle_draft_reply,
+        risk="medium",
+    )
+
+    # ── messaging.send ──────────────────────────────────────────
+    def _handle_messaging_send(
+        *,
+        to: str,
+        subject: str,
+        body: str,
+        channel: str = "email",
+        cc: str = "",
+        bcc: str = "",
+        **_: Any,
+    ) -> dict:
+        """Send a message through the messaging pipeline."""
+        import asyncio
+
+        from bantz.messaging.gmail_channel import GmailChannel
+        from bantz.messaging.models import ChannelType, Draft
+        from bantz.messaging.pipeline import MessagingPipeline
+
+        pipeline = MessagingPipeline()
+        pipeline.register_channel(GmailChannel())
+
+        draft = Draft(
+            channel=(
+                ChannelType(channel)
+                if channel in [e.value for e in ChannelType]
+                else ChannelType.EMAIL
+            ),
+            to=to,
+            subject=subject,
+            body=body,
+            cc=cc,
+            bcc=bcc,
+        )
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        pipeline.send_single(draft),
+                    ).result(timeout=30)
+            else:
+                result = asyncio.run(pipeline.send_single(draft))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": result.ok,
+            "message_id": result.message_id,
+            "error": result.error,
+            "channel": result.channel.value,
+            "display_hint": (
+                f"✉️ Mesaj gönderildi: {to} — {subject}"
+                if result.ok
+                else f"❌ Gönderim başarısız: {result.error}"
+            ),
+        }
+
+    n += _reg(
+        registry,
+        "messaging.send",
+        (
+            "Mesaj gönder — belirtilen kanaldan (email, telegram, slack) "
+            "mesaj gönder. Policy engine onayı gerektirir."
+        ),
+        _obj(
+            ("to", "string", "Alıcı"),
+            ("subject", "string", "Konu"),
+            ("body", "string", "Mesaj içeriği"),
+            ("channel", "string", "Kanal (varsayılan: email)"),
+            ("cc", "string", "CC"),
+            ("bcc", "string", "BCC"),
+            required=["to", "subject", "body"],
+        ),
+        _handle_messaging_send,
+        risk="high",
+        confirm=True,
+    )
+
+    # ── messaging.thread ────────────────────────────────────────
+    def _handle_messaging_thread(
+        *,
+        contact: str,
+        channel: str = "",
+        **_: Any,
+    ) -> dict:
+        """Get conversation thread with a contact."""
+        import asyncio
+
+        from bantz.messaging.gmail_channel import GmailChannel
+        from bantz.messaging.pipeline import MessagingPipeline
+
+        pipeline = MessagingPipeline()
+        pipeline.register_channel(GmailChannel())
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    conv = pool.submit(
+                        asyncio.run,
+                        pipeline.get_conversation(
+                            contact,
+                            channel=channel or None,
+                        ),
+                    ).result(timeout=30)
+            else:
+                conv = asyncio.run(
+                    pipeline.get_conversation(
+                        contact,
+                        channel=channel or None,
+                    )
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": True,
+            "contact": conv.contact,
+            "message_count": conv.message_count,
+            "summary": conv.summary,
+            "messages": [
+                {
+                    "id": m.id,
+                    "from": m.sender,
+                    "subject": m.subject,
+                    "preview": m.preview,
+                    "date": m.timestamp.isoformat(),
+                }
+                for m in conv.messages[:20]
+            ],
+        }
+
+    n += _reg(
+        registry,
+        "messaging.thread",
+        (
+            "Yazışma geçmişi — bir kişiyle olan tüm mesajlaşma geçmişini getir "
+            "ve LLM ile özetle. Cross-channel destekler."
+        ),
+        _obj(
+            ("contact", "string", "Kişi adı veya adresi"),
+            ("channel", "string", "Kanal filtresi (boş → tümü)"),
+            required=["contact"],
+        ),
+        _handle_messaging_thread,
+        risk="low",
+    )
+
+    # ── messaging.status ────────────────────────────────────────
+    def _handle_messaging_status(**_: Any) -> dict:
+        """Return messaging pipeline status."""
+        return {
+            "ok": True,
+            "available_channels": ["email"],
+            "pipeline": "active",
+            "features": [
+                "read_inbox",
+                "draft_reply",
+                "send",
+                "thread",
+                "batch_draft",
+            ],
+        }
+
+    n += _reg(
+        registry,
+        "messaging.status",
+        "Mesajlaşma pipeline durumunu gösterir: aktif kanallar, özellikler.",
+        _obj(required=[]),
+        _handle_messaging_status,
         risk="low",
     )
 

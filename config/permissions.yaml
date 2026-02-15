@@ -186,6 +186,32 @@ permissions:
     risk: "low"
     decision: "allow"
 
+  # ── Messaging Pipeline (#1294) ─────────────────────────────
+  - tool: "messaging.read_inbox"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "messaging.draft_reply"
+    action: "write"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "messaging.send"
+    action: "write"
+    risk: "high"
+    decision: "confirm"
+
+  - tool: "messaging.thread"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "messaging.status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"
@@ -254,3 +280,9 @@ editable_fields:
     - body
   system.execute_command:
     - command
+  messaging.send:
+    - to
+    - subject
+    - body
+    - cc
+    - bcc
