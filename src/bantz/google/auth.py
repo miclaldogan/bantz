@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import fcntl
 import logging
+import os
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-import os
 
 from bantz.security.secrets import mask_path
 
@@ -57,7 +57,21 @@ def get_credentials(
 
     This helper intentionally imports Google deps lazily so the rest of the repo
     can run without installing calendar dependencies.
+
+    Issue #1292: When the unified ``GoogleAuthManager`` is available,
+    delegates to it for centralized scope management.
     """
+
+    # ── Unified auth manager bridge (Issue #1292) ───────────────
+    if client_secret_path is None and token_path is None:
+        try:
+            from bantz.connectors.google.auth_manager import get_auth_manager
+
+            mgr = get_auth_manager()
+            if mgr is not None:
+                return mgr.get_credentials(scopes=scopes)
+        except Exception:
+            pass  # Fall through to legacy flow
 
     cfg = get_google_auth_config(client_secret_path=client_secret_path, token_path=token_path)
 
