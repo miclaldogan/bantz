@@ -1,0 +1,94 @@
+# ─── Proactive Secretary Engine — Configuration ────────────────
+# Issue #1293
+#
+# This file controls the Proactive Secretary: daily briefs,
+# signal collection, rule evaluation, and notification delivery.
+
+# ── Scheduler ───────────────────────────────────────────────────
+scheduler:
+  # Enable/disable the entire proactive engine
+  enabled: true
+  # Poll interval for the scheduler (seconds)
+  poll_interval_seconds: 30
+
+# ── Daily Brief ─────────────────────────────────────────────────
+daily_brief:
+  # Time to generate the morning brief (HH:MM, 24h)
+  time: "08:00"
+  # Enable/disable daily brief generation
+  enabled: true
+  # Maximum number of suggestions to include
+  max_suggestions: 5
+
+# ── Signal Collectors ───────────────────────────────────────────
+signals:
+  calendar:
+    enabled: true
+  email:
+    enabled: true
+  weather:
+    enabled: true
+  tasks:
+    enabled: true
+  news:
+    enabled: false  # refs #839, enable when news skill is ready
+
+# ── Work Hours (for free-slot detection) ────────────────────────
+work_hours:
+  start: 9
+  end: 18
+
+# ── Rules ───────────────────────────────────────────────────────
+# Enable/disable individual proactive rules
+rules:
+  rain_alert:
+    enabled: true
+    priority: 2
+  pending_rsvp:
+    enabled: true
+    priority: 3
+  deadline_approaching:
+    enabled: true
+    priority: 4
+  free_slot_suggestion:
+    enabled: true
+    priority: 1
+  urgent_mail:
+    enabled: true
+    priority: 4
+  high_unread:
+    enabled: true
+    priority: 2
+  overdue_tasks:
+    enabled: true
+    priority: 5
+
+# ── LLM Reasoning ──────────────────────────────────────────────
+llm_reasoning:
+  # Enable LLM-augmented contextual suggestions
+  enabled: false
+  # Model to use for reasoning (via Ollama/Gemini)
+  model: "gemini-2.0-flash"
+
+# ── Delivery Channels ──────────────────────────────────────────
+delivery:
+  terminal:
+    enabled: true
+  desktop_notification:
+    enabled: true
+    urgency: "normal"
+    timeout_ms: 10000
+  eventbus:
+    enabled: true
+
+# ── Notification Policy ────────────────────────────────────────
+notification_policy:
+  # Minimum severity to trigger a notification (info, warning, critical)
+  min_severity: "info"
+  # Quiet hours — no notifications during this period
+  quiet_start: "23:00"
+  quiet_end: "07:00"
+  # Rate limit per check (max notifications per hour)
+  max_per_hour: 3
+  # Cooldown between same-check notifications (seconds)
+  cooldown_seconds: 1800
