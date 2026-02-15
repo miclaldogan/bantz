@@ -55,6 +55,31 @@ RETRY_MAX_DELAY = 30.0  # seconds
 RETRY_BACKOFF_FACTOR = 2.0
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
+# Issue #1323: Minimum fallback for system-only prompts
+_FALLBACK_USER_PROMPT = "Lütfen devam et."
+
+
+def _make_fallback_user_content(system_lines: list[str]) -> dict:
+    """Build a fallback user content dict when no user messages exist.
+
+    If system messages are available, the last one is re-roled as user
+    content so the model receives meaningful context.  Otherwise a
+    minimal Turkish continuation prompt is used.
+    """
+    if system_lines:
+        fallback = minimize_for_cloud(redact_for_cloud(system_lines[-1]))
+        logger.warning(
+            "[GEMINI] No user messages found — re-roling last system "
+            "message as user (%d chars)",
+            len(fallback),
+        )
+    else:
+        fallback = _FALLBACK_USER_PROMPT
+        logger.warning(
+            "[GEMINI] No user or system messages — using minimum fallback prompt",
+        )
+    return {"role": "user", "parts": [{"text": fallback}]}
+
 
 @dataclass
 class GeminiStreamChunk:
@@ -200,8 +225,15 @@ class GeminiClient(LLMClient):
             safe_text = minimize_for_cloud(redact_for_cloud(content))
             contents.append({"role": gemini_role, "parts": [{"text": safe_text}]})
 
+        # Issue #1323: When all messages are system-role, Gemini requires at
+        # least one user turn.  Re-role the last system message as user rather
+        # than sending an empty string (which can cause hallucination or API
+        # rejection).
+        if not contents:
+            contents = [_make_fallback_user_content(system_lines)]
+
         payload: dict = {
-            "contents": contents or [{"role": "user", "parts": [{"text": ""}]}],
+            "contents": contents,
             "generationConfig": {
                 "temperature": float(temperature),
                 "maxOutputTokens": int(max_tokens),
@@ -517,8 +549,12 @@ class GeminiClient(LLMClient):
             safe_text = minimize_for_cloud(redact_for_cloud(content))
             contents.append({"role": gemini_role, "parts": [{"text": safe_text}]})
 
+        # Issue #1323: Same fallback as chat_detailed
+        if not contents:
+            contents = [_make_fallback_user_content(system_lines)]
+
         payload: dict = {
-            "contents": contents or [{"role": "user", "parts": [{"text": ""}]}],
+            "contents": contents,
             "generationConfig": {
                 "temperature": float(temperature),
                 "maxOutputTokens": int(max_tokens),
