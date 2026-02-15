@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -321,6 +322,9 @@ class OrchestratorState:
     # Turn counter (used by memory-lite summaries)
     turn_count: int = 0
 
+    # Issue #1313: Thread-safety lock for pending_confirmations and slot_registry
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
     # Current user input (set at the start of each turn for param builder fallback)
     current_user_input: str = ""
     
@@ -523,32 +527,38 @@ class OrchestratorState:
     
     def set_pending_confirmation(self, action: dict[str, Any]) -> None:
         """Backward-compat: set a single pending confirmation (FIFO queue)."""
-        self.pending_confirmations = [action]
+        with self._lock:
+            self.pending_confirmations = [action]
 
     def add_pending_confirmation(self, action: dict[str, Any]) -> None:
         """Add a pending confirmation to the queue (FIFO)."""
-        self.pending_confirmations.append(action)
+        with self._lock:
+            self.pending_confirmations.append(action)
 
     def pop_pending_confirmation(self) -> Optional[dict[str, Any]]:
         """Pop the next pending confirmation from the queue (FIFO)."""
-        if not self.pending_confirmations:
-            return None
-        return self.pending_confirmations.pop(0)
+        with self._lock:
+            if not self.pending_confirmations:
+                return None
+            return self.pending_confirmations.pop(0)
 
     def peek_pending_confirmation(self) -> Optional[dict[str, Any]]:
         """Peek the next pending confirmation without removing it."""
-        if not self.pending_confirmations:
-            return None
-        return self.pending_confirmations[0]
+        with self._lock:
+            if not self.pending_confirmations:
+                return None
+            return self.pending_confirmations[0]
     
     def clear_pending_confirmation(self) -> None:
         """Clear all pending confirmations (user approved/rejected)."""
-        self.pending_confirmations = []
-        self.confirmed_tool = None
+        with self._lock:
+            self.pending_confirmations = []
+            self.confirmed_tool = None
     
     def has_pending_confirmation(self) -> bool:
         """Check if there's a pending confirmation."""
-        return bool(self.pending_confirmations)
+        with self._lock:
+            return bool(self.pending_confirmations)
     
     def update_trace(self, **kwargs: Any) -> None:
         """Update trace metadata."""

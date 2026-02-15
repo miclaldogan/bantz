@@ -1242,15 +1242,11 @@ def _safe_complete(
 
     try:
         if timeout > 0:
-            # Issue #1182: Sync the HTTP-level timeout with the
-            # ThreadPoolExecutor timeout so the HTTP request aborts at
-            # the same instant instead of lingering for up to 240s.
-            _original_timeout = getattr(llm, "_timeout_seconds", None)
-            if _original_timeout is not None and _original_timeout > timeout:
-                try:
-                    llm._timeout_seconds = timeout  # type: ignore[attr-defined]
-                except Exception:
-                    pass
+            # Issue #1313: Do NOT mutate llm._timeout_seconds — it's shared
+            # state across threads. Instead, pass timeout via kwargs so only
+            # this call is affected. The HTTP-level timeout is set per-request
+            # by the LLM client when it receives a timeout_seconds kwarg.
+            kwargs.setdefault("timeout_seconds", timeout)
             # Issue #1183: Use module-level executor instead of creating
             # a new one per call to avoid thread churn under load.
             future = _FINALIZER_EXECUTOR.submit(_do_complete)
@@ -1260,13 +1256,6 @@ def _safe_complete(
                 future.cancel()
                 logger.error("[FINALIZER] LLM call timed out after %.1fs", timeout)
                 return None
-            finally:
-                # Restore original timeout
-                if _original_timeout is not None:
-                    try:
-                        llm._timeout_seconds = _original_timeout  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
         else:
             text = _do_complete()
     except Exception as exc:

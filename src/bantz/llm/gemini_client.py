@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Iterator, List, Optional
@@ -23,13 +24,17 @@ metrics_logger = logging.getLogger("bantz.llm.metrics")
 # Module-level defaults (shared across instances unless overridden)
 _default_quota_tracker: Optional[QuotaTracker] = None
 _default_circuit_breaker: Optional[CircuitBreaker] = None
+# Issue #1313: Lock for thread-safe lazy initialization of singletons.
+_defaults_lock = threading.Lock()
 
 
 def get_default_quota_tracker() -> QuotaTracker:
     """Get or create the module-level default QuotaTracker."""
     global _default_quota_tracker
     if _default_quota_tracker is None:
-        _default_quota_tracker = QuotaTracker()
+        with _defaults_lock:
+            if _default_quota_tracker is None:
+                _default_quota_tracker = QuotaTracker()
     return _default_quota_tracker
 
 
@@ -37,7 +42,9 @@ def get_default_circuit_breaker() -> CircuitBreaker:
     """Get or create the module-level default CircuitBreaker."""
     global _default_circuit_breaker
     if _default_circuit_breaker is None:
-        _default_circuit_breaker = CircuitBreaker()
+        with _defaults_lock:
+            if _default_circuit_breaker is None:
+                _default_circuit_breaker = CircuitBreaker()
     return _default_circuit_breaker
 
 
