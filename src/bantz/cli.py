@@ -537,6 +537,11 @@ def main(argv: list[str] | None = None) -> int:
         metrics_main(argv[1:])
         return 0
 
+    # Policy — risk tiers, presets, audit (Issue #1291)
+    if argv and argv[0] == "policy":
+        from bantz.policy.cli import main as policy_main
+        return policy_main(argv[1:])
+
     # Doctor — system health diagnostics (Issue #1223)
     if argv and argv[0] == "doctor":
         from bantz.doctor import run_doctor
@@ -585,6 +590,9 @@ Kullanım örnekleri:
   bantz --once "google aç"       # Tek seferlik (tarayıcı kalıcı değil)
   bantz metrics --period 24h     # Observability metrics report
   bantz metrics --period 7d      # Last 7 days metrics
+  bantz policy info              # Policy engine status
+  bantz policy preset balanced   # Show/switch policy preset
+  bantz policy risk gmail.send   # Check tool risk tier
 """,
     )
     parser.add_argument("--policy", default="config/policy.json", help="Policy dosyası yolu")

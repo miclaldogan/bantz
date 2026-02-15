@@ -2226,8 +2226,17 @@ class OrchestratorLoop:
 
                 risk_level = None
                 try:
-                    from bantz.tools.metadata import get_tool_risk
-                    risk_level = get_tool_risk(tool_name).value
+                    # Issue #1291: Prefer PolicyEngineV2 for risk tier
+                    _v2 = (
+                        self.safety_guard.policy_engine_v2
+                        if self.safety_guard
+                        else None
+                    )
+                    if _v2 is not None:
+                        risk_level = _v2.get_risk_tier(tool_name).value
+                    else:
+                        from bantz.tools.metadata import get_tool_risk
+                        risk_level = get_tool_risk(tool_name).value
                 except Exception:
                     risk_level = original.get("risk_level")
 
@@ -2306,6 +2315,17 @@ class OrchestratorLoop:
                 state.pop_pending_confirmation()
                 state.confirmed_tool = None
                 logger.info("[FIREWALL] Confirmation accepted for %s — executing.", pending_tool)
+
+                # Issue #1291: Record session permit for MED-risk tools
+                # so confirm-once-per-session works.
+                if self.safety_guard and self.safety_guard.policy_engine_v2:
+                    try:
+                        _v2 = self.safety_guard.policy_engine_v2
+                        _tier = _v2.get_risk_tier(pending_tool)
+                        _sid = getattr(state, "session_id", None) or str(id(state))
+                        _v2.confirm(pending_tool, _sid, _tier)
+                    except Exception:
+                        pass  # best-effort
             else:
                 prompt = str(pending.get("prompt") or "Confirm to continue")
                 logger.warning(
@@ -2365,40 +2385,88 @@ class OrchestratorLoop:
 
         # If no confirmation is pending AND we're not executing a confirmed tool,
         # pre-scan tool_plan and queue all confirmations in order.
+        # Issue #1291: Use PolicyEngineV2 for risk-tier evaluation when available;
+        # fall back to legacy metadata-based checks if v2 is not configured.
         if not state.has_pending_confirmation() and not confirmed_override_tool:
             try:
-                from bantz.tools.metadata import (get_confirmation_prompt,
-                                                  get_tool_risk,
-                                                  is_destructive)
-                from bantz.tools.metadata import \
-                    requires_confirmation as check_confirmation
+                _session_id = getattr(state, "session_id", None) or str(id(state))
+                _v2_engine = (
+                    self.safety_guard.policy_engine_v2
+                    if self.safety_guard
+                    else None
+                )
 
                 confirmations_to_queue: list[dict[str, Any]] = []
                 for tool_name in filtered_tool_plan:
-                    needs_confirmation = check_confirmation(
-                        tool_name,
-                        llm_requested=bool(output.requires_confirmation)
-                    )
-                    if needs_confirmation:
-                        risk = get_tool_risk(tool_name)
-                        prompt = get_confirmation_prompt(tool_name, output.slots)
+                    _tool_params = tool_args_by_name.get(tool_name) or dict(output.slots)
+
+                    # ── PolicyEngineV2 path ──
+                    if _v2_engine is not None:
+                        decision = _v2_engine.evaluate(
+                            tool_name, _tool_params, session_id=_session_id,
+                        )
+                        if decision.action == "execute":
+                            continue  # Auto-allowed (LOW or session-confirmed MED)
+
+                        # confirm / confirm_with_edit → queue
                         confirmations_to_queue.append({
                             "tool": tool_name,
-                            "prompt": prompt,
+                            "prompt": decision.prompt,
                             "slots": output.slots,
                             "gmail": getattr(output, "gmail", None) or {},
-                            "risk_level": risk.value,
+                            "risk_level": decision.tier.value,
+                            # v2-enriched fields
+                            "risk_tier": decision.tier.value,
+                            "action": decision.action,
+                            "display_params": decision.display_params,
+                            "editable_fields": decision.editable_fields,
+                            "editable": decision.editable,
+                            "requires_explicit_confirm": decision.requires_explicit_confirm,
+                            "cooldown_seconds": decision.cooldown_seconds,
                         })
 
-                        # Audit confirmation request
                         if self.safety_guard:
                             self.safety_guard.audit_decision(
                                 decision_type="confirmation_required",
                                 tool_name=tool_name,
                                 allowed=False,
-                                reason=f"Destructive tool ({risk.value}) requires user confirmation",
-                                metadata={"prompt": prompt, "params": output.slots},
+                                reason=f"PolicyEngineV2: {decision.reason} (tier={decision.tier.value})",
+                                metadata={
+                                    "prompt": decision.prompt,
+                                    "tier": decision.tier.value,
+                                    "action": decision.action,
+                                },
                             )
+                    else:
+                        # ── Legacy metadata path (fallback) ──
+                        from bantz.tools.metadata import (get_confirmation_prompt,
+                                                          get_tool_risk)
+                        from bantz.tools.metadata import \
+                            requires_confirmation as check_confirmation
+
+                        needs_confirmation = check_confirmation(
+                            tool_name,
+                            llm_requested=bool(output.requires_confirmation),
+                        )
+                        if needs_confirmation:
+                            risk = get_tool_risk(tool_name)
+                            prompt = get_confirmation_prompt(tool_name, output.slots)
+                            confirmations_to_queue.append({
+                                "tool": tool_name,
+                                "prompt": prompt,
+                                "slots": output.slots,
+                                "gmail": getattr(output, "gmail", None) or {},
+                                "risk_level": risk.value,
+                            })
+
+                            if self.safety_guard:
+                                self.safety_guard.audit_decision(
+                                    decision_type="confirmation_required",
+                                    tool_name=tool_name,
+                                    allowed=False,
+                                    reason=f"Destructive tool ({risk.value}) requires user confirmation",
+                                    metadata={"prompt": prompt, "params": output.slots},
+                                )
 
                 if confirmations_to_queue:
                     for confirmation in confirmations_to_queue:
@@ -2411,6 +2479,11 @@ class OrchestratorLoop:
                         "pending_confirmation": True,
                         "risk_level": str(first.get("risk_level") or ""),
                         "confirmation_prompt": str(first.get("prompt") or ""),
+                        # v2 fields (present only when PolicyEngineV2 is active)
+                        "risk_tier": first.get("risk_tier"),
+                        "editable_fields": first.get("editable_fields"),
+                        "editable": first.get("editable"),
+                        "cooldown_seconds": first.get("cooldown_seconds"),
                     })
                     return tool_results
             except Exception:
@@ -2440,53 +2513,102 @@ class OrchestratorLoop:
                     continue
             
             # Confirmation firewall (Issue #160 - enhanced)
-            # Import metadata module for risk classification
-            from bantz.tools.metadata import (get_confirmation_prompt,
-                                              get_tool_risk, is_destructive)
-            from bantz.tools.metadata import \
-                requires_confirmation as check_confirmation
-            
-            risk = get_tool_risk(tool_name)
-            needs_confirmation = check_confirmation(
-                tool_name,
-                llm_requested=bool(output.requires_confirmation)
+            # Issue #1291: Use PolicyEngineV2 for per-tool risk evaluation
+            _v2_engine = (
+                self.safety_guard.policy_engine_v2
+                if self.safety_guard
+                else None
             )
+            _session_id = getattr(state, "session_id", None) or str(id(state))
+
+            needs_confirmation = False
+            risk_value = "moderate"
+            confirmation_prompt = ""
+            _v2_decision = None
 
             was_confirmed = False
             if confirmed_override_tool and tool_name == confirmed_override_tool:
                 # This tool was explicitly confirmed (queue head accepted).
                 needs_confirmation = False
                 was_confirmed = True
+            elif _v2_engine is not None:
+                # ── PolicyEngineV2 path ──
+                _tool_params = tool_args_by_name.get(tool_name) or dict(output.slots)
+                _v2_decision = _v2_engine.evaluate(
+                    tool_name, _tool_params, session_id=_session_id,
+                )
+                if _v2_decision.action in ("confirm", "confirm_with_edit"):
+                    needs_confirmation = True
+                    risk_value = _v2_decision.tier.value
+                    confirmation_prompt = _v2_decision.prompt
+                else:
+                    needs_confirmation = False
+                    risk_value = _v2_decision.tier.value
+            else:
+                # ── Legacy metadata path (fallback) ──
+                from bantz.tools.metadata import (get_confirmation_prompt,
+                                                  get_tool_risk, is_destructive)
+                from bantz.tools.metadata import \
+                    requires_confirmation as check_confirmation
+
+                risk = get_tool_risk(tool_name)
+                risk_value = risk.value
+                needs_confirmation = check_confirmation(
+                    tool_name,
+                    llm_requested=bool(output.requires_confirmation),
+                )
+                if needs_confirmation:
+                    confirmation_prompt = get_confirmation_prompt(tool_name, output.slots)
+
+                    # FIREWALL: Destructive tools always need confirmation
+                    if is_destructive(tool_name) and not output.requires_confirmation:
+                        logger.warning(
+                            "[FIREWALL] Tool %s is DESTRUCTIVE but LLM didn't request confirmation. "
+                            "Enforcing confirmation requirement (Issue #160).",
+                            tool_name,
+                        )
 
             if needs_confirmation:
-                # FIREWALL: Destructive tools always need confirmation
-                # Even if LLM didn't request it
-                if is_destructive(tool_name) and not output.requires_confirmation:
-                    logger.warning(
-                        "[FIREWALL] Tool %s is DESTRUCTIVE but LLM didn't request confirmation. "
-                        "Enforcing confirmation requirement (Issue #160).",
-                        tool_name,
-                    )
+                if not confirmation_prompt:
+                    try:
+                        from bantz.tools.metadata import get_confirmation_prompt
+                        confirmation_prompt = get_confirmation_prompt(tool_name, output.slots)
+                    except Exception:
+                        confirmation_prompt = f"{tool_name} — confirm? (evet/hayır)"
 
-                # If we reach here, confirmation wasn't queued in pre-scan.
-                # Queue it now and return a pending confirmation placeholder.
-                prompt = get_confirmation_prompt(tool_name, output.slots)
-                logger.info("[FIREWALL] Tool %s (%s) requires confirmation.", tool_name, risk.value)
+                logger.info("[FIREWALL] Tool %s (%s) requires confirmation.", tool_name, risk_value)
 
-                state.add_pending_confirmation({
+                _pending = {
                     "tool": tool_name,
-                    "prompt": prompt,
+                    "prompt": confirmation_prompt,
                     "slots": output.slots,
                     "gmail": getattr(output, "gmail", None) or {},
-                    "risk_level": risk.value,
-                })
+                    "risk_level": risk_value,
+                }
+                # Enrich with v2 fields when available
+                if _v2_decision is not None:
+                    _pending.update({
+                        "risk_tier": _v2_decision.tier.value,
+                        "action": _v2_decision.action,
+                        "display_params": _v2_decision.display_params,
+                        "editable_fields": _v2_decision.editable_fields,
+                        "editable": _v2_decision.editable,
+                        "requires_explicit_confirm": _v2_decision.requires_explicit_confirm,
+                        "cooldown_seconds": _v2_decision.cooldown_seconds,
+                    })
+
+                state.add_pending_confirmation(_pending)
 
                 tool_results.append({
                     "tool": tool_name,
                     "success": False,
                     "pending_confirmation": True,
-                    "risk_level": risk.value,
-                    "confirmation_prompt": prompt,
+                    "risk_level": risk_value,
+                    "confirmation_prompt": confirmation_prompt,
+                    "risk_tier": _v2_decision.tier.value if _v2_decision else None,
+                    "editable_fields": _v2_decision.editable_fields if _v2_decision else None,
+                    "editable": _v2_decision.editable if _v2_decision else None,
+                    "cooldown_seconds": _v2_decision.cooldown_seconds if _v2_decision else None,
                 })
 
                 # Audit confirmation request
@@ -2495,8 +2617,12 @@ class OrchestratorLoop:
                         decision_type="confirmation_required",
                         tool_name=tool_name,
                         allowed=False,
-                        reason=f"Destructive tool ({risk.value}) requires user confirmation",
-                        metadata={"prompt": prompt, "params": output.slots},
+                        reason=(
+                            f"PolicyEngineV2: {_v2_decision.reason} (tier={_v2_decision.tier.value})"
+                            if _v2_decision
+                            else f"Destructive tool ({risk_value}) requires user confirmation"
+                        ),
+                        metadata={"prompt": confirmation_prompt, "params": output.slots},
                     )
 
                 return tool_results
@@ -2532,9 +2658,20 @@ class OrchestratorLoop:
                     continue
                 
                 # Build parameters: prefer explicit tool_plan args, else fall back to slots.
+                # Issue #1291: If this is a confirmed tool with edited params,
+                # merge the user-edited params over the original.
                 # Issue #1208: gmail.* tools ALWAYS go through _build_tool_params
                 # for proper aliasing (natural_query→text, title→subject, etc.)
                 args = tool_args_by_name.get(tool_name)
+
+                # Apply edited params from HIGH-risk param edit UX
+                _edited = state.confirmed_edited_params if was_confirmed else None
+                if _edited and isinstance(_edited, dict):
+                    if args is not None:
+                        args.update(_edited)
+                    else:
+                        args = dict(_edited)
+                    state.confirmed_edited_params = None  # consume once
                 if args is not None and not tool_name.startswith("gmail."):
                     params = dict(output.slots)
                     params.update(args)

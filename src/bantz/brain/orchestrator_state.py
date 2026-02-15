@@ -343,6 +343,11 @@ class OrchestratorState:
 
     # Confirmation override (used when a pending confirmation is accepted)
     confirmed_tool: Optional[str] = None
+
+    # Issue #1291: Edited params from HIGH-risk param edit UX.
+    # When user edits params before confirming, store them here so the
+    # executor uses edited values instead of original slots.
+    confirmed_edited_params: Optional[dict[str, Any]] = None
     
     # Trace metadata (for debugging and testing)
     trace: dict[str, Any] = field(default_factory=dict)

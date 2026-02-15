@@ -153,6 +153,14 @@ BANTZ_BRIEFING_HOUR=08
 # BANTZ_MISROUTE_DATASET=~/.cache/bantz/datasets/router_misroutes.jsonl
 
 
+# ─── Neo4j / Graph Database ──────────────────────────────────────
+# NEO4J_URI=neo4j+s://xxxx.databases.neo4j.io
+# NEO4J_USERNAME=neo4j
+# NEO4J_PASSWORD=                          # Store in ~/.config/bantz/neo4j-aura.env
+# NEO4J_DATABASE=neo4j
+# BANTZ_GRAPH_BACKEND=sqlite               # sqlite | neo4j
+
+
 # ─── Memory / Context ───────────────────────────────────────────
 # BANTZ_MEMORY_DB=~/.bantz/memory.db       # User memory SQLite path
 # BANTZ_MEMORY_DB_PATH=~/.bantz/memory.db  # Memory store DB path (alternate)
