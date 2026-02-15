@@ -167,7 +167,7 @@ class TestValidEnums:
     """Test the centralized valid enum sets."""
 
     def test_valid_routes(self):
-        assert VALID_ROUTES == {"calendar", "gmail", "smalltalk", "system", "unknown"}
+        assert VALID_ROUTES == {"calendar", "gmail", "smalltalk", "system", "unknown", "contacts", "keep"}
 
     def test_valid_calendar_intents(self):
         assert VALID_CALENDAR_INTENTS == {"create", "modify", "cancel", "query", "none"}

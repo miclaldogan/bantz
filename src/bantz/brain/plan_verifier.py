@@ -25,6 +25,8 @@ _ROUTE_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
     "calendar": ("calendar.", "time.", "contacts."),
     "gmail": ("gmail.", "contacts.", "time."),
     "system": ("system.", "time."),
+    "contacts": ("google.contacts.", "contacts."),
+    "keep": ("google.keep.",),
     "smalltalk": ("time.",),
     "unknown": ("time.",),
 }
@@ -107,12 +109,19 @@ def _has_tool_indicators(user_input: str) -> bool:
     return any(p.search(user_input) for p in _TOOL_INDICATOR_PATTERNS)
 
 
+# Issue #1360/#1363: Two-level prefixes that map to a single route domain.
+_COMPOUND_PREFIX_MAP: dict[str, str] = {
+    "google.contacts": "contacts",
+    "google.keep": "keep",
+}
+
+
 def infer_route_from_tools(tool_plan: list[Any]) -> str | None:
     """Infer the correct route from tool_plan prefixes.
 
-    Returns a route string ("gmail", "calendar", "system") if all tools
-    in the plan share the same domain prefix, or ``None`` if the plan is
-    empty or ambiguous.
+    Returns a route string ("gmail", "calendar", "system", "contacts",
+    "keep") if all tools in the plan share the same domain prefix, or
+    ``None`` if the plan is empty or ambiguous.
     """
     if not tool_plan:
         return None
@@ -122,6 +131,15 @@ def infer_route_from_tools(tool_plan: list[Any]) -> str | None:
             item.get("tool") if isinstance(item, dict) else str(item)
         )
         if not name:
+            continue
+        # Check compound prefixes first (google.contacts.* → contacts)
+        _matched_compound = False
+        for compound, domain in _COMPOUND_PREFIX_MAP.items():
+            if name.startswith(compound + "."):
+                domains.add(domain)
+                _matched_compound = True
+                break
+        if _matched_compound:
             continue
         prefix = name.split(".", 1)[0]
         if prefix == "time":

@@ -2232,11 +2232,14 @@ class OrchestratorLoop:
                     e.startswith("unknown_tool:_") or e.startswith("route_tool_mismatch")
                     for e in hard
                 )
-                if _only_internal and output.route in ("calendar", "gmail", "system"):
+                if _only_internal and output.route in ("calendar", "gmail", "system", "contacts", "keep"):
                     _recovery_tool = self.orchestrator._resolve_tool_from_intent(
                         output.route,
                         output.calendar_intent or "query",
                         getattr(output, "gmail_intent", "none") or "none",
+                        system_intent=getattr(output, "system_intent", "none") or "none",
+                        contacts_intent=getattr(output, "contacts_intent", "none") or "none",
+                        keep_intent=getattr(output, "keep_intent", "none") or "none",
                     )
                     if _recovery_tool:
                         logger.info(
@@ -2268,6 +2271,7 @@ class OrchestratorLoop:
             if kw_route not in ("smalltalk", "unknown"):
                 resolved_tool = self.orchestrator._resolve_tool_from_intent(
                     kw_route, "none", "none",
+                    system_intent="none", contacts_intent="none", keep_intent="none",
                 )
                 if resolved_tool:
                     logger.info(
@@ -2541,6 +2545,14 @@ class OrchestratorLoop:
                 confirmations_to_queue: list[dict[str, Any]] = []
                 for tool_name in filtered_tool_plan:
                     _tool_params = tool_args_by_name.get(tool_name) or dict(output.slots)
+                    # Issue #1361: Filter params to only include keys valid for
+                    # this tool's schema.  NLU extracts route-agnostic slots
+                    # (url, site) that leak into confirmation prompts otherwise.
+                    _tool_def = self.tools.get(tool_name)
+                    if _tool_def and _tool_def.parameters:
+                        _valid_keys = set((_tool_def.parameters.get("properties") or {}).keys())
+                        if _valid_keys:
+                            _tool_params = {k: v for k, v in _tool_params.items() if k in _valid_keys}
 
                     # ── PolicyEngineV2 path ──
                     if _v2_engine is not None:
@@ -2676,6 +2688,12 @@ class OrchestratorLoop:
             elif _v2_engine is not None:
                 # ── PolicyEngineV2 path ──
                 _tool_params = tool_args_by_name.get(tool_name) or dict(output.slots)
+                # Issue #1361: Filter params by tool schema
+                _tool_def = self.tools.get(tool_name)
+                if _tool_def and _tool_def.parameters:
+                    _valid_keys = set((_tool_def.parameters.get("properties") or {}).keys())
+                    if _valid_keys:
+                        _tool_params = {k: v for k, v in _tool_params.items() if k in _valid_keys}
                 _v2_decision = _v2_engine.evaluate(
                     tool_name, _tool_params, session_id=_session_id,
                 )
@@ -2923,16 +2941,26 @@ class OrchestratorLoop:
                         logger.debug("[INGEST] Failed to cache %s: %s", tool_name, _ing_err)
 
                 # Issue #1289: Link tool results into knowledge graph
+                # Issue #1362: on_tool_result is async — ensure_future() from
+                # sync context produces "coroutine never awaited" warnings.
+                # Use run_until_complete when no loop is running, otherwise
+                # create_task for proper scheduling.
                 if bool(tool_returned_ok) and getattr(self, "_graph_bridge", None):
                     try:
                         import asyncio as _aio_gb
-                        _aio_gb.ensure_future(
-                            self._graph_bridge.on_tool_result(
-                                tool_name=tool_name,
-                                params=params,
-                                result=result,
-                            )
+                        _coro = self._graph_bridge.on_tool_result(
+                            tool_name=tool_name,
+                            params=params,
+                            result=result,
                         )
+                        try:
+                            _loop = _aio_gb.get_running_loop()
+                        except RuntimeError:
+                            _loop = None
+                        if _loop is not None and _loop.is_running():
+                            _loop.create_task(_coro)
+                        else:
+                            _aio_gb.run(_coro)
                     except Exception as _gb_err:
                         logger.debug("[GRAPH] Failed to link %s: %s", tool_name, _gb_err)
 
