@@ -82,3 +82,7 @@ htmlcov/
 *.sqlite3
 certs/
 config/bantz/google/client_secret.json
+
+# Neo4j Aura credentials
+Neo4j-*.txt
+neo4j-aura.env
