@@ -46,6 +46,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_messaging(registry)
     count += _register_sandbox_agents(registry)
     count += _register_music(registry)
+    count += _register_health(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -2392,6 +2393,143 @@ def _register_music(registry: "ToolRegistry") -> int:
         "Bağlama uygun müzik önerisi — takvim ve saat bazlı.",
         _obj(required=[]),
         _handle_music_suggest,
+        risk="low",
+    )
+
+    return n
+
+
+# ── Health & Degradation (Issue #1298) ──────────────────────────────
+
+def _register_health(registry: "ToolRegistry") -> int:
+    """Register tools: system.health, system.health_service,
+    system.circuit_breaker, system.fallback."""
+    n = 0
+
+    # ── system.health ───────────────────────────────────────────
+    def _handle_health(**_: Any) -> dict:
+        """Run all health checks and return aggregated report."""
+        import asyncio
+
+        from bantz.core.health_monitor import get_health_monitor
+
+        monitor = get_health_monitor()
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                report = pool.submit(
+                    lambda: asyncio.run(monitor.check_all())
+                ).result(timeout=30)
+        else:
+            report = asyncio.run(monitor.check_all())
+
+        return {"ok": True, **report.to_dict()}
+
+    n += _reg(
+        registry,
+        "system.health",
+        "Tüm servislerin sağlık kontrolünü yap ve rapor döndür.",
+        _obj(required=[]),
+        _handle_health,
+        risk="low",
+    )
+
+    # ── system.health_service ───────────────────────────────────
+    def _handle_health_service(*, service: str = "", **_: Any) -> dict:
+        """Check health of a specific service."""
+        import asyncio
+
+        from bantz.core.health_monitor import get_health_monitor
+
+        if not service:
+            return {"ok": False, "error": "service parametresi gerekli"}
+
+        monitor = get_health_monitor()
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                status = pool.submit(
+                    lambda: asyncio.run(monitor.check_service(service))
+                ).result(timeout=15)
+        else:
+            status = asyncio.run(monitor.check_service(service))
+
+        return {"ok": True, **status.to_dict()}
+
+    n += _reg(
+        registry,
+        "system.health_service",
+        "Belirli bir servisin sağlık kontrolünü yap.",
+        _obj(
+            ("service", "string", "Kontrol edilecek servis adı (sqlite, ollama, google)"),
+            required=["service"],
+        ),
+        _handle_health_service,
+        risk="low",
+    )
+
+    # ── system.circuit_breaker ──────────────────────────────────
+    def _handle_circuit_breaker(**_: Any) -> dict:
+        """Get circuit breaker states for all domains."""
+        from bantz.agent.circuit_breaker import get_circuit_breaker
+
+        cb = get_circuit_breaker()
+        return {
+            "ok": True,
+            "domains": cb.to_dict(),
+            "config": {
+                "failure_threshold": cb.failure_threshold,
+                "reset_timeout": cb.reset_timeout,
+                "success_threshold": cb.success_threshold,
+            },
+        }
+
+    n += _reg(
+        registry,
+        "system.circuit_breaker",
+        "Circuit breaker durumlarını listele.",
+        _obj(required=[]),
+        _handle_circuit_breaker,
+        risk="low",
+    )
+
+    # ── system.fallback ─────────────────────────────────────────
+    def _handle_fallback(*, service: str = "", **_: Any) -> dict:
+        """Execute fallback for a service or list all fallback configs."""
+        from bantz.core.fallback_registry import get_fallback_registry
+
+        fb = get_fallback_registry()
+
+        if not service:
+            return {
+                "ok": True,
+                "services": fb.list_services(),
+                "configs": fb.to_dict(),
+            }
+
+        result = fb.execute_fallback(service)
+        return {"ok": result.success, **result.to_dict()}
+
+    n += _reg(
+        registry,
+        "system.fallback",
+        "Servis fallback durumunu sorgula veya fallback çalıştır.",
+        _obj(
+            ("service", "string", "Fallback çalıştırılacak servis adı (opsiyonel)"),
+        ),
+        _handle_fallback,
         risk="low",
     )
 
