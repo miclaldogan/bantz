@@ -22,7 +22,6 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, replace
 from typing import Any, Optional, Protocol
@@ -62,7 +61,8 @@ def _route_aware_fallback(
         successes = [r for r in tool_results if r.get("success", False)]
         if successes:
             try:
-                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
                 summary = _build_tool_success_summary(tool_results)
                 if summary and summary != "Tamamlandı efendim.":
                     return summary
@@ -282,7 +282,8 @@ class QualityFinalizer:
 
     def _build_prompt(self, ctx: FinalizationContext) -> str:
         """Try ``PromptBuilder`` first, fall back to inline template."""
-        from bantz.brain.tool_result_summarizer import _prepare_tool_results_for_finalizer
+        from bantz.brain.tool_result_summarizer import \
+            _prepare_tool_results_for_finalizer
 
         finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
             ctx.tool_results or [],
@@ -429,7 +430,8 @@ class FastFinalizer:
             return None
 
     def _build_prompt(self, ctx: FinalizationContext) -> str:
-        from bantz.brain.tool_result_summarizer import _prepare_tool_results_for_finalizer
+        from bantz.brain.tool_result_summarizer import \
+            _prepare_tool_results_for_finalizer
 
         prompt_lines = [
             "Kimlik / Roller:",
@@ -533,7 +535,7 @@ def decide_finalization_tier(
         return False, "fast", "no_finalizer"
 
     # Issue #517: env override for forcing finalizer tier
-    from bantz.llm.tier_env import get_tier_force_finalizer, get_tier_debug
+    from bantz.llm.tier_env import get_tier_debug, get_tier_force_finalizer
 
     forced = get_tier_force_finalizer()
     if forced in ("quality", "gemini"):
@@ -709,7 +711,8 @@ class FinalizationPipeline:
                 for r in ctx.tool_results
             )
             if has_write or has_read:
-                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
                 det_reply = _build_tool_success_summary(ctx.tool_results)
                 ctx.state.update_trace(
                     finalizer_used=False,
@@ -727,7 +730,8 @@ class FinalizationPipeline:
                 for r in ctx.tool_results
             )
             if has_system:
-                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
                 det_reply = _build_tool_success_summary(ctx.tool_results)
                 ctx.state.update_trace(
                     finalizer_used=False,
@@ -977,7 +981,8 @@ class FinalizationPipeline:
             _reply_lower = (output.assistant_reply or "").strip().lower()
             _is_generic = any(g in _reply_lower for g in _generic_phrases)
             if _is_generic:
-                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
                 summary = _build_tool_success_summary(ctx.tool_results)
                 if summary and summary != "Tamamlandı efendim.":
                     return replace(output, assistant_reply=summary, finalizer_model="none(tool_summary_over_generic)")
@@ -991,7 +996,8 @@ class FinalizationPipeline:
             validated = _validate_reply_language(output.assistant_reply, route=_route, tool_results=ctx.tool_results)
             return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
 
-        from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+        from bantz.brain.tool_result_summarizer import \
+            _build_tool_success_summary
 
         return replace(
             output,
@@ -1233,6 +1239,14 @@ def _safe_complete(
         try:
             return llm.complete_text(prompt=prompt, **kwargs)
         except TypeError as e:
+            # Issue #1313: Retry without timeout_seconds but preserve other
+            # kwargs (max_tokens, temperature) to avoid silent truncation.
+            if "timeout_seconds" in kwargs:
+                filtered = {k: v for k, v in kwargs.items() if k != "timeout_seconds"}
+                try:
+                    return llm.complete_text(prompt=prompt, **filtered)
+                except TypeError:
+                    pass
             logger.warning(
                 "[FINALIZER] LLM client TypeError — kwargs dropped %s: %s",
                 list(kwargs.keys()),
@@ -1242,15 +1256,11 @@ def _safe_complete(
 
     try:
         if timeout > 0:
-            # Issue #1182: Sync the HTTP-level timeout with the
-            # ThreadPoolExecutor timeout so the HTTP request aborts at
-            # the same instant instead of lingering for up to 240s.
-            _original_timeout = getattr(llm, "_timeout_seconds", None)
-            if _original_timeout is not None and _original_timeout > timeout:
-                try:
-                    llm._timeout_seconds = timeout  # type: ignore[attr-defined]
-                except Exception:
-                    pass
+            # Issue #1313: Do NOT mutate llm._timeout_seconds — it's shared
+            # state across threads. Instead, pass timeout via kwargs so only
+            # this call is affected. The HTTP-level timeout is set per-request
+            # by the LLM client when it receives a timeout_seconds kwarg.
+            kwargs.setdefault("timeout_seconds", timeout)
             # Issue #1183: Use module-level executor instead of creating
             # a new one per call to avoid thread churn under load.
             future = _FINALIZER_EXECUTOR.submit(_do_complete)
@@ -1260,13 +1270,6 @@ def _safe_complete(
                 future.cancel()
                 logger.error("[FINALIZER] LLM call timed out after %.1fs", timeout)
                 return None
-            finally:
-                # Restore original timeout
-                if _original_timeout is not None:
-                    try:
-                        llm._timeout_seconds = _original_timeout  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
         else:
             text = _do_complete()
     except Exception as exc:

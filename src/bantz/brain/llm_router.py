@@ -359,6 +359,11 @@ class JarvisLLMOrchestrator:
     # Issue #1275: Class-level registry reference for route-based schema injection
     _tool_registry: Optional[Any] = None
 
+    # Issue #1313: Class-level lock for sync_valid_tools to prevent
+    # inconsistent state when _VALID_TOOLS, SYSTEM_PROMPT, and
+    # _tool_registry are mutated concurrently.
+    _sync_lock: threading.Lock = threading.Lock()
+
     @classmethod
     def sync_valid_tools(cls, registry_names: list[str], *, registry: Optional[Any] = None) -> None:
         """Intersect _VALID_TOOLS with an actual ToolRegistry at startup.
@@ -372,25 +377,28 @@ class JarvisLLMOrchestrator:
         that route-based tool schema injection can generate compact
         per-tool schema lines at prompt build time.
         """
-        if registry is not None:
-            cls._tool_registry = registry
-        registry_set = frozenset(registry_names)
-        phantom = cls._VALID_TOOLS - registry_set
-        if phantom:
-            logger.warning(
-                "[tool_validation] %d tool(s) in _VALID_TOOLS are NOT registered: %s",
-                len(phantom), sorted(phantom),
+        # Issue #1313: Atomically update all three class attrs under lock
+        # to prevent concurrent callers from seeing inconsistent state.
+        with cls._sync_lock:
+            if registry is not None:
+                cls._tool_registry = registry
+            registry_set = frozenset(registry_names)
+            phantom = cls._VALID_TOOLS - registry_set
+            if phantom:
+                logger.warning(
+                    "[tool_validation] %d tool(s) in _VALID_TOOLS are NOT registered: %s",
+                    len(phantom), sorted(phantom),
+                )
+            cls._VALID_TOOLS = cls._VALID_TOOLS & registry_set
+            # Issue #943: Rebuild the class-level combined prompt so that
+            # any already-instantiated router that falls back to SYSTEM_PROMPT
+            # also picks up the narrowed tool list.
+            cls.SYSTEM_PROMPT = cls._build_system_prompt(cls._VALID_TOOLS)
+            logger.info(
+                "[tool_validation] _VALID_TOOLS synced — %d tools accepted, "
+                "system prompt TOOLS line refreshed",
+                len(cls._VALID_TOOLS),
             )
-        cls._VALID_TOOLS = cls._VALID_TOOLS & registry_set
-        # Issue #943: Rebuild the class-level combined prompt so that
-        # any already-instantiated router that falls back to SYSTEM_PROMPT
-        # also picks up the narrowed tool list.
-        cls.SYSTEM_PROMPT = cls._build_system_prompt(cls._VALID_TOOLS)
-        logger.info(
-            "[tool_validation] _VALID_TOOLS synced — %d tools accepted, "
-            "system prompt TOOLS line refreshed",
-            len(cls._VALID_TOOLS),
-        )
 
     # -----------------------------------------------------------------------
     # Tiered system prompt (Issue #405, Issue #937: compressed)
@@ -586,6 +594,9 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
         self._router_healthy: bool = self._check_router_health()
         self._consecutive_failures: int = 0
         self._max_consecutive_failures: int = 3  # Mark unhealthy after N failures
+        # Issue #1313: Lock for _consecutive_failures / _router_healthy
+        # to prevent lost-update race under concurrent route() calls.
+        self._health_lock: threading.Lock = threading.Lock()
 
     @property
     def _system_prompt(self) -> str:
@@ -809,7 +820,8 @@ ASSISTANT (sadece JSON):"""
                 return self._fallback_route(user_input)
             else:
                 logger.info("[router_health] Router recovered, resuming normal operation")
-                self._consecutive_failures = 0
+                with self._health_lock:
+                    self._consecutive_failures = 0
 
         # Build prompt with context using deterministic budget (Issue #227)
         context_len = self._get_model_context_length()
@@ -893,7 +905,8 @@ ASSISTANT (sadece JSON):"""
                 call_max_tokens=call_max_tokens,
             )
             if _struct_result is not None:
-                self._consecutive_failures = 0
+                with self._health_lock:
+                    self._consecutive_failures = 0
                 return _struct_result
 
         # ── Legacy text-based path ───────────────────────────────────────
@@ -910,13 +923,15 @@ ASSISTANT (sadece JSON):"""
             raw_text = self._llm.complete_text(prompt=prompt)
         except Exception as e:
             # Issue #372: Track consecutive failures and mark unhealthy
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= self._max_consecutive_failures:
-                self._router_healthy = False
-                logger.error(
-                    "[router_health] Router marked unhealthy after %d consecutive failures",
-                    self._consecutive_failures,
-                )
+            # Issue #1313: Protected under lock for thread safety.
+            with self._health_lock:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self._max_consecutive_failures:
+                    self._router_healthy = False
+                    logger.error(
+                        "[router_health] Router marked unhealthy after %d consecutive failures",
+                        self._consecutive_failures,
+                    )
             
             # PII-safe logging: only sizes (Issue #227).
             backend = getattr(self._llm, "backend_name", None)
@@ -935,7 +950,8 @@ ASSISTANT (sadece JSON):"""
             return self._fallback_route(user_input) if not self._router_healthy else self._fallback_output(user_input, error=str(e))
 
         # Issue #372: LLM call succeeded → reset failure counter
-        self._consecutive_failures = 0
+        with self._health_lock:
+            self._consecutive_failures = 0
 
         # Parse JSON (with repair attempts)
         last_err: Optional[str] = None
