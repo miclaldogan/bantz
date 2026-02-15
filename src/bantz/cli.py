@@ -334,13 +334,46 @@ def run_interactive_with_server(
 
 
 def run_stateless_once(command: str, policy_path: str, log_path: str) -> int:
-    """Run single command without persistent browser (original behavior)."""
+    """Run single command without persistent browser (original behavior).
+
+    Issue #1357: When NLU returns 'unknown', fall back to Brain/LLM
+    orchestrator for full tool-calling pipeline.
+    """
     policy = Policy.from_json_file(policy_path)
     logger = JsonlLogger(path=log_path)
     router = Router(policy=policy, logger=logger)
     ctx = ConversationContext(timeout_seconds=120)
 
     result = router.handle(text=command, ctx=ctx)
+
+    # Issue #1357: If NLU couldn't parse the command, try LLM brain
+    if not result.ok and result.intent == "unknown":
+        try:
+            from bantz.brain.runtime_factory import create_runtime
+            from bantz.brain.orchestrator_state import OrchestratorState
+
+            brain = create_runtime()
+            state = OrchestratorState()
+            output, state = brain.process_turn(command, state)
+
+            reply = str(getattr(output, "assistant_reply", "") or "").strip()
+            if not reply and getattr(output, "ask_user", False):
+                reply = str(getattr(output, "question", "") or "").strip()
+
+            # Check for pending confirmation
+            if state.has_pending_confirmation():
+                pending = state.peek_pending_confirmation() or {}
+                conf_prompt = str(pending.get("prompt") or "").strip()
+                if conf_prompt:
+                    reply = conf_prompt
+
+            if reply:
+                print(reply)
+                return 0
+        except Exception as e:
+            import logging as _log
+            _log.getLogger(__name__).debug("Brain fallback failed: %s", e)
+
     print(result.user_text)
 
     # Note about stateless mode
