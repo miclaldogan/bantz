@@ -59,7 +59,7 @@ class TestTrack:
 
     def test_str_empty(self):
         track = Track()
-        assert "bilinmeyen" in str(track)
+        assert "unknown" in str(track)
 
 
 class TestPlaylist:
@@ -452,7 +452,7 @@ class TestMusicSuggester:
         s = suggester.suggest_from_calendar("Team Meeting")
         assert s is not None
         assert s.genres == []
-        assert "önerilmiyor" in s.reason
+        assert "not recommended" in s.reason.lower()
 
     def test_suggest_exercise(self, suggester):
         s = suggester.suggest_from_calendar("exercise plan")
@@ -468,8 +468,8 @@ class TestMusicSuggester:
         s = suggester.suggest_from_calendar("Random Unknown Event")
         assert s is None  # No matching pattern
 
-    def test_suggest_turkish_keywords(self, suggester):
-        s = suggester.suggest_from_calendar("Toplantı: Haftalık Sync")
+    def test_suggest_meeting_keywords(self, suggester):
+        s = suggester.suggest_from_calendar("Conference: Weekly Sync")
         assert s is not None
         assert s.genres == []  # Meeting → no music
 

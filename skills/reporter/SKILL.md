@@ -2,7 +2,7 @@
 name: reporter
 version: 0.1.0
 author: Bantz Team
-description: "📊 Rapor Üretici — haftalık/aylık aktivite raporu, verimlilik analizi."
+description: "📊 Report Generator — weekly/monthly activity reports, productivity analysis."
 icon: 📊
 status: planned
 tags:
@@ -15,68 +15,68 @@ dependencies:
     status: pending
 
 triggers:
-  - pattern: "(?i)(rapor|istatistik|özet|analytics).*(üret|oluştur|hazırla|göster|haftalık|aylık)"
+  - pattern: "(?i)(report|statistics|summary|analytics).*(generate|create|prepare|show|weekly|monthly)"
     intent: reporter.generate
     examples:
-      - "haftalık rapor oluştur"
-      - "bu ayki aktivite özetim"
-      - "tool kullanım istatistiklerimi göster"
-      - "verimlilik raporumu hazırla"
+      - "generate weekly report"
+      - "show my activity summary this month"
+      - "show tool usage statistics"
+      - "prepare my productivity report"
     priority: 75
 
-  - pattern: "(?i)(export|dışa aktar|PDF|markdown).*(rapor|özet)"
+  - pattern: "(?i)(export|PDF|markdown).*(report|summary)"
     intent: reporter.export
     examples:
-      - "raporu PDF olarak dışa aktar"
-      - "markdown formatında rapor"
+      - "export the report as PDF"
+      - "markdown format report"
     priority: 70
 
 tools:
   - name: reporter.weekly
-    description: "Haftalık aktivite raporu üret"
+    description: "Generate weekly activity report"
     handler: llm
     parameters:
       - name: week
         type: string
-        description: "Hafta (ISO format, boş = bu hafta)"
+        description: "Week (ISO format, empty = this week)"
       - name: include_tools
         type: boolean
-        description: "Tool kullanım istatistiklerini dahil et"
+        description: "Include tool usage statistics"
 
   - name: reporter.monthly
-    description: "Aylık aktivite raporu üret"
+    description: "Generate monthly activity report"
     handler: llm
     parameters:
       - name: month
         type: string
-        description: "Ay (YYYY-MM, boş = bu ay)"
+        description: "Month (YYYY-MM, empty = this month)"
 
   - name: reporter.productivity
-    description: "Verimlilik analizi — toplantı/çalışma oranı"
+    description: "Productivity analysis — meeting/work ratio"
     handler: llm
     parameters:
       - name: period
         type: string
-        description: "Dönem: this_week, last_week, this_month"
+        description: "Period: this_week, last_week, this_month"
         enum: ["this_week", "last_week", "this_month"]
 
   - name: reporter.export
-    description: "Raporu PDF veya Markdown olarak dışa aktar"
+    description: "Export report as PDF or Markdown"
     handler: system
     risk: medium
     parameters:
       - name: report_type
         type: string
-        description: "Rapor tipi: weekly, monthly, productivity"
+        description: "Report type: weekly, monthly, productivity"
         enum: ["weekly", "monthly", "productivity"]
       - name: format
         type: string
-        description: "Çıktı formatı"
+        description: "Output format"
         enum: ["pdf", "markdown", "html"]
 
 notes: |
-  Faz G+ özelliği. Observability EPIC'ine bağımlı.
-  Tool kullanım istatistikleri → observability DB'den.
-  Takvim analizi → Calendar API'den toplantı/çalışma oranı.
-  PDF export: weasyprint veya reportlab.
-  Markdown export: jinja2 template'leri.
+  Phase G+ feature. Depends on Observability EPIC.
+  Tool usage statistics → from observability DB.
+  Calendar analysis → meeting/work ratio from Calendar API.
+  PDF export: weasyprint or reportlab.
+  Markdown export: jinja2 templates.

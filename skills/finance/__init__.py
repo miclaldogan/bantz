@@ -1,6 +1,6 @@
 """Finance Tracker skill — expense parsing and budget analysis.
 
-Issue #1299: Gelecek Yetenekler — Faz G+
+Issue #1299: Future Capabilities — Phase G+
 
 Status: PLANNED — skeleton only.
 Dependencies: Ingest Store (EPIC 1), Gmail Enhanced (EPIC 5).
@@ -20,17 +20,17 @@ logger = logging.getLogger(__name__)
 
 
 class ExpenseCategory(str, Enum):
-    """Harcama kategorileri."""
+    """Expense categories."""
 
-    FOOD = "yemek"
-    TRANSPORT = "ulaşım"
-    ENTERTAINMENT = "eğlence"
-    BILLS = "fatura"
-    SHOPPING = "alışveriş"
-    HEALTH = "sağlık"
-    EDUCATION = "eğitim"
-    SUBSCRIPTION = "abonelik"
-    OTHER = "diğer"
+    FOOD = "food"
+    TRANSPORT = "transport"
+    ENTERTAINMENT = "entertainment"
+    BILLS = "bills"
+    SHOPPING = "shopping"
+    HEALTH = "health"
+    EDUCATION = "education"
+    SUBSCRIPTION = "subscription"
+    OTHER = "other"
 
 
 @dataclass
@@ -158,8 +158,8 @@ class PlaceholderFinanceTracker(FinanceTracker):
     ) -> Dict[str, Any]:
         return {
             "status": "planned",
-            "message": "Finans takibi henüz aktif değil. "
-            "Ingest Store EPIC'i tamamlandıktan sonra aktive edilecek.",
+            "message": "Finance tracking is not yet active. "
+            "Will be activated after Ingest Store EPIC is complete.",
         }
 
     def check_budget(

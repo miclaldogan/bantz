@@ -1,6 +1,6 @@
 """Health Reminder skill — medication, hydration, and ergonomics tracking.
 
-Issue #1299: Gelecek Yetenekler — Faz G+
+Issue #1299: Future Capabilities — Phase G+
 
 Status: PLANNED — skeleton only.
 Dependencies: Scheduler (EPIC 6).
@@ -23,7 +23,7 @@ class Medication:
 
     name: str
     dose: str = ""
-    schedule: str = "sabah"  # sabah | öğle | akşam | cron expression
+    schedule: str = "morning"  # morning | noon | evening | cron expression
     active: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
@@ -82,7 +82,7 @@ class HealthReminder(ABC):
     def add_medication(
         self,
         name: str,
-        schedule: str = "sabah",
+        schedule: str = "morning",
         dose: str = "",
     ) -> Medication:
         """Add a medication reminder."""
@@ -126,7 +126,7 @@ class PlaceholderHealthReminder(HealthReminder):
     def add_medication(
         self,
         name: str,
-        schedule: str = "sabah",
+        schedule: str = "morning",
         dose: str = "",
     ) -> Medication:
         logger.info("[HealthReminder] add_medication — stub mode")
@@ -149,7 +149,7 @@ class PlaceholderHealthReminder(HealthReminder):
         return {
             "status": "planned",
             "max_sitting_minutes": max_sitting_minutes,
-            "message": "Ergonomi hatırlatıcısı henüz aktif değil.",
+            "message": "Ergonomics reminder is not yet active.",
         }
 
     def log_action(
@@ -162,6 +162,6 @@ class PlaceholderHealthReminder(HealthReminder):
     def get_daily_summary(self) -> Dict[str, Any]:
         return {
             "status": "planned",
-            "message": "Sağlık takibi henüz aktif değil. "
-            "Scheduler EPIC'i tamamlandıktan sonra aktive edilecek.",
+            "message": "Health tracking is not yet active. "
+            "Will be activated after Scheduler EPIC is complete.",
         }

@@ -45,7 +45,7 @@ class EventType(Enum):
     """
     
     # === Acknowledgment ===
-    ACK = "ack"  # "Anladım efendim, başlıyorum"
+    ACK = "ack"  # "Understood, starting now"
     
     # === Progress ===
     PROGRESS = "progress"  # {"current": 3, "total": 5, "message": "..."}
@@ -61,9 +61,9 @@ class EventType(Enum):
     RETRY = "retry"  # {"attempt": 2, "reason": "timeout"}
     
     # === Control ===
-    PAUSE = "pause"  # Job duraklatıldı
-    RESUME = "resume"  # Job devam ediyor
-    CANCEL = "cancel"  # Job iptal edildi
+    PAUSE = "pause"  # Job paused
+    RESUME = "resume"  # Job resuming
+    CANCEL = "cancel"  # Job cancelled
     
     # === Job Lifecycle ===
     JOB_CREATED = "job.created"  # New job created
@@ -75,45 +75,45 @@ class EventType(Enum):
     JOB_CANCELLED = "job.cancelled"  # Job cancelled
     
     # === Orchestrator Trace Events (Issue #284) ===
-    TURN_START = "turn.start"  # Turn başladı
-    INTENT_DETECTED = "intent.detected"  # Niyet tespit edildi
-    SLOTS_EXTRACTED = "slots.extracted"  # Slot'lar çıkarıldı  
-    TOOL_SELECTED = "tool.selected"  # Tool seçildi
-    TOOL_CALL = "tool.call"  # Tool çağrılıyor
-    TOOL_RESULT = "tool.result"  # Tool sonucu geldi
-    FINALIZER_START = "finalizer.start"  # Yanıt son haline getiriliyor
-    FINALIZER_END = "finalizer.end"  # Yanıt tamamlandı
-    TURN_END = "turn.end"  # Turn bitti
+    TURN_START = "turn.start"  # Turn started
+    INTENT_DETECTED = "intent.detected"  # Intent detected
+    SLOTS_EXTRACTED = "slots.extracted"  # Slots extracted
+    TOOL_SELECTED = "tool.selected"  # Tool selected
+    TOOL_CALL = "tool.call"  # Tool invocation
+    TOOL_RESULT = "tool.result"  # Tool result received
+    FINALIZER_START = "finalizer.start"  # Finalizing response
+    FINALIZER_END = "finalizer.end"  # Response complete
+    TURN_END = "turn.end"  # Turn ended
 
     # === Overnight Mode (Issue #836) ===
-    OVERNIGHT_STARTED = "overnight.started"  # Gece modu başladı
-    OVERNIGHT_TASK_STARTED = "overnight.task.started"  # Bir görev başladı
-    OVERNIGHT_TASK_COMPLETED = "overnight.task.completed"  # Görev tamamlandı
-    OVERNIGHT_TASK_FAILED = "overnight.task.failed"  # Görev başarısız
-    OVERNIGHT_CHECKPOINT = "overnight.checkpoint"  # Checkpoint kaydedildi
-    OVERNIGHT_WAITING_HUMAN = "overnight.waiting_human"  # İnsan kararı bekleniyor
-    OVERNIGHT_RESUMED = "overnight.resumed"  # Checkpoint'tan devam
-    OVERNIGHT_MORNING_REPORT = "overnight.morning_report"  # Sabah raporu hazır
-    OVERNIGHT_COMPLETED = "overnight.completed"  # Tüm görevler tamamlandı
+    OVERNIGHT_STARTED = "overnight.started"  # Overnight mode started
+    OVERNIGHT_TASK_STARTED = "overnight.task.started"  # Task started
+    OVERNIGHT_TASK_COMPLETED = "overnight.task.completed"  # Task completed
+    OVERNIGHT_TASK_FAILED = "overnight.task.failed"  # Task failed
+    OVERNIGHT_CHECKPOINT = "overnight.checkpoint"  # Checkpoint saved
+    OVERNIGHT_WAITING_HUMAN = "overnight.waiting_human"  # Waiting for human decision
+    OVERNIGHT_RESUMED = "overnight.resumed"  # Resumed from checkpoint
+    OVERNIGHT_MORNING_REPORT = "overnight.morning_report"  # Morning report ready
+    OVERNIGHT_COMPLETED = "overnight.completed"  # All tasks completed
 
     # === Tool Execution (Issue #1297) ===
-    TOOL_EXECUTED = "tool.executed"      # Tool başarıyla çalıştı
-    TOOL_FAILED = "tool.failed"          # Tool hata aldı
-    TOOL_CONFIRMED = "tool.confirmed"    # Kullanıcı onayladı
-    TOOL_DENIED = "tool.denied"          # Kullanıcı reddetti
+    TOOL_EXECUTED = "tool.executed"      # Tool executed successfully
+    TOOL_FAILED = "tool.failed"          # Tool encountered an error
+    TOOL_CONFIRMED = "tool.confirmed"    # User confirmed
+    TOOL_DENIED = "tool.denied"          # User denied
 
     # === Data Events (Issue #1297) ===
-    MAIL_RECEIVED = "mail.received"      # Yeni mail geldi
-    MAIL_SENT = "mail.sent"              # Mail gönderildi
-    CALENDAR_CREATED = "calendar.created"  # Etkinlik oluşturuldu
-    CALENDAR_UPDATED = "calendar.updated"  # Etkinlik güncellendi
-    TASK_COMPLETED = "task.completed"     # Görev tamamlandı
+    MAIL_RECEIVED = "mail.received"      # New mail received
+    MAIL_SENT = "mail.sent"              # Mail sent
+    CALENDAR_CREATED = "calendar.created"  # Event created
+    CALENDAR_UPDATED = "calendar.updated"  # Event updated
+    TASK_COMPLETED = "task.completed"     # Task completed
 
     # === Run Lifecycle (Issue #1297) ===
-    RUN_STARTED = "run.started"          # Yeni kullanıcı isteği
-    RUN_COMPLETED = "run.completed"      # İstek tamamlandı
-    SESSION_STARTED = "session.started"  # Yeni oturum
-    BRIEF_GENERATED = "brief.generated"  # Daily brief oluşturuldu
+    RUN_STARTED = "run.started"          # New user request
+    RUN_COMPLETED = "run.completed"      # Request completed
+    SESSION_STARTED = "session.started"  # New session
+    BRIEF_GENERATED = "brief.generated"  # Daily brief generated
 
     # === Legacy (for backward compatibility) ===
     REMINDER_FIRED = "reminder_fired"
@@ -122,12 +122,12 @@ class EventType(Enum):
     COMMAND_RESULT = "command_result"
 
     # === Health & Degradation (Issue #1298) ===
-    HEALTH_CHECK = "system.health_check"          # Sağlık kontrolü yapıldı
-    HEALTH_DEGRADED = "system.health_degraded"    # Servis bozuldu
-    HEALTH_RECOVERED = "system.health_recovered"  # Servis düzeldi
-    CIRCUIT_OPENED = "system.circuit_opened"      # Circuit breaker açıldı
-    CIRCUIT_CLOSED = "system.circuit_closed"      # Circuit breaker kapandı
-    FALLBACK_EXECUTED = "system.fallback_executed" # Fallback çalıştırıldı
+    HEALTH_CHECK = "system.health_check"          # Health check performed
+    HEALTH_DEGRADED = "system.health_degraded"    # Service degraded
+    HEALTH_RECOVERED = "system.health_recovered"  # Service recovered
+    CIRCUIT_OPENED = "system.circuit_opened"      # Circuit breaker opened
+    CIRCUIT_CLOSED = "system.circuit_closed"      # Circuit breaker closed
+    FALLBACK_EXECUTED = "system.fallback_executed" # Fallback executed
 
 
 @dataclass

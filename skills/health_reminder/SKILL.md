@@ -2,7 +2,7 @@
 name: health-reminder
 version: 0.1.0
 author: Bantz Team
-description: "💊 Sağlık Hatırlatıcı — ilaç, su, ergonomi ve aktivite hatırlatmaları."
+description: "💊 Health Reminder — medication, water, ergonomics, and activity reminders."
 icon: 💊
 status: planned
 tags:
@@ -15,67 +15,67 @@ dependencies:
     status: pending
 
 triggers:
-  - pattern: "(?i)(ilaç|vitamin|hap).*(hatırlat|ekle|ne zaman|aldım mı)"
+  - pattern: "(?i)(medication|vitamin|pill).*(remind|add|when|did I take)"
     intent: health.medication
     examples:
-      - "ilaçımı hatırlat"
-      - "vitamin almayı unuttum mu"
-      - "sabah ilacımı ekle"
+      - "remind me to take my medication"
+      - "did I forget to take my vitamin"
+      - "add my morning pill"
     priority: 80
 
-  - pattern: "(?i)(su iç|mola ver|dinlen|ergonomi|oturma süresi)"
+  - pattern: "(?i)(drink water|take a break|rest|ergonomics|sitting time)"
     intent: health.wellness
     examples:
-      - "su içme hatırlatması kur"
-      - "kaç saattir oturuyorum"
-      - "mola zamanım geldi mi"
+      - "set up water drinking reminders"
+      - "how long have I been sitting"
+      - "is it time for a break"
     priority: 70
 
 tools:
   - name: health.add_medication
-    description: "İlaç/vitamin hatırlatması ekle"
+    description: "Add medication/vitamin reminder"
     handler: system
     parameters:
       - name: name
         type: string
-        description: "İlaç/vitamin adı"
+        description: "Medication/vitamin name"
       - name: schedule
         type: string
-        description: "Program: sabah, öğle, akşam, veya cron"
+        description: "Schedule: morning, noon, evening, or cron"
       - name: dose
         type: string
-        description: "Doz bilgisi"
+        description: "Dose information"
 
   - name: health.water_reminder
-    description: "Su içme hatırlatması (Pomodoro tarzı interval)"
+    description: "Water drinking reminder (Pomodoro-style interval)"
     handler: system
     parameters:
       - name: interval_minutes
         type: integer
-        description: "Hatırlatma aralığı (dakika, varsayılan: 45)"
+        description: "Reminder interval (minutes, default: 45)"
       - name: daily_goal_ml
         type: integer
-        description: "Günlük hedef (ml, varsayılan: 2500)"
+        description: "Daily goal (ml, default: 2500)"
 
   - name: health.ergonomics
-    description: "Ergonomi uyarısı — oturma süresi takibi"
+    description: "Ergonomics reminder — sitting time tracking"
     handler: system
     parameters:
       - name: max_sitting_minutes
         type: integer
-        description: "Maks oturma süresi (varsayılan: 90 dakika)"
+        description: "Max sitting time (default: 90 minutes)"
 
   - name: health.daily_log
-    description: "Günlük sağlık log'u (ilaç alındı, su içildi, vb.)"
+    description: "Daily health log (medication taken, water drunk, etc.)"
     handler: system
     parameters:
       - name: action
         type: string
-        description: "Yapılan eylem"
+        description: "Action taken"
         enum: ["medication_taken", "water_drunk", "break_taken", "exercise"]
 
 notes: |
-  Faz G+ özelliği. Düşük karmaşıklık — Scheduler EPIC'ine bağımlı.
-  cron-tabanlı hatırlatmalar + D-Bus notification.
-  İlaç takibi: SQLite'da medication_log tablosu.
-  Ergonomi: X11/Wayland idle time API'den oturma süresi hesaplama.
+  Phase G+ feature. Low complexity — depends on Scheduler EPIC.
+  Cron-based reminders + D-Bus notification.
+  Medication tracking: SQLite medication_log table.
+  Ergonomics: X11/Wayland idle time API for sitting time calculation.

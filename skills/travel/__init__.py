@@ -1,9 +1,9 @@
 """Travel Assistant skill — flight/hotel/car booking management.
 
-Issue #1299: Gelecek Yetenekler — Faz G+
+Issue #1299: Future Capabilities — Phase G+
 
 Status: PLANNED — skeleton only.
-Dependencies: Gmail Enhanced (EPIC 5), Graf Bellek (EPIC 2).
+Dependencies: Gmail Enhanced (EPIC 5), Graph Memory (EPIC 2).
 """
 
 from __future__ import annotations

@@ -159,7 +159,7 @@ class TestHealthMonitor:
         monitor = HealthMonitor(checks={})
         status = await monitor.check_service("nope")
         assert status.status == ServiceStatus.UNHEALTHY
-        assert "Bilinmeyen" in status.error
+        assert "Unknown" in status.error
 
     @pytest.mark.asyncio
     async def test_check_all_aggregation(self):
@@ -307,7 +307,7 @@ class TestHealthMonitor:
     def test_format_report_none(self):
         monitor = HealthMonitor(checks={})
         text = monitor.format_report()
-        assert "henüz" in text
+        assert "no checks" in text.lower()
 
     def test_singleton(self):
         m1 = get_health_monitor()
@@ -336,7 +336,7 @@ class TestFallbackConfig:
         cfg = FallbackConfig(
             service="ollama",
             strategy=FallbackStrategy.MODEL_DOWNGRADE,
-            message_tr="Model değiştirildi",
+            message="Model switched",
             fallback_model="qwen2.5-coder:3b",
         )
         d = cfg.to_dict()
@@ -348,7 +348,7 @@ class TestFallbackConfig:
         cfg = FallbackConfig(
             service="x",
             strategy=FallbackStrategy.NONE,
-            message_tr="Yok",
+            message="None",
         )
         d = cfg.to_dict()
         assert "max_cache_age_s" not in d
@@ -382,7 +382,7 @@ class TestFallbackRegistry:
         cfg = FallbackConfig(
             service="test_svc",
             strategy=FallbackStrategy.GRACEFUL_ERROR,
-            message_tr="Test error",
+            message="Test error",
         )
         registry.register(cfg)
         assert registry.get_config("test_svc") is not None
@@ -395,7 +395,7 @@ class TestFallbackRegistry:
             "ollama": FallbackConfig(
                 service="ollama",
                 strategy=FallbackStrategy.MODEL_DOWNGRADE,
-                message_tr="Downgrade",
+                message="Downgrade",
                 fallback_model="qwen2.5-coder:3b",
             ),
         })
@@ -408,7 +408,7 @@ class TestFallbackRegistry:
             "ollama": FallbackConfig(
                 service="ollama",
                 strategy=FallbackStrategy.MODEL_DOWNGRADE,
-                message_tr="No model",
+                message="No model",
                 fallback_model="",
             ),
         })
@@ -420,7 +420,7 @@ class TestFallbackRegistry:
             "spotify": FallbackConfig(
                 service="spotify",
                 strategy=FallbackStrategy.GRACEFUL_ERROR,
-                message_tr="Spotify çalışmıyor",
+                message="Spotify not working",
             ),
         })
         result = registry.execute_fallback("spotify")
@@ -439,7 +439,7 @@ class TestFallbackRegistry:
                 "google": FallbackConfig(
                     service="google",
                     strategy=FallbackStrategy.CACHE,
-                    message_tr="Cache",
+                    message="Cache",
                     max_cache_age_s=3600,
                 ),
             },
@@ -447,7 +447,7 @@ class TestFallbackRegistry:
         )
         result = registry.execute_fallback("google")
         assert result.success is False
-        assert "bulunamadı" in result.message
+        assert "not found" in result.message.lower()
 
     def test_cache_fallback_valid(self, tmp_path):
         cache_file = tmp_path / "google_cache.json"
@@ -458,7 +458,7 @@ class TestFallbackRegistry:
                 "google": FallbackConfig(
                     service="google",
                     strategy=FallbackStrategy.CACHE,
-                    message_tr="Cache",
+                    message="Cache",
                     max_cache_age_s=3600,
                 ),
             },
@@ -482,7 +482,7 @@ class TestFallbackRegistry:
                 "google": FallbackConfig(
                     service="google",
                     strategy=FallbackStrategy.CACHE,
-                    message_tr="Cache",
+                    message="Cache",
                     max_cache_age_s=60,  # 1 minute max age
                 ),
             },
@@ -490,14 +490,14 @@ class TestFallbackRegistry:
         )
         result = registry.execute_fallback("google")
         assert result.success is False
-        assert "eski" in result.message
+        assert "old" in result.message.lower() or "too old" in result.message.lower()
 
     def test_none_strategy(self):
         registry = FallbackRegistry(configs={
             "x": FallbackConfig(
                 service="x",
                 strategy=FallbackStrategy.NONE,
-                message_tr="Nothing",
+                message="Nothing",
             ),
         })
         result = registry.execute_fallback("x")
@@ -511,7 +511,7 @@ class TestFallbackRegistry:
             "custom": FallbackConfig(
                 service="custom",
                 strategy=FallbackStrategy.GRACEFUL_ERROR,
-                message_tr="Custom",
+                message="Custom",
                 fallback_fn=custom_fn,
             ),
         })
@@ -527,7 +527,7 @@ class TestFallbackRegistry:
             "bad": FallbackConfig(
                 service="bad",
                 strategy=FallbackStrategy.GRACEFUL_ERROR,
-                message_tr="Bad",
+                message="Bad",
                 fallback_fn=bad_fn,
             ),
         })
@@ -540,7 +540,7 @@ class TestFallbackRegistry:
             "x": FallbackConfig(
                 service="x",
                 strategy=FallbackStrategy.GRACEFUL_ERROR,
-                message_tr="Test",
+                message="Test",
             ),
         })
         registry.execute_fallback("x")
@@ -744,7 +744,7 @@ class TestIntegration:
             "svc": FallbackConfig(
                 service="svc",
                 strategy=FallbackStrategy.GRACEFUL_ERROR,
-                message_tr="Servis çalışmıyor",
+                message="Service not working",
             ),
         })
         result = registry.execute_fallback("svc")
@@ -789,7 +789,7 @@ class TestIntegration:
             "db": FallbackConfig(
                 service="db",
                 strategy=FallbackStrategy.GRACEFUL_ERROR,
-                message_tr="DB çöktü",
+                message="DB crashed",
             ),
         })
         fb = registry.execute_fallback("db")
@@ -818,7 +818,7 @@ class TestIntegration:
             "api": FallbackConfig(
                 service="api",
                 strategy=FallbackStrategy.GRACEFUL_ERROR,
-                message_tr="API çöktü",
+                message="API crashed",
             ),
         })
 

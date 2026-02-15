@@ -2,7 +2,7 @@
 name: file-search
 version: 0.1.0
 author: Bantz Team
-description: "🔍 Semantic dosya arama — yerel dosya sistemi indexleme ve anlamsal arama."
+description: "🔍 Semantic File Search — local filesystem indexing and semantic retrieval."
 icon: 🔍
 status: planned
 tags:
@@ -15,63 +15,63 @@ dependencies:
     status: pending
 
 triggers:
-  - pattern: "(?i)(dosya|belge|sunum|rapor|döküman).*(bul|ara|nerede|hangisi)"
+  - pattern: "(?i)(file|document|presentation|report|doc).*(find|search|where|which)"
     intent: file_search.find
     examples:
-      - "geçen ay hazırladığım sunum neredeydi"
-      - "bütçe raporunu bul"
-      - "o PDF'i ara"
-      - "notlarımda şu konu vardı"
+      - "where was that presentation I made last month"
+      - "find the budget report"
+      - "search for that PDF"
+      - "I had something about this topic in my notes"
     priority: 80
 
-  - pattern: "(?i)(indexle|tara|dosyaları güncelle)"
+  - pattern: "(?i)(index|scan|update files)"
     intent: file_search.index
     examples:
-      - "dosyalarımı indexle"
-      - "belgeleri tara"
+      - "index my files"
+      - "scan my documents"
     priority: 60
 
 tools:
   - name: file_search.query
-    description: "Semantik dosya arama — anlamsal sorgu ile dosya bul"
+    description: "Semantic file search — find files using natural language query"
     handler: llm
     parameters:
       - name: query
         type: string
-        description: "Doğal dilde arama sorgusu"
+        description: "Natural language search query"
       - name: file_types
         type: string
-        description: "Dosya tipleri: pdf, docx, txt, all"
+        description: "File types: pdf, docx, txt, all"
         enum: ["pdf", "docx", "txt", "md", "all"]
       - name: directory
         type: string
-        description: "Arama dizini (varsayılan: ~/Documents)"
+        description: "Search directory (default: ~/Documents)"
 
   - name: file_search.index
-    description: "Yerel dosya sistemi indexleme"
+    description: "Index local filesystem for search"
     handler: system
     risk: medium
     parameters:
       - name: directories
         type: array
-        description: "İndexlenecek dizinler listesi"
+        description: "List of directories to index"
       - name: force
         type: boolean
-        description: "Mevcut index'i sıfırdan oluştur"
+        description: "Rebuild index from scratch"
 
   - name: file_search.recent
-    description: "Son değiştirilen dosyaları listele"
+    description: "List recently modified files"
     handler: system
     parameters:
       - name: days
         type: integer
-        description: "Son kaç günün dosyaları"
+        description: "Number of days to look back"
       - name: file_type
         type: string
-        description: "Dosya tipi filtresi"
+        description: "File type filter"
 
 notes: |
-  Faz G+ özelliği. Ingest Store EPIC'i tamamlandıktan sonra aktive edilecek.
+  Phase G+ feature. Will be activated after Ingest Store EPIC is complete.
   PDF → text extraction (pdfplumber), DOCX → python-docx, TXT → direct read.
-  Embedding: sentence-transformers veya Ollama embedding endpoint.
-  Index: SQLite FTS5 + embedding vektör tablosu.
+  Embedding: sentence-transformers or Ollama embedding endpoint.
+  Index: SQLite FTS5 + embedding vector table.

@@ -1,6 +1,6 @@
 """Spotify player backend — Spotify Web API + local CLI.
 
-Issue #1296: Müzik Kontrolü — Spotify Web API entegrasyonu.
+Issue #1296: Music Control — Spotify Web API integration.
 
 Uses ``spotify`` (spotify-cli) or ``playerctl`` for control,
 and the Spotify Web API for search/playlists when credentials
@@ -85,7 +85,7 @@ class SpotifyPlayer(MusicPlayer):
             for pl in playlists:
                 if playlist.lower() in pl.name.lower():
                     return await self._dbus_cmd("open", pl.uri)
-            return {"ok": False, "error": f"Playlist bulunamadı: {playlist}"}
+            return {"ok": False, "error": f"Playlist not found: {playlist}"}
 
         return await self._dbus_cmd("play")
 
@@ -238,7 +238,7 @@ class SpotifyPlayer(MusicPlayer):
     async def _dbus_cmd(self, command: str, *args: str) -> dict[str, Any]:
         """Execute a playerctl command targeting Spotify."""
         if not self._playerctl:
-            return {"ok": False, "error": "playerctl kurulu değil."}
+            return {"ok": False, "error": "playerctl is not installed."}
 
         cmd = ["playerctl", "-p", "spotify", command, *args]
         try:
@@ -257,13 +257,13 @@ class SpotifyPlayer(MusicPlayer):
                 return {"ok": True, "stdout": stdout_str}
             return {
                 "ok": False,
-                "error": stderr_str.strip() or f"playerctl {command} başarısız",
+                "error": stderr_str.strip() or f"playerctl {command} failed",
                 "stdout": stdout_str,
             }
         except asyncio.TimeoutError:
-            return {"ok": False, "error": "playerctl zaman aşımı"}
+            return {"ok": False, "error": "playerctl timed out"}
         except FileNotFoundError:
-            return {"ok": False, "error": "playerctl bulunamadı"}
+            return {"ok": False, "error": "playerctl not found"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

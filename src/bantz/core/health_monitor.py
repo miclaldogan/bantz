@@ -207,7 +207,7 @@ async def check_google_api() -> HealthStatus:
                 service="google",
                 status=ServiceStatus.UNHEALTHY,
                 latency_ms=latency,
-                error="Token dosyası bulunamadı",
+                error="Token file not found",
             )
 
         import json
@@ -227,7 +227,7 @@ async def check_google_api() -> HealthStatus:
                 service="google",
                 status=ServiceStatus.DEGRADED,
                 latency_ms=latency,
-                error="Refresh token eksik",
+                error="Refresh token missing",
                 details={"expiry": expiry},
             )
 
@@ -306,7 +306,7 @@ class HealthMonitor:
             return HealthStatus(
                 service=name,
                 status=ServiceStatus.UNHEALTHY,
-                error=f"Bilinmeyen servis: {name}",
+                error=f"Unknown service: {name}",
             )
         try:
             return await fn()
@@ -403,7 +403,7 @@ class HealthMonitor:
         """
         report = report or self._last_report
         if not report:
-            return "Sağlık raporu yok — henüz kontrol yapılmadı."
+            return "No health report yet — no checks have been run."
 
         _STATUS_ICONS = {
             ServiceStatus.HEALTHY: "🟢",
@@ -417,7 +417,7 @@ class HealthMonitor:
             ServiceStatus.UNHEALTHY: "❌ UNHEALTHY",
         }
 
-        lines = ["🏥 Bantz Sağlık Raporu:"]
+        lines = ["🏥 Bantz Health Report:"]
         services = sorted(report.checks.items())
         for i, (name, status) in enumerate(services):
             is_last = i == len(services) - 1
@@ -432,7 +432,7 @@ class HealthMonitor:
 
         lines.append("")
         overall_text = _OVERALL_TEXT.get(report.overall, str(report.overall))
-        lines.append(f"Genel durum: {overall_text}")
+        lines.append(f"Overall: {overall_text}")
 
         return "\n".join(lines)
 
