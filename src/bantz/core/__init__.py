@@ -13,6 +13,17 @@ import importlib
 from typing import Any
 
 from bantz.core.events import EventBus, Event, get_event_bus, EventType
+from bantz.core.subscriber_registry import (
+    wire_subscribers,
+    unwire_all,
+    get_wired_subscribers,
+    ObservabilitySubscriber,
+    IngestSubscriber,
+    AuditSubscriber,
+    LoggingMiddleware,
+    RateLimitMiddleware,
+    EventSubscriber,
+)
 from bantz.core.timing import (
     TimingRequirements,
     TIMING,
@@ -52,6 +63,16 @@ __all__ = [
     "Event",
     "get_event_bus",
     "EventType",
+    # Subscriber Registry (Issue #1297)
+    "wire_subscribers",
+    "unwire_all",
+    "get_wired_subscribers",
+    "ObservabilitySubscriber",
+    "IngestSubscriber",
+    "AuditSubscriber",
+    "LoggingMiddleware",
+    "RateLimitMiddleware",
+    "EventSubscriber",
     # Timing
     "TimingRequirements",
     "TIMING",

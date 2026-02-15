@@ -379,6 +379,19 @@ class OrchestratorLoop:
             logger.warning("[ORCHESTRATOR] IngestBridge init failed: %s", _isx)
             self._ingest_bridge = None
 
+        # Issue #1297: Wire event bus subscribers — decoupled observability
+        self._event_subscribers: dict[str, Any] = {}
+        try:
+            from bantz.core.subscriber_registry import wire_subscribers
+            self._event_subscribers = wire_subscribers(
+                self.event_bus,
+                run_tracker=self.run_tracker,
+                ingest_bridge=self._ingest_bridge,
+                audit_logger=self.audit_logger,
+            )
+        except Exception as _ws_err:
+            logger.debug("[ORCHESTRATOR] wire_subscribers failed: %s", _ws_err)
+
         # Issue #900: Sync router _VALID_TOOLS with actual ToolRegistry
         # Issue #1275: Pass registry reference for route-based schema injection
         try:
@@ -535,6 +548,19 @@ class OrchestratorLoop:
             except Exception as _obs_err:
                 logger.debug("[OBS] start_run failed: %s", _obs_err)
 
+        # Issue #1297: Emit run.started event
+        _run_corr_id = getattr(_obs_run, "run_id", None) if _obs_run else None
+        self.event_bus.publish(
+            EventType.RUN_STARTED.value,
+            {
+                "user_input": user_input,
+                "session_id": getattr(state, "session_id", None),
+                "run_id": _run_corr_id or "",
+            },
+            source="orchestrator",
+            correlation_id=_run_corr_id,
+        )
+
         # Issue #417: Build session context once per turn (cached with TTL)
         # Issue #902: Per-session cache keyed by state identity
         # Issue #1067: Use session_id when available; cap cache size
@@ -598,6 +624,14 @@ class OrchestratorLoop:
                     "with '%s' — cleared.",
                     user_input,
                 )
+
+                # Issue #1297: Emit tool.denied event
+                self.event_bus.publish(
+                    EventType.TOOL_DENIED.value,
+                    {"tool": str(pending.get("tool", "")), "reason": "user_rejected"},
+                    source="orchestrator",
+                )
+
                 from bantz.brain.llm_router import OrchestratorOutput
                 rejection_output = OrchestratorOutput(
                     route="smalltalk",
@@ -848,6 +882,22 @@ class OrchestratorLoop:
                 except Exception:
                     logger.debug("[OBS] end_run failed", exc_info=True)
 
+            # Issue #1297: Emit run.completed event
+            _run_corr_id = getattr(_obs_run, "run_id", None) if _obs_run else None
+            self.event_bus.publish(
+                EventType.RUN_COMPLETED.value,
+                {
+                    "route": final_output.route,
+                    "intent": final_output.calendar_intent,
+                    "final_output": (final_output.assistant_reply or "")[:500],
+                    "model": getattr(self.orchestrator, "model_name", ""),
+                    "status": "success",
+                    "run_id": _run_corr_id or "",
+                },
+                source="orchestrator",
+                correlation_id=_run_corr_id,
+            )
+
             return final_output, state
         
         except Exception as e:
@@ -861,6 +911,19 @@ class OrchestratorLoop:
                     self.run_tracker.end_run(_obs_run, status="error")
                 except Exception:
                     pass
+
+            # Issue #1297: Emit run.completed with error status
+            _run_corr_id = getattr(_obs_run, "run_id", None) if _obs_run else None
+            self.event_bus.publish(
+                EventType.RUN_COMPLETED.value,
+                {
+                    "status": "error",
+                    "error": str(e),
+                    "run_id": _run_corr_id or "",
+                },
+                source="orchestrator",
+                correlation_id=_run_corr_id,
+            )
             
             # Return fallback output
             from bantz.brain.llm_router import OrchestratorOutput
@@ -2316,6 +2379,13 @@ class OrchestratorLoop:
                 state.confirmed_tool = None
                 logger.info("[FIREWALL] Confirmation accepted for %s — executing.", pending_tool)
 
+                # Issue #1297: Emit tool.confirmed event
+                self.event_bus.publish(
+                    EventType.TOOL_CONFIRMED.value,
+                    {"tool": pending_tool, "params": pending.get("params", {})},
+                    source="orchestrator",
+                )
+
                 # Issue #1291: Record session permit for MED-risk tools
                 # so confirm-once-per-session works.
                 if self.safety_guard and self.safety_guard.policy_engine_v2:
@@ -2809,12 +2879,24 @@ class OrchestratorLoop:
                         metadata={"params": params, "risk_level": risk.value},
                     )
                 
-                # Emit tool event
-                self.event_bus.publish("tool.call", {
-                    "tool": tool_name,
-                    "params": params,
-                    "result": str(result)[:200],
-                })
+                # Emit tool event (Issue #1297: enriched payload for subscribers)
+                _obs_run_id = state.trace.get("_obs_run_id", "")
+                self.event_bus.publish(
+                    EventType.TOOL_CALL.value,
+                    {
+                        "tool": tool_name,
+                        "params": params,
+                        "result": str(result)[:500],
+                        "result_summary": result_summary,
+                        "elapsed_ms": elapsed_ms,
+                        "risk_level": risk.value,
+                        "confirmed": was_confirmed,
+                        "success": bool(tool_returned_ok),
+                        "run_id": _obs_run_id,
+                    },
+                    source="orchestrator",
+                    correlation_id=_obs_run_id or None,
+                )
                 
             except Exception as e:
                 logger.exception("Tool %s failed: %s", tool_name, e)
@@ -2843,6 +2925,22 @@ class OrchestratorLoop:
                         )
                     except Exception as audit_err:
                         logger.warning("Failed to log tool execution error: %s", audit_err)
+
+                # Issue #1297: Emit tool.failed event for subscribers
+                _obs_run_id = state.trace.get("_obs_run_id", "")
+                self.event_bus.publish(
+                    EventType.TOOL_FAILED.value,
+                    {
+                        "tool": tool_name,
+                        "error": str(e),
+                        "risk_level": risk.value if "risk" in dir() else "unknown",
+                        "params": params if "params" in locals() else {},
+                        "elapsed_ms": 0,
+                        "run_id": _obs_run_id,
+                    },
+                    source="orchestrator",
+                    correlation_id=_obs_run_id or None,
+                )
         
         return tool_results
     
