@@ -553,6 +553,11 @@ def main(argv: list[str] | None = None) -> int:
         from bantz.core.health_cli import main as health_main
         return health_main(argv[1:])
 
+    # Graph — knowledge graph inspection (Issue #1289)
+    if argv and argv[0] == "graph":
+        from bantz.data.graph_cli import main as graph_main
+        return graph_main(argv[1:])
+
     # Onboard — guided first-time setup wizard (Issue #1223)
     if argv and argv[0] == "onboard":
         from bantz.onboard import run_onboard
@@ -601,6 +606,8 @@ Kullanım örnekleri:
   bantz health                   # Service health checks (CB + fallback)
   bantz health --json            # Health report as JSON
   bantz health --service ollama  # Check a single service
+  bantz graph stats              # Knowledge graph statistics
+  bantz graph search "Ali"       # Search graph nodes
 """,
     )
     parser.add_argument("--policy", default="config/policy.json", help="Policy dosyası yolu")

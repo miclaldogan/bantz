@@ -23,6 +23,7 @@ from bantz.data.metrics_reporter import MetricsReporter
 from bantz.data.graph_store import GraphStore, GraphNode, GraphEdge, NODE_LABELS, EDGE_RELATIONS
 from bantz.data.auto_linker import AutoLinker
 from bantz.data.hybrid_retriever import HybridRetriever
+from bantz.data.graph_bridge import GraphBridge
 
 __all__ = [
     "IngestStore",
@@ -41,4 +42,5 @@ __all__ = [
     "EDGE_RELATIONS",
     "AutoLinker",
     "HybridRetriever",
+    "GraphBridge",
 ]

@@ -367,4 +367,20 @@ class SQLiteGraphStore(GraphStore):
         conn = self._conn()
         nodes = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
         edges = conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
-        return {"nodes": nodes, "edges": edges}
+
+        # Label distribution
+        labels: Dict[str, int] = {}
+        for row in conn.execute("SELECT label, COUNT(*) FROM nodes GROUP BY label"):
+            labels[row[0]] = row[1]
+
+        # Relation distribution
+        relations: Dict[str, int] = {}
+        for row in conn.execute("SELECT relation, COUNT(*) FROM edges GROUP BY relation"):
+            relations[row[0]] = row[1]
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "labels": labels,
+            "relations": relations,
+        }

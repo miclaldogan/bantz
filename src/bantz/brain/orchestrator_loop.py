@@ -379,6 +379,28 @@ class OrchestratorLoop:
             logger.warning("[ORCHESTRATOR] IngestBridge init failed: %s", _isx)
             self._ingest_bridge = None
 
+        # Issue #1289: Graph Memory — link tool results into knowledge graph
+        self._graph_bridge: Any = None
+        try:
+            from bantz.data.graph_bridge import GraphBridge
+            import asyncio as _aio
+            loop = _aio.get_event_loop() if _aio.get_event_loop().is_running() else None
+            if loop and loop.is_running():
+                import concurrent.futures as _cf
+                _gb_future = _cf.Future()
+                async def _init_gb():
+                    try:
+                        _gb_future.set_result(await GraphBridge.create_default())
+                    except Exception as e:
+                        _gb_future.set_result(None)
+                _aio.ensure_future(_init_gb())
+            else:
+                self._graph_bridge = _aio.get_event_loop().run_until_complete(
+                    GraphBridge.create_default()
+                )
+        except Exception as _gbx:
+            logger.warning("[ORCHESTRATOR] GraphBridge init failed: %s", _gbx)
+
         # Issue #1297: Wire event bus subscribers — decoupled observability
         self._event_subscribers: dict[str, Any] = {}
         try:
@@ -440,6 +462,15 @@ class OrchestratorLoop:
         if getattr(self, "_ingest_bridge", None) is not None:
             try:
                 self._ingest_bridge.close()
+            except Exception:
+                pass
+        # Issue #1289: Close graph store
+        if getattr(self, "_graph_bridge", None) is not None:
+            try:
+                import asyncio as _aio_close
+                _aio_close.get_event_loop().run_until_complete(
+                    self._graph_bridge.close()
+                )
             except Exception:
                 pass
 
@@ -2849,6 +2880,20 @@ class OrchestratorLoop:
                         )
                     except Exception as _ing_err:
                         logger.debug("[INGEST] Failed to cache %s: %s", tool_name, _ing_err)
+
+                # Issue #1289: Link tool results into knowledge graph
+                if bool(tool_returned_ok) and getattr(self, "_graph_bridge", None):
+                    try:
+                        import asyncio as _aio_gb
+                        _aio_gb.ensure_future(
+                            self._graph_bridge.on_tool_result(
+                                tool_name=tool_name,
+                                params=params,
+                                result=result,
+                            )
+                        )
+                    except Exception as _gb_err:
+                        logger.debug("[GRAPH] Failed to link %s: %s", tool_name, _gb_err)
 
                 # Add to state
                 state.add_tool_result(tool_name, result, success=bool(tool_returned_ok))
