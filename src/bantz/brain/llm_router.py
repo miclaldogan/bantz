@@ -117,9 +117,12 @@ def get_repair_tracker() -> RepairTracker:
 
 
 # Valid enums (single source of truth for this module)
-VALID_ROUTES = frozenset({"calendar", "gmail", "smalltalk", "system", "unknown"})
+VALID_ROUTES = frozenset({"calendar", "gmail", "contacts", "keep", "smalltalk", "system", "unknown"})
 VALID_CALENDAR_INTENTS = frozenset({"create", "modify", "cancel", "query", "none"})
 VALID_GMAIL_INTENTS = frozenset({"list", "search", "read", "send", "none"})
+VALID_SYSTEM_INTENTS = frozenset({"time", "status", "battery", "disk", "none"})
+VALID_CONTACTS_INTENTS = frozenset({"list", "search", "create", "delete", "none"})
+VALID_KEEP_INTENTS = frozenset({"create", "list", "search", "none"})
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +265,13 @@ class OrchestratorOutput:
     # Gmail extensions (Issue #317)
     gmail_intent: str = "none"  # list | search | read | send | none
     gmail: dict[str, Any] = field(default_factory=dict)  # {to?, subject?, body?, label?, category?, natural_query?, search_term?}
+
+    # Issue #1359: System intent
+    system_intent: str = "none"  # time | status | battery | disk | none
+    # Issue #1360: Contacts intent
+    contacts_intent: str = "none"  # list | search | create | delete | none
+    # Issue #1363: Keep intent
+    keep_intent: str = "none"  # create | list | search | none
     
     # Orchestrator extensions (Issue #134)
     ask_user: bool = False  # Need clarification?
@@ -290,7 +300,9 @@ class OrchestratorOutput:
         routes. This property returns the route-appropriate intent:
         - calendar → calendar_intent (create/modify/cancel/query/none)
         - gmail → gmail_intent (list/search/read/send/none)
-        - system → calendar_intent (overloaded: time/status/query)
+        - system → system_intent (time/status/battery/disk/none)
+        - contacts → contacts_intent (list/search/create/delete/none)
+        - keep → keep_intent (create/list/search/none)
         - smalltalk → "chat"
         - unknown → "unknown"
         """
@@ -301,7 +313,13 @@ class OrchestratorOutput:
             return "chat"
         if route == "unknown":
             return "unknown"
-        # calendar / system — use calendar_intent (backward compat)
+        if route == "contacts":
+            return self.contacts_intent or "none"
+        if route == "keep":
+            return self.keep_intent or "none"
+        if route == "system":
+            return self.system_intent or self.calendar_intent or "none"
+        # calendar — use calendar_intent (backward compat)
         return self.calendar_intent or "none"
 
 
@@ -353,6 +371,8 @@ class JarvisLLMOrchestrator:
         "gmail.remove_label", "gmail.mark_read", "gmail.mark_unread",
         "gmail.archive", "gmail.batch_modify", "gmail.send_to_contact",
         "contacts.upsert", "contacts.resolve", "contacts.list", "contacts.delete",
+        "google.contacts.search", "google.contacts.get", "google.contacts.create",
+        "google.keep.list", "google.keep.create", "google.keep.search",
         "time.now", "system.status",
     })
 
@@ -420,7 +440,7 @@ class JarvisLLMOrchestrator:
     _SYSTEM_PROMPT_CORE = """Sen BANTZ'sın. SADECE TÜRKÇE konuş, 'Efendim' hitabı kullan.
 
 OUTPUT (tek JSON, Markdown/açıklama YOK):
-{"route":"<calendar|gmail|system|smalltalk|unknown>","calendar_intent":"<create|modify|cancel|query|none>","gmail_intent":"<list|search|read|send|none>","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dakika|null","title":"ad|null","window_hint":"today/tomorrow/evening/morning/week|null"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["tool_adı"],"status":"done","ask_user":false,"question":"","requires_confirmation":false}
+{"route":"<calendar|gmail|contacts|keep|system|smalltalk|unknown>","calendar_intent":"<create|modify|cancel|query|none>","gmail_intent":"<list|search|read|send|none>","system_intent":"<time|status|battery|disk|none>","contacts_intent":"<list|search|create|delete|none>","keep_intent":"<create|list|search|none>","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dakika|null","title":"ad|null","window_hint":"today/tomorrow/evening/morning/week|null"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["tool_adı"],"status":"done","ask_user":false,"question":"","requires_confirmation":false}
 
 status KURALLARI:
 - "done" → tek araç yeter, doğrudan çalıştır (varsayılan).
@@ -450,7 +470,9 @@ SAAT: 1-6="sabah" yoksa PM (bir→13, iki→14, üç→15, dört→16, beş→17
     # ── DETAIL BLOCK (~120 tokens) ─── stripped when budget tight ────────
     _SYSTEM_PROMPT_DETAIL = """
 GMAIL: gmail.list_messages query="from:X subject:Y after:YYYY/MM/DD". gmail.smart_search natural_query Türkçe ("yıldızlı","sosyal","promosyonlar","önemli").
-SYSTEM: "saat kaç"→time.now, "cpu/ram"→system.status.
+SYSTEM: "saat kaç"→time.now (system_intent="time"), "cpu/ram/durum"→system.status (system_intent="status"), "pil"→system.status (system_intent="battery").
+CONTACTS: "kişi listele"→google.contacts.search (contacts_intent="list"), "rehber ara"→google.contacts.search (contacts_intent="search").
+KEEP: "not oluştur"→google.keep.create (keep_intent="create"), "notlarımı göster"→google.keep.list (keep_intent="list"), "not ara"→google.keep.search (keep_intent="search").
 SAAT: beşe→17:00, sabah beşte→05:00, akşam altıda→18:00, öğlen→12:00, gece onbirde→23:00.
 
 ÇOK ADIMLI GÖREVLER (Issue #1279): Karmaşık istekler için "subtasks" listesi ekle:
@@ -465,7 +487,10 @@ U: bugün neler var → {"route":"calendar","calendar_intent":"query","slots":{"
 U: beşe toplantı koy → {"route":"calendar","calendar_intent":"create","slots":{"time":"17:00","title":"toplantı"},"confidence":0.9,"tool_plan":["calendar.create_event"],"status":"done","requires_confirmation":true,"assistant_reply":""}
 U: saat kaç → {"route":"system","confidence":0.95,"tool_plan":["time.now"],"status":"done","assistant_reply":""}
 U: yıldızlı maillerim → {"route":"gmail","gmail_intent":"search","gmail":{"natural_query":"yıldızlı"},"confidence":0.95,"tool_plan":["gmail.smart_search"],"status":"done","assistant_reply":""}
-U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","gmail":{"to":"test@gmail.com","body":"Merhaba"},"confidence":0.9,"tool_plan":["gmail.send"],"status":"done","requires_confirmation":true,"assistant_reply":""}"""
+U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","gmail":{"to":"test@gmail.com","body":"Merhaba"},"confidence":0.9,"tool_plan":["gmail.send"],"status":"done","requires_confirmation":true,"assistant_reply":""}
+U: rehberimdeki kişileri göster → {"route":"contacts","contacts_intent":"list","confidence":0.9,"tool_plan":["google.contacts.search"],"status":"done","assistant_reply":""}
+U: bir not oluştur yarın markete git → {"route":"keep","keep_intent":"create","slots":{"title":"yarın markete git"},"confidence":0.9,"tool_plan":["google.keep.create"],"status":"done","requires_confirmation":true,"assistant_reply":""}
+U: sistem durumunu göster → {"route":"system","system_intent":"status","confidence":0.9,"tool_plan":["system.status"],"status":"done","assistant_reply":""}"""
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
@@ -1853,6 +1878,18 @@ ASSISTANT (sadece JSON):"""
         "system": [
             "saat kaç", "tarih", "gün ne", "pil", "batarya",
             "sistem", "ayar", "volume", "ses",
+            # Issue #1359: system.status keywords
+            "cpu", "ram", "bellek", "disk", "durum",
+        ],
+        "contacts": [
+            # Issue #1360: contacts route keywords
+            "kişi", "rehber", "kontaklar", "numara",
+            "iletişim", "adres defteri",
+        ],
+        "keep": [
+            # Issue #1363: keep/notes route keywords
+            "not ", "notlar", "memo", "hatırlatıcı",
+            "not oluştur", "not al", "not ekle",
         ],
         "smalltalk": [
             "nasılsın", "merhaba", "selam", "teşekkür",
@@ -1976,10 +2013,25 @@ ASSISTANT (sadece JSON):"""
         ("system", "none"): "time.now",
         ("system", "time"): "time.now",
         ("system", "status"): "system.status",
+        ("system", "battery"): "system.status",
+        ("system", "disk"): "system.status",
+        # Issue #1360: contacts route tool resolution
+        ("contacts", "list"): "google.contacts.search",
+        ("contacts", "search"): "google.contacts.search",
+        ("contacts", "create"): "google.contacts.create",
+        ("contacts", "delete"): "contacts.delete",
+        ("contacts", "none"): "google.contacts.search",
+        # Issue #1363: keep/notes route tool resolution
+        ("keep", "create"): "google.keep.create",
+        ("keep", "list"): "google.keep.list",
+        ("keep", "search"): "google.keep.search",
+        ("keep", "none"): "google.keep.list",
     }
 
     def _resolve_tool_from_intent(
         self, route: str, calendar_intent: str, gmail_intent: str = "none",
+        *, system_intent: str = "none", contacts_intent: str = "none",
+        keep_intent: str = "none",
     ) -> str | None:
         """Resolve the correct tool name from route + intent."""
         if route == "calendar":
@@ -1987,11 +2039,30 @@ ASSISTANT (sadece JSON):"""
         elif route == "gmail":
             return self._TOOL_LOOKUP.get((route, gmail_intent))
         elif route == "system":
-            # Issue #1312: Try specific intent first, fall back to default.
-            # Previously always returned ("system", "none") → "time.now",
-            # ignoring intents like "status".
+            # Issue #1359: Use dedicated system_intent first, then
+            # calendar_intent fallback (backward compat), then default.
+            # When system_intent is explicitly set (not "none"), use it directly.
+            # Otherwise, try calendar_intent (backward compat overloaded field),
+            # then fall back to ("system", "none") default.
+            if system_intent != "none":
+                return (
+                    self._TOOL_LOOKUP.get((route, system_intent))
+                    or self._TOOL_LOOKUP.get((route, "none"))
+                )
             return (
                 self._TOOL_LOOKUP.get((route, calendar_intent))
+                or self._TOOL_LOOKUP.get((route, "none"))
+            )
+        elif route == "contacts":
+            # Issue #1360: contacts route resolution
+            return (
+                self._TOOL_LOOKUP.get((route, contacts_intent))
+                or self._TOOL_LOOKUP.get((route, "none"))
+            )
+        elif route == "keep":
+            # Issue #1363: keep/notes route resolution
+            return (
+                self._TOOL_LOOKUP.get((route, keep_intent))
                 or self._TOOL_LOOKUP.get((route, "none"))
             )
         return None
@@ -2161,6 +2232,63 @@ ASSISTANT (sadece JSON):"""
                 normalized["gmail_intent"] = "list"  # default for gmail route
             logger.info("[intent_inference] gmail intent inferred from input: '%s'", normalized["gmail_intent"])
 
+        # ── Issue #1359: System intent inference from user input ──────────
+        _raw_system_intent = str(normalized.get("system_intent") or "none").strip().lower()
+        if route == "system" and _raw_system_intent == "none" and user_input:
+            _input_lower = (user_input or "").lower()
+            _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
+            _SYS_STATUS_WORDS = {"cpu", "ram", "bellek", "durum", "kaynak", "kullanım", "performans"}
+            _SYS_BATTERY_WORDS = {"pil", "batarya", "şarj"}
+            _SYS_DISK_WORDS = {"disk", "depolama", "alan", "storage"}
+            _SYS_TIME_WORDS = {"saat", "tarih", "zaman"}
+
+            if _input_tokens & _SYS_STATUS_WORDS:
+                normalized["system_intent"] = "status"
+            elif _input_tokens & _SYS_BATTERY_WORDS:
+                normalized["system_intent"] = "battery"
+            elif _input_tokens & _SYS_DISK_WORDS:
+                normalized["system_intent"] = "disk"
+            elif _input_tokens & _SYS_TIME_WORDS or "saat kaç" in _input_lower:
+                normalized["system_intent"] = "time"
+            else:
+                normalized["system_intent"] = "status"  # default for system route
+            logger.info("[intent_inference] system intent inferred: '%s'", normalized["system_intent"])
+
+        # ── Issue #1360: Contacts intent inference ────────────────────────
+        _raw_contacts_intent = str(normalized.get("contacts_intent") or "none").strip().lower()
+        if route == "contacts" and _raw_contacts_intent == "none" and user_input:
+            _input_lower = (user_input or "").lower()
+            _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
+            _CONTACTS_CREATE_WORDS = {"ekle", "oluştur", "kaydet"}
+            _CONTACTS_DELETE_WORDS = {"sil", "kaldır"}
+            _CONTACTS_SEARCH_WORDS = {"ara", "bul"}
+
+            if _input_tokens & _CONTACTS_CREATE_WORDS:
+                normalized["contacts_intent"] = "create"
+            elif _input_tokens & _CONTACTS_DELETE_WORDS:
+                normalized["contacts_intent"] = "delete"
+            elif _input_tokens & _CONTACTS_SEARCH_WORDS:
+                normalized["contacts_intent"] = "search"
+            else:
+                normalized["contacts_intent"] = "list"  # default
+            logger.info("[intent_inference] contacts intent inferred: '%s'", normalized["contacts_intent"])
+
+        # ── Issue #1363: Keep intent inference ────────────────────────────
+        _raw_keep_intent = str(normalized.get("keep_intent") or "none").strip().lower()
+        if route == "keep" and _raw_keep_intent == "none" and user_input:
+            _input_lower = (user_input or "").lower()
+            _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
+            _KEEP_CREATE_WORDS = {"oluştur", "yaz", "ekle", "al"}
+            _KEEP_SEARCH_WORDS = {"ara", "bul"}
+
+            if _input_tokens & _KEEP_CREATE_WORDS or "not oluştur" in _input_lower or "not al" in _input_lower:
+                normalized["keep_intent"] = "create"
+            elif _input_tokens & _KEEP_SEARCH_WORDS:
+                normalized["keep_intent"] = "search"
+            else:
+                normalized["keep_intent"] = "list"  # default
+            logger.info("[intent_inference] keep intent inferred: '%s'", normalized["keep_intent"])
+
         slots = normalized.get("slots") or {}
         if not isinstance(slots, dict):
             slots = {}
@@ -2256,9 +2384,13 @@ ASSISTANT (sadece JSON):"""
         # If 3B model gave empty or all-invalid tool_plan but route+intent are
         # clear, resolve the correct tool deterministically.
         # Also re-resolve if route was overridden (model's tools are for wrong route).
-        if (not tool_plan or _route_was_overridden) and route in ("calendar", "gmail", "system"):
+        if (not tool_plan or _route_was_overridden) and route in ("calendar", "gmail", "system", "contacts", "keep"):
             resolved_tool = self._resolve_tool_from_intent(
-                route, calendar_intent, gmail_intent=str(normalized.get("gmail_intent") or "none").strip().lower(),
+                route, calendar_intent,
+                gmail_intent=str(normalized.get("gmail_intent") or "none").strip().lower(),
+                system_intent=str(normalized.get("system_intent") or "none").strip().lower(),
+                contacts_intent=str(normalized.get("contacts_intent") or "none").strip().lower(),
+                keep_intent=str(normalized.get("keep_intent") or "none").strip().lower(),
             )
             if resolved_tool:
                 tool_plan = [resolved_tool]
@@ -2348,7 +2480,7 @@ ASSISTANT (sadece JSON):"""
         _BOOST_FLOOR = float(os.getenv("BANTZ_ROUTER_BOOST_FLOOR", "0.3"))
         if confidence < self._confidence_threshold:
             # Check if route+intent are actually valid and meaningful
-            _route_valid = route in ("calendar", "gmail", "system")
+            _route_valid = route in ("calendar", "gmail", "system", "contacts", "keep")
             _has_intent = calendar_intent not in ("none", "")
             _has_tools = bool(tool_plan)
 
@@ -2411,6 +2543,17 @@ ASSISTANT (sadece JSON):"""
             except ImportError:
                 pass  # graceful degradation
 
+        # Issue #1359/#1360/#1363: Extract route-specific intents
+        system_intent = str(parsed.get("system_intent") or "none").strip().lower()
+        if system_intent not in VALID_SYSTEM_INTENTS:
+            system_intent = "none"
+        contacts_intent = str(parsed.get("contacts_intent") or "none").strip().lower()
+        if contacts_intent not in VALID_CONTACTS_INTENTS:
+            contacts_intent = "none"
+        keep_intent = str(parsed.get("keep_intent") or "none").strip().lower()
+        if keep_intent not in VALID_KEEP_INTENTS:
+            keep_intent = "none"
+
         # Issue #1273: Extract ReAct status field
         _react_status = str(parsed.get("status") or "done").strip().lower()
         if _react_status not in ("done", "needs_more_info"):
@@ -2431,6 +2574,9 @@ ASSISTANT (sadece JSON):"""
             assistant_reply=assistant_reply,
             gmail_intent=gmail_intent,
             gmail=gmail_obj,
+            system_intent=system_intent,
+            contacts_intent=contacts_intent,
+            keep_intent=keep_intent,
             ask_user=ask_user,
             question=question,
             requires_confirmation=requires_confirmation,
@@ -2458,6 +2604,7 @@ ASSISTANT (sadece JSON):"""
         if kw_route not in ("unknown", "smalltalk"):
             resolved = self._resolve_tool_from_intent(
                 kw_route, "none", "none",
+                system_intent="none", contacts_intent="none", keep_intent="none",
             )
             if resolved:
                 tool_plan = [resolved]

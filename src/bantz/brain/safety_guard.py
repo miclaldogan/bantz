@@ -387,7 +387,8 @@ class SafetyGuard:
         # If route is not a tool-allowed route, filter based on safety
         # (Issue #170 adds read-only Gmail tools under route="gmail").
         # "system" route allows safe tools like time.now and system.status.
-        allowed_routes = {"calendar", "gmail", "system"}
+        # Issue #1360/#1363: contacts and keep routes allow their tools.
+        allowed_routes = {"calendar", "gmail", "system", "contacts", "keep"}
         
         if route in allowed_routes:
             # Route explicitly allows tools
