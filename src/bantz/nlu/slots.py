@@ -14,9 +14,9 @@ Uses Turkish-aware patterns for accurate extraction.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from bantz.nlu.types import Slot, SlotType
