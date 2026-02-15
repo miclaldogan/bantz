@@ -68,8 +68,13 @@ class EntitySlot:
 
     @property
     def age(self) -> int:
-        """Return how many turns old relative to creation (set externally)."""
-        return 0  # computed by SlotRegistry
+        """Return how many turns old relative to creation.
+
+        NOTE: Requires ``current_turn`` to be set externally via
+        ``SlotRegistry.expire_stale()`` context. Falls back to 0
+        when the registry hasn't stamped the entity yet.
+        """
+        return getattr(self, "_current_turn", self.created_at_turn) - self.created_at_turn
 
     def is_expired(self, current_turn: int) -> bool:
         """Check if entity has exceeded its TTL."""
@@ -133,6 +138,9 @@ class SlotRegistry:
     def expire_stale(self, current_turn: int) -> int:
         """Remove entities that have exceeded their TTL.
 
+        Issue #1316: Also stamps ``_current_turn`` on surviving entities
+        so that ``EntitySlot.age`` returns the correct value.
+
         Returns the number of expired entities.
         """
         expired_keys = [
@@ -141,6 +149,9 @@ class SlotRegistry:
         ]
         for k in expired_keys:
             del self._entities[k]
+        # Issue #1316: Stamp current turn on surviving entities for age calc
+        for entity in self._entities.values():
+            object.__setattr__(entity, "_current_turn", current_turn)
         if self._active and self._active.is_expired(current_turn):
             logger.debug(
                 "[SlotRegistry] Active entity expired: type=%s id=%s (turn %d, created %d, ttl %d)",
@@ -148,6 +159,8 @@ class SlotRegistry:
                 current_turn, self._active.created_at_turn, self._active.ttl,
             )
             self._active = None
+        elif self._active:
+            object.__setattr__(self._active, "_current_turn", current_turn)
         return len(expired_keys)
 
     def to_prompt_block(self) -> str:
@@ -155,17 +168,35 @@ class SlotRegistry:
 
         Target: ~50-100 tokens to stay within context budget.
         Returns empty string if no active entity.
+
+        Issue #1316: Uses key-based trimming instead of raw string
+        truncation to avoid injecting broken JSON into the prompt.
         """
         if not self._active:
             return ""
         d = self._active.to_prompt_dict()
+        # Issue #1316: Trim large slot values instead of slicing raw JSON
+        _MAX_BLOCK_CHARS = 400
         try:
             block = json.dumps(d, ensure_ascii=False)
         except (TypeError, ValueError):
             block = str(d)
-        # Hard cap at 400 chars (~100 tokens)
-        if len(block) > 400:
-            block = block[:400] + "…"
+        if len(block) > _MAX_BLOCK_CHARS:
+            # Progressively trim longest slot values
+            trimmed = dict(d)
+            for key in sorted(trimmed, key=lambda k: len(str(trimmed.get(k, ""))), reverse=True):
+                val = trimmed[key]
+                if isinstance(val, str) and len(val) > 80:
+                    trimmed[key] = val[:77] + "..."
+                try:
+                    block = json.dumps(trimmed, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    block = str(trimmed)
+                if len(block) <= _MAX_BLOCK_CHARS:
+                    break
+            # Final hard cap — but on a best-effort valid-JSON block
+            if len(block) > _MAX_BLOCK_CHARS:
+                block = block[:_MAX_BLOCK_CHARS]
         return block
 
     def clear(self) -> None:
@@ -679,6 +710,7 @@ class OrchestratorState:
         self.trace = {}
         self.conversation_history = []
         self.turn_count = 0
+        self.current_user_input = ""  # Issue #1316: clear stale input
         self.session_context = None
         self.reference_table = None
         self.disambiguation_pending = None
