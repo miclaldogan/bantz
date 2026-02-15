@@ -1676,7 +1676,6 @@ ASSISTANT (sadece JSON):"""
             extract_first_json_object,
             repair_common_json_issues,
             validate_orchestrator_output,
-            apply_orchestrator_defaults,
             balance_truncated_json,
         )
 
@@ -1974,7 +1973,7 @@ ASSISTANT (sadece JSON):"""
 
         # ── Issue #421: Detect route/intent before normalization ─────────
         pre_route = str(parsed.get("route") or "unknown").strip().lower()
-        pre_intent = str(parsed.get("calendar_intent") or "none").strip().lower()
+        _pre_intent = str(parsed.get("calendar_intent") or "none").strip().lower()
 
         # Apply defaults for missing/invalid fields
         normalized = apply_orchestrator_defaults(parsed)
