@@ -964,8 +964,9 @@ class FinalizationPipeline:
         if failed:
             error_msg = "Üzgünüm efendim, bazı işlemler başarısız oldu:\n"
             for r in failed:
+                # Issue #1315: Sanitize tool errors — don't leak raw exceptions
                 error_msg += (
-                    f"- {r.get('tool', '?')}: {r.get('error', 'Unknown error')}\n"
+                    f"- {r.get('tool', '?')}: {_sanitize_tool_error(r.get('error', 'Unknown error'))}\n"
                 )
             return replace(output, assistant_reply=error_msg.strip(), finalizer_model="none(error)")
 
@@ -1148,6 +1149,39 @@ def _tool_first_guard_message(*, route: str) -> str:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+# Issue #1315: User-safe error mappings — prevent raw exception leaks
+_ERROR_SAFE_MAP: dict[str, str] = {
+    "timeout": "İşlem zaman aşımına uğradı",
+    "connection": "Bağlantı hatası oluştu",
+    "auth": "Kimlik doğrulama hatası",
+    "permission": "Yetki hatası",
+    "not_found": "İstenen kaynak bulunamadı",
+    "rate_limit": "Çok fazla istek, lütfen biraz bekleyin",
+}
+
+# Max length for sanitized error messages shown to user
+_MAX_ERROR_MSG_LENGTH = 150
+
+
+def _sanitize_tool_error(error: str) -> str:
+    """Sanitize tool error for user-facing display.
+
+    Issue #1315: Maps known error patterns to safe Turkish messages
+    and truncates unknown errors to prevent leaking internal details
+    (stack traces, file paths, API keys).
+    """
+    if not isinstance(error, str):
+        return "Bilinmeyen hata"
+    lower = error.lower()
+    for pattern, safe_msg in _ERROR_SAFE_MAP.items():
+        if pattern in lower:
+            return safe_msg
+    # Truncate and strip anything that looks like a path or traceback
+    sanitized = error.split("\n")[0]  # First line only
+    if len(sanitized) > _MAX_ERROR_MSG_LENGTH:
+        sanitized = sanitized[:_MAX_ERROR_MSG_LENGTH] + "…"
+    return sanitized
 
 # Issue #1183: Reusable thread pool for _safe_complete — avoids creating
 # and destroying a ThreadPoolExecutor on every finalization call.

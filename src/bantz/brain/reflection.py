@@ -26,7 +26,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -219,7 +219,7 @@ def parse_reflection_response(raw: str) -> ReflectionResult:
     # Strip markdown code fences
     if text.startswith("```"):
         lines = text.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
+        lines = [ln for ln in lines if not ln.strip().startswith("```")]
         text = "\n".join(lines).strip()
 
     # Try JSON parse
@@ -313,7 +313,7 @@ def reflect(
         return ReflectionResult(
             triggered=True,
             satisfied=True,  # don't block on LLM failure
-            reason=f"reflection_llm_error: {exc}",
+            reason=f"reflection_llm_error: {type(exc).__name__}",
             trigger_cause=cause,
             elapsed_ms=elapsed,
         )
