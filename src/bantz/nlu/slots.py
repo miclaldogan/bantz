@@ -410,6 +410,27 @@ TURKISH_SUFFIXES = [
     "a", "e", "i", "ı", "u", "ü",  # Without apostrophe
 ]
 
+# ── Issue #1320: Pre-compiled regex patterns ──────────────────────────────
+# Previously compiled inside extract_url() and extract_query() on every call.
+_URL_PATTERN_RE: re.Pattern[str] = re.compile(
+    r"(https?://[^\s<>\"']+)", re.IGNORECASE,
+)
+_DOMAIN_PATTERN_RE: re.Pattern[str] = re.compile(
+    r"([a-zA-Z0-9-]+)\.(com|org|net|io|dev|app|tv|co|me|ai)", re.IGNORECASE,
+)
+_SEARCH_PATTERN_RE: re.Pattern[str] = re.compile(
+    r"([a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)[''`]?(?:da|de|ta|te)\s+(.+?)\s+"
+    r"(?:ara|bul|araması|aratır|arat)",
+    re.IGNORECASE,
+)
+_REVERSE_PATTERN_RE: re.Pattern[str] = re.compile(
+    r"(.+?)\s+(?:ara|bul)\s+([a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)[''`]?(?:da|de|ta|te)",
+    re.IGNORECASE,
+)
+_SIMPLE_SEARCH_RE: re.Pattern[str] = re.compile(
+    r"(.+?)[''`]?(?:yi|ı|i|u|ü)?\s*ara\b", re.IGNORECASE,
+)
+
 
 def _normalize_site_name(text: str) -> str:
     """Normalize site name by removing Turkish suffixes."""
@@ -437,12 +458,7 @@ def extract_url(text: str) -> Optional[URLSlot]:
     text_lower = text.lower()
     
     # Pattern 1: Full URL
-    url_pattern = re.compile(
-        r"(https?://[^\s<>\"']+)",
-        re.IGNORECASE,
-    )
-    
-    match = url_pattern.search(text)
+    match = _URL_PATTERN_RE.search(text)
     if match:
         url = match.group(1)
         # Clean trailing punctuation
@@ -463,12 +479,7 @@ def extract_url(text: str) -> Optional[URLSlot]:
             pass
     
     # Pattern 2: Domain-like (xxx.com, xxx.org)
-    domain_pattern = re.compile(
-        r"([a-zA-Z0-9-]+)\.(com|org|net|io|dev|app|tv|co|me|ai)",
-        re.IGNORECASE,
-    )
-    
-    match = domain_pattern.search(text)
+    match = _DOMAIN_PATTERN_RE.search(text)
     if match:
         domain = match.group(0)
         site_name = match.group(1).lower()
@@ -678,13 +689,7 @@ def extract_query(text: str) -> Optional[QuerySlot]:
     text_lower = text.lower()
     
     # Pattern 1: "X'da Y ara/bul" or "X'de Y araması yap"
-    search_pattern = re.compile(
-        r"([a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)[''`]?(?:da|de|ta|te)\s+(.+?)\s+"
-        r"(?:ara|bul|araması|aratır|arat)",
-        re.IGNORECASE,
-    )
-    
-    match = search_pattern.search(text_lower)
+    match = _SEARCH_PATTERN_RE.search(text_lower)
     if match:
         site = _normalize_site_name(match.group(1))
         query = match.group(2).strip()
@@ -697,12 +702,7 @@ def extract_query(text: str) -> Optional[QuerySlot]:
         )
     
     # Pattern 2: "Y ara X'da" (reversed)
-    reverse_pattern = re.compile(
-        r"(.+?)\s+(?:ara|bul)\s+([a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)[''`]?(?:da|de|ta|te)",
-        re.IGNORECASE,
-    )
-    
-    match = reverse_pattern.search(text_lower)
+    match = _REVERSE_PATTERN_RE.search(text_lower)
     if match:
         query = match.group(1).strip()
         site = _normalize_site_name(match.group(2))
@@ -715,12 +715,7 @@ def extract_query(text: str) -> Optional[QuerySlot]:
         )
     
     # Pattern 3: Simple "Y ara" / "Y'yi ara"
-    simple_pattern = re.compile(
-        r"(.+?)[''`]?(?:yi|ı|i|u|ü)?\s*ara\b",
-        re.IGNORECASE,
-    )
-    
-    match = simple_pattern.search(text_lower)
+    match = _SIMPLE_SEARCH_RE.search(text_lower)
     if match:
         query = match.group(1).strip()
         # Remove leading verbs

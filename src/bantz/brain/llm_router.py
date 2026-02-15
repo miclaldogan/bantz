@@ -1898,6 +1898,22 @@ ASSISTANT (sadece JSON):"""
             return max(scores, key=scores.get)  # type: ignore[arg-type]
         return "unknown"
 
+    # Issue #1320: Pre-compiled regex for slot value cleaning
+    # Previously compiled on every _extract_output() call.
+    _TYPE_PREFIX_RE: re.Pattern[str] = re.compile(
+        r"^(str|string|email|dk|int|null)\s*[:]\s*", re.IGNORECASE,
+    )
+    _PLACEHOLDER_RE: re.Pattern[str] = re.compile(r"^<.*>$")
+    _VALID_TIME_RE: re.Pattern[str] = re.compile(r"^\d{2}:\d{2}$")
+    _VALID_DATE_RE: re.Pattern[str] = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    _JUNK_VALUES: frozenset[str] = frozenset({
+        "pm", "am", "none", "null", "<route>", "<intent>", "<tool_adı>",
+    })
+    _INSTRUCTION_FRAGMENTS: tuple[str, ...] = (
+        "kullanıcı", "etkinlik adı söylemedi", "söylemediği", "belirtilmedi",
+        "girilmedi", "verilmedi", "yoksa null", "veya null",
+    )
+
     # Issue #1212: Anaphoric follow-up detection for Turkish
     # Issue #1254: Added "başka", "içeriğinde", "ne var", "daha" etc.
     _ANAPHORA_TOKENS: frozenset[str] = frozenset({
@@ -2136,35 +2152,27 @@ ASSISTANT (sadece JSON):"""
 
         # ── Issue #LLM-quality: Aggressive slot value cleaning ────────────
         # 3B model produces many garbled slot values. Clean them all.
-        _TYPE_PREFIX_RE = re.compile(r"^(str|string|email|dk|int|null)\s*[:]\s*", re.IGNORECASE)
-        _PLACEHOLDER_RE = re.compile(r"^<.*>$")  # e.g. "<YYYY-MM-DD veya null>"
-        _JUNK_VALUES = frozenset({"pm", "am", "none", "null", "<route>", "<intent>", "<tool_adı>"})
-        _VALID_TIME_RE = re.compile(r"^\d{2}:\d{2}$")  # HH:MM
-        _VALID_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # YYYY-MM-DD
-        # Strings that are instruction copies, not real values
-        _INSTRUCTION_FRAGMENTS = [
-            "kullanıcı", "etkinlik adı söylemedi", "söylemediği", "belirtilmedi",
-            "girilmedi", "verilmedi", "yoksa null", "veya null",
-        ]
+        # Issue #1320: Regex patterns, junk values, and instruction fragments
+        # are now class-level constants to avoid recompilation per call.
         cleaned_slots: dict[str, Any] = {}
         for k, v in slots.items():
             if isinstance(v, str):
-                cleaned = _TYPE_PREFIX_RE.sub("", v).strip()
+                cleaned = self._TYPE_PREFIX_RE.sub("", v).strip()
                 # If the cleaned value is empty, null, or a placeholder, set to None
                 if (
                     not cleaned
-                    or cleaned.lower() in _JUNK_VALUES
-                    or _PLACEHOLDER_RE.match(cleaned)
+                    or cleaned.lower() in self._JUNK_VALUES
+                    or self._PLACEHOLDER_RE.match(cleaned)
                 ):
                     cleaned_slots[k] = None
                 # Check if value is an instruction copy (model copies rule text)
-                elif any(frag in cleaned.lower() for frag in _INSTRUCTION_FRAGMENTS):
+                elif any(frag in cleaned.lower() for frag in self._INSTRUCTION_FRAGMENTS):
                     cleaned_slots[k] = None
                 # time must be HH:MM format — anything else is garbage
-                elif k == "time" and not _VALID_TIME_RE.match(cleaned):
+                elif k == "time" and not self._VALID_TIME_RE.match(cleaned):
                     cleaned_slots[k] = None
                 # date must be YYYY-MM-DD format
-                elif k == "date" and not _VALID_DATE_RE.match(cleaned):
+                elif k == "date" and not self._VALID_DATE_RE.match(cleaned):
                     cleaned_slots[k] = None
                 else:
                     cleaned_slots[k] = cleaned
