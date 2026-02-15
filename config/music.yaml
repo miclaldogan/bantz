@@ -1,0 +1,52 @@
+# ── Music Control Configuration ──────────────────────────────────────
+# Issue #1296: Müzik Kontrolü — Spotify/Local Player + Context-Aware Suggestions
+
+music:
+  # Default player backend: spotify | mpris | auto
+  # auto: try spotify first, fall back to any MPRIS player
+  default_player: "auto"
+
+  # Spotify settings
+  spotify:
+    # Spotify Web API access token (optional — for search/playlists)
+    # Set via BANTZ_SPOTIFY_TOKEN environment variable
+    access_token: ""
+
+  # Local MPRIS player settings
+  mpris:
+    # Preferred player name (empty → auto-detect first available)
+    # Examples: vlc, mpv, rhythmbox, audacious, lollypop
+    preferred_player: ""
+
+  # Volume settings
+  volume:
+    default: 50
+    step: 10  # volume up/down step
+
+# ── Context-Aware Suggestions ────────────────────────────────────────
+suggestions:
+  enabled: true
+
+  # Calendar keyword → genre mappings
+  # Use null/~ to indicate "don't suggest music"
+  calendar_moods:
+    deep work: ["lo-fi beats", "ambient", "classical"]
+    focus: ["lo-fi beats", "ambient", "classical"]
+    coding: ["lo-fi beats", "synthwave", "electronic"]
+    meeting: ~
+    toplantı: ~
+    call: ~
+    lunch: ["Turkish pop", "chill", "bossa nova"]
+    exercise: ["workout", "EDM", "rock"]
+    yoga: ["ambient", "meditation"]
+    study: ["classical", "lo-fi beats"]
+    reading: ["classical", "jazz", "ambient"]
+    party: ["pop", "dance", "Turkish pop"]
+
+  # Time-of-day → genre mappings
+  time_moods:
+    early_morning: ["classical", "jazz", "acoustic"]      # 05:00-08:00
+    morning: ["indie", "pop", "Turkish pop"]               # 08:00-12:00
+    afternoon: ["rock", "electronic", "hip-hop"]           # 12:00-17:00
+    evening: ["chill", "jazz", "R&B"]                      # 17:00-21:00
+    night: ["ambient", "lo-fi beats", "classical"]         # 21:00-05:00
