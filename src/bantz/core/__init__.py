@@ -24,6 +24,22 @@ from bantz.core.subscriber_registry import (
     RateLimitMiddleware,
     EventSubscriber,
 )
+from bantz.core.health_monitor import (
+    HealthMonitor,
+    HealthReport,
+    HealthStatus,
+    ServiceStatus,
+    get_health_monitor,
+    reset_health_monitor,
+)
+from bantz.core.fallback_registry import (
+    FallbackRegistry,
+    FallbackConfig,
+    FallbackResult,
+    FallbackStrategy,
+    get_fallback_registry,
+    reset_fallback_registry,
+)
 from bantz.core.timing import (
     TimingRequirements,
     TIMING,
@@ -73,6 +89,19 @@ __all__ = [
     "LoggingMiddleware",
     "RateLimitMiddleware",
     "EventSubscriber",
+    # Health Monitor & Fallback (Issue #1298)
+    "HealthMonitor",
+    "HealthReport",
+    "HealthStatus",
+    "ServiceStatus",
+    "get_health_monitor",
+    "reset_health_monitor",
+    "FallbackRegistry",
+    "FallbackConfig",
+    "FallbackResult",
+    "FallbackStrategy",
+    "get_fallback_registry",
+    "reset_fallback_registry",
     # Timing
     "TimingRequirements",
     "TIMING",

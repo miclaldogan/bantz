@@ -289,6 +289,7 @@ class HealthMonitor:
         self._circuit_breaker = circuit_breaker
         self._check_interval = check_interval
         self._last_report: Optional[HealthReport] = None
+        self._previous_statuses: Dict[str, ServiceStatus] = {}
         self._running = False
 
     def register_check(self, name: str, fn: HealthCheckFn) -> None:
@@ -332,11 +333,49 @@ class HealthMonitor:
         )
         self._last_report = report
 
-        # Publish event if degraded or unhealthy
+        # Publish per-service events for state transitions
+        if self._event_bus:
+            for name, status in results.items():
+                prev = self._previous_statuses.get(name)
+                try:
+                    if status.status != ServiceStatus.HEALTHY and (
+                        prev is None or prev == ServiceStatus.HEALTHY
+                    ):
+                        # Service just degraded / went unhealthy
+                        self._event_bus.publish(
+                            event_type="system.health_degraded",
+                            data={
+                                "service": name,
+                                "status": status.status.value,
+                                "error": status.error,
+                                "latency_ms": status.latency_ms,
+                            },
+                            source="health_monitor",
+                        )
+                    elif status.status == ServiceStatus.HEALTHY and prev and prev != ServiceStatus.HEALTHY:
+                        # Service recovered
+                        self._event_bus.publish(
+                            event_type="system.health_recovered",
+                            data={
+                                "service": name,
+                                "previous_status": prev.value,
+                                "latency_ms": status.latency_ms,
+                            },
+                            source="health_monitor",
+                        )
+                except Exception as exc:
+                    logger.debug("[HealthMonitor] Event publish failed: %s", exc)
+
+            # Update previous status tracking
+            self._previous_statuses = {
+                name: status.status for name, status in results.items()
+            }
+
+        # Publish overall degradation event (legacy compat)
         if overall != ServiceStatus.HEALTHY and self._event_bus:
             try:
                 self._event_bus.publish(
-                    event_type="system.health_degraded",
+                    event_type="system.health_check",
                     data=report.to_dict(),
                     source="health_monitor",
                 )

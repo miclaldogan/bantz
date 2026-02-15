@@ -23,6 +23,15 @@ from typing import Any, Callable, Optional
 logger = logging.getLogger(__name__)
 
 
+def _get_event_bus_safe():
+    """Get the EventBus singleton without import-time side effects."""
+    try:
+        from bantz.core.events import get_event_bus
+        return get_event_bus()
+    except Exception:
+        return None
+
+
 class CircuitState(Enum):
     """Circuit breaker states."""
     CLOSED = "closed"       # Normal operation
@@ -127,6 +136,10 @@ class CircuitBreaker:
                 if stats.successes >= self.success_threshold:
                     # Recovery confirmed, close circuit
                     stats.reset()
+                    self._emit_circuit_event(
+                        "system.circuit_closed", domain,
+                        message=f"Circuit closed for '{domain}' — recovery confirmed",
+                    )
     
     def record_failure(self, domain: str) -> None:
         """
@@ -146,12 +159,20 @@ class CircuitBreaker:
                     # Threshold reached, open circuit
                     stats.state = CircuitState.OPEN
                     stats.opened_at = datetime.now()
-            
+                    self._emit_circuit_event(
+                        "system.circuit_opened", domain,
+                        message=f"Circuit opened for '{domain}' — {self.failure_threshold} consecutive failures",
+                    )
+
             elif stats.state == CircuitState.HALF_OPEN:
                 # Recovery failed, reopen circuit
                 stats.state = CircuitState.OPEN
                 stats.opened_at = datetime.now()
                 stats.successes = 0
+                self._emit_circuit_event(
+                    "system.circuit_opened", domain,
+                    message=f"Circuit re-opened for '{domain}' — half-open probe failed",
+                )
     
     def is_open(self, domain: str) -> bool:
         """
@@ -226,6 +247,26 @@ class CircuitBreaker:
         """List all tracked domains."""
         with self._lock:
             return list(self._stats.keys())
+
+    def _emit_circuit_event(
+        self,
+        event_type: str,
+        domain: str,
+        *,
+        message: str = "",
+    ) -> None:
+        """Publish a circuit breaker event to the EventBus (best-effort)."""
+        bus = _get_event_bus_safe()
+        if bus is None:
+            return
+        try:
+            bus.publish(
+                event_type=event_type,
+                data={"domain": domain, "message": message},
+                source="circuit_breaker",
+            )
+        except Exception as exc:
+            logger.debug("[CB] Event publish failed: %s", exc)
 
     async def call(
         self,
