@@ -323,6 +323,62 @@ permissions:
     risk: "low"
     decision: "allow"
 
+  # ── Music Control (Issue #1296) ────────────────────────────
+  - tool: "music.play"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.pause"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.resume"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.next"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.prev"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.stop"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.volume"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.search"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.playlists"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.suggest"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"

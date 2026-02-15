@@ -45,6 +45,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_proactive(registry)
     count += _register_messaging(registry)
     count += _register_sandbox_agents(registry)
+    count += _register_music(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -1966,6 +1967,431 @@ def _register_sandbox_agents(registry: "ToolRegistry") -> int:
             required=["file_path"],
         ),
         _handle_coding_review,
+        risk="low",
+    )
+
+    return n
+
+
+# ── Music (Issue #1296) ──────────────────────────────────────────────
+
+def _register_music(registry: "ToolRegistry") -> int:
+    """Register music playback, search, and suggestion tools."""
+    n = 0
+
+    _instances: dict[str, Any] = {}
+
+    def _get_player() -> Any:
+        if "player" not in _instances:
+            import os
+
+            from bantz.skills.music.local_player import LocalPlayer
+            from bantz.skills.music.spotify_player import SpotifyPlayer
+
+            token = os.environ.get("BANTZ_SPOTIFY_TOKEN", "")
+            spotify = SpotifyPlayer(access_token=token or None)
+            local = LocalPlayer()
+
+            if spotify.available:
+                _instances["player"] = spotify
+            elif local.available:
+                _instances["player"] = local
+            else:
+                # Default to spotify (may fail gracefully)
+                _instances["player"] = spotify
+        return _instances["player"]
+
+    def _get_suggester() -> Any:
+        if "suggester" not in _instances:
+            from bantz.skills.music.suggester import MusicSuggester
+
+            _instances["suggester"] = MusicSuggester()
+        return _instances["suggester"]
+
+    # ── music.play ──────────────────────────────────────────────
+    def _handle_music_play(
+        *,
+        query: str = "",
+        playlist: str = "",
+        uri: str = "",
+        **_: Any,
+    ) -> dict:
+        """Play music."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        player.play(
+                            query or None,
+                            playlist=playlist or None,
+                            uri=uri or None,
+                        ),
+                    ).result(timeout=15)
+            else:
+                result = asyncio.run(
+                    player.play(
+                        query or None,
+                        playlist=playlist or None,
+                        uri=uri or None,
+                    )
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "music.play",
+        (
+            "Müzik çal — sorguya göre şarkı/playlist başlat, "
+            "devam ettir veya URI ile çal."
+        ),
+        _obj(
+            ("query", "string", "Arama sorgusu (tür, şarkı adı, sanatçı)"),
+            ("playlist", "string", "Playlist adı"),
+            ("uri", "string", "Doğrudan Spotify/medya URI"),
+        ),
+        _handle_music_play,
+        risk="low",
+    )
+
+    # ── music.pause ─────────────────────────────────────────────
+    def _handle_music_pause(**_: Any) -> dict:
+        """Pause music."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, player.pause()
+                    ).result(timeout=5)
+            else:
+                result = asyncio.run(player.pause())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "music.pause",
+        "Müziği duraklat.",
+        _obj(required=[]),
+        _handle_music_pause,
+        risk="low",
+    )
+
+    # ── music.resume ────────────────────────────────────────────
+    def _handle_music_resume(**_: Any) -> dict:
+        """Resume music."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, player.resume()
+                    ).result(timeout=5)
+            else:
+                result = asyncio.run(player.resume())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "music.resume",
+        "Müziği devam ettir.",
+        _obj(required=[]),
+        _handle_music_resume,
+        risk="low",
+    )
+
+    # ── music.next ──────────────────────────────────────────────
+    def _handle_music_next(**_: Any) -> dict:
+        """Skip to next track."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, player.next_track()
+                    ).result(timeout=5)
+            else:
+                result = asyncio.run(player.next_track())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "music.next",
+        "Sonraki şarkıya geç.",
+        _obj(required=[]),
+        _handle_music_next,
+        risk="low",
+    )
+
+    # ── music.prev ──────────────────────────────────────────────
+    def _handle_music_prev(**_: Any) -> dict:
+        """Go to previous track."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, player.prev_track()
+                    ).result(timeout=5)
+            else:
+                result = asyncio.run(player.prev_track())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "music.prev",
+        "Önceki şarkıya dön.",
+        _obj(required=[]),
+        _handle_music_prev,
+        risk="low",
+    )
+
+    # ── music.stop ──────────────────────────────────────────────
+    def _handle_music_stop(**_: Any) -> dict:
+        """Stop playback."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, player.stop()
+                    ).result(timeout=5)
+            else:
+                result = asyncio.run(player.stop())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "music.stop",
+        "Müziği durdur.",
+        _obj(required=[]),
+        _handle_music_stop,
+        risk="low",
+    )
+
+    # ── music.volume ────────────────────────────────────────────
+    def _handle_music_volume(
+        *, level: int = -1, **_: Any
+    ) -> dict:
+        """Set or get volume."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            if level < 0:
+                # Get volume
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        result = pool.submit(
+                            asyncio.run, player.get_volume()
+                        ).result(timeout=5)
+                else:
+                    result = asyncio.run(player.get_volume())
+            else:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        result = pool.submit(
+                            asyncio.run, player.set_volume(level)
+                        ).result(timeout=5)
+                else:
+                    result = asyncio.run(player.set_volume(level))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "music.volume",
+        "Ses seviyesini ayarla veya göster (0-100).",
+        _obj(
+            ("level", "integer", "Ses seviyesi (0-100). Negatif → mevcut seviyeyi göster."),
+        ),
+        _handle_music_volume,
+        risk="low",
+    )
+
+    # ── music.status ────────────────────────────────────────────
+    def _handle_music_status(**_: Any) -> dict:
+        """Get player status."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, player.status()
+                    ).result(timeout=10)
+            else:
+                result = asyncio.run(player.status())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return result
+
+    n += _reg(
+        registry,
+        "music.status",
+        "Çalan müzik durumu — şarkı, sanatçı, ses seviyesi.",
+        _obj(required=[]),
+        _handle_music_status,
+        risk="low",
+    )
+
+    # ── music.search ────────────────────────────────────────────
+    def _handle_music_search(
+        *, query: str, limit: int = 10, **_: Any
+    ) -> dict:
+        """Search for tracks."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    tracks = pool.submit(
+                        asyncio.run,
+                        player.search(query, limit=limit),
+                    ).result(timeout=15)
+            else:
+                tracks = asyncio.run(
+                    player.search(query, limit=limit)
+                )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": True,
+            "count": len(tracks),
+            "tracks": [t.to_dict() for t in tracks],
+        }
+
+    n += _reg(
+        registry,
+        "music.search",
+        "Şarkı ara — Spotify'da şarkı/sanatçı/albüm ara.",
+        _obj(
+            ("query", "string", "Arama sorgusu"),
+            ("limit", "integer", "Maksimum sonuç (varsayılan: 10)"),
+            required=["query"],
+        ),
+        _handle_music_search,
+        risk="low",
+    )
+
+    # ── music.playlists ─────────────────────────────────────────
+    def _handle_music_playlists(**_: Any) -> dict:
+        """List playlists."""
+        import asyncio
+
+        player = _get_player()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    playlists = pool.submit(
+                        asyncio.run, player.list_playlists()
+                    ).result(timeout=15)
+            else:
+                playlists = asyncio.run(player.list_playlists())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {
+            "ok": True,
+            "count": len(playlists),
+            "playlists": [p.to_dict() for p in playlists],
+        }
+
+    n += _reg(
+        registry,
+        "music.playlists",
+        "Playlist listele — Spotify playlist'lerini getir.",
+        _obj(required=[]),
+        _handle_music_playlists,
+        risk="low",
+    )
+
+    # ── music.suggest ───────────────────────────────────────────
+    def _handle_music_suggest(**_: Any) -> dict:
+        """Get context-aware music suggestion."""
+        suggester = _get_suggester()
+        suggestion = suggester.suggest()
+        return {
+            "ok": True,
+            **suggestion.to_dict(),
+        }
+
+    n += _reg(
+        registry,
+        "music.suggest",
+        "Bağlama uygun müzik önerisi — takvim ve saat bazlı.",
+        _obj(required=[]),
+        _handle_music_suggest,
         risk="low",
     )
 
