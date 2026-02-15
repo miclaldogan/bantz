@@ -1672,13 +1672,10 @@ ASSISTANT (sadece JSON):"""
             and a repair pass was needed to obtain valid JSON.
         """
 
-        from bantz.brain.json_protocol import (
-            extract_first_json_object,
-            repair_common_json_issues,
-            validate_orchestrator_output,
-            balance_truncated_json,
-        )
-
+        from bantz.brain.json_protocol import (balance_truncated_json,
+                                               extract_first_json_object,
+                                               repair_common_json_issues,
+                                               validate_orchestrator_output)
         # Issue #594: schema-level repair/validation (field-by-field)
         from bantz.brain.router_validation import repair_router_output
 
@@ -2507,7 +2504,8 @@ class HybridJarvisLLMOrchestrator:
             }
 
             try:
-                from bantz.brain.prompt_engineering import PromptBuilder, build_session_context
+                from bantz.brain.prompt_engineering import (
+                    PromptBuilder, build_session_context)
 
                 effective_session_context = session_context or build_session_context()
                 seed = str((effective_session_context or {}).get("session_id") or "default")
