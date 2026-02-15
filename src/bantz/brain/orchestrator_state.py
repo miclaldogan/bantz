@@ -591,6 +591,12 @@ class OrchestratorState:
         """Set gmail listed messages with cap enforcement.
 
         Issue #1314: Keeps only the last max_gmail_listed entries.
+
+        Args:
+            messages: List of Gmail message dicts (id, from, subject).
+
+        Returns:
+            None. Caps ``gmail_listed_messages`` to ``max_gmail_listed``.
         """
         self.gmail_listed_messages = messages[-self.max_gmail_listed :]
 
@@ -598,6 +604,12 @@ class OrchestratorState:
         """Set calendar listed events with cap enforcement.
 
         Issue #1314: Keeps only the last max_calendar_listed entries.
+
+        Args:
+            events: List of calendar event dicts (id, summary, start, end).
+
+        Returns:
+            None. Caps ``calendar_listed_events`` to ``max_calendar_listed``.
         """
         self.calendar_listed_events = events[-self.max_calendar_listed :]
 
@@ -605,6 +617,12 @@ class OrchestratorState:
         """Add a ReAct observation with cap enforcement.
 
         Issue #1314: Keeps only the last max_react_observations entries.
+
+        Args:
+            observation: ReAct observation dict (iteration, tool, result_summary, success).
+
+        Returns:
+            None. Appends to ``react_observations`` and caps to ``max_react_observations``.
         """
         self.react_observations.append(observation)
         if len(self.react_observations) > self.max_react_observations:
