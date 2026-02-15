@@ -175,11 +175,11 @@ class TestLineOperations:
         f = workspace / "test.py"
         f.write_text("A\nB\nC\nD\nE\n")
         editor.replace_lines(str(f), 2, 4, "REPLACED\n")
-        content = f.read_text()
-        assert "REPLACED" in content
-        assert "B" not in content
-        assert "C" not in content
-        assert "D" not in content
+        lines = f.read_text().splitlines()
+        assert "REPLACED" in lines
+        assert "B" not in lines
+        assert "C" not in lines
+        assert "D" not in lines
 
 
 # ─────────────────────────────────────────────────────────────────

@@ -1353,10 +1353,15 @@ ASSISTANT (sadece JSON):"""
         # Issue #1276: Inject active entity context for cross-turn slot tracking
         # Placed after dialog summary, before retrieved memory (medium priority).
         # Budget: ~100 tokens max, only present when an active entity exists.
+        # Fix #1310: Use .get() instead of .pop() to avoid mutating caller's dict.
+        # Keys extracted here are excluded from SESSION_CONTEXT serialization below.
+        _extracted_keys: set[str] = set()
         if session_context and remaining > 50:
             _entity_ctx = None
             if isinstance(session_context, dict):
-                _entity_ctx = session_context.pop("active_entity", None)
+                _entity_ctx = session_context.get("active_entity")
+                if _entity_ctx is not None:
+                    _extracted_keys.add("active_entity")
             if _entity_ctx:
                 entity_header = "ACTIVE_ENTITY (önceki turda oluşturulan/değiştirilen varlık):\n"
                 entity_overhead = _estimate_tokens(entity_header) + 1
@@ -1400,9 +1405,11 @@ ASSISTANT (sadece JSON):"""
 
         # Issue #938: Extract and inject NLU slots as a dedicated block
         # before session_context so the 3B model sees pre-parsed entities.
+        # Fix #1310: Use .get() instead of .pop() to avoid mutating caller's dict.
         _nlu_slots = None
         if session_context and "nlu_slots" in session_context:
-            _nlu_slots = session_context.pop("nlu_slots")
+            _nlu_slots = session_context.get("nlu_slots")
+            _extracted_keys.add("nlu_slots")
             try:
                 slots_str = json.dumps(_nlu_slots, ensure_ascii=False)
             except Exception:
@@ -1419,10 +1426,17 @@ ASSISTANT (sadece JSON):"""
                 session_budget = max(0, session_budget - used)
 
         if session_context and session_budget > 0:
+            # Fix #1310: Exclude keys already injected as dedicated blocks
+            # (active_entity, nlu_slots) to avoid duplication in SESSION_CONTEXT.
+            _ctx_to_serialize = (
+                {k: v for k, v in session_context.items() if k not in _extracted_keys}
+                if _extracted_keys
+                else session_context
+            )
             try:
-                ctx_str = json.dumps(session_context, ensure_ascii=False, indent=2)
+                ctx_str = json.dumps(_ctx_to_serialize, ensure_ascii=False, indent=2)
             except Exception:
-                ctx_str = str(session_context)
+                ctx_str = str(_ctx_to_serialize)
 
             header = "SESSION_CONTEXT:\n"
             overhead = _estimate_tokens(header) + 1
@@ -1809,9 +1823,13 @@ ASSISTANT (sadece JSON):"""
             # multi-word patterns to avoid false positives.
             "takvim planı", "günlük plan", "haftalık plan",
             "etkinlik iptal", "randevu iptal", "toplantı iptal",
+            # Bare "iptal" — often means event cancellation
+            "iptal",
             # "saat kaçta" = "at what time" (calendar follow-up about
             # event times) vs "saat kaç" = "what time is it" (system).
             "saat kaçta",
+            # Declarative calendar: "olacak" (will be/happen)
+            "olacak",
         ],
         "gmail": [
             "mail", "e-posta", "eposta", "mesaj", "gönder",

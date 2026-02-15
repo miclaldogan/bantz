@@ -182,10 +182,19 @@ class TestProtectedSpans:
 
 
 def _has_translation_models():
-    """Check if MarianMT models are available."""
+    """Check if MarianMT models are available and working.
+
+    The ``available`` property only checks that transformers/sentencepiece
+    can be imported.  With torch < 2.6 the model loading itself fails
+    (CVE-2025-32434 safeguard), so we probe an actual translation.
+    """
     try:
         b = LanguageBridge()
-        return b.available
+        if not b.available:
+            return False
+        # Attempt a real translation to verify torch model loading works
+        result = b.to_en("merhaba")
+        return result.canonical != "merhaba"  # If unchanged, model failed
     except Exception:
         return False
 

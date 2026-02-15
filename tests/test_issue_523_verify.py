@@ -98,7 +98,8 @@ class TestVerifyAllOk:
 class TestVerifyEmpty:
     def test_empty_result_none(self):
         from bantz.brain.verify_results import verify_tool_results
-        results = [{"tool": "calendar.list_events", "success": True, "result": None, "result_summary": ""}]
+        # Use a tool NOT in valid_empty_tools so None result counts as failure
+        results = [{"tool": "calendar.create_event", "success": True, "result": None, "result_summary": ""}]
         vr = verify_tool_results(results)
         assert vr.verified is False
         assert vr.tools_fail == 1
@@ -153,7 +154,8 @@ class TestVerifyRetry:
         def retry_fn(tool_name, original):
             return {"tool": tool_name, "success": True, "result": "recovered", "result_summary": "ok"}
 
-        results = [{"tool": "calendar.list_events", "success": False, "error": "timeout"}]
+        # Use a tool in retryable_tools but NOT in valid_empty_tools
+        results = [{"tool": "gmail.get_message", "success": False, "error": "timeout"}]
         vr = verify_tool_results(results, config=VerifyConfig(max_retries=1), retry_fn=retry_fn)
         assert vr.verified is True
         assert vr.tools_retry == 1
@@ -167,7 +169,8 @@ class TestVerifyRetry:
         def retry_fn(tool_name, original):
             return {"tool": tool_name, "success": False, "error": "still broken"}
 
-        results = [{"tool": "test.tool", "success": False, "error": "broken"}]
+        # Use a tool in retryable_tools whitelist
+        results = [{"tool": "contacts.resolve", "success": False, "error": "broken"}]
         vr = verify_tool_results(results, config=VerifyConfig(max_retries=1), retry_fn=retry_fn)
         assert vr.verified is False
         assert vr.tools_retry == 1
@@ -211,7 +214,8 @@ class TestVerifyRetry:
         def retry_fn(tool_name, original):
             return {"tool": tool_name, "success": True, "result": "data", "result_summary": "data"}
 
-        results = [{"tool": "test.tool", "success": True, "result": None, "result_summary": ""}]
+        # Use a tool that IS retryable but NOT in valid_empty_tools
+        results = [{"tool": "contacts.resolve", "success": True, "result": None, "result_summary": ""}]
         vr = verify_tool_results(results, config=VerifyConfig(retry_empty=True), retry_fn=retry_fn)
         assert vr.verified is True
         assert vr.tools_retry == 1

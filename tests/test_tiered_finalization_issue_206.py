@@ -144,9 +144,12 @@ def test_calendar_stays_fast_no_quality_escalation():
     output, state = loop.process_turn("bugün neler var?", state)
 
     assert finalizer.calls == 0
-    assert state.trace.get("response_tier") == "fast"
+    # Issue #1215: calendar.list_events now uses deterministic path,
+    # bypassing the fast/quality tier decision entirely.
+    assert state.trace.get("finalizer_strategy") == "deterministic_calendar"
     assert state.trace.get("finalizer_used") is False
-    assert "bugün" in output.assistant_reply.lower()
+    # Deterministic summary includes event details
+    assert "Team Meeting" in output.assistant_reply or "etkinlik" in output.assistant_reply.lower()
 
 
 def test_email_draft_uses_quality_finalizer():

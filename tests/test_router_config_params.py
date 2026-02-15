@@ -25,7 +25,7 @@ class MockLLMClient:
         self.calls = []
         self.model_name = "test-model"
     
-    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200) -> str:
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, **_kwargs) -> str:
         self.calls.append({
             "prompt": prompt,
             "temperature": temperature,

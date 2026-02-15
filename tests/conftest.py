@@ -10,6 +10,32 @@ from typing import Any
 
 import pytest
 
+# ── Issue: sync_valid_tools class mutation guard ─────────────────────────
+# JarvisLLMOrchestrator.sync_valid_tools() (called by OrchestratorLoop.__init__)
+# mutates class-level _VALID_TOOLS and SYSTEM_PROMPT. Without this global
+# autouse fixture, tests that create OrchestratorLoop with different registries
+# progressively narrow _VALID_TOOLS, causing later tests to fail.
+from bantz.brain.llm_router import JarvisLLMOrchestrator as _Orch
+
+_PRISTINE_VALID_TOOLS = frozenset(_Orch._VALID_TOOLS)
+_PRISTINE_SYSTEM_PROMPT = (
+    _Orch._SYSTEM_PROMPT_CORE
+    + _Orch._SYSTEM_PROMPT_DETAIL
+    + _Orch._SYSTEM_PROMPT_EXAMPLES
+)
+
+
+@pytest.fixture(autouse=True)
+def _restore_orchestrator_class_state():
+    """Restore JarvisLLMOrchestrator class-level state before/after each test."""
+    _Orch._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    _Orch.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+    _Orch._tool_registry = None
+    yield
+    _Orch._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    _Orch.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+    _Orch._tool_registry = None
+
 
 @pytest.fixture(autouse=True)
 def _ensure_event_loop_for_sync_tests():
