@@ -33,19 +33,13 @@ import logging
 import os
 import threading
 import time
-from typing import List, Optional, Iterator, Any
 from dataclasses import dataclass
+from typing import Any, Iterator, List, Optional
 
-from bantz.llm.base import (
-    LLMClient,
-    LLMMessage,
-    LLMResponse,
-    LLMToolCall,
-    LLMConnectionError,
-    LLMModelNotFoundError,
-    LLMTimeoutError,
-    LLMInvalidResponseError,
-)
+from bantz.llm.base import (LLMClient, LLMConnectionError,
+                            LLMInvalidResponseError, LLMMessage,
+                            LLMModelNotFoundError, LLMResponse,
+                            LLMTimeoutError, LLMToolCall)
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +276,7 @@ class VLLMOpenAIClient(LLMClient):
         max_retries = 3
         last_exc: Exception | None = None
         for attempt in range(max_retries):
-            t0 = time.perf_counter()
+            t0 = time.perf_counter()  # noqa: F841 — kept for future latency logging
             try:
                 return self._do_chat_request(
                     client, openai_messages,
@@ -428,14 +422,15 @@ class VLLMOpenAIClient(LLMClient):
             # Issue #1104: Classify OpenAI typed exceptions first, then
             # fall back to string matching for generic exceptions.
             try:
-                from openai import RateLimitError, AuthenticationError, APITimeoutError
+                from openai import (APITimeoutError, AuthenticationError,
+                                    RateLimitError)
                 if isinstance(e, RateLimitError):
                     raise LLMConnectionError(
-                        f"vLLM rate_limited (429). Retry later."
+                        "vLLM rate_limited (429). Retry later."
                     ) from e
                 if isinstance(e, AuthenticationError):
                     raise LLMConnectionError(
-                        f"vLLM authentication failed. Check VLLM_API_KEY."
+                        "vLLM authentication failed. Check VLLM_API_KEY."
                     ) from e
                 if isinstance(e, APITimeoutError):
                     raise LLMTimeoutError(
@@ -513,6 +508,7 @@ class VLLMOpenAIClient(LLMClient):
         total_tokens = 0
         total_content_chars = 0  # Issue #1013: accumulate content length
         chunk_count = 0
+        stream = None  # Issue #1311: track for cleanup in finally
         
         try:
             # Call OpenAI-compatible streaming API
@@ -611,6 +607,15 @@ class VLLMOpenAIClient(LLMClient):
                 raise LLMInvalidResponseError(
                     f"vLLM stream failed: {e}"
                 ) from e
+        finally:
+            # Issue #1311: Always close the stream to prevent HTTP connection
+            # leaks. This runs when the generator is fully consumed, explicitly
+            # closed, or garbage-collected after early exit.
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
     
     def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None, system_prompt: Optional[str] = None) -> str:
         """Simple text completion (used by Router).

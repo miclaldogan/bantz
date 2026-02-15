@@ -2,30 +2,20 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import os
+import time
+from dataclasses import dataclass
 from typing import Iterator, List, Optional
 
 import requests
 
-from bantz.llm.base import (
-    LLMClient,
-    LLMMessage,
-    LLMResponse,
-    LLMConnectionError,
-    LLMModelNotFoundError,
-    LLMTimeoutError,
-    LLMInvalidResponseError,
-)
-
-from bantz.llm.privacy import redact_for_cloud, minimize_for_cloud
-from bantz.llm.quota_tracker import (
-    QuotaTracker,
-    QuotaExceeded,
-    CircuitBreaker,
-    CircuitOpen,
-)
-
+from bantz.llm.base import (LLMClient, LLMConnectionError,
+                            LLMInvalidResponseError, LLMMessage,
+                            LLMModelNotFoundError, LLMResponse,
+                            LLMTimeoutError)
+from bantz.llm.privacy import minimize_for_cloud, redact_for_cloud
+from bantz.llm.quota_tracker import (CircuitBreaker, CircuitOpen,
+                                     QuotaExceeded, QuotaTracker)
 
 logger = logging.getLogger(__name__)
 metrics_logger = logging.getLogger("bantz.llm.metrics")
@@ -57,9 +47,6 @@ RETRY_BASE_DELAY = 1.0  # seconds
 RETRY_MAX_DELAY = 30.0  # seconds
 RETRY_BACKOFF_FACTOR = 2.0
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
-
-
-from dataclasses import dataclass
 
 
 @dataclass
@@ -374,7 +361,7 @@ class GeminiClient(LLMClient):
 
             except requests.RequestException as e:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                last_exception = e
+                last_exception = e  # noqa: F841 — kept for debugger inspection
                 if _metrics_enabled():
                     metrics_logger.info(
                         "llm_call_failed backend=%s model=%s latency_ms=%s "
@@ -420,7 +407,7 @@ class GeminiClient(LLMClient):
                         attempt,
                     )
                 raise LLMInvalidResponseError(
-                    f"Gemini parse_error reason=parse_error"
+                    "Gemini parse_error reason=parse_error"
                 ) from e
 
         # Should not reach here, but safety net
@@ -562,12 +549,14 @@ class GeminiClient(LLMClient):
                     _wait = 2 ** _attempt
                     logger.warning("[GEMINI_STREAM] 429 rate-limited, retry %d/%d in %ds",
                                    _attempt, _max_stream_retries, _wait)
+                    r.close()  # Issue #1311: close before retry to prevent leak
                     time.sleep(_wait)
                     continue
                 if r.status_code >= 500 and _attempt < _max_stream_retries:
                     _wait = 2 ** _attempt
                     logger.warning("[GEMINI_STREAM] %d server error, retry %d/%d in %ds",
                                    r.status_code, _attempt, _max_stream_retries, _wait)
+                    r.close()  # Issue #1311: close before retry to prevent leak
                     time.sleep(_wait)
                     continue
                 break
@@ -708,6 +697,14 @@ class GeminiClient(LLMClient):
             raise LLMInvalidResponseError(
                 "Gemini parse_error reason=parse_error"
             ) from e
+        finally:
+            # Issue #1311: Always close the response to release the HTTP
+            # connection back to the pool, even on early exit or error.
+            if r is not None:
+                try:
+                    r.close()
+                except Exception:
+                    pass
 
     def chat_stream_to_text(
         self,
