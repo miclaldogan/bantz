@@ -44,7 +44,10 @@ class ReflectionConfig:
 
     enabled: bool = _REFLECTION_ENABLED
     confidence_threshold: float = 0.7
-    max_prompt_tokens: int = 600    # keep reflection prompt small
+    # Issue #1322: Aligned with build_reflection_prompt max_chars=800.
+    # Turkish text ≈ 3-4 chars/token → 800 chars ≈ 200-270 tokens.
+    # 512 tokens leaves headroom for the template chrome.
+    max_prompt_tokens: int = 512
     max_response_tokens: int = 300
     temperature: float = 0.0
 
@@ -170,7 +173,7 @@ Yanıt (sadece JSON):
 def build_reflection_prompt(
     user_input: str,
     tool_results: list[dict[str, Any]],
-    max_chars: int = 800,
+    max_chars: int = 600,
 ) -> str:
     """Build a compact reflection prompt for the LLM.
 
@@ -216,25 +219,19 @@ def parse_reflection_response(raw: str) -> ReflectionResult:
     """
     text = raw.strip()
 
-    # Strip markdown code fences
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [ln for ln in lines if not ln.strip().startswith("```")]
-        text = "\n".join(lines).strip()
+    # Issue #1322: Strip markdown code fences (opening + closing together)
+    import re as _re
+    text = _re.sub(r"```\w*\n?(.*?)```", r"\1", text, flags=_re.DOTALL).strip()
 
     # Try JSON parse
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        # Try extracting JSON object from surrounding text
-        import re
-        match = re.search(r'\{[^{}]+\}', text, re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group())
-            except json.JSONDecodeError:
-                data = None
-        else:
+        # Issue #1322: Use balanced-brace parser for nested JSON
+        try:
+            from bantz.brain.json_protocol import extract_first_json_object
+            data = extract_first_json_object(text)
+        except Exception:
             data = None
 
     if not isinstance(data, dict):
