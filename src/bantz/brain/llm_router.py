@@ -1900,14 +1900,29 @@ ASSISTANT (sadece JSON):"""
 
     # Issue #1212: Anaphoric follow-up detection for Turkish
     # Issue #1254: Added "başka", "içeriğinde", "ne var", "daha" etc.
+    # Issue #1319: Added missing Turkish demonstrative pronouns and
+    # anaphoric forms: accusatives (onu, bunu, şunu), genitives
+    # (bunun, onun), and context-reference words (yukarıdaki, önceki,
+    # aynı).  Note: bare "bu", "şu", "o" intentionally excluded to
+    # avoid false positives on common short utterances.
     _ANAPHORA_TOKENS: frozenset[str] = frozenset({
-        "onlar", "bunlar", "şunlar", "bunları", "onları", "şunları",
+        # Plural demonstratives
+        "onlar", "bunlar", "şunlar",
+        # Accusative forms
+        "bunları", "onları", "şunları",
+        "onu", "bunu", "şunu",
+        # Genitive forms
+        "bunun", "onun",
+        # Interrogative / follow-up
         "nelermiş", "neymiş", "neydi", "hangisi", "hangileri",
+        # Summarisation / continuation commands
         "özetle", "detay", "ayrıntı", "devam", "devamı",
         "tekrarla", "göster", "oku", "anlat",
         # Issue #1254: Common follow-up words missing from original set
         "başka", "içeriğinde", "içeriği", "içindeki", "daha",
-        "neler", "neymiş", "bana", "söyle", "açıkla",
+        "neler", "bana", "söyle", "açıkla",
+        # Issue #1319: Context-reference words
+        "yukarıdaki", "önceki", "aynı",
     })
 
     def _is_anaphoric_followup(self, user_input: str) -> bool:
