@@ -531,6 +531,12 @@ def main(argv: list[str] | None = None) -> int:
         proactive_args = proactive_p.parse_args(argv)
         return handle_proactive_command(proactive_args)
 
+    # Metrics — observability reports (Issue #1290)
+    if argv and argv[0] == "metrics":
+        from bantz.data.metrics_reporter import main as metrics_main
+        metrics_main(argv[1:])
+        return 0
+
     # Doctor — system health diagnostics (Issue #1223)
     if argv and argv[0] == "doctor":
         from bantz.doctor import run_doctor
@@ -577,6 +583,8 @@ Kullanım örnekleri:
   bantz --serve --http --port 9000  # Farklı portta HTTP
   bantz --http-only               # Sadece HTTP API (CLI yok)
   bantz --once "google aç"       # Tek seferlik (tarayıcı kalıcı değil)
+  bantz metrics --period 24h     # Observability metrics report
+  bantz metrics --period 7d      # Last 7 days metrics
 """,
     )
     parser.add_argument("--policy", default="config/policy.json", help="Policy dosyası yolu")
