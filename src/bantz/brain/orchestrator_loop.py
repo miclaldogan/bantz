@@ -22,7 +22,7 @@ from typing import Any, Optional
 from bantz.agent.tools import ToolRegistry
 from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
 from bantz.brain.orchestrator_state import OrchestratorState, extract_entity_from_tool_result
-from bantz.brain.reflection import reflect, ReflectionConfig, ReflectionResult
+from bantz.brain.reflection import reflect, ReflectionResult
 from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
 from bantz.brain.memory_lite import DialogSummaryManager, CompactSummary
 from bantz.core.events import EventBus, EventType
@@ -329,9 +329,18 @@ class OrchestratorLoop:
             self._memory_tracer = None
 
         # Initialize safety guard (Issue #140)
+        # Issue #1291: Policy Engine v2 — risk tiers, presets, redaction
+        _policy_v2 = None
+        try:
+            from bantz.policy.engine_v2 import PolicyEngineV2
+            _policy_v2 = PolicyEngineV2()
+        except Exception as _pv2_err:
+            logger.debug("[ORCHESTRATOR] PolicyEngineV2 init failed: %s", _pv2_err)
+
         if self.config.enable_safety_guard:
             self.safety_guard = SafetyGuard(
-                policy=self.config.security_policy or ToolSecurityPolicy()
+                policy=self.config.security_policy or ToolSecurityPolicy(),
+                policy_engine_v2=_policy_v2,
             )
         else:
             self.safety_guard = None
@@ -741,7 +750,7 @@ class OrchestratorLoop:
                 # Phase 2.75: Self-Reflection (Issue #1277)
                 # Semantic verification: does the result satisfy the user's request?
                 try:
-                    reflection = self._reflection_phase(
+                    self._reflection_phase(
                         user_input, orchestrator_output, tool_results, state,
                     )
                 except Exception as _ref_exc:
@@ -1477,11 +1486,11 @@ class OrchestratorLoop:
                     pass
         
         if self.config.debug:
-            logger.debug(f"[ORCHESTRATOR] LLM Planning Phase:")
-            logger.debug(f"  User: {user_input}")
-            logger.debug(f"  Dialog Summary (memory-lite): {dialog_summary or 'None'}")
-            logger.debug(f"  Recent History: {len(conversation_history)} turns")
-            logger.debug(f"  Tool Results: {len(tool_results)}")
+            logger.debug("[ORCHESTRATOR] LLM Planning Phase:")
+            logger.debug("  User: %s", user_input)
+            logger.debug("  Dialog Summary (memory-lite): %s", dialog_summary or 'None')
+            logger.debug("  Recent History: %d turns", len(conversation_history))
+            logger.debug("  Tool Results: %d", len(tool_results))
         
         # Issue #417: Use cached session context from state (built once in process_turn)
         # Issue #359: state.session_context is always set by process_turn (or externally)
@@ -1861,15 +1870,15 @@ class OrchestratorLoop:
                         )
 
         if self.config.debug:
-            logger.debug(f"[ORCHESTRATOR] LLM Decision:")
-            logger.debug(f"  Route: {output.route}")
-            logger.debug(f"  Intent: {output.calendar_intent}")
-            logger.debug(f"  Confidence: {output.confidence:.2f}")
-            logger.debug(f"  Tool Plan: {output.tool_plan}")
-            logger.debug(f"  Ask User: {output.ask_user}")
-            logger.debug(f"  Requires Confirmation: {output.requires_confirmation}")
+            logger.debug("[ORCHESTRATOR] LLM Decision:")
+            logger.debug("  Route: %s", output.route)
+            logger.debug("  Intent: %s", output.calendar_intent)
+            logger.debug("  Confidence: %.2f", output.confidence)
+            logger.debug("  Tool Plan: %s", output.tool_plan)
+            logger.debug("  Ask User: %s", output.ask_user)
+            logger.debug("  Requires Confirmation: %s", output.requires_confirmation)
             if output.reasoning_summary:
-                logger.debug(f"  Reasoning: {output.reasoning_summary}")
+                logger.debug("  Reasoning: %s", output.reasoning_summary)
         
         # Emit routing event
         self.event_bus.publish("llm.decision", {
@@ -2162,6 +2171,7 @@ class OrchestratorLoop:
 
                 risk_level = None
                 try:
+                    from bantz.tools.metadata import get_tool_risk
                     risk_level = get_tool_risk(tool_name).value
                 except Exception:
                     risk_level = original.get("risk_level")
@@ -3004,11 +3014,11 @@ class OrchestratorLoop:
         )
         
         if self.config.debug:
-            logger.debug(f"[ORCHESTRATOR] State Updated:")
-            logger.debug(f"  Rolling Summary: {state.rolling_summary[:100] if state.rolling_summary else 'None'}...")
-            logger.debug(f"  Memory-lite: {len(self.memory)} turns")
-            logger.debug(f"  Conversation Turns: {len(state.conversation_history)}")
-            logger.debug(f"  Tool Results: {len(state.last_tool_results)}")
+            logger.debug("[ORCHESTRATOR] State Updated:")
+            logger.debug("  Rolling Summary: %s...", state.rolling_summary[:100] if state.rolling_summary else 'None')
+            logger.debug("  Memory-lite: %d turns", len(self.memory))
+            logger.debug("  Conversation Turns: %d", len(state.conversation_history))
+            logger.debug("  Tool Results: %d", len(state.last_tool_results))
 
         # Issue #1288: Log ingest store stats for this turn
         if getattr(self, "_ingest_bridge", None) is not None:
