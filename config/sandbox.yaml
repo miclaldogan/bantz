@@ -1,0 +1,64 @@
+# ── Sandbox Execution Configuration ──────────────────────────────────
+# Issue #1295: PC Agent + CodingAgent — Sandbox Execution + Safety Guardrails
+
+sandbox:
+  # Execution mode: firejail | docker | none
+  # - firejail: Linux Firejail sandbox (recommended for production)
+  # - docker: Docker container isolation
+  # - none: Direct execution (development/test)
+  mode: "none"
+
+  # Default timeout for commands (seconds)
+  default_timeout: 30
+
+  # Maximum number of rollback checkpoints to keep
+  max_checkpoints: 50
+
+  # Allowed directories for sandboxed execution
+  allowed_dirs:
+    - "~"
+    - "/tmp/bantz"
+
+# ── Safety Guardrails ────────────────────────────────────────────────
+safety:
+  # Enable/disable safety checks
+  enabled: true
+
+  # Extra blocked patterns (regex → Turkish explanation)
+  # These are added ON TOP of the built-in blocked patterns.
+  extra_blocked: []
+  #  - pattern: "dangerous_command"
+  #    reason: "Tehlikeli komut"
+
+  # Extra dry-run-required patterns
+  extra_dry_run: []
+  #  - pattern: "risky_command"
+  #    reason: "Riskli — simülasyon gerekli"
+
+# ── PC Agent ─────────────────────────────────────────────────────────
+pc_agent:
+  # Enable file organization feature
+  file_organize: true
+
+  # Default file listing limit
+  max_file_results: 100
+
+  # Clipboard backend: xclip | xsel
+  clipboard_backend: "xclip"
+
+# ── Coding Agent ─────────────────────────────────────────────────────
+coding_agent:
+  # Test framework: pytest | unittest
+  test_framework: "pytest"
+
+  # Test execution timeout (seconds)
+  test_timeout: 120
+
+  # Code review: enable LLM-based review
+  llm_review: true
+
+  # Git operations: allow auto-commit
+  git_auto_commit: false
+
+  # Git operations: allow auto-push
+  git_auto_push: false
