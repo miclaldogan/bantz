@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 from bantz.brain.llm_router import JarvisLLMOrchestrator
 from bantz.brain.orchestrator_state import OrchestratorState
 
-
 # ======================================================================
 # Helpers
 # ======================================================================
@@ -155,6 +154,7 @@ class TestGeminiSingletonThreadSafety:
     def test_concurrent_quota_tracker_creation(self):
         """Multiple threads should get the same QuotaTracker instance."""
         import bantz.llm.gemini_client as gc
+
         # Reset to force re-creation
         gc._default_quota_tracker = None
 

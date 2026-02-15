@@ -10,7 +10,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from bantz.brain.anaphora import ReferenceTable

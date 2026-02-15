@@ -61,7 +61,8 @@ def _route_aware_fallback(
         successes = [r for r in tool_results if r.get("success", False)]
         if successes:
             try:
-                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
                 summary = _build_tool_success_summary(tool_results)
                 if summary and summary != "Tamamlandı efendim.":
                     return summary
@@ -281,7 +282,8 @@ class QualityFinalizer:
 
     def _build_prompt(self, ctx: FinalizationContext) -> str:
         """Try ``PromptBuilder`` first, fall back to inline template."""
-        from bantz.brain.tool_result_summarizer import _prepare_tool_results_for_finalizer
+        from bantz.brain.tool_result_summarizer import \
+            _prepare_tool_results_for_finalizer
 
         finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
             ctx.tool_results or [],
@@ -428,7 +430,8 @@ class FastFinalizer:
             return None
 
     def _build_prompt(self, ctx: FinalizationContext) -> str:
-        from bantz.brain.tool_result_summarizer import _prepare_tool_results_for_finalizer
+        from bantz.brain.tool_result_summarizer import \
+            _prepare_tool_results_for_finalizer
 
         prompt_lines = [
             "Kimlik / Roller:",
@@ -532,7 +535,7 @@ def decide_finalization_tier(
         return False, "fast", "no_finalizer"
 
     # Issue #517: env override for forcing finalizer tier
-    from bantz.llm.tier_env import get_tier_force_finalizer, get_tier_debug
+    from bantz.llm.tier_env import get_tier_debug, get_tier_force_finalizer
 
     forced = get_tier_force_finalizer()
     if forced in ("quality", "gemini"):
@@ -708,7 +711,8 @@ class FinalizationPipeline:
                 for r in ctx.tool_results
             )
             if has_write or has_read:
-                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
                 det_reply = _build_tool_success_summary(ctx.tool_results)
                 ctx.state.update_trace(
                     finalizer_used=False,
@@ -726,7 +730,8 @@ class FinalizationPipeline:
                 for r in ctx.tool_results
             )
             if has_system:
-                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
                 det_reply = _build_tool_success_summary(ctx.tool_results)
                 ctx.state.update_trace(
                     finalizer_used=False,
@@ -976,7 +981,8 @@ class FinalizationPipeline:
             _reply_lower = (output.assistant_reply or "").strip().lower()
             _is_generic = any(g in _reply_lower for g in _generic_phrases)
             if _is_generic:
-                from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
                 summary = _build_tool_success_summary(ctx.tool_results)
                 if summary and summary != "Tamamlandı efendim.":
                     return replace(output, assistant_reply=summary, finalizer_model="none(tool_summary_over_generic)")
@@ -990,7 +996,8 @@ class FinalizationPipeline:
             validated = _validate_reply_language(output.assistant_reply, route=_route, tool_results=ctx.tool_results)
             return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
 
-        from bantz.brain.tool_result_summarizer import _build_tool_success_summary
+        from bantz.brain.tool_result_summarizer import \
+            _build_tool_success_summary
 
         return replace(
             output,
