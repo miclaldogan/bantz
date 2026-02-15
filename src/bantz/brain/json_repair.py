@@ -13,16 +13,14 @@ Key Features:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass
 from typing import Any, Protocol
 
-from bantz.brain.json_protocol import (
-    JsonParseError,
-    ValidationError,
-    extract_first_json_object,
-    validate_action_shape,
-    validate_tool_action,
-)
+from bantz.brain.json_protocol import (JsonParseError, ValidationError,
+                                       extract_first_json_object,
+                                       validate_action_shape,
+                                       validate_tool_action)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +45,29 @@ class RepairResult:
     attempts: int
     error: str | None = None
     error_type: str | None = None
+
+
+# Issue #1315: Maximum raw_text length to prevent prompt injection via oversized input
+_MAX_RAW_TEXT_LENGTH = 2000
+
+# Issue #1315: Regex to strip special LLM tokens that could hijack repair prompt
+_SPECIAL_TOKEN_RE = re.compile(
+    r"<\|(?:system|user|assistant|im_start|im_end|endoftext|pad|tool)\|>",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_raw_text(raw_text: str) -> str:
+    """Sanitize raw LLM output before injecting into repair prompt.
+
+    Issue #1315: Prevents prompt injection by:
+    1. Stripping special LLM tokens (<|system|>, <|user|>, etc.)
+    2. Truncating to _MAX_RAW_TEXT_LENGTH characters
+    """
+    sanitized = _SPECIAL_TOKEN_RE.sub("", raw_text)
+    if len(sanitized) > _MAX_RAW_TEXT_LENGTH:
+        sanitized = sanitized[:_MAX_RAW_TEXT_LENGTH] + "\n[...truncated]"
+    return sanitized
 
 
 def build_repair_prompt(*, raw_text: str, error_summary: str, validation_error: ValidationError | None = None) -> str:
@@ -118,7 +139,7 @@ def build_repair_prompt(*, raw_text: str, error_summary: str, validation_error: 
         error_guidance +
         f"Error summary: {error_summary}\n\n"
         "Original text:\n"
-        f"{raw_text}\n"
+        f"{_sanitize_raw_text(raw_text)}\n"
     )
 
 
