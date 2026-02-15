@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import re
 
-
-
 # ── slots.py module-level regex ───────────────────────────────────────────
 
 
