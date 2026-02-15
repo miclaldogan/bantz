@@ -633,7 +633,7 @@ U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","
             # Option 3: No health method → assume healthy (mock clients, etc.)
             return True
         except Exception as e:
-            logger.warning(f"[router_health] Health check failed: {e}")
+            logger.warning("[router_health] Health check failed: %s", e)
             return False
 
     def _fallback_route(self, user_input: str) -> "OrchestratorOutput":
@@ -966,7 +966,7 @@ ASSISTANT (sadece JSON):"""
             except Exception as e:
                 last_err = str(e)
                 was_repaired = True  # LLM re-prompt = heavy repair
-                logger.warning(f"Router JSON parse failed: {e}")
+                logger.warning("Router JSON parse failed: %s", e)
 
                 # Attempt repair by asking the model to re-emit strict JSON.
                 # Keep the repair prompt small and deterministic.
@@ -2440,7 +2440,7 @@ ASSISTANT (sadece JSON):"""
         Uses keyword-based route detection so the correct tool can still
         be executed even when the 7B model outputs malformed JSON.
         """
-        logger.warning(f"Orchestrator fallback triggered: {error}")
+        logger.warning("Orchestrator fallback triggered: %s", error)
 
         # Attempt keyword based route + tool resolution
         kw_route = self._detect_route_from_input(user_input)
