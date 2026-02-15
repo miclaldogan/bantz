@@ -513,6 +513,7 @@ class VLLMOpenAIClient(LLMClient):
         total_tokens = 0
         total_content_chars = 0  # Issue #1013: accumulate content length
         chunk_count = 0
+        stream = None  # Issue #1311: track for cleanup in finally
         
         try:
             # Call OpenAI-compatible streaming API
@@ -611,6 +612,15 @@ class VLLMOpenAIClient(LLMClient):
                 raise LLMInvalidResponseError(
                     f"vLLM stream failed: {e}"
                 ) from e
+        finally:
+            # Issue #1311: Always close the stream to prevent HTTP connection
+            # leaks. This runs when the generator is fully consumed, explicitly
+            # closed, or garbage-collected after early exit.
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
     
     def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None, system_prompt: Optional[str] = None) -> str:
         """Simple text completion (used by Router).

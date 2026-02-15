@@ -562,12 +562,14 @@ class GeminiClient(LLMClient):
                     _wait = 2 ** _attempt
                     logger.warning("[GEMINI_STREAM] 429 rate-limited, retry %d/%d in %ds",
                                    _attempt, _max_stream_retries, _wait)
+                    r.close()  # Issue #1311: close before retry to prevent leak
                     time.sleep(_wait)
                     continue
                 if r.status_code >= 500 and _attempt < _max_stream_retries:
                     _wait = 2 ** _attempt
                     logger.warning("[GEMINI_STREAM] %d server error, retry %d/%d in %ds",
                                    r.status_code, _attempt, _max_stream_retries, _wait)
+                    r.close()  # Issue #1311: close before retry to prevent leak
                     time.sleep(_wait)
                     continue
                 break
@@ -708,6 +710,14 @@ class GeminiClient(LLMClient):
             raise LLMInvalidResponseError(
                 "Gemini parse_error reason=parse_error"
             ) from e
+        finally:
+            # Issue #1311: Always close the response to release the HTTP
+            # connection back to the pool, even on early exit or error.
+            if r is not None:
+                try:
+                    r.close()
+                except Exception:
+                    pass
 
     def chat_stream_to_text(
         self,
