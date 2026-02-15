@@ -20,41 +20,33 @@ from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 from bantz.agent.tools import ToolRegistry
-from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
-from bantz.brain.orchestrator_state import OrchestratorState, extract_entity_from_tool_result
-from bantz.brain.reflection import reflect, ReflectionResult
-from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
-from bantz.brain.memory_lite import DialogSummaryManager, CompactSummary
-from bantz.core.events import EventBus, EventType
-from bantz.routing.preroute import PreRouter, IntentCategory, LocalResponseGenerator
-from bantz.nlu.slots import SlotExtractor
-
-# Issue #941: Extracted modules — keep backward-compat re-exports
-from bantz.brain.tool_result_summarizer import (  # noqa: F401
-    _summarize_tool_result,
-    _prepare_tool_results_for_finalizer,
-    _build_tool_success_summary,
-    _count_items,
-    _extract_count,
-    _extract_field,
-)
-from bantz.brain.tool_plan_sanitizer import (
-    TOOL_REMAP,
-    force_tool_plan as _force_tool_plan_fn,
-    sanitize_tool_plan as _sanitize_tool_plan_fn,
-)
-from bantz.brain.post_route_corrections import (
-    looks_like_email_send_intent,
-    extract_first_email,
-    extract_recipient_name,
-    extract_message_body_hint,
-    post_route_correction_email_send,
-)
-from bantz.brain.plan_verifier import verify_plan
-from bantz.brain.tool_param_builder import build_tool_params
-from bantz.brain.misroute_integration import record_turn_misroute
 from bantz.brain.context_builder import ContextBuilder
 from bantz.brain.language_bridge import get_bridge
+from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
+from bantz.brain.memory_lite import CompactSummary, DialogSummaryManager
+from bantz.brain.misroute_integration import record_turn_misroute
+from bantz.brain.orchestrator_state import (OrchestratorState,
+                                            extract_entity_from_tool_result)
+from bantz.brain.plan_verifier import verify_plan
+from bantz.brain.post_route_corrections import (
+    extract_first_email, extract_message_body_hint, extract_recipient_name,
+    looks_like_email_send_intent, post_route_correction_email_send)
+from bantz.brain.reflection import ReflectionResult, reflect
+from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
+from bantz.brain.tool_param_builder import build_tool_params
+from bantz.brain.tool_plan_sanitizer import TOOL_REMAP
+from bantz.brain.tool_plan_sanitizer import \
+    force_tool_plan as _force_tool_plan_fn
+from bantz.brain.tool_plan_sanitizer import \
+    sanitize_tool_plan as _sanitize_tool_plan_fn
+# Issue #941: Extracted modules — keep backward-compat re-exports
+from bantz.brain.tool_result_summarizer import (  # noqa: F401
+    _build_tool_success_summary, _count_items, _extract_count, _extract_field,
+    _prepare_tool_results_for_finalizer, _summarize_tool_result)
+from bantz.core.events import EventBus, EventType
+from bantz.nlu.slots import SlotExtractor
+from bantz.routing.preroute import (IntentCategory, LocalResponseGenerator,
+                                    PreRouter)
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +310,8 @@ class OrchestratorLoop:
 
         # Issue #599: Memory injection trace/audit (best-effort, non-fatal)
         try:
-            from bantz.brain.memory_trace import MemoryBudgetConfig, MemoryTracer
+            from bantz.brain.memory_trace import (MemoryBudgetConfig,
+                                                  MemoryTracer)
 
             self._memory_tracer = MemoryTracer(
                 MemoryBudgetConfig(
@@ -552,7 +545,8 @@ class OrchestratorLoop:
                 if len(self._session_ctx_caches) >= self._session_ctx_max_size:
                     oldest = next(iter(self._session_ctx_caches))
                     del self._session_ctx_caches[oldest]
-                from bantz.brain.session_context_cache import SessionContextCache
+                from bantz.brain.session_context_cache import \
+                    SessionContextCache
                 self._session_ctx_caches[sid] = SessionContextCache(ttl_seconds=self._session_ctx_ttl)
             state.session_context = self._session_ctx_caches[sid].get_or_build()
         
@@ -682,7 +676,8 @@ class OrchestratorLoop:
                 and orchestrator_output.confidence < 0.5
             ):
                 try:
-                    from bantz.skills.declarative.generator import get_self_evolving_manager
+                    from bantz.skills.declarative.generator import \
+                        get_self_evolving_manager
                     mgr = get_self_evolving_manager()
                     if mgr is not None:
                         gap = mgr.check_for_skill_gap(
@@ -727,7 +722,8 @@ class OrchestratorLoop:
                 _use_subtask = False
                 if orchestrator_output.subtasks:
                     try:
-                        from bantz.brain.task_planner import build_plan, is_decomposition_candidate
+                        from bantz.brain.task_planner import (
+                            build_plan, is_decomposition_candidate)
                         if is_decomposition_candidate(
                             orchestrator_output.tool_plan,
                             orchestrator_output.status,
@@ -791,7 +787,8 @@ class OrchestratorLoop:
 
             # Issue #664: Structured trace export (per turn)
             try:
-                from bantz.brain.trace_exporter import build_turn_trace, write_turn_trace
+                from bantz.brain.trace_exporter import (build_turn_trace,
+                                                        write_turn_trace)
                 turn_trace = build_turn_trace(
                     turn_id=state.turn_count,
                     user_input=user_input,
@@ -1046,7 +1043,8 @@ class OrchestratorLoop:
 
         # Issue #664: Structured trace export for replay/regression
         try:
-            from bantz.brain.trace_exporter import build_turn_trace, write_turn_trace
+            from bantz.brain.trace_exporter import (build_turn_trace,
+                                                    write_turn_trace)
             elapsed_ms = int((time.time() - start_time) * 1000)
             turn_trace = build_turn_trace(
                 turn_id=state.turn_count,
@@ -1118,7 +1116,8 @@ class OrchestratorLoop:
 
             # Issue #1221: Enforce tool result size limits
             try:
-                from bantz.brain.tool_result_limiter import enforce_result_size_limits
+                from bantz.brain.tool_result_limiter import \
+                    enforce_result_size_limits
                 tool_results = enforce_result_size_limits(
                     tool_results, trace_id=trace_id,
                 )
@@ -1141,7 +1140,7 @@ class OrchestratorLoop:
 
             # ── OBSERVE ──
             for tr in tool_results:
-                state.react_observations.append({
+                state.add_react_observation({
                     "iteration": _react_iter,
                     "tool": tr.get("tool", ""),
                     "result_summary": tr.get("result_summary", "")[:300],
@@ -1218,6 +1217,7 @@ class OrchestratorLoop:
             Accumulated ``tool_results`` list across all subtasks.
         """
         from dataclasses import replace as dc_replace
+
         from bantz.brain.task_planner import resolve_params
 
         plan = state.subtask_plan
@@ -1281,7 +1281,8 @@ class OrchestratorLoop:
 
             # Enforce result size limits
             try:
-                from bantz.brain.tool_result_limiter import enforce_result_size_limits
+                from bantz.brain.tool_result_limiter import \
+                    enforce_result_size_limits
                 tool_results = enforce_result_size_limits(tool_results, trace_id=trace_id)
             except Exception:
                 pass
@@ -1324,7 +1325,7 @@ class OrchestratorLoop:
                 logger.warning("[Subtask] Subtask %d failed: %s", subtask.id, _error[:100])
 
             # Record observation
-            state.react_observations.append({
+            state.add_react_observation({
                 "iteration": subtask_idx,
                 "subtask_id": subtask.id,
                 "goal": subtask.goal,
@@ -1552,7 +1553,8 @@ class OrchestratorLoop:
                 if len(self._session_ctx_caches) >= self._session_ctx_max_size:
                     oldest = next(iter(self._session_ctx_caches))
                     del self._session_ctx_caches[oldest]
-                from bantz.brain.session_context_cache import SessionContextCache
+                from bantz.brain.session_context_cache import \
+                    SessionContextCache
                 self._session_ctx_caches[sid] = SessionContextCache(ttl_seconds=self._session_ctx_ttl)
             session_context = self._session_ctx_caches[sid].get_or_build()
             state.session_context = session_context
@@ -1664,7 +1666,8 @@ class OrchestratorLoop:
                     )
             # Also enrich subject from user input if missing
             if not _gmail_obj.get("subject"):
-                from bantz.brain.post_route_corrections import extract_subject_hint
+                from bantz.brain.post_route_corrections import \
+                    extract_subject_hint
                 _subj = extract_subject_hint(_email_text)
                 if _subj:
                     _gmail_obj["subject"] = _subj
@@ -2037,6 +2040,7 @@ class OrchestratorLoop:
         # Issue #907: Static plan verification
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         from bantz.brain.plan_verifier import infer_route_from_tools
+
         # Use the original Turkish user input for plan verification, since
         # _has_tool_indicators() patterns are Turkish.  ``user_input`` here
         # is the English bridge-translated text which would cause false
@@ -2182,7 +2186,8 @@ class OrchestratorLoop:
             return tool_results
 
         try:
-            from bantz.brain.verify_results import VerifyConfig, verify_tool_results
+            from bantz.brain.verify_results import (VerifyConfig,
+                                                    verify_tool_results)
         except Exception:
             # If the verify module isn't available for any reason, proceed.
             return tool_results
@@ -2361,12 +2366,11 @@ class OrchestratorLoop:
         # pre-scan tool_plan and queue all confirmations in order.
         if not state.has_pending_confirmation() and not confirmed_override_tool:
             try:
-                from bantz.tools.metadata import (
-                    get_tool_risk,
-                    is_destructive,
-                    requires_confirmation as check_confirmation,
-                    get_confirmation_prompt,
-                )
+                from bantz.tools.metadata import (get_confirmation_prompt,
+                                                  get_tool_risk,
+                                                  is_destructive)
+                from bantz.tools.metadata import \
+                    requires_confirmation as check_confirmation
 
                 confirmations_to_queue: list[dict[str, Any]] = []
                 for tool_name in filtered_tool_plan:
@@ -2436,12 +2440,10 @@ class OrchestratorLoop:
             
             # Confirmation firewall (Issue #160 - enhanced)
             # Import metadata module for risk classification
-            from bantz.tools.metadata import (
-                get_tool_risk,
-                is_destructive,
-                requires_confirmation as check_confirmation,
-                get_confirmation_prompt,
-            )
+            from bantz.tools.metadata import (get_confirmation_prompt,
+                                              get_tool_risk, is_destructive)
+            from bantz.tools.metadata import \
+                requires_confirmation as check_confirmation
             
             risk = get_tool_risk(tool_name)
             needs_confirmation = check_confirmation(
@@ -2794,9 +2796,8 @@ class OrchestratorLoop:
         Issue #404: Extracted from 300-line monolith into Strategy pattern.
         See ``bantz.brain.finalization_pipeline`` for the full pipeline.
         """
-        from bantz.brain.finalization_pipeline import (
-            build_finalization_context,
-        )
+        from bantz.brain.finalization_pipeline import \
+            build_finalization_context
 
         # Issue #874: Build personality block for finalizer prompt
         _personality_block: Optional[str] = None
@@ -2906,7 +2907,7 @@ class OrchestratorLoop:
             if not isinstance(events, list):
                 continue
             # Store compact event refs (id + summary + start/end for display)
-            state.calendar_listed_events = [
+            state.set_calendar_listed_events([
                 {
                     "id": ev.get("id") or ev.get("event_id") or "",
                     "summary": ev.get("summary") or ev.get("title") or "",
@@ -2915,7 +2916,7 @@ class OrchestratorLoop:
                 }
                 for ev in events
                 if isinstance(ev, dict)
-            ]
+            ])
 
     @staticmethod
     def _extract_and_register_entities(
@@ -3119,7 +3120,7 @@ class OrchestratorLoop:
                     # Issue #1218: Store listed message headers for entity resolution
                     messages = raw.get("messages") or []
                     if isinstance(messages, list) and messages:
-                        state.gmail_listed_messages = [
+                        state.set_gmail_listed_messages([
                             {
                                 "id": str(m.get("id", "")),
                                 "from": str(m.get("from", "")),
@@ -3127,7 +3128,7 @@ class OrchestratorLoop:
                             }
                             for m in messages[:20]
                             if isinstance(m, dict) and m.get("id")
-                        ]
+                        ])
                     break
     
     # =========================================================================

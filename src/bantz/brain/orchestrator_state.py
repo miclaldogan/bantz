@@ -308,12 +308,14 @@ class OrchestratorState:
     
     # Pending confirmations (FIFO queue for multiple destructive tools)
     pending_confirmations: list[dict[str, Any]] = field(default_factory=list)
+    max_pending_confirmations: int = 10  # Issue #1314: Cap pending confirmations
 
     # Confirmation override (used when a pending confirmation is accepted)
     confirmed_tool: Optional[str] = None
     
     # Trace metadata (for debugging and testing)
     trace: dict[str, Any] = field(default_factory=dict)
+    max_trace_keys: int = 20  # Issue #1314: Cap trace dict keys
     
     # Conversation history (last N turns)
     conversation_history: list[dict[str, str]] = field(default_factory=list)
@@ -347,9 +349,11 @@ class OrchestratorState:
 
     # Issue #1218: Store last listed gmail message headers for entity resolution
     gmail_listed_messages: list[dict[str, str]] = field(default_factory=list)
+    max_gmail_listed: int = 50  # Issue #1314: Cap listed messages
 
     # Issue #1224: Store last listed calendar events for #N follow-up resolution
     calendar_listed_events: list[dict[str, Any]] = field(default_factory=list)
+    max_calendar_listed: int = 50  # Issue #1314: Cap listed events
 
     # Issue #1242: Language Bridge — detected language and canonical EN input
     detected_lang: str = ""
@@ -360,6 +364,7 @@ class OrchestratorState:
     # Cleared at the start of each turn. Carries observations across ReAct
     # iterations so the LLM can see what happened and decide next action.
     react_observations: list[dict[str, Any]] = field(default_factory=list)
+    max_react_observations: int = 50  # Issue #1314: Cap observations per turn
     react_iteration: int = 0  # current ReAct iteration within a turn
 
     # Issue #1276: Cross-turn entity/slot tracking
@@ -531,9 +536,17 @@ class OrchestratorState:
             self.pending_confirmations = [action]
 
     def add_pending_confirmation(self, action: dict[str, Any]) -> None:
-        """Add a pending confirmation to the queue (FIFO)."""
+        """Add a pending confirmation to the queue (FIFO).
+
+        Issue #1314: Enforces max_pending_confirmations cap. Oldest entries
+        are evicted when the queue is full.
+        """
         with self._lock:
             self.pending_confirmations.append(action)
+            if len(self.pending_confirmations) > self.max_pending_confirmations:
+                self.pending_confirmations = self.pending_confirmations[
+                    -self.max_pending_confirmations :
+                ]
 
     def pop_pending_confirmation(self) -> Optional[dict[str, Any]]:
         """Pop the next pending confirmation from the queue (FIFO)."""
@@ -561,8 +574,61 @@ class OrchestratorState:
             return bool(self.pending_confirmations)
     
     def update_trace(self, **kwargs: Any) -> None:
-        """Update trace metadata."""
+        """Update trace metadata.
+
+        Issue #1314: Enforces max_trace_keys cap. Oldest keys are evicted
+        when the dict exceeds the limit.
+        """
         self.trace.update(kwargs)
+        if len(self.trace) > self.max_trace_keys:
+            keys_to_drop = list(self.trace.keys())[
+                : len(self.trace) - self.max_trace_keys
+            ]
+            for k in keys_to_drop:
+                del self.trace[k]
+
+    def set_gmail_listed_messages(self, messages: list[dict[str, str]]) -> None:
+        """Set gmail listed messages with cap enforcement.
+
+        Issue #1314: Keeps only the last max_gmail_listed entries.
+
+        Args:
+            messages: List of Gmail message dicts (id, from, subject).
+
+        Returns:
+            None. Caps ``gmail_listed_messages`` to ``max_gmail_listed``.
+        """
+        self.gmail_listed_messages = messages[-self.max_gmail_listed :]
+
+    def set_calendar_listed_events(self, events: list[dict[str, Any]]) -> None:
+        """Set calendar listed events with cap enforcement.
+
+        Issue #1314: Keeps only the last max_calendar_listed entries.
+
+        Args:
+            events: List of calendar event dicts (id, summary, start, end).
+
+        Returns:
+            None. Caps ``calendar_listed_events`` to ``max_calendar_listed``.
+        """
+        self.calendar_listed_events = events[-self.max_calendar_listed :]
+
+    def add_react_observation(self, observation: dict[str, Any]) -> None:
+        """Add a ReAct observation with cap enforcement.
+
+        Issue #1314: Keeps only the last max_react_observations entries.
+
+        Args:
+            observation: ReAct observation dict (iteration, tool, result_summary, success).
+
+        Returns:
+            None. Appends to ``react_observations`` and caps to ``max_react_observations``.
+        """
+        self.react_observations.append(observation)
+        if len(self.react_observations) > self.max_react_observations:
+            self.react_observations = self.react_observations[
+                -self.max_react_observations :
+            ]
     
     def get_context_for_llm(self) -> dict[str, Any]:
         """Get context to send to LLM (summary + recent history + tool results).
