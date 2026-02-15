@@ -19,6 +19,7 @@ Factory helpers:
 
 from __future__ import annotations
 
+import atexit
 import concurrent.futures
 import json
 import logging
@@ -1153,6 +1154,8 @@ def _tool_first_guard_message(*, route: str) -> str:
 _FINALIZER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=2, thread_name_prefix="finalizer",
 )
+# Issue #1314: Clean shutdown — prevent thread leak on interpreter exit
+atexit.register(_FINALIZER_EXECUTOR.shutdown, wait=False)
 
 # Issue #1253: Default context window used when model does not expose its own.
 _DEFAULT_CONTEXT_WINDOW = 4096
