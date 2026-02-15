@@ -337,7 +337,7 @@ class GeminiClient(LLMClient):
 
             except requests.Timeout as e:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                last_exception = e
+                last_exception = e  # noqa: F841 — kept for debugger inspection
                 if _metrics_enabled():
                     metrics_logger.info(
                         "llm_call_failed backend=%s model=%s latency_ms=%s "
