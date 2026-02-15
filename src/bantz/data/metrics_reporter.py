@@ -143,8 +143,12 @@ async def _main(args: argparse.Namespace) -> None:
         await tracker.close()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Bantz Metrics Reporter")
+def main(argv: list[str] | None = None) -> None:
+    """CLI entry point.  Called by ``bantz metrics`` or ``python -m``."""
+    parser = argparse.ArgumentParser(
+        prog="bantz metrics",
+        description="Bantz Observability Metrics Reporter",
+    )
     parser.add_argument(
         "--period", default="24h",
         help="Time period: 24h, 7d, 30d (default: 24h)",
@@ -153,7 +157,7 @@ def main() -> None:
         "--db", default=None,
         help="Path to observability.db (default: ~/.bantz/data/observability.db)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         asyncio.run(_main(args))
