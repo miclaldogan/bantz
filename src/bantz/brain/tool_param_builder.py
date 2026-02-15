@@ -262,8 +262,9 @@ def build_tool_params(
 # Issue #1244: Turkish content extraction patterns for calendar events
 _TR_TITLE_PATTERNS = [
     # "X ekle/oluştur/kaydet" — content before action verb
+    # \w* handles conjugations: ekle→ekler/eklesin/eklersin/eklersen
     re.compile(
-        r"(?:takvime?\s+)?(.+?)\s+(?:ekle|oluştur|kaydet|koy|yaz|planla)",
+        r"(?:takvime?\s+)?(.+?)\s+(?:ekle\w*|oluştur\w*|kaydet\w*|koy\w*|yaz\w*|planla\w*)",
         re.IGNORECASE,
     ),
     # "X için etkinlik/toplantı" — content before event type
@@ -279,6 +280,10 @@ _TR_NOISE_WORDS = frozenset({
     "saat", "da", "de", "tam", "için", "bir", "takvime",
     "takvimime", "ekle", "oluştur", "kaydet", "koy", "yaz",
     "planla", "bak", "bana", "benim", "lütfen",
+    # Turkish dative/locative time suffixes: sekize, dokuza, ona, etc.
+    "bire", "ikiye", "üçe", "dörde", "beşe", "altıya",
+    "yediye", "sekize", "dokuza", "ona", "onbire", "onikiye",
+    "misin", "mısın", "musun", "müsün", "dostum",
 })
 
 

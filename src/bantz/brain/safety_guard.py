@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 
 # Strict confirmation tokens (no ambiguity)
 CONFIRMATION_ACCEPT_TOKENS = {
-    "1", "yes", "y", "evet", "e", "ok", "tamam", "onaylıyorum", "kabul"
+    "1", "yes", "y", "evet", "e", "ok", "tamam", "onaylıyorum", "kabul",
+    "sil", "gönder", "ekle", "yap", "koy", "kaydet",
 }
 
 CONFIRMATION_REJECT_TOKENS = {

@@ -552,6 +552,7 @@ class OrchestratorLoop:
                 "evet", "e", "yes", "y", "ok", "okay", "tamam", "olur",
                 "peki", "tabii", "tabi", "elbette", "onaylıyorum",
                 "gönder", "at", "yolla",
+                "sil", "ekle", "yap", "koy", "kaydet",
             })
             _NEGATIVE_TOKENS = frozenset({
                 "hayır", "h", "no", "n", "iptal", "vazgeç", "istemiyorum",
@@ -1945,6 +1946,35 @@ class OrchestratorLoop:
                         },
                     )
 
+        # Issue #calendar-intent-misroute: Correct calendar/create→query when
+        # the input is clearly a query ("var mı", "neler", "planlarımız").
+        if output.route == "calendar" and output.calendar_intent in ("create", "none"):
+            _intent_check = (_cal_check_text or "").lower()
+            _query_markers = {
+                "var mı", "neler", "ne var", "planlarımız", "ne yapacağız",
+                "göster", "listele", "kontrol", "planımız", "programımız",
+                "neler var", "ne yapıyoruz", "planımızda", "takvimimizde",
+            }
+            if any(m in _intent_check for m in _query_markers):
+                _q_tool = self.orchestrator._resolve_tool_from_intent(
+                    "calendar", "query", "none",
+                )
+                if _q_tool:
+                    logger.info(
+                        "[CALENDAR_INTENT_FIX] Correcting create→query for '%.40s'",
+                        _cal_check_text,
+                    )
+                    output = replace(
+                        output,
+                        calendar_intent="query",
+                        tool_plan=[_q_tool],
+                        raw_output={
+                            **output.raw_output,
+                            "calendar_intent_corrected": True,
+                            "original_intent": "create",
+                        },
+                    )
+
         # Issue #907: Static plan verification
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         from bantz.brain.plan_verifier import infer_route_from_tools
@@ -1997,12 +2027,34 @@ class OrchestratorLoop:
             if hard:
                 # Issue #1229: Hard errors MUST clear tool_plan to prevent
                 # execution of invalid/dangerous tool calls.
-                output = replace(
-                    output,
-                    tool_plan=[],
-                    ask_user=True,
-                    question="Anlayamadım, tekrar eder misin?",
+                # Special recovery: if the only hard errors are hallucinated
+                # internal tools (e.g. _reflection) and route is valid,
+                # inject the correct tool instead of blocking.
+                _only_internal = all(
+                    e.startswith("unknown_tool:_") or e.startswith("route_tool_mismatch")
+                    for e in hard
                 )
+                if _only_internal and output.route in ("calendar", "gmail", "system"):
+                    _recovery_tool = self.orchestrator._resolve_tool_from_intent(
+                        output.route,
+                        output.calendar_intent or "query",
+                        getattr(output, "gmail_intent", "none") or "none",
+                    )
+                    if _recovery_tool:
+                        logger.info(
+                            "[PLAN_VERIFIER] Recovered hallucinated tools → %s",
+                            _recovery_tool,
+                        )
+                        output = replace(output, tool_plan=[_recovery_tool])
+                        hard = []  # recovered
+
+                if hard:
+                    output = replace(
+                        output,
+                        tool_plan=[],
+                        ask_user=True,
+                        question="Anlayamadım, tekrar eder misin?",
+                    )
 
         # Issue #1214: Keyword-based route recovery when LLM routes to
         # smalltalk/unknown with no tool_plan but input has tool indicators.
