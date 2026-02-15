@@ -282,7 +282,7 @@ class VLLMOpenAIClient(LLMClient):
         max_retries = 3
         last_exc: Exception | None = None
         for attempt in range(max_retries):
-            t0 = time.perf_counter()
+            t0 = time.perf_counter()  # noqa: F841 — kept for future latency logging
             try:
                 return self._do_chat_request(
                     client, openai_messages,
@@ -431,11 +431,11 @@ class VLLMOpenAIClient(LLMClient):
                 from openai import RateLimitError, AuthenticationError, APITimeoutError
                 if isinstance(e, RateLimitError):
                     raise LLMConnectionError(
-                        f"vLLM rate_limited (429). Retry later."
+                        "vLLM rate_limited (429). Retry later."
                     ) from e
                 if isinstance(e, AuthenticationError):
                     raise LLMConnectionError(
-                        f"vLLM authentication failed. Check VLLM_API_KEY."
+                        "vLLM authentication failed. Check VLLM_API_KEY."
                     ) from e
                 if isinstance(e, APITimeoutError):
                     raise LLMTimeoutError(

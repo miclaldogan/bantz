@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import os
+from dataclasses import dataclass
 from typing import Iterator, List, Optional
 
 import requests
@@ -57,9 +58,6 @@ RETRY_BASE_DELAY = 1.0  # seconds
 RETRY_MAX_DELAY = 30.0  # seconds
 RETRY_BACKOFF_FACTOR = 2.0
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
-
-
-from dataclasses import dataclass
 
 
 @dataclass
@@ -374,7 +372,7 @@ class GeminiClient(LLMClient):
 
             except requests.RequestException as e:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                last_exception = e
+                last_exception = e  # noqa: F841 — kept for debugger inspection
                 if _metrics_enabled():
                     metrics_logger.info(
                         "llm_call_failed backend=%s model=%s latency_ms=%s "
@@ -420,7 +418,7 @@ class GeminiClient(LLMClient):
                         attempt,
                     )
                 raise LLMInvalidResponseError(
-                    f"Gemini parse_error reason=parse_error"
+                    "Gemini parse_error reason=parse_error"
                 ) from e
 
         # Should not reach here, but safety net
