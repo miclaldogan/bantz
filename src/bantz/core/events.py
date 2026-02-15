@@ -129,6 +129,11 @@ class EventType(Enum):
     CIRCUIT_CLOSED = "system.circuit_closed"      # Circuit breaker closed
     FALLBACK_EXECUTED = "system.fallback_executed" # Fallback executed
 
+    # === Graph Memory (Issue #1289) ===
+    GRAPH_ENTITY_LINKED = "graph.entity_linked"   # Entities linked into graph
+    GRAPH_QUERY = "graph.query"                    # Graph query executed
+    GRAPH_DECAY = "graph.decay"                    # Edge decay applied
+
 
 @dataclass
 class Event:

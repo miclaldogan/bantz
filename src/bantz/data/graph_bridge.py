@@ -25,6 +25,15 @@ from bantz.data.graph_store import GraphStore
 
 logger = logging.getLogger(__name__)
 
+
+def _get_event_bus_safe():
+    """Get the EventBus singleton without import-time side effects."""
+    try:
+        from bantz.core.events import get_event_bus
+        return get_event_bus()
+    except Exception:
+        return None
+
 # Tool name → source category mapping
 _TOOL_SOURCE_MAP: Dict[str, str] = {
     # Gmail tools
@@ -115,6 +124,24 @@ class GraphBridge:
                 "[GraphBridge] %s: %d items → %d edges",
                 tool_name, len(items), total_edges,
             )
+
+            # Emit event for observability
+            bus = _get_event_bus_safe()
+            if bus is not None:
+                try:
+                    bus.publish(
+                        event_type="graph.entity_linked",
+                        data={
+                            "tool": tool_name,
+                            "source": source,
+                            "items": len(items),
+                            "edges_created": total_edges,
+                            "total_edges": self._edges_created,
+                        },
+                        source="graph_bridge",
+                    )
+                except Exception:
+                    pass
 
         return total_edges
 
