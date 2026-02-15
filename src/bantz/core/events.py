@@ -1,24 +1,34 @@
-"""Bantz Event Bus - Pub/sub system for proactive messaging.
+"""Bantz Event Bus — Async pub/sub system for internal communication.
+
+Issue #1297: Event Bus — Async Pub/Sub İç İletişim Altyapısı.
+
+Features:
+- Synchronous and async publish
+- Wildcard prefix subscribe: ``tool.*`` matches ``tool.executed``, ``tool.failed``
+- Catch-all subscribe: ``*``
+- Middleware chain for logging, filtering, rate limiting
+- Correlation ID for run tracking
+- Fire-and-forget error handling
+- Thread-safe history
 
 Events flow:
+- tool_runner → publish("tool.executed", {...})
 - Reminder fires → publish("reminder_fired", {...})
-- Check-in triggers → publish("checkin_triggered", {...})
+- Mail received → publish("mail.received", {...})
 - Bantz wants to speak → publish("bantz_message", {...})
-
-Subscribers:
-- CLI: prints proactive messages
-- Browser panel: shows in chat (future)
-- Logger: records event history
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import threading
-import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Any
+from typing import Any, Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class EventType(Enum):
@@ -86,6 +96,25 @@ class EventType(Enum):
     OVERNIGHT_MORNING_REPORT = "overnight.morning_report"  # Sabah raporu hazır
     OVERNIGHT_COMPLETED = "overnight.completed"  # Tüm görevler tamamlandı
 
+    # === Tool Execution (Issue #1297) ===
+    TOOL_EXECUTED = "tool.executed"      # Tool başarıyla çalıştı
+    TOOL_FAILED = "tool.failed"          # Tool hata aldı
+    TOOL_CONFIRMED = "tool.confirmed"    # Kullanıcı onayladı
+    TOOL_DENIED = "tool.denied"          # Kullanıcı reddetti
+
+    # === Data Events (Issue #1297) ===
+    MAIL_RECEIVED = "mail.received"      # Yeni mail geldi
+    MAIL_SENT = "mail.sent"              # Mail gönderildi
+    CALENDAR_CREATED = "calendar.created"  # Etkinlik oluşturuldu
+    CALENDAR_UPDATED = "calendar.updated"  # Etkinlik güncellendi
+    TASK_COMPLETED = "task.completed"     # Görev tamamlandı
+
+    # === Run Lifecycle (Issue #1297) ===
+    RUN_STARTED = "run.started"          # Yeni kullanıcı isteği
+    RUN_COMPLETED = "run.completed"      # İstek tamamlandı
+    SESSION_STARTED = "session.started"  # Yeni oturum
+    BRIEF_GENERATED = "brief.generated"  # Daily brief oluşturuldu
+
     # === Legacy (for backward compatibility) ===
     REMINDER_FIRED = "reminder_fired"
     CHECKIN_TRIGGERED = "checkin_triggered"
@@ -100,41 +129,89 @@ class Event:
     data: Dict[str, Any]
     timestamp: datetime = field(default_factory=datetime.now)
     source: str = "core"
-    
+    correlation_id: Optional[str] = None  # Run/job tracking ID
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d: Dict[str, Any] = {
             "type": self.event_type,
             "data": self.data,
             "timestamp": self.timestamp.isoformat(),
             "source": self.source,
         }
+        if self.correlation_id:
+            d["correlation_id"] = self.correlation_id
+        return d
 
 
-# Type alias for event handlers
+# Type aliases for event handlers and middleware
 EventHandler = Callable[[Event], None]
+AsyncEventHandler = Callable[[Event], Any]  # Coroutine-returning handler
+Middleware = Callable[[Event], Optional[Event]]  # Sync middleware
+AsyncMiddleware = Callable[[Event], Any]  # Async middleware (returns Event|None)
 
 
 class EventBus:
-    """Simple pub/sub event bus with history."""
-    
-    def __init__(self, history_size: int = 100):
+    """Pub/sub event bus with wildcard matching, middleware, and async support.
+
+    Features:
+    - Exact-match subscribe: ``subscribe("tool.executed", handler)``
+    - Wildcard prefix subscribe: ``subscribe("tool.*", handler)``
+      matches any event whose type starts with ``tool.``
+    - Catch-all: ``subscribe_all(handler)``
+    - Middleware chain: transform/filter events before dispatch
+    - Async publish: ``apublish()`` for coroutine handlers
+    - Fire-and-forget: subscriber errors never block the publisher
+    """
+
+    def __init__(self, history_size: int = 100) -> None:
         self._subscribers: Dict[str, List[EventHandler]] = {}
+        self._async_subscribers: Dict[str, List[AsyncEventHandler]] = {}
         self._global_subscribers: List[EventHandler] = []
+        self._async_global_subscribers: List[AsyncEventHandler] = []
+        self._middleware: List[Middleware] = []
+        self._async_middleware: List[AsyncMiddleware] = []
         self._history: deque[Event] = deque(maxlen=history_size)
         self._lock = threading.Lock()
-    
+
+    # ── Subscribe ────────────────────────────────────────────────
+
     def subscribe(self, event_type: str, handler: EventHandler) -> None:
-        """Subscribe to a specific event type."""
+        """Subscribe to a specific event type.
+
+        Supports wildcard prefix patterns:
+        - ``"tool.executed"`` — exact match
+        - ``"tool.*"`` — matches any event starting with ``tool.``
+        - Use ``subscribe_all()`` for catch-all.
+        """
         with self._lock:
             if event_type not in self._subscribers:
                 self._subscribers[event_type] = []
             self._subscribers[event_type].append(handler)
-    
+
+    def subscribe_async(
+        self, event_type: str, handler: AsyncEventHandler
+    ) -> None:
+        """Subscribe an async handler to a specific event type.
+
+        Supports the same wildcard patterns as ``subscribe()``.
+        """
+        with self._lock:
+            if event_type not in self._async_subscribers:
+                self._async_subscribers[event_type] = []
+            self._async_subscribers[event_type].append(handler)
+
     def subscribe_all(self, handler: EventHandler) -> None:
-        """Subscribe to ALL events."""
+        """Subscribe to ALL events (catch-all)."""
         with self._lock:
             self._global_subscribers.append(handler)
-    
+
+    def subscribe_all_async(self, handler: AsyncEventHandler) -> None:
+        """Subscribe an async handler to ALL events."""
+        with self._lock:
+            self._async_global_subscribers.append(handler)
+
+    # ── Unsubscribe ──────────────────────────────────────────────
+
     def unsubscribe(self, event_type: str, handler: EventHandler) -> None:
         """Unsubscribe from an event type."""
         with self._lock:
@@ -143,7 +220,7 @@ class EventBus:
                     self._subscribers[event_type].remove(handler)
                 except ValueError:
                     pass
-    
+
     def unsubscribe_all(self, handler: EventHandler) -> None:
         """Unsubscribe from global subscription."""
         with self._lock:
@@ -151,46 +228,214 @@ class EventBus:
                 self._global_subscribers.remove(handler)
             except ValueError:
                 pass
-    
-    def publish(self, event_type: str, data: Optional[Dict[str, Any]] = None, source: str = "core") -> Event:
-        """Publish an event to all subscribers."""
+
+    # ── Middleware ────────────────────────────────────────────────
+
+    def add_middleware(self, middleware: Middleware) -> None:
+        """Add a sync middleware to the processing chain.
+
+        Middleware receives an Event and returns an Event (possibly modified)
+        or None to suppress the event entirely.
+        """
+        self._middleware.append(middleware)
+
+    def add_async_middleware(self, middleware: AsyncMiddleware) -> None:
+        """Add an async middleware to the processing chain."""
+        self._async_middleware.append(middleware)
+
+    # ── Publish ──────────────────────────────────────────────────
+
+    def publish(
+        self,
+        event_type: str,
+        data: Optional[Dict[str, Any]] = None,
+        source: str = "core",
+        correlation_id: Optional[str] = None,
+    ) -> Optional[Event]:
+        """Publish an event synchronously.
+
+        Runs all sync middleware first, then dispatches to sync handlers.
+        Async handlers are NOT called — use ``apublish()`` for full dispatch.
+
+        Returns:
+            The Event, or None if a middleware suppressed it.
+        """
         event = Event(
             event_type=event_type,
             data=data or {},
             source=source,
+            correlation_id=correlation_id,
         )
-        
+
+        # Run sync middleware
+        for mw in self._middleware:
+            try:
+                event = mw(event)
+            except Exception as exc:
+                logger.error("[EventBus] Middleware error: %s", exc)
+                return None
+            if event is None:
+                return None  # Middleware suppressed the event
+
         with self._lock:
-            # Add to history
             self._history.append(event)
-            
-            # Get handlers (copy to avoid lock during execution)
-            handlers = list(self._subscribers.get(event_type, []))
-            global_handlers = list(self._global_subscribers)
-        
-        # Execute handlers outside lock
-        for handler in handlers + global_handlers:
+            handlers = self._collect_sync_handlers(event.event_type)
+
+        # Fire-and-forget: handler errors never propagate
+        for handler in handlers:
             try:
                 handler(event)
-            except Exception as e:
-                print(f"[EventBus] Handler error: {e}")
-        
+            except Exception as exc:
+                logger.error(
+                    "[EventBus] Handler %s error on %s: %s",
+                    getattr(handler, "__name__", repr(handler)),
+                    event.event_type,
+                    exc,
+                )
+
         return event
-    
-    def get_history(self, event_type: Optional[str] = None, limit: int = 20) -> List[Event]:
+
+    async def apublish(
+        self,
+        event_type: str,
+        data: Optional[Dict[str, Any]] = None,
+        source: str = "core",
+        correlation_id: Optional[str] = None,
+    ) -> Optional[Event]:
+        """Publish an event asynchronously.
+
+        Runs all middleware (sync + async), then dispatches to all handlers
+        (sync + async) concurrently. Fire-and-forget: errors are logged.
+
+        Returns:
+            The Event, or None if a middleware suppressed it.
+        """
+        event = Event(
+            event_type=event_type,
+            data=data or {},
+            source=source,
+            correlation_id=correlation_id,
+        )
+
+        # Run sync middleware
+        for mw in self._middleware:
+            try:
+                event = mw(event)
+            except Exception as exc:
+                logger.error("[EventBus] Middleware error: %s", exc)
+                return None
+            if event is None:
+                return None
+
+        # Run async middleware
+        for mw in self._async_middleware:
+            try:
+                event = await mw(event)
+            except Exception as exc:
+                logger.error("[EventBus] Async middleware error: %s", exc)
+                return None
+            if event is None:
+                return None
+
+        with self._lock:
+            self._history.append(event)
+            sync_handlers = self._collect_sync_handlers(event.event_type)
+            async_handlers = self._collect_async_handlers(event.event_type)
+
+        # Dispatch sync handlers
+        for handler in sync_handlers:
+            try:
+                handler(event)
+            except Exception as exc:
+                logger.error(
+                    "[EventBus] Handler %s error: %s",
+                    getattr(handler, "__name__", repr(handler)),
+                    exc,
+                )
+
+        # Dispatch async handlers (fire-and-forget)
+        if async_handlers:
+            tasks = [
+                asyncio.create_task(self._safe_async_call(h, event))
+                for h in async_handlers
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        return event
+
+    # ── History ──────────────────────────────────────────────────
+
+    def get_history(
+        self, event_type: Optional[str] = None, limit: int = 20
+    ) -> List[Event]:
         """Get recent events from history."""
         with self._lock:
             if event_type:
-                events = [e for e in self._history if e.event_type == event_type]
+                events = [
+                    e for e in self._history
+                    if e.event_type == event_type
+                ]
             else:
                 events = list(self._history)
-        
+
         return events[-limit:]
-    
+
     def clear_history(self) -> None:
         """Clear event history."""
         with self._lock:
             self._history.clear()
+
+    # ── Internal ─────────────────────────────────────────────────
+
+    def _collect_sync_handlers(self, event_type: str) -> List[EventHandler]:
+        """Collect matching sync handlers: exact + wildcard + global."""
+        handlers: List[EventHandler] = []
+
+        # Exact match
+        handlers.extend(self._subscribers.get(event_type, []))
+
+        # Wildcard prefix match: "tool.*" matches "tool.executed"
+        for pattern, subs in self._subscribers.items():
+            if pattern.endswith(".*") and event_type.startswith(pattern[:-2] + "."):
+                handlers.extend(subs)
+
+        # Global catch-all
+        handlers.extend(self._global_subscribers)
+
+        return handlers
+
+    def _collect_async_handlers(
+        self, event_type: str
+    ) -> List[AsyncEventHandler]:
+        """Collect matching async handlers: exact + wildcard + global."""
+        handlers: List[AsyncEventHandler] = []
+
+        # Exact match
+        handlers.extend(self._async_subscribers.get(event_type, []))
+
+        # Wildcard prefix match
+        for pattern, subs in self._async_subscribers.items():
+            if pattern.endswith(".*") and event_type.startswith(pattern[:-2] + "."):
+                handlers.extend(subs)
+
+        # Global catch-all
+        handlers.extend(self._async_global_subscribers)
+
+        return handlers
+
+    @staticmethod
+    async def _safe_async_call(
+        handler: AsyncEventHandler, event: Event
+    ) -> None:
+        """Call an async handler with error logging."""
+        try:
+            await handler(event)
+        except Exception as exc:
+            logger.error(
+                "[EventBus] Async handler %s error: %s",
+                getattr(handler, "__name__", repr(handler)),
+                exc,
+            )
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -207,25 +452,7 @@ def get_event_bus() -> EventBus:
     return _event_bus
 
 
-# ─────────────────────────────────────────────────────────────────
-# Standard event types (for documentation)
-# ─────────────────────────────────────────────────────────────────
-"""
-Standard events:
-
-reminder_fired:
-    data: {id, message, time}
-    source: scheduler
-    
-checkin_triggered:
-    data: {id, prompt}
-    source: scheduler
-    
-bantz_message:
-    data: {text, intent, proactive: True}
-    source: core
-    
-command_result:
-    data: {command, result, ok}
-    source: router
-"""
+def reset_event_bus() -> None:
+    """Reset singleton (for tests)."""
+    global _event_bus
+    _event_bus = None
