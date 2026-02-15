@@ -41,12 +41,12 @@ def _make_orchestrator() -> JarvisLLMOrchestrator:
 class TestSyncValidToolsLock:
     """Verify sync_valid_tools uses a lock for atomic updates."""
 
-    def test_has_sync_lock_attribute(self):
+    def test_has_sync_lock_attribute(self) -> None:
         """Class should have a _sync_lock attribute."""
         assert hasattr(JarvisLLMOrchestrator, "_sync_lock")
         assert isinstance(JarvisLLMOrchestrator._sync_lock, type(threading.Lock()))
 
-    def test_concurrent_sync_no_crash(self):
+    def test_concurrent_sync_no_crash(self) -> None:
         """Multiple threads calling sync_valid_tools should not crash."""
         original_tools = JarvisLLMOrchestrator._VALID_TOOLS.copy()
         registry = list(original_tools)
@@ -75,13 +75,13 @@ class TestSyncValidToolsLock:
 class TestHealthLock:
     """Verify _consecutive_failures updates are lock-protected."""
 
-    def test_has_health_lock(self):
+    def test_has_health_lock(self) -> None:
         """Instance should have a _health_lock."""
         orch = _make_orchestrator()
         assert hasattr(orch, "_health_lock")
         assert isinstance(orch._health_lock, type(threading.Lock()))
 
-    def test_concurrent_failure_increments(self):
+    def test_concurrent_failure_increments(self) -> None:
         """Concurrent increments under lock should not lose updates."""
         orch = _make_orchestrator()
         orch._max_consecutive_failures = 1000  # don't trigger unhealthy
@@ -108,7 +108,7 @@ class TestHealthLock:
 class TestSafeCompleteNoMutation:
     """Verify _safe_complete does NOT mutate llm._timeout_seconds."""
 
-    def test_llm_timeout_not_mutated(self):
+    def test_llm_timeout_not_mutated(self) -> None:
         """_safe_complete should not modify llm._timeout_seconds."""
         from bantz.brain.finalization_pipeline import _safe_complete
 
@@ -122,7 +122,7 @@ class TestSafeCompleteNoMutation:
         # The original timeout must remain unchanged
         assert mock_llm._timeout_seconds == 120.0
 
-    def test_timeout_passed_via_kwargs(self):
+    def test_timeout_passed_via_kwargs(self) -> None:
         """timeout_seconds should be passed in kwargs, not via LLM mutation."""
         from bantz.brain.finalization_pipeline import _safe_complete
 
@@ -135,12 +135,13 @@ class TestSafeCompleteNoMutation:
 
         # complete_text should have been called with timeout_seconds in kwargs
         call_kwargs = mock_llm.complete_text.call_args
-        if call_kwargs:
-            kw = call_kwargs[1] if call_kwargs[1] else {}
-            # Either timeout_seconds is in kwargs or it was passed some other way
-            assert kw is not None or True  # kwargs captured for debugging
-            # Key assertion: _timeout_seconds was NOT mutated
-            assert mock_llm._timeout_seconds == 120.0
+        assert call_kwargs is not None, "complete_text was not called"
+        kw = call_kwargs[1] if call_kwargs[1] else {}
+        assert kw.get("timeout_seconds") == 5.0, (
+            f"Expected timeout_seconds=5.0 in kwargs, got {kw}"
+        )
+        # Key assertion: _timeout_seconds was NOT mutated
+        assert mock_llm._timeout_seconds == 120.0
 
 
 # ======================================================================
@@ -151,7 +152,7 @@ class TestSafeCompleteNoMutation:
 class TestGeminiSingletonThreadSafety:
     """Verify Gemini default singletons use double-checked locking."""
 
-    def test_concurrent_quota_tracker_creation(self):
+    def test_concurrent_quota_tracker_creation(self) -> None:
         """Multiple threads should get the same QuotaTracker instance."""
         import bantz.llm.gemini_client as gc
 
@@ -172,7 +173,7 @@ class TestGeminiSingletonThreadSafety:
         # All threads should have gotten the same instance
         assert len(set(id(r) for r in results)) == 1
 
-    def test_concurrent_circuit_breaker_creation(self):
+    def test_concurrent_circuit_breaker_creation(self) -> None:
         """Multiple threads should get the same CircuitBreaker instance."""
         import bantz.llm.gemini_client as gc
         gc._default_circuit_breaker = None
@@ -199,13 +200,13 @@ class TestGeminiSingletonThreadSafety:
 class TestOrchestratorStateLocking:
     """Verify OrchestratorState confirmation methods are thread-safe."""
 
-    def test_has_lock(self):
+    def test_has_lock(self) -> None:
         """State should have a _lock attribute."""
         state = OrchestratorState()
         assert hasattr(state, "_lock")
         assert isinstance(state._lock, type(threading.Lock()))
 
-    def test_concurrent_add_pop(self):
+    def test_concurrent_add_pop(self) -> None:
         """Concurrent add + pop should not crash or corrupt data."""
         state = OrchestratorState()
         errors = []
@@ -233,7 +234,7 @@ class TestOrchestratorStateLocking:
 
         assert not errors
 
-    def test_concurrent_set_clear(self):
+    def test_concurrent_set_clear(self) -> None:
         """Concurrent set + clear should not corrupt state."""
         state = OrchestratorState()
         errors = []
@@ -267,14 +268,14 @@ class TestOrchestratorStateLocking:
         # After all operations, state should be consistent
         assert isinstance(state.pending_confirmations, list)
 
-    def test_has_pending_returns_bool(self):
+    def test_has_pending_returns_bool(self) -> None:
         """has_pending_confirmation should work under lock."""
         state = OrchestratorState()
         assert state.has_pending_confirmation() is False
         state.add_pending_confirmation({"tool": "test"})
         assert state.has_pending_confirmation() is True
 
-    def test_peek_does_not_remove(self):
+    def test_peek_does_not_remove(self) -> None:
         """peek_pending_confirmation should not remove the item."""
         state = OrchestratorState()
         state.add_pending_confirmation({"tool": "test"})

@@ -1239,6 +1239,14 @@ def _safe_complete(
         try:
             return llm.complete_text(prompt=prompt, **kwargs)
         except TypeError as e:
+            # Issue #1313: Retry without timeout_seconds but preserve other
+            # kwargs (max_tokens, temperature) to avoid silent truncation.
+            if "timeout_seconds" in kwargs:
+                filtered = {k: v for k, v in kwargs.items() if k != "timeout_seconds"}
+                try:
+                    return llm.complete_text(prompt=prompt, **filtered)
+                except TypeError:
+                    pass
             logger.warning(
                 "[FINALIZER] LLM client TypeError — kwargs dropped %s: %s",
                 list(kwargs.keys()),
