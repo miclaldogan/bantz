@@ -259,6 +259,22 @@ class SafetyGuard:
             for fld in _unknown_fields:
                 logger.warning("Unknown field '%s' in tool '%s' — stripped", fld, tool.name)
                 del params[fld]
+            # Issue #1356: Track stripped fields for observability
+            if _unknown_fields:
+                try:
+                    from bantz.core.events import get_event_bus
+                    bus = get_event_bus()
+                    bus.publish(
+                        "tool.param_stripped",
+                        {
+                            "tool": tool.name,
+                            "stripped_fields": _unknown_fields,
+                            "remaining_params": list(params.keys()),
+                        },
+                        source="safety_guard",
+                    )
+                except Exception:
+                    pass  # best-effort observability
             for fld, value in params.items():
                 
                 field_schema = properties[fld]

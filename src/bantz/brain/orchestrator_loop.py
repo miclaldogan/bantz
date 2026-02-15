@@ -2159,27 +2159,68 @@ class OrchestratorLoop:
             # Auto-correct route from tool_plan prefixes when the only errors
             # are route/tool mismatches (LLM got tools right but route wrong).
             if correctable and not hard:
-                inferred = infer_route_from_tools(output.tool_plan)
-                if inferred and inferred != output.route:
-                    logger.info(
-                        "[PLAN_VERIFIER] Auto-correcting route %s→%s based on tool_plan",
-                        output.route, inferred,
+                # Issue #1355: Intent-based route correction.
+                # When gmail_intent is set but route is not 'gmail', the LLM
+                # got the intent right but routed to the wrong domain. Fix
+                # route AND tool_plan from the intent.
+                _intent_corrected = False
+                _gmail_intent = getattr(output, "gmail_intent", "none") or "none"
+                _cal_intent = output.calendar_intent or "none"
+                if _gmail_intent != "none" and output.route != "gmail":
+                    _correct_tool = self.orchestrator._resolve_tool_from_intent(
+                        "gmail", _cal_intent, _gmail_intent,
                     )
-                    output = replace(output, route=inferred)
-                elif not inferred:
-                    # Issue #1229: Cannot infer correct route → hard-block
-                    # tool execution to prevent misrouted tool calls.
-                    logger.warning(
-                        "[PLAN_VERIFIER] Cannot infer route from tool_plan, "
-                        "blocking execution. errors=%s",
-                        correctable,
+                    if _correct_tool:
+                        logger.info(
+                            "[PLAN_VERIFIER] Auto-correcting route %s→gmail "
+                            "and tool→%s based on gmail_intent=%s",
+                            output.route, _correct_tool, _gmail_intent,
+                        )
+                        output = replace(
+                            output,
+                            route="gmail",
+                            tool_plan=[_correct_tool],
+                        )
+                        _intent_corrected = True
+                elif _cal_intent != "none" and output.route != "calendar":
+                    _correct_tool = self.orchestrator._resolve_tool_from_intent(
+                        "calendar", _cal_intent, _gmail_intent,
                     )
-                    output = replace(
-                        output,
-                        tool_plan=[],
-                        ask_user=True,
-                        question="Bu isteği tam anlayamadım efendim. Biraz daha açar mısınız?",
-                    )
+                    if _correct_tool:
+                        logger.info(
+                            "[PLAN_VERIFIER] Auto-correcting route %s→calendar "
+                            "and tool→%s based on calendar_intent=%s",
+                            output.route, _correct_tool, _cal_intent,
+                        )
+                        output = replace(
+                            output,
+                            route="calendar",
+                            tool_plan=[_correct_tool],
+                        )
+                        _intent_corrected = True
+
+                if not _intent_corrected:
+                    inferred = infer_route_from_tools(output.tool_plan)
+                    if inferred and inferred != output.route:
+                        logger.info(
+                            "[PLAN_VERIFIER] Auto-correcting route %s→%s based on tool_plan",
+                            output.route, inferred,
+                        )
+                        output = replace(output, route=inferred)
+                    elif not inferred:
+                        # Issue #1229: Cannot infer correct route → hard-block
+                        # tool execution to prevent misrouted tool calls.
+                        logger.warning(
+                            "[PLAN_VERIFIER] Cannot infer route from tool_plan, "
+                            "blocking execution. errors=%s",
+                            correctable,
+                        )
+                        output = replace(
+                            output,
+                            tool_plan=[],
+                            ask_user=True,
+                            question="Bu isteği tam anlayamadım efendim. Biraz daha açar mısınız?",
+                        )
 
             if hard:
                 # Issue #1229: Hard errors MUST clear tool_plan to prevent
@@ -2835,7 +2876,7 @@ class OrchestratorLoop:
                         "success": False,
                         "error": f"Tool '{tool_name}' timed out after {timeout:.0f}s",
                         "user_message": f"Efendim, '{tool_name}' işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.",
-                        "risk_level": risk.value,
+                        "risk_level": risk_value,
                         "params": params,
                         "elapsed_ms": elapsed_ms,
                     })
@@ -2862,7 +2903,7 @@ class OrchestratorLoop:
                     "raw_result": result,  # ✅ Original structured data
                     "result_summary": result_summary,  # ✅ Smart summary for display
                     "error": tool_error,
-                    "risk_level": risk.value,
+                    "risk_level": risk_value,
                     "params": params,
                     "elapsed_ms": elapsed_ms,
                 })
@@ -2921,7 +2962,7 @@ class OrchestratorLoop:
                         tool_name=tool_name,
                         allowed=True,
                         reason="Tool executed successfully",
-                        metadata={"params": params, "risk_level": risk.value},
+                        metadata={"params": params, "risk_level": risk_value},
                     )
                 
                 # Emit tool event (Issue #1297: enriched payload for subscribers)
@@ -2934,7 +2975,7 @@ class OrchestratorLoop:
                         "result": str(result)[:500],
                         "result_summary": result_summary,
                         "elapsed_ms": elapsed_ms,
-                        "risk_level": risk.value,
+                        "risk_level": risk_value,
                         "confirmed": was_confirmed,
                         "success": bool(tool_returned_ok),
                         "run_id": _obs_run_id,
@@ -2949,7 +2990,7 @@ class OrchestratorLoop:
                     "tool": tool_name,
                     "success": False,
                     "error": str(e),
-                    "risk_level": risk.value,
+                    "risk_level": risk_value,
                     "params": params if "params" in locals() else {},
                     "elapsed_ms": 0,
                 })
@@ -2978,7 +3019,7 @@ class OrchestratorLoop:
                     {
                         "tool": tool_name,
                         "error": str(e),
-                        "risk_level": risk.value if "risk" in dir() else "unknown",
+                        "risk_level": risk_value,
                         "params": params if "params" in locals() else {},
                         "elapsed_ms": 0,
                         "run_id": _obs_run_id,
