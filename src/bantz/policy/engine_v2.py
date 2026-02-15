@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -51,6 +52,13 @@ __all__ = [
     "PolicyDecision",
     "PolicyEngineV2",
 ]
+
+
+# ── Constants ────────────────────────────────────────────────────
+
+# High-risk confirmation cooldown (seconds) — forced delay before
+# the confirmation is accepted to prevent accidental clicks.
+HIGH_RISK_CONFIRM_COOLDOWN_SECONDS = 3
 
 
 # ── Enums ─────────────────────────────────────────────────────────
@@ -175,6 +183,13 @@ def redact_sensitive(
             redacted[key] = redact_value(str(val)) if isinstance(val, str) else "***"
         elif isinstance(val, dict):
             redacted[key] = redact_sensitive(val, tool_name, extra_fields)
+        elif isinstance(val, list):
+            redacted[key] = [
+                redact_sensitive(item, tool_name, extra_fields)
+                if isinstance(item, dict)
+                else item
+                for item in val
+            ]
         else:
             redacted[key] = val
     return redacted
@@ -226,6 +241,8 @@ def _load_redact_fields(
     except Exception:
         return {}
 
+    if not isinstance(raw, dict):
+        return {}
     redact_section = raw.get("redact_fields", {})
     if not isinstance(redact_section, dict):
         return {}
@@ -250,6 +267,8 @@ def _load_editable_fields(
     except (ImportError, Exception):
         return {}
 
+    if not isinstance(raw, dict):
+        return {}
     section = raw.get("editable_fields", {})
     if not isinstance(section, dict):
         return {}
@@ -269,24 +288,31 @@ class _SessionPermits:
 
     MED-risk tools confirmed once don't need re-confirmation in the
     same session.  HIGH-risk tools are NEVER remembered.
+
+    Thread-safe: all mutations are guarded by a lock.
     """
 
     def __init__(self) -> None:
         self._permits: Dict[tuple[str, str], float] = {}
+        self._lock = threading.Lock()
 
     def is_confirmed(self, session_id: str, tool_name: str) -> bool:
-        return (session_id, tool_name) in self._permits
+        with self._lock:
+            return (session_id, tool_name) in self._permits
 
     def confirm(self, session_id: str, tool_name: str) -> None:
-        self._permits[(session_id, tool_name)] = time.time()
+        with self._lock:
+            self._permits[(session_id, tool_name)] = time.time()
 
     def revoke(self, session_id: str, tool_name: str) -> None:
-        self._permits.pop((session_id, tool_name), None)
+        with self._lock:
+            self._permits.pop((session_id, tool_name), None)
 
     def clear_session(self, session_id: str) -> None:
-        keys = [k for k in self._permits if k[0] == session_id]
-        for k in keys:
-            del self._permits[k]
+        with self._lock:
+            keys = [k for k in self._permits if k[0] == session_id]
+            for k in keys:
+                del self._permits[k]
 
 
 # ── Policy Engine v2 ─────────────────────────────────────────────
@@ -479,7 +505,7 @@ class PolicyEngineV2:
         if tier == RiskTier.MED:
             self._permits.confirm(session_id, tool_name)
 
-        return edited_params or {}
+        return edited_params if edited_params is not None else {}
 
     def deny(self, tool_name: str, session_id: str) -> None:
         """Record that a user denied a tool."""
@@ -534,7 +560,7 @@ class PolicyEngineV2:
             editable_fields=editable,
             editable=bool(editable),
             requires_explicit_confirm=True,
-            cooldown_seconds=3,
+            cooldown_seconds=HIGH_RISK_CONFIRM_COOLDOWN_SECONDS,
             reason="HIGH_REQUIRE_CONFIRMATION_WITH_EDIT",
         )
 
