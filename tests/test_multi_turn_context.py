@@ -8,19 +8,32 @@ anaphora resolution (e.g., "saat kaçta" referring to previously mentioned event
 import pytest
 from unittest.mock import Mock, MagicMock
 from bantz.brain.orchestrator_loop import OrchestratorLoop, OrchestratorConfig, OrchestratorState
-from bantz.brain.llm_router import OrchestratorOutput
+from bantz.brain.llm_router import OrchestratorOutput, JarvisLLMOrchestrator
+from bantz.agent.tools import ToolRegistry
+
+_PRISTINE_VALID_TOOLS = frozenset(JarvisLLMOrchestrator._VALID_TOOLS)
+
+
+@pytest.fixture(autouse=True)
+def _reset_valid_tools():
+    """Restore _VALID_TOOLS before and after each test."""
+    JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    yield
+    JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
 
 
 @pytest.fixture
 def orchestrator_loop():
     """Create OrchestratorLoop for testing."""
     mock_orchestrator = Mock()
-    mock_tools = Mock()
+    mock_orchestrator._llm = None
+    mock_orchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    tools = ToolRegistry()
     mock_event_bus = Mock()
     
     return OrchestratorLoop(
         orchestrator=mock_orchestrator,
-        tools=mock_tools,
+        tools=tools,
         event_bus=mock_event_bus,
         config=OrchestratorConfig(enable_safety_guard=False, debug=True, enable_preroute=False),
     )
@@ -210,6 +223,7 @@ class TestConversationHistoryPersistence:
             confidence=0.9,
             tool_plan=[],
             assistant_reply="Merhaba efendim!",
+            raw_output={"preroute_complete": True},
         )
         orchestrator_loop.orchestrator.route = Mock(return_value=mock_output)
         
@@ -229,6 +243,7 @@ class TestConversationHistoryPersistence:
             confidence=0.9,
             tool_plan=[],
             assistant_reply="İyiyim, teşekkürler!",
+            raw_output={"preroute_complete": True},
         )
         orchestrator_loop.orchestrator.route = Mock(return_value=mock_output2)
         

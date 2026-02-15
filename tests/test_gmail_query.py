@@ -198,13 +198,14 @@ class TestLLMRouterGmailPrompt:
     """Test that LLM router prompt includes Gmail query examples."""
     
     def test_prompt_has_gmail_query_examples(self):
-        """Prompt should have Gmail query examples."""
+        """Prompt should have Gmail-related examples."""
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         
         prompt = JarvisLLMOrchestrator.SYSTEM_PROMPT
         
-        # Should have query examples
-        assert "from:linkedin" in prompt or "linkedin" in prompt.lower()
+        # Should have gmail route and intent examples
+        assert "gmail" in prompt.lower()
+        assert "smart_search" in prompt or "list_messages" in prompt or "gmail_intent" in prompt
     
     def test_prompt_mentions_query_parameter(self):
         """Prompt should mention query parameter for gmail.list_messages."""

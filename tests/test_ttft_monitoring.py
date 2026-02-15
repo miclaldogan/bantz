@@ -313,7 +313,7 @@ class TestVLLMOpenAIClientTTFT:
         
         # Mock OpenAI response
         mock_response = Mock()
-        mock_response.choices = [Mock(message=Mock(content="test response"))]
+        mock_response.choices = [Mock(message=Mock(content="test response", tool_calls=None))]
         mock_response.usage = Mock(total_tokens=10)
         
         mock_client_instance.chat.completions.create.return_value = mock_response
@@ -365,9 +365,9 @@ class TestStreamingTTFT:
         
         # Mock streaming response
         mock_chunks = [
-            Mock(choices=[Mock(delta=Mock(content="Hello"), finish_reason=None)]),
-            Mock(choices=[Mock(delta=Mock(content=" world"), finish_reason=None)]),
-            Mock(choices=[Mock(delta=Mock(content="!"), finish_reason="stop")]),
+            Mock(choices=[Mock(delta=Mock(content="Hello"), finish_reason=None)], usage=None),
+            Mock(choices=[Mock(delta=Mock(content=" world"), finish_reason=None)], usage=None),
+            Mock(choices=[Mock(delta=Mock(content="!"), finish_reason="stop")], usage=None),
         ]
         
         mock_client_instance.chat.completions.create.return_value = iter(mock_chunks)
@@ -442,8 +442,8 @@ class TestTTFTIntegration:
         
         # Mock streaming response
         mock_chunks = [
-            Mock(choices=[Mock(delta=Mock(content="Test"), finish_reason=None)]),
-            Mock(choices=[Mock(delta=Mock(content=" response"), finish_reason="stop")]),
+            Mock(choices=[Mock(delta=Mock(content="Test"), finish_reason=None)], usage=None),
+            Mock(choices=[Mock(delta=Mock(content=" response"), finish_reason="stop")], usage=None),
         ]
         
         mock_client_instance.chat.completions.create.return_value = iter(mock_chunks)

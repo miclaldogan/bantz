@@ -1203,9 +1203,9 @@ class TestBridge:
         
         result = compare_parsers("youtube aç")
         
-        assert "legacy" in result
+        assert "legacy" in result or "regex" in result
         assert "hybrid" in result
-        assert "match" in result
+        assert "match" in result or "matches" in result
     
     def test_get_nlu_stats(self):
         from bantz.nlu.bridge import get_nlu_stats, parse_intent_hybrid

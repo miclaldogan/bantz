@@ -263,6 +263,7 @@ def test_vllm_chat_detailed_response(mock_get_client):
     mock_completion = Mock()
     mock_completion.choices = [Mock()]
     mock_completion.choices[0].message.content = "Test response"
+    mock_completion.choices[0].message.tool_calls = None  # prevent Mock auto-attribute
     mock_completion.choices[0].finish_reason = "stop"
     mock_completion.model = "test-model"
     mock_completion.usage.total_tokens = 42

@@ -12,7 +12,6 @@ Principle: "LLM controls everything, but executor enforces guardrails"
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -20,7 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from bantz.agent.tools import Tool, ToolRegistry
+from bantz.agent.tools import Tool
 from bantz.brain.arg_sanitizer import ArgSanitizer
 from bantz.policy.engine import PolicyEngine
 
@@ -33,7 +32,8 @@ logger = logging.getLogger(__name__)
 
 # Strict confirmation tokens (no ambiguity)
 CONFIRMATION_ACCEPT_TOKENS = {
-    "1", "yes", "y", "evet", "e", "ok", "tamam", "onaylıyorum", "kabul"
+    "1", "yes", "y", "evet", "e", "ok", "tamam", "onaylıyorum", "kabul",
+    "sil", "gönder", "ekle", "yap", "koy", "kaydet",
 }
 
 CONFIRMATION_REJECT_TOKENS = {
@@ -151,16 +151,40 @@ class SafetyGuard:
         self,
         policy: Optional[ToolSecurityPolicy] = None,
         policy_engine: Optional[PolicyEngine] = None,
+        policy_engine_v2: Optional[Any] = None,
         audit_log_path: Optional[Path] = None,
         audit_retention_days: int = 90,
         sanitizer: Optional[ArgSanitizer] = None,
     ):
         self.policy = policy or ToolSecurityPolicy()
         self.policy_engine = policy_engine
+        self.policy_engine_v2 = policy_engine_v2  # Issue #1291
         self._audit_retention_days = audit_retention_days
         self._audit_logger: Optional[Any] = None
         self._audit_log_path = audit_log_path
         self._sanitizer = sanitizer or ArgSanitizer()
+
+    # ── Issue #1291: PolicyEngineV2 integration ──
+
+    def evaluate_policy(
+        self,
+        tool_name: str,
+        params: Optional[dict[str, Any]] = None,
+        session_id: str = "default",
+    ) -> Optional[Any]:
+        """Evaluate tool via PolicyEngineV2 if available.
+
+        Returns a PolicyDecision or None if v2 engine is not configured.
+        """
+        if self.policy_engine_v2 is None:
+            return None
+        try:
+            return self.policy_engine_v2.evaluate(
+                tool_name, params or {}, session_id=session_id,
+            )
+        except Exception as exc:
+            logger.debug("[SafetyGuard] PolicyEngineV2.evaluate failed: %s", exc)
+            return None
 
     def _get_audit_logger(self) -> Any:
         """Lazily initialize the persistent audit logger (Issue #423)."""
@@ -228,10 +252,14 @@ class SafetyGuard:
             
             # Check field types (basic validation)
             properties = schema.get("properties", {})
+            # Strip unknown fields to prevent tool execution errors.
+            # The 3B model often sends router output fields (natural_query,
+            # text, title) as tool params — these must be removed.
+            _unknown_fields = [fld for fld in params if fld not in properties]
+            for fld in _unknown_fields:
+                logger.warning("Unknown field '%s' in tool '%s' — stripped", fld, tool.name)
+                del params[fld]
             for fld, value in params.items():
-                if fld not in properties:
-                    logger.warning(f"Unknown field '{fld}' in tool '{tool.name}'")
-                    continue
                 
                 field_schema = properties[fld]
                 expected_type = field_schema.get("type")
@@ -243,10 +271,23 @@ class SafetyGuard:
                         return False, f"Field '{fld}' must be integer, got bool"
                     if isinstance(value, str):
                         # LLM often returns "30" instead of 30 — coerce gracefully
-                        try:
-                            params[fld] = int(value)
-                        except (ValueError, TypeError):
-                            return False, f"Field '{fld}' must be integer, got non-numeric string"
+                        # Issue #duration: Also handle "H:MM" / "HH:MM" time-format
+                        # strings for duration fields (e.g. "0:30" → 30 minutes).
+                        _coerced = False
+                        if ":" in value:
+                            _parts = value.strip().split(":")
+                            if len(_parts) == 2:
+                                try:
+                                    _h, _m = int(_parts[0]), int(_parts[1])
+                                    params[fld] = _h * 60 + _m
+                                    _coerced = True
+                                except (ValueError, TypeError):
+                                    pass
+                        if not _coerced:
+                            try:
+                                params[fld] = int(value)
+                            except (ValueError, TypeError):
+                                return False, f"Field '{fld}' must be integer, got non-numeric string"
                     elif not isinstance(value, int):
                         return False, f"Field '{fld}' must be integer, got {type(value).__name__}"
                 elif expected_type == "number" and (isinstance(value, bool) or not isinstance(value, (int, float))):
@@ -470,7 +511,6 @@ class SafetyGuard:
 
             if removed > 0:
                 # Rewrite log with only kept entries
-                import threading
                 with audit_logger._lock:
                     with open(audit_logger.log_path, "w", encoding="utf-8") as f:
                         for entry in kept:

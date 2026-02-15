@@ -140,6 +140,7 @@ class Run:
         return _ToolCallContext(self, tool_name, params, confirmation)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize run metadata to a plain dict for storage/export."""
         return {
             "run_id": self.run_id,
             "user_input": self.user_input,
@@ -174,6 +175,7 @@ class ToolCall:
     created_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize tool call metadata to a plain dict for storage/export."""
         return {
             "call_id": self.call_id,
             "run_id": self.run_id,
@@ -207,6 +209,7 @@ class Artifact:
     created_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize artifact metadata to a plain dict for storage/export."""
         return {
             "artifact_id": self.artifact_id,
             "run_id": self.run_id,

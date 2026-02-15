@@ -32,6 +32,13 @@ from bantz.routing.preroute import (
 # Fixtures
 # ==========================================================================
 
+@pytest.fixture(autouse=True)
+def _disable_bridge(monkeypatch):
+    """Disable language bridge so Turkish test inputs reach prerouter unchanged."""
+    monkeypatch.setenv("BANTZ_BRIDGE_INPUT_GATE", "0")
+    monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", "0")
+
+
 @pytest.fixture
 def event_bus():
     return Mock()

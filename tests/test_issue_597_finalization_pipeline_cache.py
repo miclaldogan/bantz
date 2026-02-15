@@ -55,7 +55,7 @@ def test_finalization_pipeline_cached_across_calls(monkeypatch):
 
     import bantz.brain.finalization_pipeline as fp
 
-    def _create_pipeline(*, finalizer_llm=None, planner_llm=None, event_bus=None):
+    def _create_pipeline(*, finalizer_llm=None, planner_llm=None, event_bus=None, **kwargs):
         pipe = _FakePipeline(output=_make_output(assistant_reply="cached"))
         created.append(pipe)
         return pipe
@@ -89,7 +89,7 @@ def test_finalization_pipeline_cache_invalidates_on_planner_change(monkeypatch):
 
     import bantz.brain.finalization_pipeline as fp
 
-    def _create_pipeline(*, finalizer_llm=None, planner_llm=None, event_bus=None):
+    def _create_pipeline(*, finalizer_llm=None, planner_llm=None, event_bus=None, **kwargs):
         pipe = _FakePipeline(output=_make_output(assistant_reply=str(id(planner_llm))))
         created.append(pipe)
         return pipe

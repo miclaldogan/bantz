@@ -231,7 +231,7 @@ BANTZ_BRIEFING_HOUR=08
 # Brain works in English for better routing accuracy, UI stays Turkish.
 # BANTZ_BRIDGE_ENABLED=0                   # Master switch (1=on, 0=off)
 # BANTZ_BRIDGE_INPUT_GATE=1                # TR→EN input translation for router
-# BANTZ_BRIDGE_OUTPUT_GATE=0               # EN→TR output translation (finalizer)
+# BANTZ_BRIDGE_OUTPUT_GATE=1               # EN→TR output translation (default: enabled)
 # BANTZ_BRIDGE_ENGINE=marianmt             # Translation engine: marianmt | nllb
 # BANTZ_BRIDGE_CACHE_TTL=300               # Translation cache TTL (seconds)
 # BANTZ_BRIDGE_LOG=0                       # Log every translation (debug)

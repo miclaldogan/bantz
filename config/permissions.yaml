@@ -125,3 +125,66 @@ permissions:
     action: "*"
     risk: "medium"
     decision: "confirm"
+
+
+# ── Redact Fields (Issue #1291) ──────────────────────────────
+# Per-tool sensitive parameter fields to mask in confirmation UI.
+# Global keys (password, api_key, token, secret, etc.) are ALWAYS
+# redacted regardless of this config.
+
+redact_fields:
+  gmail.send:
+    - password
+    - api_key
+    - token
+    - refresh_token
+  gmail.send_draft:
+    - password
+    - token
+  gmail.send_to_contact:
+    - password
+    - token
+  system.execute_command:
+    - env_vars
+    - environment
+  calendar.create_event: []
+  calendar.update_event: []
+  calendar.delete_event: []
+  "browser.*":
+    - cookie
+    - authorization
+
+
+# ── Editable Fields (Issue #1291) ────────────────────────────
+# Per-tool fields that users may edit before confirming (HIGH risk only).
+# Fields listed here appear as "[DÜZENLENEBİLİR]" in the confirmation UI.
+
+editable_fields:
+  calendar.delete_event:
+    - notify_attendees
+  calendar.create_event:
+    - title
+    - description
+    - start_time
+    - end_time
+    - attendees
+  calendar.update_event:
+    - title
+    - description
+    - start_time
+    - end_time
+    - attendees
+  gmail.send:
+    - subject
+    - body
+    - to
+    - cc
+    - bcc
+  gmail.send_to_contact:
+    - subject
+    - body
+  gmail.send_draft:
+    - subject
+    - body
+  system.execute_command:
+    - command
