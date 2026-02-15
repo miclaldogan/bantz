@@ -851,7 +851,7 @@ class OrchestratorLoop:
             return final_output, state
         
         except Exception as e:
-            logger.exception(f"Orchestrator turn failed: {e}")
+            logger.exception("Orchestrator turn failed: %s", e)
             self.event_bus.publish(EventType.ERROR.value, {"error": str(e)})
 
             # Issue #1290: Record error in observability
@@ -2309,8 +2309,9 @@ class OrchestratorLoop:
             else:
                 prompt = str(pending.get("prompt") or "Confirm to continue")
                 logger.warning(
-                    f"[FIREWALL] Cannot execute tools - confirmation pending for {pending_tool}. "
-                    f"User must confirm first."
+                    "[FIREWALL] Cannot execute tools - confirmation pending for %s. "
+                    "User must confirm first.",
+                    pending_tool,
                 )
                 return [{
                     "tool": "blocked",
@@ -2348,7 +2349,7 @@ class OrchestratorLoop:
             
             if violations:
                 for violation in violations:
-                    logger.warning(f"[SAFETY] Tool plan violation: {violation.reason}")
+                    logger.warning("[SAFETY] Tool plan violation: %s", violation.reason)
                     self.safety_guard.audit_decision(
                         decision_type="filter_tool_plan",
                         tool_name=violation.tool_name,
@@ -2418,13 +2419,13 @@ class OrchestratorLoop:
         
         for tool_name in filtered_tool_plan:
             if self.config.debug:
-                logger.debug(f"[ORCHESTRATOR] Executing tool: {tool_name}")
+                logger.debug("[ORCHESTRATOR] Executing tool: %s", tool_name)
             
             # Safety Guard: Check tool allowlist/denylist
             if self.safety_guard:
                 allowed, deny_reason = self.safety_guard.check_tool_allowed(tool_name)
                 if not allowed:
-                    logger.warning(f"[SAFETY] Tool '{tool_name}' denied: {deny_reason}")
+                    logger.warning("[SAFETY] Tool '%s' denied: %s", tool_name, deny_reason)
                     self.safety_guard.audit_decision(
                         decision_type="tool_allowlist",
                         tool_name=tool_name,
@@ -2462,14 +2463,15 @@ class OrchestratorLoop:
                 # Even if LLM didn't request it
                 if is_destructive(tool_name) and not output.requires_confirmation:
                     logger.warning(
-                        f"[FIREWALL] Tool {tool_name} is DESTRUCTIVE but LLM didn't request confirmation. "
-                        f"Enforcing confirmation requirement (Issue #160)."
+                        "[FIREWALL] Tool %s is DESTRUCTIVE but LLM didn't request confirmation. "
+                        "Enforcing confirmation requirement (Issue #160).",
+                        tool_name,
                     )
 
                 # If we reach here, confirmation wasn't queued in pre-scan.
                 # Queue it now and return a pending confirmation placeholder.
                 prompt = get_confirmation_prompt(tool_name, output.slots)
-                logger.info(f"[FIREWALL] Tool {tool_name} ({risk.value}) requires confirmation.")
+                logger.info("[FIREWALL] Tool %s (%s) requires confirmation.", tool_name, risk.value)
 
                 state.add_pending_confirmation({
                     "tool": tool_name,
@@ -2555,7 +2557,7 @@ class OrchestratorLoop:
                 if self.safety_guard:
                     valid, error = self.safety_guard.validate_tool_args(tool, params)
                     if not valid:
-                        logger.warning(f"[SAFETY] Tool '{tool_name}' args invalid: {error}")
+                        logger.warning("[SAFETY] Tool '%s' args invalid: %s", tool_name, error)
                         self.safety_guard.audit_decision(
                             decision_type="arg_validation",
                             tool_name=tool_name,
@@ -2658,7 +2660,7 @@ class OrchestratorLoop:
                             result=result,
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to log tool execution: {e}")
+                        logger.warning("Failed to log tool execution: %s", e)
                 
                 # Audit successful execution (Safety Guard)
                 if self.safety_guard:
@@ -2678,7 +2680,7 @@ class OrchestratorLoop:
                 })
                 
             except Exception as e:
-                logger.exception(f"Tool {tool_name} failed: {e}")
+                logger.exception("Tool %s failed: %s", tool_name, e)
                 tool_results.append({
                     "tool": tool_name,
                     "success": False,
@@ -2703,7 +2705,7 @@ class OrchestratorLoop:
                             params=params if 'params' in locals() else None,
                         )
                     except Exception as audit_err:
-                        logger.warning(f"Failed to log tool execution error: {audit_err}")
+                        logger.warning("Failed to log tool execution error: %s", audit_err)
         
         return tool_results
     
