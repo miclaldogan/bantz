@@ -308,3 +308,184 @@ class TestBudgetConfigEdgeCases:
         cfg = PromptBudgetConfig()
         with pytest.raises(Exception):  # FrozenInstanceError
             cfg.context_length = 2048  # type: ignore
+
+
+# ====================================================================
+# Fix #1310: _build_prompt must NOT mutate caller's session_context
+# ====================================================================
+
+
+class TestBuildPromptNoMutation:
+    """Verify _build_prompt does not mutate session_context (Fix #1310).
+
+    Before the fix, _build_prompt used .pop() to extract 'nlu_slots' and
+    'active_entity' from the caller's dict, permanently deleting them.
+    This caused data loss on the retry path (second _build_prompt call)
+    and broke cross-turn entity resolution.
+    """
+
+    @pytest.fixture
+    def mock_llm(self) -> object:
+        """Create a mock LLM client."""
+        class MockLLM:
+            def complete_text(
+                self,
+                *,
+                prompt: str,
+                temperature: float = 0.0,
+                max_tokens: int = 200,
+            ) -> str:
+                return (
+                    '{"route": "smalltalk", "calendar_intent": "none",'
+                    ' "slots": {}, "confidence": 0.9, "tool_plan": [],'
+                    ' "assistant_reply": "Merhaba!"}'
+                )
+        return MockLLM()
+
+    def test_session_context_not_mutated_after_build_prompt(
+        self, mock_llm: object
+    ) -> None:
+        """session_context dict must be identical before and after _build_prompt."""
+        router = JarvisLLMOrchestrator(llm=mock_llm)
+
+        session_context = {
+            "tz": "Europe/Istanbul",
+            "nlu_slots": {"time": "14:00", "app": "takvim"},
+            "active_entity": {
+                "type": "calendar_event",
+                "id": "evt_123",
+                "summary": "Toplantı",
+            },
+            "current_datetime": "2026-02-15T10:00:00+03:00",
+        }
+        # Deep-copy to compare later
+        import copy
+        expected = copy.deepcopy(session_context)
+
+        router._build_prompt(
+            user_input="yarın saat 3'te toplantı ekle",
+            dialog_summary="Önceki diyalog",
+            retrieved_memory=None,
+            session_context=session_context,
+            token_budget=1000,
+        )
+
+        assert session_context == expected, (
+            "_build_prompt mutated session_context! "
+            f"Missing keys: {set(expected) - set(session_context)}"
+        )
+
+    def test_nlu_slots_survive_double_build(self, mock_llm: object) -> None:
+        """nlu_slots must be present in session_context after two _build_prompt calls.
+
+        This simulates the retry path in route() where _build_prompt is
+        called twice with the same dict on tight-budget scenarios.
+        """
+        router = JarvisLLMOrchestrator(llm=mock_llm)
+
+        session_context = {
+            "tz": "Europe/Istanbul",
+            "nlu_slots": {"time": "15:00", "query": "toplantı"},
+        }
+
+        # First call
+        router._build_prompt(
+            user_input="test",
+            session_context=session_context,
+            token_budget=1000,
+        )
+        assert "nlu_slots" in session_context, (
+            "nlu_slots lost after first _build_prompt call"
+        )
+
+        # Second call (retry path)
+        router._build_prompt(
+            user_input="test",
+            session_context=session_context,
+            token_budget=500,
+        )
+        assert "nlu_slots" in session_context, (
+            "nlu_slots lost after second _build_prompt call"
+        )
+        assert session_context["nlu_slots"] == {"time": "15:00", "query": "toplantı"}
+
+    def test_active_entity_survives_double_build(self, mock_llm: object) -> None:
+        """active_entity must be present after two _build_prompt calls."""
+        router = JarvisLLMOrchestrator(llm=mock_llm)
+
+        entity = {"type": "calendar_event", "id": "evt_456", "summary": "Demo"}
+        session_context = {
+            "tz": "Europe/Istanbul",
+            "active_entity": entity,
+        }
+
+        router._build_prompt(
+            user_input="test",
+            session_context=session_context,
+            token_budget=1000,
+        )
+        assert session_context.get("active_entity") == entity
+
+        router._build_prompt(
+            user_input="test",
+            session_context=session_context,
+            token_budget=500,
+        )
+        assert session_context.get("active_entity") == entity
+
+    def test_extracted_keys_not_duplicated_in_session_block(
+        self, mock_llm: object
+    ) -> None:
+        """nlu_slots and active_entity should appear as dedicated blocks,
+        NOT duplicated inside SESSION_CONTEXT JSON."""
+        router = JarvisLLMOrchestrator(llm=mock_llm)
+
+        session_context = {
+            "tz": "Europe/Istanbul",
+            "nlu_slots": {"time": "14:00"},
+            "active_entity": {"type": "event", "id": "e1"},
+            "other_key": "should_appear",
+        }
+
+        prompt, meta = router._build_prompt(
+            user_input="test",
+            session_context=session_context,
+            token_budget=2000,
+        )
+
+        # Dedicated blocks should be present
+        assert "PRE_EXTRACTED_SLOTS:" in prompt
+        assert "ACTIVE_ENTITY" in prompt
+
+        # SESSION_CONTEXT block should contain 'other_key' but NOT the
+        # already-extracted keys to avoid duplication.
+        session_block_start = prompt.find("SESSION_CONTEXT:")
+        if session_block_start != -1:
+            session_block = prompt[session_block_start:]
+            assert "other_key" in session_block
+            assert '"nlu_slots"' not in session_block, (
+                "nlu_slots duplicated in SESSION_CONTEXT block"
+            )
+            assert '"active_entity"' not in session_block, (
+                "active_entity duplicated in SESSION_CONTEXT block"
+            )
+
+    def test_empty_session_context_no_error(self, mock_llm: object) -> None:
+        """Empty or None session_context should not raise."""
+        router = JarvisLLMOrchestrator(llm=mock_llm)
+
+        # None
+        prompt, _ = router._build_prompt(
+            user_input="test",
+            session_context=None,
+            token_budget=1000,
+        )
+        assert "USER: test" in prompt
+
+        # Empty dict
+        prompt, _ = router._build_prompt(
+            user_input="test",
+            session_context={},
+            token_budget=1000,
+        )
+        assert "USER: test" in prompt
