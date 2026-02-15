@@ -7,10 +7,7 @@ use lazy %-formatting instead of eager f-string interpolation.
 from __future__ import annotations
 
 import ast
-import textwrap
 from pathlib import Path
-
-import pytest
 
 # Root of the project
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -50,7 +47,7 @@ class TestNoFStringLoggerCalls:
         filepath = _PROJECT_ROOT / "src" / "bantz" / "brain" / "llm_router.py"
         violations = _find_fstring_logger_calls(filepath)
         assert violations == [], (
-            f"Found f-string logger calls in llm_router.py:\n"
+            "Found f-string logger calls in llm_router.py:\n"
             + "\n".join(f"  L{line}: {code}" for line, code in violations)
         )
 
@@ -58,7 +55,7 @@ class TestNoFStringLoggerCalls:
         filepath = _PROJECT_ROOT / "src" / "bantz" / "brain" / "orchestrator_loop.py"
         violations = _find_fstring_logger_calls(filepath)
         assert violations == [], (
-            f"Found f-string logger calls in orchestrator_loop.py:\n"
+            "Found f-string logger calls in orchestrator_loop.py:\n"
             + "\n".join(f"  L{line}: {code}" for line, code in violations)
         )
 
