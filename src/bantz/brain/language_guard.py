@@ -22,7 +22,6 @@ import re
 import unicodedata
 from typing import Optional, Tuple
 
-
 # ============================================================================
 # Unicode ranges
 # ============================================================================
@@ -210,7 +209,6 @@ def turkish_confidence(text: str) -> float:
 
     # Base score from letter composition
     turkish_letters = counts.get("turkish_latin", 0)
-    latin_letters = counts.get("latin", 0)
     cjk_letters = counts.get("cjk", 0) + counts.get("japanese", 0) + counts.get("korean", 0)
     foreign_letters = counts.get("cyrillic", 0) + counts.get("arabic_hebrew", 0)
 
@@ -285,12 +283,18 @@ def detect_language_issue(text: str) -> Optional[str]:
         # Issue #1176: Parenthesis check was too broad — normal Turkish
         # text with parentheses (e.g. "Ali (kardeşim) geldi") would
         # bypass the confidence check. Now requires actual code keywords.
+        # Issue #1317: "var" removed — it means "exists" in Turkish and
+        # caused false positives. Require ≥2 keyword matches to reduce
+        # single-keyword false positives. Narrowed http prefix to http(s)://.
+        _CODE_KW_RE = re.compile(
+            r"\b(?:def|class|import|return|print|function|const|let)\b"
+        )
         _url_or_code = (
             "://" in text
-            or text.strip().startswith("http")
+            or text.strip().startswith(("http://", "https://"))
             or (
                 "(" in text and ")" in text
-                and re.search(r"\b(?:def|class|import|return|print|function|const|var|let)\b", text)
+                and len(_CODE_KW_RE.findall(text)) >= 2
             )
         )
         if _url_or_code:
