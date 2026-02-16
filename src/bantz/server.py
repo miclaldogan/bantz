@@ -463,6 +463,43 @@ class BantzServer:
         self._scan_page_size = 10
         self._last_scan: Optional[dict] = None
 
+        # ── Data Sync Scheduler (Gmail, Calendar, News → IngestStore) ──
+        self._sync_scheduler = None
+        self._sync_loop = None      # dedicated asyncio loop for sync
+        self._sync_thread = None    # background thread running the loop
+        try:
+            import asyncio as _aio
+            import threading
+            from bantz.data import IngestStore, SyncScheduler
+            from bantz.tools.sync_search_tools import init_sync_tools
+
+            _sync_store = IngestStore()
+            self._sync_scheduler = SyncScheduler(_sync_store)
+
+            # Run sync scheduler in a dedicated background thread with
+            # its own event loop so it works in both interactive and
+            # daemon modes (the main thread is sync/blocking).
+            self._sync_loop = _aio.new_event_loop()
+
+            def _sync_thread_target(loop, scheduler):
+                _aio.set_event_loop(loop)
+                loop.run_until_complete(scheduler.start())
+                loop.run_forever()
+
+            self._sync_thread = threading.Thread(
+                target=_sync_thread_target,
+                args=(self._sync_loop, self._sync_scheduler),
+                daemon=True,
+                name="bantz-sync",
+            )
+            self._sync_thread.start()
+            init_sync_tools(self._sync_scheduler)
+            logging.getLogger(__name__).info("Data sync scheduler started.")
+        except Exception as _sync_err:
+            logging.getLogger(__name__).warning(
+                "Data sync init failed (non-fatal): %s", _sync_err,
+            )
+
     def _get_router(self) -> Router:
         if self.router is None:
             self.router = Router(policy=self.policy, logger=self.logger)
@@ -698,12 +735,21 @@ class BantzServer:
                             "confirmation_tool": pending_tool,
                         }
 
+                # Snapshot tool results before this turn
+                _prev_tool_count = len(self._brain_state.last_tool_results) if self._brain_state else 0
+
                 output, self._brain_state = self._brain.process_turn(
                     command, self._brain_state
                 )
                 reply = str(getattr(output, "assistant_reply", "") or "").strip()
                 if not reply and getattr(output, "ask_user", False):
                     reply = str(getattr(output, "question", "") or "").strip()
+
+                # Extract only THIS turn's tool results
+                _current_tools = (
+                    self._brain_state.last_tool_results[_prev_tool_count:]
+                    if self._brain_state else []
+                )
 
                 # ── Issue #869: Check if this turn created a pending confirmation ──
                 confirmation_pending = (
@@ -732,6 +778,10 @@ class BantzServer:
                         str((self._brain_state.peek_pending_confirmation() or {}).get("tool", ""))
                         if confirmation_pending else None
                     ),
+                    "tools_used": [
+                        {"tool": r.get("tool", ""), "args": r.get("params", {})}
+                        for r in _current_tools
+                    ] or None,
                 }
             except Exception as e:
                 logging.getLogger(__name__).error("Brain handler failed: %s", e)
@@ -935,6 +985,21 @@ class BantzServer:
         try:
             reminder_manager = get_reminder_manager()
             reminder_manager.stop_scheduler()
+        except Exception:
+            pass
+
+        # Stop data sync scheduler
+        try:
+            if self._sync_scheduler is not None and self._sync_loop is not None:
+                import asyncio as _aio
+                future = _aio.run_coroutine_threadsafe(
+                    self._sync_scheduler.stop(), self._sync_loop,
+                )
+                future.result(timeout=5)
+                self._sync_loop.call_soon_threadsafe(self._sync_loop.stop)
+                if self._sync_thread is not None:
+                    self._sync_thread.join(timeout=3)
+                logging.getLogger(__name__).info("Data sync scheduler stopped.")
         except Exception:
             pass
 
