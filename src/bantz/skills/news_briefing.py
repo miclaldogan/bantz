@@ -145,10 +145,16 @@ class NewsProviderBase(ABC):
 # ── RSS provider ──────────────────────────────────────────────
 
 class RSSNewsProvider(NewsProviderBase):
-    """Fetch news from RSS feeds."""
+    """Fetch news from RSS feeds with retry and robust error handling."""
 
-    def __init__(self, timeout: float = 10.0) -> None:
+    _USER_AGENT = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Bantz/1.0"
+    )
+
+    def __init__(self, timeout: float = 10.0, max_retries: int = 2) -> None:
         self.timeout = timeout
+        self._max_retries = max_retries
 
     def fetch(self, category: NewsCategory) -> List[NewsItem]:
         """Fetch and parse RSS feeds for a category."""
@@ -159,8 +165,10 @@ class RSSNewsProvider(NewsProviderBase):
                 fetched = self._parse_feed(feed_url, category)
                 items.extend(fetched)
                 logger.debug("[news][rss] %d items from %s", len(fetched), feed_url)
-            except Exception:
-                logger.warning("[news][rss] failed to fetch %s", feed_url)
+            except URLError as e:
+                logger.warning("[news][rss] network error for %s: %s", feed_url, e)
+            except Exception as e:
+                logger.warning("[news][rss] failed to fetch %s: %s", feed_url, e)
 
         # Deduplicate by fingerprint
         seen = set()
@@ -174,12 +182,35 @@ class RSSNewsProvider(NewsProviderBase):
         return unique
 
     def _parse_feed(self, url: str, category: NewsCategory) -> List[NewsItem]:
-        """Parse a single RSS feed URL."""
-        req = Request(url, headers={"User-Agent": "Bantz/1.0 NewsBot"})
-        with urlopen(req, timeout=self.timeout) as resp:
-            data = resp.read()
+        """Parse a single RSS feed URL with retry (Issue #1369)."""
+        import ssl
 
-        return self._parse_xml(data, category, source=url)
+        last_error: Optional[Exception] = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                req = Request(url, headers={"User-Agent": self._USER_AGENT})
+                # Some Turkish news sites have SSL cert issues
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+
+                with urlopen(req, timeout=self.timeout, context=ctx) as resp:
+                    data = resp.read()
+
+                return self._parse_xml(data, category, source=url)
+            except (URLError, OSError) as e:
+                last_error = e
+                if attempt < self._max_retries:
+                    wait = 1.0 * (attempt + 1)
+                    logger.debug(
+                        "[news][rss] retry %d/%d for %s after %.1fs: %s",
+                        attempt + 1, self._max_retries, url, wait, e,
+                    )
+                    time.sleep(wait)
+                    continue
+                raise
+
+        raise last_error or RuntimeError(f"Failed to fetch {url}")
 
     @staticmethod
     def _parse_xml(data: bytes, category: NewsCategory, source: str = "") -> List[NewsItem]:
