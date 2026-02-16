@@ -3328,6 +3328,21 @@ class OrchestratorLoop:
         )
         self.memory.add_turn(summary)
 
+        # Sync tool results into state.last_tool_results so API can report them
+        for _tr in tool_results:
+            _tname = str(_tr.get("tool") or "").strip()
+            if not _tname or _tr.get("pending_confirmation"):
+                continue
+            state.last_tool_results.append({
+                "tool": _tname,
+                "params": _tr.get("params") or {},
+                "result": str(_tr.get("result_summary") or _tr.get("raw_result") or "")[:500],
+                "success": bool(_tr.get("success")),
+            })
+        # Keep bounded
+        if len(state.last_tool_results) > (state.max_tool_results * 2):
+            state.last_tool_results = state.last_tool_results[-(state.max_tool_results * 2):]
+
         # Issue #873: Persistent user memory — learn from interaction
         if getattr(self, "user_memory", None) is not None:
             try:

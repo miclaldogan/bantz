@@ -15,10 +15,11 @@ def ensure_registered() -> None:
         return
     _registered = True
 
-    from bantz.router.handlers import browser, panel, pc, daily, scheduler, coding
+    from bantz.router.handlers import browser, panel, pc, daily, scheduler, coding, sync
     browser.register_all()
     panel.register_all()
     pc.register_all()
     daily.register_all()
     scheduler.register_all()
     coding.register_all()
+    sync.register_all()

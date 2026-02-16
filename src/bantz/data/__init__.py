@@ -9,6 +9,7 @@ Provides:
 - GraphStore: Backend-agnostic knowledge graph interface
 - AutoLinker: Automatic entity/relationship extraction from tool results
 - HybridRetriever: Keyword + graph traversal retrieval
+- SyncScheduler: Proactive data synchronization (Gmail, Calendar, News)
 """
 
 from bantz.data.ingest_store import IngestStore, DataClass, IngestRecord
@@ -24,6 +25,7 @@ from bantz.data.graph_store import GraphStore, GraphNode, GraphEdge, NODE_LABELS
 from bantz.data.auto_linker import AutoLinker
 from bantz.data.hybrid_retriever import HybridRetriever
 from bantz.data.graph_bridge import GraphBridge
+from bantz.data.sync import SyncScheduler
 
 __all__ = [
     "IngestStore",
@@ -43,4 +45,5 @@ __all__ = [
     "AutoLinker",
     "HybridRetriever",
     "GraphBridge",
+    "SyncScheduler",
 ]

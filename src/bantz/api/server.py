@@ -270,11 +270,23 @@ def create_app(
 
         result = await loop.run_in_executor(executor, _run_command)
 
+        # Extract tools_used from brain result
+        raw_tools = result.get("tools_used")
+        tools_used = None
+        if raw_tools and isinstance(raw_tools, list):
+            from bantz.api.models import ToolCall
+            tools_used = [
+                ToolCall(tool=t.get("tool", ""), args=t.get("args", {}))
+                for t in raw_tools
+                if isinstance(t, dict) and t.get("tool")
+            ] or None
+
         return ChatResponse(
             ok=result.get("ok", False),
             response=result.get("text", ""),
             route=result.get("route", result.get("intent", "unknown")),
             brain=result.get("brain", False),
+            tools_used=tools_used,
             requires_confirmation=result.get("needs_confirmation", False),
             confirmation_prompt=result.get("confirmation_prompt"),
             session=body.session,

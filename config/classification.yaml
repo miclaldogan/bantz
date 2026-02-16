@@ -1,0 +1,35 @@
+# Bantz — Email classification rules (extensible)
+#
+# Custom rules for classifying Gmail messages by sender, domain,
+# or subject patterns.  Merged with built-in rules at startup.
+#
+# Priority: higher = checked first.  Built-in rules have priority 30-90.
+# Use priority > 100 for user overrides that should take precedence.
+#
+# Pattern fields accept regex patterns (case-insensitive):
+#   sender_patterns:      matched against sender email
+#   sender_name_patterns: matched against sender display name
+#   subject_patterns:     matched against email subject
+#   domain_patterns:      simple substring match against sender email
+
+rules:
+  # ── Example: university-specific rule ──
+  # - category: "my_university"
+  #   sender_patterns:
+  #     - "omu\\.edu\\.tr"
+  #   sender_name_patterns:
+  #     - "ondokuz mayıs"
+  #   priority: 100
+
+  # ── Example: work-specific rule ──
+  # - category: "work"
+  #   domain_patterns:
+  #     - "mycompany.com"
+  #   priority: 100
+
+  # ── Example: project-specific rule ──
+  # - category: "bantz_project"
+  #   subject_patterns:
+  #     - "\\[bantz\\]"
+  #     - "bantz.*PR"
+  #   priority: 95

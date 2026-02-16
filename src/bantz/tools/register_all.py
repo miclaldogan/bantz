@@ -47,6 +47,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_sandbox_agents(registry)
     count += _register_music(registry)
     count += _register_health(registry)
+    count += _register_sync_search(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -2539,6 +2540,145 @@ def _register_health(registry: "ToolRegistry") -> int:
             ("service", "string", "Service name for fallback execution (optional)"),
         ),
         _handle_fallback,
+        risk="low",
+    )
+
+    return n
+
+
+# ── Sync Search (10) ────────────────────────────────────────────────
+
+def _register_sync_search(registry: "ToolRegistry") -> int:
+    """Register DB-backed search tools for synced data (Gmail, Calendar, News)."""
+    try:
+        from bantz.tools.sync_search_tools import (
+            inbox_search_tool,
+            inbox_by_category_tool,
+            inbox_categories_tool,
+            inbox_summary_tool,
+            calendar_upcoming_tool,
+            calendar_search_tool,
+            news_latest_tool,
+            news_search_tool,
+            sync_status_tool,
+            sync_now_tool,
+        )
+    except Exception as e:
+        logger.warning(f"[ToolGap] sync_search import: {e}")
+        return 0
+
+    n = 0
+
+    n += _reg(
+        registry,
+        "inbox.search",
+        "Search synced Gmail messages locally by keyword. Faster than live API — searches subject, sender, snippet in the local database.",
+        _obj(
+            ("query", "string", "Search keyword (subject, sender, snippet)"),
+            ("limit", "integer", "Max results (default 20)"),
+        ),
+        inbox_search_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "inbox.by_category",
+        "List synced messages by classification category (github, tubitak, linkedin, google, bank, newsletter, social, education, shopping, travel, etc.).",
+        _obj(
+            ("category", "string", "Category to filter: github, tubitak, linkedin, google, amazon, bank, newsletter, social, education, shopping, travel, uncategorized"),
+            ("limit", "integer", "Max results (default 20)"),
+            required=["category"],
+        ),
+        inbox_by_category_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "inbox.categories",
+        "List all inbox classification categories with message counts.",
+        _obj(),
+        inbox_categories_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "inbox.summary",
+        "Get inbox summary: total messages, top categories, top senders, recent subjects.",
+        _obj(),
+        inbox_summary_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "calendar.upcoming",
+        "Get upcoming events from locally synced calendar. Faster than live API call.",
+        _obj(
+            ("days", "integer", "Days forward to look (default 7)"),
+            ("limit", "integer", "Max events (default 20)"),
+        ),
+        calendar_upcoming_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "calendar.search",
+        "Search synced calendar events by keyword (title, location).",
+        _obj(
+            ("query", "string", "Search keyword"),
+            ("limit", "integer", "Max results (default 20)"),
+            required=["query"],
+        ),
+        calendar_search_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "news.latest",
+        "Get latest news articles from locally synced RSS feeds. Categories: ai, tech, turkey.",
+        _obj(
+            ("category", "string", "Filter by category: ai, tech, turkey (empty=all)"),
+            ("limit", "integer", "Max articles (default 5)"),
+        ),
+        news_latest_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "news.search",
+        "Search synced news articles by keyword across all categories.",
+        _obj(
+            ("query", "string", "Search keyword in title, source, summary"),
+            ("limit", "integer", "Max results (default 10)"),
+            required=["query"],
+        ),
+        news_search_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "sync.status",
+        "Show data synchronization health: last sync times, stats, running state for Gmail/Calendar/News.",
+        _obj(),
+        sync_status_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "sync.now",
+        "Trigger immediate sync for a specific data source (gmail, calendar, news) or all sources.",
+        _obj(
+            ("source", "string", "Source to sync: gmail, calendar, news (empty=all)"),
+        ),
+        sync_now_tool,
         risk="low",
     )
 

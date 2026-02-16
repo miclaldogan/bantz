@@ -102,6 +102,16 @@ Intent = Literal[
     "job_resume",             # "continue", "go on" → resume paused job
     "job_cancel",             # "cancel", "abort" → cancel current job
     "job_status",             # "what are you doing", "status" → job status query
+    # Sync-powered data search intents (data platform)
+    "inbox_search",           # Search synced inbox by keyword
+    "inbox_classify",         # Query inbox by classification category
+    "inbox_summary",          # Get inbox summary overview
+    "calendar_upcoming",      # Get upcoming events from synced calendar
+    "calendar_search",        # Search synced calendar events
+    "news_latest",            # Get latest synced news
+    "news_search",            # Search synced news
+    "sync_status",            # Data sync health / status
+    "sync_now",               # Trigger manual sync
     "unknown",
 ]
 
