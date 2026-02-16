@@ -766,7 +766,7 @@ def validate_orchestrator_output(
     # Validate route enum
     route = parsed.get("route")
     if route is not None:
-        valid_routes = {"calendar", "gmail", "smalltalk", "system", "wiki", "chat", "contacts", "keep", "unknown"}
+        valid_routes = {"calendar", "gmail", "news", "smalltalk", "system", "wiki", "chat", "contacts", "keep", "unknown"}
         if str(route).lower() not in valid_routes:
             errors.append(f"invalid_route:{route}")
     

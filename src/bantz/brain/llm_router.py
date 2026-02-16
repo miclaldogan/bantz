@@ -117,8 +117,9 @@ def get_repair_tracker() -> RepairTracker:
 
 
 # Valid enums (single source of truth for this module)
-VALID_ROUTES = frozenset({"calendar", "gmail", "contacts", "keep", "smalltalk", "system", "unknown"})
+VALID_ROUTES = frozenset({"calendar", "gmail", "contacts", "keep", "news", "smalltalk", "system", "unknown"})
 VALID_CALENDAR_INTENTS = frozenset({"create", "modify", "cancel", "query", "none"})
+VALID_NEWS_INTENTS = frozenset({"briefing", "search", "none"})
 VALID_GMAIL_INTENTS = frozenset({"list", "search", "read", "send", "none"})
 VALID_SYSTEM_INTENTS = frozenset({"time", "status", "battery", "disk", "none"})
 VALID_CONTACTS_INTENTS = frozenset({"list", "search", "create", "delete", "none"})
@@ -272,6 +273,8 @@ class OrchestratorOutput:
     contacts_intent: str = "none"  # list | search | create | delete | none
     # Issue #1363: Keep intent
     keep_intent: str = "none"  # create | list | search | none
+    # Issue #1365: News intent
+    news_intent: str = "none"  # briefing | search | none
     
     # Orchestrator extensions (Issue #134)
     ask_user: bool = False  # Need clarification?
@@ -317,6 +320,8 @@ class OrchestratorOutput:
             return self.contacts_intent or "none"
         if route == "keep":
             return self.keep_intent or "none"
+        if route == "news":
+            return self.news_intent or "none"
         if route == "system":
             return self.system_intent or self.calendar_intent or "none"
         # calendar — use calendar_intent (backward compat)
@@ -373,6 +378,7 @@ class JarvisLLMOrchestrator:
         "contacts.upsert", "contacts.resolve", "contacts.list", "contacts.delete",
         "google.contacts.search", "google.contacts.get", "google.contacts.create",
         "google.keep.list", "google.keep.create", "google.keep.search",
+        "news.latest", "news.search",
         "time.now", "system.status",
     })
 
@@ -440,7 +446,7 @@ class JarvisLLMOrchestrator:
     _SYSTEM_PROMPT_CORE = """Sen BANTZ'sın. SADECE TÜRKÇE konuş, 'Efendim' hitabı kullan.
 
 OUTPUT (tek JSON, Markdown/açıklama YOK):
-{"route":"<calendar|gmail|contacts|keep|system|smalltalk|unknown>","calendar_intent":"<create|modify|cancel|query|none>","gmail_intent":"<list|search|read|send|none>","system_intent":"<time|status|battery|disk|none>","contacts_intent":"<list|search|create|delete|none>","keep_intent":"<create|list|search|none>","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dakika|null","title":"ad|null","window_hint":"today/tomorrow/evening/morning/week|null"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["tool_adı"],"status":"done","ask_user":false,"question":"","requires_confirmation":false}
+{"route":"<calendar|gmail|contacts|keep|news|system|smalltalk|unknown>","calendar_intent":"<create|modify|cancel|query|none>","gmail_intent":"<list|search|read|send|none>","system_intent":"<time|status|battery|disk|none>","contacts_intent":"<list|search|create|delete|none>","keep_intent":"<create|list|search|none>","news_intent":"<briefing|search|none>","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"dakika|null","title":"ad|null","window_hint":"today/tomorrow/evening/morning/week|null"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["tool_adı"],"status":"done","ask_user":false,"question":"","requires_confirmation":false}
 
 status KURALLARI:
 - "done" → tek araç yeter, doğrudan çalıştır (varsayılan).
@@ -473,6 +479,7 @@ GMAIL: gmail.list_messages query="from:X subject:Y after:YYYY/MM/DD". gmail.smar
 SYSTEM: "saat kaç"→time.now (system_intent="time"), "cpu/ram/durum"→system.status (system_intent="status"), "pil"→system.status (system_intent="battery").
 CONTACTS: "kişi listele"→google.contacts.search (contacts_intent="list"), "rehber ara"→google.contacts.search (contacts_intent="search").
 KEEP: "not oluştur"→google.keep.create (keep_intent="create"), "notlarımı göster"→google.keep.list (keep_intent="list"), "not ara"→google.keep.search (keep_intent="search").
+NEWS: "son haberleri göster"→news.latest (news_intent="briefing"), "gündem ne"→news.latest (news_intent="briefing"), "teknoloji haberleri"→news.latest (news_intent="briefing"), "haberlerde ara"→news.search (news_intent="search").
 SAAT: beşe→17:00, sabah beşte→05:00, akşam altıda→18:00, öğlen→12:00, gece onbirde→23:00.
 
 ÇOK ADIMLI GÖREVLER (Issue #1279): Karmaşık istekler için "subtasks" listesi ekle:
@@ -490,7 +497,9 @@ U: yıldızlı maillerim → {"route":"gmail","gmail_intent":"search","gmail":{"
 U: test@gmail.com'a merhaba gönder → {"route":"gmail","gmail_intent":"send","gmail":{"to":"test@gmail.com","body":"Merhaba"},"confidence":0.9,"tool_plan":["gmail.send"],"status":"done","requires_confirmation":true,"assistant_reply":""}
 U: rehberimdeki kişileri göster → {"route":"contacts","contacts_intent":"list","confidence":0.9,"tool_plan":["google.contacts.search"],"status":"done","assistant_reply":""}
 U: bir not oluştur yarın markete git → {"route":"keep","keep_intent":"create","slots":{"title":"yarın markete git"},"confidence":0.9,"tool_plan":["google.keep.create"],"status":"done","requires_confirmation":true,"assistant_reply":""}
-U: sistem durumunu göster → {"route":"system","system_intent":"status","confidence":0.9,"tool_plan":["system.status"],"status":"done","assistant_reply":""}"""
+U: sistem durumunu göster → {"route":"system","system_intent":"status","confidence":0.9,"tool_plan":["system.status"],"status":"done","assistant_reply":""}
+U: son haberleri göster → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}
+U: teknoloji haberleri → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}"""
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
@@ -549,6 +558,9 @@ U: sistem durumunu göster → {"route":"system","system_intent":"status","confi
             "cpu", "ram", "bellek", "disk", "sistem", "durum",
             "saat kaç", "tarih",
         ],
+        "news": [
+            "haber", "haberler", "gündem", "haberleri göster",
+        ],
     }
 
     @staticmethod
@@ -568,7 +580,7 @@ U: sistem durumunu göster → {"route":"system","system_intent":"status","confi
             intent_str = hint.get("preroute_intent", "")
             # Map intent to route: CALENDAR_LIST → calendar, GMAIL_LIST → gmail, etc.
             intent_lower = intent_str.lower()
-            for route in ("calendar", "gmail", "contacts", "system"):
+            for route in ("calendar", "gmail", "contacts", "system", "news"):
                 if route in intent_lower:
                     return route
 
@@ -1855,7 +1867,7 @@ ASSISTANT (sadece JSON):"""
             "etkinlik", "takvim", "randevu", "toplantı",
             "yarın", "bugün", "akşam", "sabah", "öğle",
             "ekle", "oluştur", "planla", "ne yapıyoruz",
-            "programım", "programda", "gündem",
+            "programım", "programda",
             # Issue #1071: Replaced generic "plan" and "iptal" with
             # multi-word patterns to avoid false positives.
             "takvim planı", "günlük plan", "haftalık plan",
@@ -1890,6 +1902,12 @@ ASSISTANT (sadece JSON):"""
             # Issue #1363: keep/notes route keywords
             "not ", "notlar", "memo", "hatırlatıcı",
             "not oluştur", "not al", "not ekle",
+        ],
+        "news": [
+            # Issue #1365: news route keywords
+            "haber", "haberler", "gündem", "son haberler",
+            "teknoloji haberleri", "spor haberleri", "ekonomi haberleri",
+            "haberleri göster", "haberlerde ara",
         ],
         "smalltalk": [
             "nasılsın", "merhaba", "selam", "teşekkür",
@@ -2026,12 +2044,16 @@ ASSISTANT (sadece JSON):"""
         ("keep", "list"): "google.keep.list",
         ("keep", "search"): "google.keep.search",
         ("keep", "none"): "google.keep.list",
+        # Issue #1365: news route tool resolution
+        ("news", "briefing"): "news.latest",
+        ("news", "search"): "news.search",
+        ("news", "none"): "news.latest",
     }
 
     def _resolve_tool_from_intent(
         self, route: str, calendar_intent: str, gmail_intent: str = "none",
         *, system_intent: str = "none", contacts_intent: str = "none",
-        keep_intent: str = "none",
+        keep_intent: str = "none", news_intent: str = "none",
     ) -> str | None:
         """Resolve the correct tool name from route + intent."""
         if route == "calendar":
@@ -2064,6 +2086,13 @@ ASSISTANT (sadece JSON):"""
             return (
                 self._TOOL_LOOKUP.get((route, keep_intent))
                 or self._TOOL_LOOKUP.get((route, "none"))
+            )
+        elif route == "news":
+            # Issue #1365: news route resolution
+            return (
+                self._TOOL_LOOKUP.get((route, news_intent))
+                or self._TOOL_LOOKUP.get((route, "none"))
+                or "news.latest"
             )
         return None
 
@@ -2289,6 +2318,19 @@ ASSISTANT (sadece JSON):"""
                 normalized["keep_intent"] = "list"  # default
             logger.info("[intent_inference] keep intent inferred: '%s'", normalized["keep_intent"])
 
+        # ── Issue #1365: News intent inference ────────────────────────────
+        _raw_news_intent = str(normalized.get("news_intent") or "none").strip().lower()
+        if route == "news" and _raw_news_intent == "none" and user_input:
+            _input_lower = (user_input or "").lower()
+            _NEWS_SEARCH_WORDS = {"ara", "bul", "arat"}
+            _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
+
+            if _input_tokens & _NEWS_SEARCH_WORDS or "haberlerde ara" in _input_lower:
+                normalized["news_intent"] = "search"
+            else:
+                normalized["news_intent"] = "briefing"  # default
+            logger.info("[intent_inference] news intent inferred: '%s'", normalized["news_intent"])
+
         slots = normalized.get("slots") or {}
         if not isinstance(slots, dict):
             slots = {}
@@ -2384,13 +2426,14 @@ ASSISTANT (sadece JSON):"""
         # If 3B model gave empty or all-invalid tool_plan but route+intent are
         # clear, resolve the correct tool deterministically.
         # Also re-resolve if route was overridden (model's tools are for wrong route).
-        if (not tool_plan or _route_was_overridden) and route in ("calendar", "gmail", "system", "contacts", "keep"):
+        if (not tool_plan or _route_was_overridden) and route in ("calendar", "gmail", "system", "contacts", "keep", "news"):
             resolved_tool = self._resolve_tool_from_intent(
                 route, calendar_intent,
                 gmail_intent=str(normalized.get("gmail_intent") or "none").strip().lower(),
                 system_intent=str(normalized.get("system_intent") or "none").strip().lower(),
                 contacts_intent=str(normalized.get("contacts_intent") or "none").strip().lower(),
                 keep_intent=str(normalized.get("keep_intent") or "none").strip().lower(),
+                news_intent=str(normalized.get("news_intent") or "none").strip().lower(),
             )
             if resolved_tool:
                 tool_plan = [resolved_tool]
@@ -2553,6 +2596,9 @@ ASSISTANT (sadece JSON):"""
         keep_intent = str(parsed.get("keep_intent") or "none").strip().lower()
         if keep_intent not in VALID_KEEP_INTENTS:
             keep_intent = "none"
+        news_intent = str(parsed.get("news_intent") or "none").strip().lower()
+        if news_intent not in VALID_NEWS_INTENTS:
+            news_intent = "none"
 
         # Issue #1273: Extract ReAct status field
         _react_status = str(parsed.get("status") or "done").strip().lower()
@@ -2577,6 +2623,7 @@ ASSISTANT (sadece JSON):"""
             system_intent=system_intent,
             contacts_intent=contacts_intent,
             keep_intent=keep_intent,
+            news_intent=news_intent,
             ask_user=ask_user,
             question=question,
             requires_confirmation=requires_confirmation,
@@ -2605,6 +2652,7 @@ ASSISTANT (sadece JSON):"""
             resolved = self._resolve_tool_from_intent(
                 kw_route, "none", "none",
                 system_intent="none", contacts_intent="none", keep_intent="none",
+                news_intent="none",
             )
             if resolved:
                 tool_plan = [resolved]
