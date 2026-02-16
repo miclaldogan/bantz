@@ -364,6 +364,15 @@ class VLLMOpenAIClient(LLMClient):
                     ))
                 if not parsed_tool_calls:
                     parsed_tool_calls = None
+
+            # Issue #1368: Ollama fallback — parse tool_calls from content field
+            # Ollama sometimes puts tool call JSON in content instead of tool_calls.
+            # Format: {"name": "tool_name", "arguments": {...}} or
+            #         [{"function": {"name": "...", "arguments": {...}}}]
+            if parsed_tool_calls is None and content.strip():
+                parsed_tool_calls = self._parse_tool_calls_from_content(content)
+                if parsed_tool_calls:
+                    content = ""  # Clear content since it was a tool call, not text
             
             usage_dict: dict[str, Any] | None = None
             try:
@@ -463,7 +472,68 @@ class VLLMOpenAIClient(LLMClient):
                 raise LLMInvalidResponseError(
                     f"vLLM response parsing failed: {e}"
                 ) from e
-    
+
+    @staticmethod
+    def _parse_tool_calls_from_content(content: str) -> Optional[List[LLMToolCall]]:
+        """Parse tool calls embedded in content field (Issue #1368).
+
+        Ollama and some backends put tool call JSON in the content field
+        instead of the structured tool_calls field.  Supports formats:
+
+        1. Single object: {"name": "fn", "arguments": {...}}
+        2. Array of objects: [{"function": {"name": "fn", "arguments": {...}}}]
+        3. Ollama format: {"name": "fn", "parameters": {...}}
+
+        Returns None if content doesn't look like a tool call.
+        """
+        stripped = content.strip()
+        if not stripped or not (stripped.startswith("{") or stripped.startswith("[")):
+            return None
+
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+
+        results: List[LLMToolCall] = []
+
+        items = parsed if isinstance(parsed, list) else [parsed]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            # Format 1/3: {"name": "fn", "arguments"/"parameters": {...}}
+            name = item.get("name")
+            args = item.get("arguments") or item.get("parameters") or {}
+
+            # Format 2: {"function": {"name": "fn", "arguments": {...}}}
+            if not name and "function" in item:
+                func = item["function"]
+                if isinstance(func, dict):
+                    name = func.get("name")
+                    args = func.get("arguments") or func.get("parameters") or {}
+
+            if not name or not isinstance(name, str):
+                continue
+
+            # Validate it looks like a tool name (contains a dot)
+            if "." not in name:
+                continue
+
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args) if args.strip() else {}
+                except json.JSONDecodeError:
+                    args = {}
+
+            results.append(LLMToolCall(
+                id=item.get("id", "") or "",
+                name=name,
+                arguments=args if isinstance(args, dict) else {},
+            ))
+
+        return results if results else None
+
     def chat_stream(
         self,
         messages: List[LLMMessage],
