@@ -54,6 +54,9 @@ class IntentCategory(Enum):
     APP_LAUNCH = "app_launch"
     SCREENSHOT = "screenshot"
     
+    # Issue #1370: Weather — not supported yet, catch to avoid misrouting
+    WEATHER = "weather"
+    
     # Complex - needs router
     UNKNOWN = "unknown"
     COMPLEX = "complex"
@@ -98,6 +101,7 @@ class IntentCategory(Enum):
             IntentCategory.BRIGHTNESS,
             IntentCategory.APP_LAUNCH,
             IntentCategory.SCREENSHOT,
+            IntentCategory.WEATHER,
         }
     
     @property
@@ -123,6 +127,7 @@ class IntentCategory(Enum):
             IntentCategory.BRIGHTNESS: "system",
             IntentCategory.APP_LAUNCH: "system",
             IntentCategory.SCREENSHOT: "system",
+            IntentCategory.WEATHER: "local",
             IntentCategory.UNKNOWN: "router",
             IntentCategory.COMPLEX: "router",
             IntentCategory.AMBIGUOUS: "router",
@@ -490,6 +495,30 @@ def create_date_rule() -> PreRouteRule:
     )
 
 
+def create_weather_rule() -> PreRouteRule:
+    """Create weather query detection rule (Issue #1370).
+
+    Prevents weather queries from being misrouted to time.now.
+    """
+    return PatternRule(
+        name="weather",
+        intent=IntentCategory.WEATHER,
+        patterns=[
+            r"hava\s+durumu",
+            r"hava\s+nas[ıi]l",
+            r"hava\s+s[ıi]cakl[ıi][gğ][ıi]",
+            r"hava\s+raporu",
+            r"weather",
+            r"ya[gğ]mur\s+ya[gğ][ıia](?:cak|yor)?",
+            r"kar\s+ya[gğ][ıia](?:cak|yor)?",
+            r"s[ıi]cakl[ıi]k\s+ka[cç]",
+            r"derece\s+ka[cç]",
+            r"ka[cç]\s+derece",
+        ],
+        confidence=0.95,
+    )
+
+
 class CalendarListRule(PatternRule):
     """Calendar list rule with Turkish time/date slot extraction.
 
@@ -800,6 +829,7 @@ class PreRouter:
             create_system_keyword_rule(),
             create_volume_rule(),
             create_screenshot_rule(),
+            create_weather_rule(),
             create_smalltalk_rule(),
         ]
     
@@ -998,6 +1028,15 @@ class LocalResponseGenerator:
         month_name = months_tr[now.month - 1]
         
         return f"Bugün {day_name}, {now.day} {month_name} {now.year}."
+
+    @staticmethod
+    def weather() -> str:
+        """Generate weather not-supported response (Issue #1370)."""
+        return (
+            "Henüz hava durumu servisim aktif değil efendim. "
+            "Bu özellik yakında eklenecek. "
+            "Tarayıcıdan kontrol edebilirsiniz."
+        )
     
     def generate(self, intent: IntentCategory) -> str:
         """Generate response for intent.
@@ -1017,6 +1056,7 @@ class LocalResponseGenerator:
             IntentCategory.SMALLTALK: self.smalltalk,
             IntentCategory.TIME_QUERY: self.time_query,
             IntentCategory.DATE_QUERY: self.date_query,
+            IntentCategory.WEATHER: self.weather,
         }
         
         generator = generators.get(intent)
