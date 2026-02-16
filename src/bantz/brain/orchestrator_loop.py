@@ -214,10 +214,25 @@ class OrchestratorConfig:
     memory_pii_filter: bool = True  # Memory-lite PII filtering (Issue #368)
     tool_timeout_seconds: float = 30.0  # Per-tool execution timeout (Issue #431)
     enable_preroute: bool = True  # Issue #407: Rule-based pre-route bypass
-    finalizer_timeout_seconds: float = 10.0  # Issue #947: Finalizer LLM timeout (quality)
-    fast_finalizer_timeout_seconds: float = 5.0  # Issue #947: Fast finalizer LLM timeout
+    finalizer_timeout_seconds: float = 15.0  # Issue #947/#1367: Finalizer LLM timeout (quality)
+    fast_finalizer_timeout_seconds: float = 8.0  # Issue #947/#1367: Fast finalizer LLM timeout
     
     def __post_init__(self):
+        # Issue #1367: Allow env-var override for finalizer timeouts
+        import os
+        env_quality = os.getenv("BANTZ_FINALIZER_TIMEOUT_S")
+        if env_quality:
+            try:
+                self.finalizer_timeout_seconds = float(env_quality)
+            except ValueError:
+                pass
+        env_fast = os.getenv("BANTZ_FAST_FINALIZER_TIMEOUT_S")
+        if env_fast:
+            try:
+                self.fast_finalizer_timeout_seconds = float(env_fast)
+            except ValueError:
+                pass
+
         if self.require_confirmation_for is None:
             # Default: destructive operations require confirmation
             self.require_confirmation_for = [
