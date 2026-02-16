@@ -48,6 +48,11 @@ _DEFAULT_MAX_MESSAGES = 50         # messages per sync pass
 _DEFAULT_INITIAL_FETCH = 100       # first-time sync depth
 _INGEST_SOURCE = "gmail"
 
+# Issue #1366: Rate limit / retry config
+_MAX_RETRIES = 3
+_INITIAL_BACKOFF_SEC = 2.0         # doubles on each retry
+_RATE_LIMIT_CODES = {429, 403}     # Google API rate limit HTTP codes
+
 
 def _parse_sender(from_header: str) -> tuple[str, str]:
     """Extract (sender_name, sender_email) from a From header.
@@ -214,20 +219,64 @@ class GmailSyncer:
         return await loop.run_in_executor(None, self._fetch_messages_sync)
 
     def _fetch_messages_sync(self) -> List[Dict[str, Any]]:
-        """Synchronous Gmail API fetch (runs in thread pool)."""
+        """Synchronous Gmail API fetch with exponential backoff (Issue #1366).
+
+        Retries up to _MAX_RETRIES times on 429/403 rate limit errors
+        with exponential backoff (2s → 4s → 8s).
+        """
         try:
             from bantz.google.gmail import gmail_list_messages
         except ImportError:
             logger.warning("[GmailSync] bantz.google.gmail not available")
             return []
 
-        result = gmail_list_messages(
-            max_results=self._max_messages,
-            interactive=False,
-        )
+        last_error: Optional[Exception] = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                result = gmail_list_messages(
+                    max_results=self._max_messages,
+                    interactive=False,
+                )
 
-        if not result.get("ok"):
-            logger.warning("[GmailSync] gmail_list_messages failed: %s", result.get("error"))
+                if not result.get("ok"):
+                    error_msg = result.get("error", "")
+                    # Check for rate limit in error message
+                    if "429" in str(error_msg) or "quota" in str(error_msg).lower():
+                        backoff = _INITIAL_BACKOFF_SEC * (2 ** attempt)
+                        logger.warning(
+                            "[GmailSync] Rate limited (attempt %d/%d), backing off %.1fs: %s",
+                            attempt + 1, _MAX_RETRIES + 1, backoff, error_msg,
+                        )
+                        time.sleep(backoff)
+                        continue
+                    logger.warning("[GmailSync] gmail_list_messages failed: %s", error_msg)
+                    return []
+
+                break  # Success
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+                # Check for HTTP status code in exception
+                is_rate_limit = any(
+                    code_str in error_str
+                    for code_str in ("429", "403", "rateLimitExceeded", "userRateLimitExceeded")
+                )
+                if is_rate_limit and attempt < _MAX_RETRIES:
+                    backoff = _INITIAL_BACKOFF_SEC * (2 ** attempt)
+                    logger.warning(
+                        "[GmailSync] Rate limit exception (attempt %d/%d), backing off %.1fs: %s",
+                        attempt + 1, _MAX_RETRIES + 1, backoff, e,
+                    )
+                    time.sleep(backoff)
+                    continue
+                logger.error("[GmailSync] Gmail API error: %s", e, exc_info=True)
+                return []
+        else:
+            # All retries exhausted
+            logger.error(
+                "[GmailSync] All %d retries exhausted. Last error: %s",
+                _MAX_RETRIES + 1, last_error,
+            )
             return []
 
         raw_messages = result.get("messages", [])
