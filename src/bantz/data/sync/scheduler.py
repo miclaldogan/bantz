@@ -28,6 +28,7 @@ Environment config::
     BANTZ_SYNC_GMAIL=true               # per-source toggle
     BANTZ_SYNC_CALENDAR=true
     BANTZ_SYNC_NEWS=true
+    BANTZ_SYNC_BOOT_STAGGER=5          # seconds between syncer starts
 """
 
 from __future__ import annotations
@@ -87,10 +88,16 @@ class SyncScheduler:
         gmail_interval: Optional[int] = None,
         calendar_interval: Optional[int] = None,
         news_interval: Optional[int] = None,
+        boot_stagger: Optional[int] = None,
     ) -> None:
         self._store = store
         self._started = False
         self._start_time: float = 0.0
+
+        # Stagger delay between syncer starts at boot (Issue #1371)
+        self._boot_stagger = boot_stagger if boot_stagger is not None else _env_int(
+            "BANTZ_SYNC_BOOT_STAGGER", 5,
+        )
 
         # Read config from env with overrides
         self._enable_gmail = _env_bool("BANTZ_SYNC_GMAIL")
@@ -127,7 +134,11 @@ class SyncScheduler:
     # ── Lifecycle ─────────────────────────────────────────────
 
     async def start(self) -> Dict[str, Any]:
-        """Start all enabled syncers.  Returns a summary of what started."""
+        """Start all enabled syncers.  Returns a summary of what started.
+
+        Syncers are started with a staggered delay (default 5s) between
+        each source to avoid burst API traffic at boot (Issue #1371).
+        """
         if self._started:
             logger.warning("[SyncScheduler] Already started.")
             return {"ok": False, "reason": "already_started"}
@@ -135,8 +146,10 @@ class SyncScheduler:
         self._started = True
         self._start_time = time.time()
         started: list[str] = []
+        stagger = self._boot_stagger
 
         # Run initial sync for all sources, then start periodic
+        # Stagger between sources to spread boot load
         if self._gmail_syncer:
             try:
                 await self._gmail_syncer.sync()
@@ -146,6 +159,12 @@ class SyncScheduler:
                 logger.error("[SyncScheduler] Gmail syncer failed to start: %s", e)
 
         if self._calendar_syncer:
+            if stagger > 0 and started:
+                logger.debug(
+                    "[SyncScheduler] Stagger delay %ds before calendar sync",
+                    stagger,
+                )
+                await asyncio.sleep(stagger)
             try:
                 await self._calendar_syncer.sync()
                 await self._calendar_syncer.start_periodic()
@@ -154,6 +173,12 @@ class SyncScheduler:
                 logger.error("[SyncScheduler] Calendar syncer failed to start: %s", e)
 
         if self._news_syncer:
+            if stagger > 0 and started:
+                logger.debug(
+                    "[SyncScheduler] Stagger delay %ds before news sync",
+                    stagger,
+                )
+                await asyncio.sleep(stagger)
             try:
                 await self._news_syncer.sync()
                 await self._news_syncer.start_periodic()
