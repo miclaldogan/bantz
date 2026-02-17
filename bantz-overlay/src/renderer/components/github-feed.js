@@ -171,7 +171,7 @@ class GitHubFeedPanel {
 
   _normalizeEventType(type) {
     if (!type) return 'default';
-    const t = type.toLowerCase().replace(/event$/i, '').replace(/_/g, '_');
+    const t = type.toLowerCase().replace(/event$/i, '');
     if (t.includes('push')) return 'push';
     if (t.includes('pull') || t.includes('pr')) return 'pull_request';
     if (t.includes('issue') && !t.includes('comment')) return 'issue';

@@ -287,7 +287,7 @@ ipcMain.handle('shell:open-external', async (_event, url) => {
   try {
     const { shell } = require('electron');
     await shell.openExternal(url);
-    console.log(`[Main] Opened external: ${url.slice(0, 80)}`);
+    console.log(`[Main] Opened external: ${sanitizeLogValue(url).slice(0, 80)}`);
     return true;
   } catch (err) {
     console.error('[Main] Failed to open URL:', err.message);
@@ -333,7 +333,12 @@ ipcMain.handle('system:get-weather', async () => {
     // Final fallback
     if (!location) location = 'Corum';
 
-    console.log(`[Main] Weather location: ${location}`);
+    // Sanitize location: allow only safe city-name characters (letters, digits,
+    // spaces, commas, dots, hyphens, Turkish chars). Prevents request forgery
+    // via malicious env values. (CodeQL: js/file-access-to-http)
+    location = location.replace(/[^a-zA-Z\u00e7\u00c7\u011f\u011e\u0131\u0130\u00f6\u00d6\u015f\u015e\u00fc\u00dc0-9\s,.\-]/g, '').trim().slice(0, 100) || 'Corum';
+
+    console.log(`[Main] Weather location: ${sanitizeLogValue(location)}`);
     return new Promise((resolve) => {
       const request = net.request(`https://wttr.in/${encodeURIComponent(location)}?format=j1`);
       let body = '';
@@ -363,7 +368,7 @@ ipcMain.handle('system:get-weather', async () => {
         });
       });
       request.on('error', (err) => {
-        console.error('[Main] Weather fetch error:', err.message);
+        console.error('[Main] Weather fetch error:', sanitizeLogValue(err.message));
         resolve(null);
       });
       request.end();
@@ -435,7 +440,7 @@ function parseRSSXML(xml, sourceName) {
       articles.push({
         title: decodeHTMLEntities(title),
         source: sourceName,
-        summary: description ? decodeHTMLEntities(description).replace(/<[^>]+>/g, '').slice(0, 200) : '',
+        summary: description ? stripHtmlTags(decodeHTMLEntities(description)).slice(0, 200) : '',
         link: link || '',
         pubDate: pubDate || new Date().toISOString(),
       });
@@ -443,6 +448,28 @@ function parseRSSXML(xml, sourceName) {
   }
 
   return articles;
+}
+
+/**
+ * Iteratively strip all HTML tags to prevent incomplete sanitization.
+ * A single-pass replace can leave tags like '<scr<a>ipt>' intact.
+ */
+function stripHtmlTags(str) {
+  let prev;
+  do {
+    prev = str;
+    str = str.replace(/<[^>]+>/g, '');
+  } while (str !== prev);
+  return str;
+}
+
+/**
+ * Sanitize a value before logging to prevent log injection
+ * (newlines, control characters that could forge log entries).
+ */
+function sanitizeLogValue(val) {
+  if (val == null) return '';
+  return String(val).replace(/[\r\n\t]/g, ' ').slice(0, 500);
 }
 
 function extractTag(xml, tagName) {
@@ -457,13 +484,15 @@ function extractTag(xml, tagName) {
 }
 
 function decodeHTMLEntities(str) {
+  // Decode &amp; LAST to prevent double-unescaping:
+  // e.g. '&amp;lt;' → '&lt;' → '<' would be a double-unescape bug.
   return str
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'");
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
 }
 
 ipcMain.handle('news:get-feed', async () => {
@@ -594,7 +623,15 @@ app.whenReady().then(() => {
     const url = new URL(request.url);
     // Resolve file path from the renderer directory
     let filePath = path.join(rendererPath, decodeURIComponent(url.pathname));
-    
+
+    // Prevent path traversal: resolved path must stay within rendererPath
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(rendererPath))) {
+      console.error('[Protocol] Path traversal blocked');
+      return new Response('Forbidden', { status: 403 });
+    }
+    filePath = resolved;
+
     // Determine MIME type
     const ext = path.extname(filePath).toLowerCase();
     const mimeTypes = {
@@ -615,7 +652,7 @@ app.whenReady().then(() => {
         headers: { 'Content-Type': mimeType },
       });
     } catch (err) {
-      console.error(`[Protocol] File not found: ${filePath}`);
+      console.error(`[Protocol] File not found: ${sanitizeLogValue(filePath)}`);
       return new Response('Not Found', { status: 404 });
     }
   });
@@ -753,7 +790,7 @@ ipcMain.handle('github:get-feed', async () => {
         }
       }
     } catch (e) {
-      console.warn('[Main] GitHub events fetch failed:', e.message);
+      console.warn('[Main] GitHub events fetch failed:', sanitizeLogValue(e.message));
     }
 
     // 2. Fetch notifications
@@ -776,7 +813,7 @@ ipcMain.handle('github:get-feed', async () => {
         }
       }
     } catch (e) {
-      console.warn('[Main] GitHub notifications fetch failed:', e.message);
+      console.warn('[Main] GitHub notifications fetch failed:', sanitizeLogValue(e.message));
     }
 
     // 3. If specific repos configured, fetch their events
@@ -790,7 +827,7 @@ ipcMain.handle('github:get-feed', async () => {
           }
         }
       } catch (e) {
-        console.warn('[Main] GitHub repo events failed for ' + repo + ':', e.message);
+        console.warn('[Main] GitHub repo events failed for ' + sanitizeLogValue(repo) + ':', sanitizeLogValue(e.message));
       }
     }
 
@@ -805,7 +842,7 @@ ipcMain.handle('github:get-feed', async () => {
       .sort((a, b) => new Date(b.ts) - new Date(a.ts))
       .slice(0, 40);
 
-    console.log('[Main] GitHub feed: ' + results.events.length + ' events, ' + results.unreadCount + ' unread');
+    console.log('[Main] GitHub feed: ' + sanitizeLogValue(results.events.length) + ' events, ' + sanitizeLogValue(results.unreadCount) + ' unread');
     return results;
   } catch (err) {
     console.error('[Main] GitHub feed error:', err.message);
