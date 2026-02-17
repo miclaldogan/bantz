@@ -22,18 +22,13 @@
         <span class="status-text" id="status-text">Connecting...</span>
       </div>
 
-      <!-- Placeholder: panels and sphere will be injected here by future issues -->
       <div id="content-area" class="content-area">
-        <!-- Phase 2: Particle sphere (#1402) -->
         <div id="sphere-container" class="sphere-container"></div>
       </div>
 
       <!-- Speech area at bottom -->
       <div id="speech-area" class="speech-area">
-        <!-- Phase 4: Reasoning chain (#1410) will go here -->
         <div id="reasoning-chain" class="reasoning-chain"></div>
-
-        <!-- Phase 4: Typewriter output (#1409) will go here -->
         <div id="typewriter-output" class="typewriter-output">
           <span id="typewriter-text"></span>
           <span id="typewriter-cursor" class="cursor">█</span>
@@ -70,7 +65,7 @@
   </script>
   <script type="module" src="renderer.js"></script>
   <script type="module">
-    // Diagnostic: test each import individually
+    // Diagnostic: test ES module imports (does NOT re-execute renderer.js)
     import('./vendor/three.min.js')
       .then(() => console.log('[ModuleDiag] three.min.js OK'))
       .catch(e => console.error('[ModuleDiag] three.min.js FAIL: ' + e.message));
@@ -83,9 +78,6 @@
     import('./components/sphere-state.js')
       .then(() => console.log('[ModuleDiag] sphere-state.js OK'))
       .catch(e => console.error('[ModuleDiag] sphere-state.js FAIL: ' + e.message));
-    import('./renderer.js')
-      .then(() => console.log('[ModuleDiag] renderer.js OK'))
-      .catch(e => console.error('[ModuleDiag] renderer.js FAIL: ' + e.message));
   </script>
 </body>
 </html>

@@ -249,6 +249,11 @@ class CalendarSyncer:
             display_summary += f" @ {location}"
 
         try:
+            # Check for existing record with same fingerprint before ingesting
+            from bantz.data.ingest_store import fingerprint as _fp
+            fp = _fp(content, _INGEST_SOURCE)
+            existing = self._store.get_by_fingerprint(fp)
+
             record_id = self._store.ingest(
                 content=content,
                 source=_INGEST_SOURCE,
@@ -256,8 +261,8 @@ class CalendarSyncer:
                 summary=display_summary,
                 meta=meta,
             )
-            # ingest() returns existing ID on dedup hit
-            return "new" if record_id else "dedup"
+            # existing being truthy means dedup hit (fingerprint already existed)
+            return "dedup" if existing else "new"
         except Exception as e:
             logger.warning("[CalendarSync] Failed to ingest event %s: %s", event_id, e)
             return "dedup"
