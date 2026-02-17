@@ -31,7 +31,7 @@
     "response": "Sistem durumu: CPU %12, RAM %45, disk %60. Her şey normal efendim.",
     "tool_calls": [
       {
-        "tool": "system.info",
+        "tool": "system.status",
         "args": {},
         "result": {
           "cpu_percent": 12,

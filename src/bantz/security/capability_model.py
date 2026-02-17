@@ -149,6 +149,7 @@ _TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     "file.move": ToolCapability("file.move", frozenset({Capability.WRITE, Capability.FILESYSTEM}), "destructive"),
     # System
     "system.status": ToolCapability("system.status", frozenset({Capability.READ}), "safe"),
+    "system.volume": ToolCapability("system.volume", frozenset({Capability.EXECUTE_EXTERNAL}), "safe"),
     "system.screenshot": ToolCapability("system.screenshot", frozenset({Capability.READ}), "safe"),
     "system.execute_command": ToolCapability("system.execute_command", frozenset({Capability.EXECUTE_EXTERNAL}), "destructive"),
     "system.shutdown": ToolCapability("system.shutdown", frozenset({Capability.EXECUTE_EXTERNAL}), "destructive"),

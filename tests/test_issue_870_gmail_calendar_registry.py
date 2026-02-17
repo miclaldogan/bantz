@@ -310,6 +310,7 @@ class TestToolRemapIntegrity(unittest.TestCase):
         "calendar.list_events",
         "calendar.create_event",
         "calendar.delete_event",
+        "system.status",
     }
 
     def test_all_remap_targets_are_real_tools(self):

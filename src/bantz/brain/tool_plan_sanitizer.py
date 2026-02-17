@@ -26,6 +26,8 @@ TOOL_REMAP: dict[tuple[str, str], str] = {
     ("calendar.get_events", "*"): "calendar.list_events",
     ("calendar.add_event", "*"): "calendar.create_event",
     ("calendar.remove_event", "*"): "calendar.delete_event",
+    # Issue #1385: system.info → system.status naming alignment
+    ("system.info", "*"): "system.status",
 }
 
 
