@@ -169,6 +169,19 @@ function initPanelTransitions() {
   console.log('[Overlay] Panel transitions initialized');
 }
 
+// ─── TTS Voice Sync ───────────────────────────────────────────
+let ttsSync = null;
+
+function initTTSSync() {
+  if (!window.TTSVoiceSync || !typewriter) {
+    console.warn('[Overlay] TTSVoiceSync or typewriter not available');
+    return;
+  }
+  ttsSync = new window.TTSVoiceSync(typewriter, hudPanel);
+  window.bantzTTSSync = ttsSync;
+  console.log('[Overlay] TTS voice sync initialized');
+}
+
 // ─── Reasoning Chain Display ─────────────────────────────────
 let reasoningChain = null;
 
@@ -376,15 +389,23 @@ function handleStateMessage(msg) {
   if (typewriter) {
     if (msg.speech_token) {
       typewriter.addToken(msg.speech_token);
+      if (ttsSync) ttsSync.trackToken(msg.speech_token);
     }
     if (msg.speech_start) {
       // End reasoning when speech begins
       if (reasoningChain) reasoningChain.end();
       typewriter.beginSpeech();
+      if (ttsSync) ttsSync.onTTSStart();
     }
     if (msg.speech_end) {
       typewriter.endSpeech();
+      if (ttsSync) ttsSync.onTTSEnd();
     }
+  }
+
+  // Handle TTS word boundary events
+  if (ttsSync && msg.tts_word_boundary) {
+    ttsSync.onWordBoundary(msg.tts_word_boundary);
   }
 
   // Handle reasoning tokens
@@ -532,6 +553,9 @@ initGlitchEffects();
 
 // ─── Initialize Panel Transitions ───────────────────────────
 initPanelTransitions();
+
+// ─── Initialize TTS Sync ───────────────────────────────────
+initTTSSync();
 
 // ─── Check First Boot / Absence ─────────────────────────────
 checkFirstBootOrAbsence();
