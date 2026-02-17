@@ -62,10 +62,12 @@ class TestIssue405PromptBudget:
         core_tokens = est(cls._SYSTEM_PROMPT_CORE)
         assert core_tokens <= 800, f"CORE prompt {core_tokens} tokens > 800"
 
-    def test_full_prompt_under_1600_tokens(self):
+    def test_full_prompt_under_1800_tokens(self):
         cls, est = self._import()
         full_tokens = est(cls.SYSTEM_PROMPT)
-        assert full_tokens <= 1600, f"Full prompt {full_tokens} tokens > 1600"
+        # Issue #1391: budget raised from 1600 to 1800 to accommodate
+        # routing examples for code, translate, volume, app launch.
+        assert full_tokens <= 1800, f"Full prompt {full_tokens} tokens > 1800"
 
     def test_full_prompt_equals_core_plus_detail_plus_examples(self):
         cls, _ = self._import()
