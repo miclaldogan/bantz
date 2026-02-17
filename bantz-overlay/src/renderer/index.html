@@ -13,29 +13,37 @@
   -->
   <div id="overlay-root">
 
-    <!-- Main HUD panel (centered transparent rectangle) -->
-    <div id="hud-panel" class="hud-panel">
+    <!-- Left column: inbox / notifications / daily tasks / system status -->
+    <div id="region-left" class="region region-left"></div>
 
-      <!-- Status indicator: shows connection state -->
-      <div id="status-indicator" class="status-indicator">
-        <span class="status-dot" id="status-dot"></span>
-        <span class="status-text" id="status-text">Connecting...</span>
-      </div>
+    <!-- Center column: sphere + speech (the original HUD core) -->
+    <div id="region-center" class="region region-center">
+      <div id="hud-panel" class="hud-panel">
 
-      <div id="content-area" class="content-area">
-        <div id="sphere-container" class="sphere-container"></div>
-      </div>
-
-      <!-- Speech area at bottom -->
-      <div id="speech-area" class="speech-area">
-        <div id="reasoning-chain" class="reasoning-chain"></div>
-        <div id="typewriter-output" class="typewriter-output">
-          <span id="typewriter-text"></span>
-          <span id="typewriter-cursor" class="cursor">█</span>
+        <!-- Status indicator: shows connection state -->
+        <div id="status-indicator" class="status-indicator">
+          <span class="status-dot" id="status-dot"></span>
+          <span class="status-text" id="status-text">Connecting...</span>
         </div>
-      </div>
 
-    </div><!-- /#hud-panel -->
+        <div id="content-area" class="content-area">
+          <div id="sphere-container" class="sphere-container"></div>
+        </div>
+
+        <!-- Speech area at bottom -->
+        <div id="speech-area" class="speech-area">
+          <div id="reasoning-chain" class="reasoning-chain"></div>
+          <div id="typewriter-output" class="typewriter-output">
+            <span id="typewriter-text"></span>
+            <span id="typewriter-cursor" class="cursor">█</span>
+          </div>
+        </div>
+
+      </div><!-- /#hud-panel -->
+    </div><!-- /#region-center -->
+
+    <!-- Right column: github feed / news / clock -->
+    <div id="region-right" class="region region-right"></div>
 
   </div><!-- /#overlay-root -->
 

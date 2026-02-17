@@ -247,7 +247,8 @@ document.addEventListener('mousemove', (e) => {
     el.closest('.terminal-panel') ||
     el.closest('.news-tooltip') ||
     el.closest('.phone-call-overlay') ||
-    el.closest('.news-popup')
+    el.closest('.news-popup') ||
+    el.closest('.text-input-container')
   );
 
   if (isInteractive && !_mouseEnabled) {
