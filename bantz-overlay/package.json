@@ -19,11 +19,16 @@
     "appId": "com.bantz.overlay",
     "productName": "Bantz Overlay",
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Utility"
     },
     "directories": {
       "output": "dist"
     }
+  },
+  "dependencies": {
+    "three": "^0.182.0"
   }
 }
