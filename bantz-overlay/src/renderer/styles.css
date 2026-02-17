@@ -400,3 +400,28 @@ html, body {
     display: none;
   }
 }
+
+/* ── Terminal Line Styles ───────────────────────────────────────── */
+.terminal-line {
+  padding: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-line.active {
+  color: var(--color-accent);
+  border-left: 2px solid var(--color-accent);
+  padding-left: 6px;
+}
+
+.terminal-line.dimmed {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.terminal-line.highlight {
+  background: rgba(255, 180, 60, 0.08);
+  border-left: 2px solid var(--color-text-amber);
+  padding-left: 6px;
+}
