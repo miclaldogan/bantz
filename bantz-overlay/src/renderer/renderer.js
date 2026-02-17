@@ -51,6 +51,19 @@ function initSphere() {
   });
 }
 
+// ─── Panel Layout Engine ──────────────────────────────────────────
+let layoutEngine = null;
+
+function initLayoutEngine() {
+  if (!window.PanelLayoutEngine) {
+    console.warn('[Overlay] PanelLayoutEngine not loaded');
+    return;
+  }
+  layoutEngine = new window.PanelLayoutEngine(hudPanel);
+  window.bantzLayout = layoutEngine;
+  console.log('[Overlay] Panel layout engine initialized');
+}
+
 // ─── News Feed Panel ───────────────────────────────────────────
 let newsFeed = null;
 let newsImagePopup = null;
@@ -64,6 +77,9 @@ function initNewsFeed() {
   newsFeed.mount();
   newsFeed.show();
   window.bantzNewsFeed = newsFeed;
+
+  // Register with layout engine
+  if (layoutEngine) layoutEngine.register('news-feed', newsFeed, 'right');
 
   // Image popup
   if (window.NewsImagePopup) {
@@ -86,6 +102,10 @@ function initDailyTasks() {
   dailyTasks.mount();
   dailyTasks.show();
   window.bantzDailyTasks = dailyTasks;
+
+  // Register with layout engine
+  if (layoutEngine) layoutEngine.register('daily-tasks', dailyTasks, 'left');
+
   console.log('[Overlay] Daily tasks initialized');
 }
 
@@ -101,6 +121,10 @@ function initSystemStatus() {
   systemStatus.mount();
   systemStatus.show();
   window.bantzSystemStatus = systemStatus;
+
+  // Register with layout engine
+  if (layoutEngine) layoutEngine.register('system-status', systemStatus, 'bottom-left');
+
   console.log('[Overlay] System status initialized');
 }
 
@@ -368,6 +392,9 @@ window.overlayAPI.getDisplayInfo().then((info) => {
 
 // ─── Initialize Particle Sphere ─────────────────────────────
 initSphere();
+
+// ─── Initialize Panel Layout Engine ─────────────────────────
+initLayoutEngine();
 
 // ─── Initialize News Feed ───────────────────────────────────
 initNewsFeed();
