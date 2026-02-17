@@ -118,6 +118,19 @@ function initTypewriter() {
   console.log('[Overlay] Typewriter initialized');
 }
 
+// ─── Glitch Effects ───────────────────────────────────────────
+let glitchEffects = null;
+
+function initGlitchEffects() {
+  if (!window.GlitchEffects) {
+    console.warn('[Overlay] GlitchEffects not loaded');
+    return;
+  }
+  glitchEffects = new window.GlitchEffects(hudPanel);
+  window.bantzGlitchEffects = glitchEffects;
+  console.log('[Overlay] Glitch effects initialized');
+}
+
 // ─── Reasoning Chain Display ─────────────────────────────────
 let reasoningChain = null;
 
@@ -218,6 +231,18 @@ function handleStateMessage(msg) {
   // Update sphere state animation based on assistant state
   if (stateAnimator && msg.state) {
     stateAnimator.setState(msg.state);
+
+    // Trigger glitch effects on state transitions
+    if (glitchEffects) {
+      if (msg.state === 'wake') {
+        glitchEffects.triggerWakeFlicker();
+        glitchEffects.triggerChromatic('normal');
+      } else if (msg.state === 'thinking') {
+        glitchEffects.triggerChromatic('intense');
+      } else if (msg.state === 'listening' || msg.state === 'speaking') {
+        glitchEffects.triggerChromatic('normal');
+      }
+    }
   }
 
   // Handle speech tokens for typewriter
@@ -355,6 +380,9 @@ initSystemStatus();
 
 // ─── Initialize Typewriter ─────────────────────────────────
 initTypewriter();
+
+// ─── Initialize Glitch Effects ──────────────────────────────
+initGlitchEffects();
 
 // ─── Initialize Reasoning Chain ─────────────────────────────
 initReasoningChain();

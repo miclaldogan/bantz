@@ -42,6 +42,12 @@
   /* CRT effect intensity (0 = off) */
   --crt-opacity: 0.04;
   --crt-flicker-opacity: 0.015;
+  --crt-flicker-duration: 8s;
+
+  /* Chromatic aberration */
+  --ca-shift: 2px;
+  --ca-alpha: 0.3;
+  --ca-duration: 500ms;
 }
 
 /* ── Reset ──────────────────────────────────────────────────────── */
@@ -128,7 +134,7 @@ html, body {
   pointer-events: none;
   z-index: 999;
   opacity: var(--crt-flicker-opacity);
-  animation: crt-flicker 8s ease-in-out infinite;
+  animation: crt-flicker var(--crt-flicker-duration) ease-in-out infinite;
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0) 0%,
@@ -346,23 +352,47 @@ html, body {
 @keyframes chromatic-aberration {
   0% {
     text-shadow: none;
+    filter: none;
   }
-  25% {
-    text-shadow: -1px 0 rgba(255, 0, 0, 0.3), 1px 0 rgba(0, 100, 255, 0.3);
+  20% {
+    text-shadow:
+      calc(var(--ca-shift) * -1) 0 rgba(255, 0, 0, var(--ca-alpha)),
+      var(--ca-shift)            0 rgba(0, 100, 255, var(--ca-alpha));
+    filter: hue-rotate(2deg);
   }
   50% {
-    text-shadow: -2px 0 rgba(255, 0, 0, 0.2), 2px 0 rgba(0, 100, 255, 0.2);
-  }
-  75% {
-    text-shadow: -1px 0 rgba(255, 0, 0, 0.1), 1px 0 rgba(0, 100, 255, 0.1);
+    text-shadow:
+      calc(var(--ca-shift) * -0.5) 0 rgba(255, 0, 0, calc(var(--ca-alpha) * 0.6)),
+      calc(var(--ca-shift) * 0.5)  0 rgba(0, 100, 255, calc(var(--ca-alpha) * 0.6));
+    filter: hue-rotate(-1deg);
   }
   100% {
     text-shadow: none;
+    filter: none;
   }
 }
 
 .chromatic-flash {
-  animation: chromatic-aberration 0.5s ease-out;
+  animation: chromatic-aberration var(--ca-duration) ease-out;
+}
+
+/* ── Random Flicker (JS class toggle) ──────────────────────────── */
+.random-flicker {
+  opacity: 0.96 !important;
+}
+
+/* ── Wake Flicker (intense 100ms burst) ────────────────────────── */
+@keyframes wake-flicker-anim {
+  0%   { opacity: 1; filter: brightness(1); }
+  15%  { opacity: 0.7; filter: brightness(1.3); }
+  30%  { opacity: 0.95; filter: brightness(0.9); }
+  50%  { opacity: 0.8; filter: brightness(1.2); }
+  70%  { opacity: 1; filter: brightness(1.1); }
+  100% { opacity: 1; filter: brightness(1); }
+}
+
+.wake-flicker {
+  animation: wake-flicker-anim 150ms steps(6) !important;
 }
 
 /* ── Panel Slide-In Animations ──────────────────────────────────── */
@@ -398,6 +428,17 @@ html, body {
   .hud-panel::before,
   .hud-panel::after {
     display: none;
+  }
+
+  .chromatic-flash,
+  .random-flicker,
+  .wake-flicker {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+
+  .glitch-noise-overlay {
+    display: none !important;
   }
 }
 
