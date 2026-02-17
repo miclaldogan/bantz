@@ -89,6 +89,21 @@ function initDailyTasks() {
   console.log('[Overlay] Daily tasks initialized');
 }
 
+// ─── System Status Panel ───────────────────────────────────────
+let systemStatus = null;
+
+function initSystemStatus() {
+  if (!window.SystemStatusPanel) {
+    console.warn('[Overlay] SystemStatusPanel not loaded');
+    return;
+  }
+  systemStatus = new window.SystemStatusPanel(hudPanel);
+  systemStatus.mount();
+  systemStatus.show();
+  window.bantzSystemStatus = systemStatus;
+  console.log('[Overlay] System status initialized');
+}
+
 // ─── Mouse Interaction Zones ──────────────────────────────────
 // When the mouse enters the HUD panel, we enable mouse events
 // so the user can interact with panels/sphere. When it leaves,
@@ -228,6 +243,24 @@ function handleBriefingMessage(msg) {
           id: msg.id,
         });
       }
+      // Route weather cards to system status panel
+      if (msg.category === 'weather' && systemStatus) {
+        systemStatus.setWeather({
+          temperature: msg.temperature,
+          condition: msg.condition,
+          humidity: msg.humidity,
+          wind_speed: msg.wind_speed,
+        });
+      }
+      // Route system metrics
+      if (msg.category === 'system' && systemStatus) {
+        systemStatus.setSystemMetrics({
+          cpu: msg.cpu,
+          ram: msg.ram,
+          disk: msg.disk,
+          uptime_seconds: msg.uptime_seconds,
+        });
+      }
       break;
     case 'briefing_start':
       console.log('[Overlay] Briefing started');
@@ -259,3 +292,6 @@ initNewsFeed();
 
 // ─── Initialize Daily Tasks ─────────────────────────────────
 initDailyTasks();
+
+// ─── Initialize System Status ───────────────────────────────
+initSystemStatus();
