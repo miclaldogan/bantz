@@ -36,27 +36,75 @@ def _get_event_bus_safe():
 
 # Tool name → source category mapping
 _TOOL_SOURCE_MAP: Dict[str, str] = {
-    # Gmail tools
+    # Gmail tools (legacy underscore)
     "gmail_list_messages": "gmail",
     "gmail_get_message": "gmail",
     "gmail_send": "gmail",
     "gmail_reply": "gmail",
     "gmail_search": "gmail",
-    # Calendar tools
+    # Gmail tools (current dotted)
+    "gmail.list_messages": "gmail",
+    "gmail.get_message": "gmail",
+    "gmail.send": "gmail",
+    "gmail.generate_reply": "gmail",
+    "gmail.smart_search": "gmail",
+    "gmail.query_from_nl": "gmail",
+    # Calendar tools (legacy underscore)
     "calendar_list_events": "calendar",
     "calendar_get_event": "calendar",
     "calendar_create_event": "calendar",
     "calendar_update_event": "calendar",
     "calendar_find_free_slots": "calendar",
-    # Contact tools
+    # Calendar tools (current dotted)
+    "calendar.list_events": "calendar",
+    "calendar.get_event": "calendar",
+    "calendar.create_event": "calendar",
+    "calendar.update_event": "calendar",
+    "calendar.delete_event": "calendar",
+    "calendar.find_free_slots": "calendar",
+    # Contacts
     "contacts_list": "contacts",
     "contacts_search": "contacts",
     "contacts_get": "contacts",
-    # Task tools
+    "contacts.list": "contacts",
+    "contacts.search": "contacts",
+    "contacts.get": "contacts",
+    # Tasks
     "tasks_list": "tasks",
     "tasks_create": "tasks",
     "tasks_update": "tasks",
+    "tasks.list": "tasks",
+    "tasks.create": "tasks",
+    "tasks.update": "tasks",
+    # Classroom
+    "google.classroom.courses": "classroom",
+    "google.classroom.coursework": "classroom",
+    "google.classroom.submissions": "classroom",
 }
+
+
+def _resolve_source_from_tool_name(tool_name: str) -> Optional[str]:
+    """Resolve canonical source category from tool name.
+
+    Supports both legacy underscore names (``gmail_list_messages``)
+    and current dotted names (``gmail.list_messages``).
+    """
+    if not tool_name:
+        return None
+
+    if tool_name in _TOOL_SOURCE_MAP:
+        return _TOOL_SOURCE_MAP[tool_name]
+
+    normalized = tool_name.replace(".", "_")
+    if normalized in _TOOL_SOURCE_MAP:
+        return _TOOL_SOURCE_MAP[normalized]
+
+    prefix = tool_name.split(".", 1)[0]
+    if prefix in {"gmail", "calendar", "contacts", "tasks", "classroom"}:
+        return prefix
+    if tool_name.startswith("google.classroom."):
+        return "classroom"
+    return None
 
 
 class GraphBridge:
@@ -106,7 +154,7 @@ class GraphBridge:
         if not self._enabled:
             return 0
 
-        source = _TOOL_SOURCE_MAP.get(tool_name)
+        source = _resolve_source_from_tool_name(tool_name)
         if not source:
             return 0
 

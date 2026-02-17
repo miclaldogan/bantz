@@ -155,6 +155,22 @@ class PanelLayoutEngine {
 
     // Apply initial position
     this._positionPanel(id);
+
+    // Hover behavior: bring panel to front + small asymmetry offset
+    el.addEventListener('mouseenter', () => {
+      this.bringToFront(id);
+      const x = (Math.random() * 6) - 3;
+      const y = (Math.random() * 6) - 3;
+      el.style.setProperty('--micro-offset-x', `${x.toFixed(1)}px`);
+      el.style.setProperty('--micro-offset-y', `${y.toFixed(1)}px`);
+      el.classList.add('terminal-hovered');
+    });
+    el.addEventListener('mouseleave', () => {
+      el.classList.remove('terminal-hovered');
+      el.style.removeProperty('--micro-offset-x');
+      el.style.removeProperty('--micro-offset-y');
+    });
+
     console.log(`[PanelLayout] Registered "${id}" → slot "${slot}" → region "${slotDef.region}"`);
   }
 

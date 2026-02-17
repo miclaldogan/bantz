@@ -44,6 +44,12 @@ contextBridge.exposeInMainWorld('overlayAPI', {
   sendDaemonEvent: (event) => ipcRenderer.send('daemon:event', event),
 
   /**
+   * Send a text command to the daemon for processing.
+   * @param {string} text - The user's text input
+   */
+  sendCommand: (text) => ipcRenderer.send('daemon:command', text),
+
+  /**
    * Register a callback for daemon connection state changes.
    * State: 'connected' | 'connecting' | 'disconnected'
    * @param {(state: string) => void} callback
@@ -96,6 +102,36 @@ contextBridge.exposeInMainWorld('overlayAPI', {
    */
   reconnect: () => ipcRenderer.send('daemon:reconnect'),
 
+  // ─── Auth Status ──────────────────────────────────────────────
+  /**
+   * Listen for auth status updates (first-run detection).
+   * @param {(status: {google: boolean, github: boolean, needsSetup: boolean}) => void} callback
+   */
+  onAuthStatus: (callback) => {
+    ipcRenderer.removeAllListeners('auth:status');
+    ipcRenderer.on('auth:status', (_event, status) => callback(status));
+  },
+
+  /**
+   * Get current Google + GitHub auth status synchronously.
+   * @returns {Promise<{google: boolean, github: boolean, hasClientSecret: boolean, needsSetup: boolean}>}
+   */
+  getAuthStatus: () => ipcRenderer.invoke('auth:get-status'),
+
+  /**
+   * Trigger Google OAuth flow for given services.
+   * @param {string[]} [scopes] - e.g. ['calendar', 'gmail', 'classroom']. Defaults to all.
+   * @returns {Promise<{success: boolean, scopes?: string[], error?: string}>}
+   */
+  requestGoogleOAuth: (scopes) => ipcRenderer.invoke('auth:request-google-oauth', scopes),
+
+  /**
+   * Open a Google Classroom enrollment link in the default browser.
+   * @param {string} enrollmentCode - The Classroom course enrollment code.
+   * @returns {Promise<boolean>}
+   */
+  openClassroomEnrollment: (enrollmentCode) => ipcRenderer.invoke('classroom:open-enrollment', enrollmentCode),
+
   // ─── System Data ─────────────────────────────────────────────
   /**
    * Get real system metrics (CPU, RAM, Disk, Uptime).
@@ -121,12 +157,6 @@ contextBridge.exposeInMainWorld('overlayAPI', {
    * @returns {Promise<string|null>} Image URL or null
    */
   getArticleImage: (url) => ipcRenderer.invoke('news:get-article-image', url),
-
-  /**
-   * Get GitHub activity feed (events + notifications).
-   * @returns {Promise<{events: Array, unreadCount: number}|null>}
-   */
-  getGitHubFeed: () => ipcRenderer.invoke('github:get-feed'),
 
   /**
    * Open a URL in the user's default browser.

@@ -400,20 +400,23 @@ class OrchestratorLoop:
         try:
             from bantz.data.graph_bridge import GraphBridge
             import asyncio as _aio
-            loop = _aio.get_event_loop() if _aio.get_event_loop().is_running() else None
-            if loop and loop.is_running():
-                import concurrent.futures as _cf
-                _gb_future = _cf.Future()
-                async def _init_gb():
+            try:
+                _running_loop = _aio.get_running_loop()
+            except RuntimeError:
+                _running_loop = None
+
+            if _running_loop is not None and _running_loop.is_running():
+                # Async context: create_task so the init completes in the loop
+                async def _init_gb_async(self_ref=self):
                     try:
-                        _gb_future.set_result(await GraphBridge.create_default())
-                    except Exception as e:
-                        _gb_future.set_result(None)
-                _aio.ensure_future(_init_gb())
+                        self_ref._graph_bridge = await GraphBridge.create_default()
+                        logger.info("[ORCHESTRATOR] GraphBridge initialized (async)")
+                    except Exception as _e:
+                        logger.warning("[ORCHESTRATOR] GraphBridge async init failed: %s", _e)
+                _running_loop.create_task(_init_gb_async())
             else:
-                self._graph_bridge = _aio.get_event_loop().run_until_complete(
-                    GraphBridge.create_default()
-                )
+                self._graph_bridge = _aio.run(GraphBridge.create_default())
+                logger.info("[ORCHESTRATOR] GraphBridge initialized (sync)")
         except Exception as _gbx:
             logger.warning("[ORCHESTRATOR] GraphBridge init failed: %s", _gbx)
 
@@ -422,6 +425,33 @@ class OrchestratorLoop:
             self._context_builder._ingest_bridge = self._ingest_bridge
         if getattr(self, "_graph_bridge", None) is not None:
             self._context_builder._graph_bridge = self._graph_bridge
+
+        # Issue #1450: Google Data Sync → SQLite IngestStore
+        # Pulls Gmail, Calendar, and Classroom data locally for fast offline access.
+        self._google_sync: Any = None
+        try:
+            from bantz.data.google_sync import GoogleSyncManager
+            _gs_store = self._ingest_bridge._store if self._ingest_bridge else None
+            self._google_sync = GoogleSyncManager(store=_gs_store)
+            import asyncio as _aio_gs
+            try:
+                _gs_loop = _aio_gs.get_running_loop()
+            except RuntimeError:
+                _gs_loop = None
+
+            if _gs_loop is not None and _gs_loop.is_running():
+                async def _start_google_sync(self_ref=self):
+                    try:
+                        await self_ref._google_sync.sync_all()
+                        await self_ref._google_sync.start_background_sync()
+                        logger.info("[ORCHESTRATOR] Google sync started")
+                    except Exception as _gse:
+                        logger.warning("[ORCHESTRATOR] Google sync error: %s", _gse)
+                _gs_loop.create_task(_start_google_sync())
+            else:
+                logger.info("[ORCHESTRATOR] Google sync deferred (no running loop)")
+        except Exception as _gsx:
+            logger.warning("[ORCHESTRATOR] GoogleSyncManager init failed: %s", _gsx)
 
         # Issue #1297: Wire event bus subscribers — decoupled observability
         self._event_subscribers: dict[str, Any] = {}
@@ -495,6 +525,12 @@ class OrchestratorLoop:
                 _aio_close.get_event_loop().run_until_complete(
                     self._graph_bridge.close()
                 )
+            except Exception:
+                pass
+        # Issue #1450: Close google sync manager
+        if getattr(self, "_google_sync", None) is not None:
+            try:
+                self._google_sync.close()
             except Exception:
                 pass
 
@@ -2918,11 +2954,15 @@ class OrchestratorLoop:
                 # But first: check IngestStore cache for read-only tools
                 _cache_hit = None
                 _CACHEABLE_TOOLS = {
+                    # Legacy names
                     "gmail_list_messages", "gmail_search", "gmail_get_message",
-                    "list_events", "find_free_slots", "system_info",
-                    "gmail_list_labels",
+                    "list_events", "find_free_slots", "system_info", "gmail_list_labels",
+                    # Canonical dotted names
+                    "gmail.list_messages", "gmail.smart_search", "gmail.get_message", "gmail.list_labels",
+                    "calendar.list_events", "calendar.find_free_slots",
                     "weather.get_current", "weather.get_forecast",
                     "news.latest", "news.briefing", "news.category",
+                    "google.classroom.courses", "google.classroom.coursework", "google.classroom.submissions",
                 }
                 if (
                     tool_name in _CACHEABLE_TOOLS

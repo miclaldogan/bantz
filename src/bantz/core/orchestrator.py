@@ -955,7 +955,16 @@ def stop_jarvis() -> None:
 def main() -> int:
     """Main entry point for Jarvis."""
     import argparse
-    
+
+    # Load .env from project root so BANTZ_VLLM_URL / BANTZ_VLLM_MODEL etc. apply
+    try:
+        from dotenv import load_dotenv as _load_dotenv
+        _env_path = Path(__file__).resolve().parents[3] / ".env"
+        if _env_path.exists():
+            _load_dotenv(_env_path, override=False)
+    except ImportError:
+        pass  # python-dotenv not installed, rely on env vars being set externally
+
     parser = argparse.ArgumentParser(
         prog="jarvis",
         description="Jarvis - Just A Rather Very Intelligent System",

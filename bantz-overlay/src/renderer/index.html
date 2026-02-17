@@ -7,6 +7,17 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div id="boot-layer">
+    <div class="boot-bg">
+      <pre id="boot-log" class="boot-log"></pre>
+      <div class="boot-scanlines"></div>
+    </div>
+    <div class="boot-logo">
+      <img src="assets/bantz_no_bg_KEEP_SMILE_CLEAN.png" alt="BANTZ" onerror="this.style.display='none';this.parentNode.innerHTML='<span class=boot-text>BANTZ</span>'" />
+    </div>
+  </div>
+
+  <div id="app-shell">
   <!--
     The overlay root container.
     Everything transparent by default; only content panels are visible.
@@ -89,5 +100,6 @@
       .then(() => console.log('[ModuleDiag] sphere-state.js OK'))
       .catch(e => console.error('[ModuleDiag] sphere-state.js FAIL: ' + e.message));
   </script>
+  </div><!-- /#app-shell -->
 </body>
 </html>

@@ -287,7 +287,7 @@ ipcMain.handle('shell:open-external', async (_event, url) => {
   try {
     const { shell } = require('electron');
     await shell.openExternal(url);
-    console.log('[Main] Opened external: ' + String(url || '').replace(/[\r\n]/g, '').slice(0, 80));
+    console.log(`[Main] Opened external: ${sanitizeLogValue(url).slice(0, 80)}`);
     return true;
   } catch (err) {
     console.error('[Main] Failed to open URL:', err.message);
@@ -333,24 +333,14 @@ ipcMain.handle('system:get-weather', async () => {
     // Final fallback
     if (!location) location = 'Corum';
 
-    // Validate location against an allowlist of known safe city names.
-    // This breaks the CodeQL taint chain (file-data → HTTP request)
-    // by ensuring only pre-approved constant strings reach the network.
-    const KNOWN_CITIES = [
-      'Corum','Istanbul','Ankara','Izmir','Bursa','Antalya','Adana',
-      'Konya','Gaziantep','Mersin','Diyarbakir','Kayseri','Eskisehir',
-      'Samsun','Trabzon','Erzurum','Malatya','Van','Batman','Rize',
-      'London','Berlin','Paris','Amsterdam','Tokyo','New York',
-    ];
-    const requestedLoc = (location || '').trim();
-    // Case-insensitive match against the allowlist
-    const safeLocation = KNOWN_CITIES.find(
-      c => c.toLowerCase() === requestedLoc.toLowerCase()
-    ) || 'Corum';
+    // Sanitize location: allow only safe city-name characters (letters, digits,
+    // spaces, commas, dots, hyphens, Turkish chars).  Prevents request forgery
+    // via malicious env values.  (CodeQL: js/file-access-to-http)
+    location = location.replace(/[^a-zA-ZçÇğĞıİöÖşŞüÜ0-9\s,.\-]/g, '').trim().slice(0, 100) || 'Corum';
 
-    console.log('[Main] Weather location: ' + safeLocation);
+    console.log(`[Main] Weather location: ${sanitizeLogValue(location)}`);
     return new Promise((resolve) => {
-      const request = net.request(`https://wttr.in/${encodeURIComponent(safeLocation)}?format=j1`);
+      const request = net.request(`https://wttr.in/${encodeURIComponent(location)}?format=j1`);
       let body = '';
       request.on('response', (response) => {
         response.on('data', (chunk) => { body += chunk.toString(); });
@@ -372,19 +362,19 @@ ipcMain.handle('system:get-weather', async () => {
               visibility: parseInt(current.visibility, 10) || 0,
             });
           } catch (e) {
-            console.error('[Main] Weather parse error:', String(e.message || '').replace(/[\r\n]/g, ''));
+            console.error('[Main] Weather parse error:', e.message);
             resolve(null);
           }
         });
       });
       request.on('error', (err) => {
-        console.error('[Main] Weather fetch error:', String(err.message || '').replace(/[\r\n]/g, ''));
+        console.error('[Main] Weather fetch error:', sanitizeLogValue(err.message));
         resolve(null);
       });
       request.end();
     });
   } catch (err) {
-    console.error('[Main] Weather error:', String(err.message || '').replace(/[\r\n]/g, ''));
+    console.error('[Main] Weather error:', err.message);
     return null;
   }
 });
@@ -592,7 +582,7 @@ function startIPCClient() {
 
   // Forward user text commands from renderer → daemon
   ipcMain.on('daemon:command', (_event, text) => {
-    console.log(`[Main] Forwarding command to daemon: ${text.substring(0, 80)}`);
+    console.log(`[Main] Forwarding command to daemon: ${sanitizeLogValue(text).substring(0, 80)}`);
     ipcClient.send({ type: 'command', text });
   });
 
@@ -603,13 +593,13 @@ function startIPCClient() {
     }
     // Update tray tooltip
     if (tray) updateTrayConnectionState(tray, state);
-    console.log('[Main] IPC state: ' + String(state).replace(/[\r\n]/g, ''));
+    console.log(`[Main] IPC state: ${state}`);
   });
 
   ipcClient.on('error', (err) => {
     // Only log non-routine errors (suppress flood)
     if (err.code !== 'ENOENT' && err.code !== 'ECONNREFUSED' && err.code !== 'ECONNRESET') {
-      console.error('[Main] IPC error:', String(err.message || '').replace(/[\r\n]/g, ''));
+      console.error('[Main] IPC error:', err.message);
     }
   });
 
@@ -630,7 +620,7 @@ function startIPCClient() {
  */
 async function checkFirstRunAuth() {
   const os = require('os');
-  const { execSync, exec, execFile } = require('child_process');
+  const { execSync, exec } = require('child_process');
   const homedir = os.homedir();
   const results = { google: false, github: false, needsSetup: false };
 
@@ -679,19 +669,17 @@ async function checkFirstRunAuth() {
         const sysPython = 'python3';
         const pythonCmd = fs.existsSync(venvPython) ? venvPython : sysPython;
 
-        // Run the consent wizard non-interactively for calendar + gmail
-        // Use execFile() with explicit args to prevent shell-command injection
-        // from uncontrolled path values. (CodeQL: js/shell-command-injection-from-environment)
-        execFile(
-          pythonCmd,
-          ['-c', [
-            'from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager',
-            'setup_auth_manager()',
-            'mgr = get_auth_manager()',
-            "mgr.ensure_scope('calendar')",
-            "mgr.ensure_scope('gmail')",
-            "print('AUTH_OK')",
-          ].join('\n')],
+        // Run the consent wizard non-interactively for calendar + gmail + classroom
+        exec(
+          `${pythonCmd} -c "
+from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager
+setup_auth_manager()
+mgr = get_auth_manager()
+mgr.ensure_scope('calendar')
+mgr.ensure_scope('gmail')
+mgr.ensure_scope('classroom')
+print('AUTH_OK')
+"`,
           { cwd: projectRoot, timeout: 120000, env: { ...process.env, PYTHONPATH: path.join(projectRoot, 'src') } },
           (err, stdout, stderr) => {
             if (err) {
@@ -735,6 +723,110 @@ async function checkFirstRunAuth() {
 
   return results;
 }
+
+// ─── IPC: Auth Handlers ───────────────────────────────────────────────────
+
+/**
+ * Renderer can query current Google + GitHub auth status on demand.
+ */
+ipcMain.handle('auth:get-status', async () => {
+  const os = require('os');
+  const { execSync } = require('child_process');
+  const homedir = os.homedir();
+
+  const googleTokenPaths = [
+    path.join(homedir, '.config', 'bantz', 'google', 'token.json'),
+    path.join(homedir, '.config', 'bantz', 'google', 'gmail_token.json'),
+    path.join(homedir, '.config', 'bantz', 'google', 'google_unified_token.json'),
+  ];
+  const google = googleTokenPaths.some(p => {
+    try { return fs.existsSync(p) && fs.statSync(p).size > 10; } catch { return false; }
+  });
+
+  let github = false;
+  try { execSync('gh auth status', { stdio: 'pipe', timeout: 3000 }); github = true; } catch {}
+
+  const clientSecret = fs.existsSync(
+    path.join(homedir, '.config', 'bantz', 'google', 'client_secret.json')
+  );
+
+  return { google, github, hasClientSecret: clientSecret, needsSetup: !google };
+});
+
+/**
+ * Renderer explicitly requests Google OAuth (e.g. from settings panel).
+ * Accepted scopes: ['calendar', 'gmail', 'classroom'] or omit for all.
+ */
+ipcMain.handle('auth:request-google-oauth', async (_event, scopes) => {
+  const os = require('os');
+  const homedir = os.homedir();
+  const projectRoot = path.resolve(__dirname, '..', '..', '..');
+  const clientSecretPath = path.join(homedir, '.config', 'bantz', 'google', 'client_secret.json');
+
+  if (!fs.existsSync(clientSecretPath)) {
+    return { success: false, error: 'client_secret.json not found. Place it at ~/.config/bantz/google/' };
+  }
+
+  const scopeList = (Array.isArray(scopes) && scopes.length > 0)
+    ? scopes
+    : ['calendar', 'gmail', 'classroom'];
+
+  const venvPython = path.join(projectRoot, '..', '.venv', 'bin', 'python3');
+  const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+  const scopeStr = scopeList.map(s => `mgr.ensure_scope('${s}')`).join('\n');
+
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    exec(
+      `${pythonCmd} -c "
+from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager
+setup_auth_manager()
+mgr = get_auth_manager()
+${scopeStr}
+print('AUTH_OK')
+"`,
+      {
+        cwd: projectRoot,
+        timeout: 180000,
+        env: { ...process.env, PYTHONPATH: path.join(projectRoot, 'src') },
+      },
+      (err, stdout, stderr) => {
+        if (err) {
+          resolve({ success: false, error: err.message });
+        } else if (stdout.includes('AUTH_OK')) {
+          if (overlayWindow && overlayWindow.webContents) {
+            overlayWindow.webContents.send('auth:status', { google: true, needsSetup: false });
+          }
+          resolve({ success: true, scopes: scopeList });
+        } else {
+          resolve({ success: false, error: stderr || 'Unknown error' });
+        }
+      }
+    );
+  });
+});
+
+/**
+ * Open a Google Classroom course enrollment link in the default browser.
+ * The code param is the classroom invitation/enrollment code.
+ */
+ipcMain.handle('classroom:open-enrollment', async (_event, enrollmentCode) => {
+  if (!enrollmentCode || typeof enrollmentCode !== 'string') {
+    return false;
+  }
+  // Sanitize: allow only alphanumeric characters (Classroom codes are short alphanum)
+  const safe = enrollmentCode.replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
+  if (!safe) return false;
+
+  const url = `https://classroom.google.com/c/${encodeURIComponent(safe)}`;
+  try {
+    const { shell } = require('electron');
+    await shell.openExternal(url);
+    return true;
+  } catch {
+    return false;
+  }
+});
 
 // ─── Environment Loading ────────────────────────────────────────────
 
@@ -800,7 +892,7 @@ app.whenReady().then(async () => {
       return new Response('Forbidden', { status: 403 });
     }
     filePath = resolved;
-
+    
     // Determine MIME type
     const ext = path.extname(filePath).toLowerCase();
     const mimeTypes = {
@@ -821,7 +913,7 @@ app.whenReady().then(async () => {
         headers: { 'Content-Type': mimeType },
       });
     } catch (err) {
-      console.error('[Protocol] File not found: ' + String(filePath || '').replace(/[\r\n]/g, ''));
+      console.error(`[Protocol] File not found: ${sanitizeLogValue(filePath)}`);
       return new Response('Not Found', { status: 404 });
     }
   });
@@ -962,7 +1054,7 @@ ipcMain.handle('github:get-feed', async () => {
         }
       }
     } catch (e) {
-      console.warn('[Main] GitHub events fetch failed:', String(e.message || '').replace(/[\r\n]/g, ''));
+      console.warn('[Main] GitHub events fetch failed:', sanitizeLogValue(e.message));
     }
 
     // 2. Fetch notifications
@@ -985,7 +1077,7 @@ ipcMain.handle('github:get-feed', async () => {
         }
       }
     } catch (e) {
-      console.warn('[Main] GitHub notifications fetch failed:', String(e.message || '').replace(/[\r\n]/g, ''));
+      console.warn('[Main] GitHub notifications fetch failed:', sanitizeLogValue(e.message));
     }
 
     // 3. If specific repos configured, fetch their events
@@ -999,7 +1091,7 @@ ipcMain.handle('github:get-feed', async () => {
           }
         }
       } catch (e) {
-        console.warn('[Main] GitHub repo events failed for ' + String(repo || '').replace(/[\r\n]/g, '') + ':', String(e.message || '').replace(/[\r\n]/g, ''));
+        console.warn('[Main] GitHub repo events failed for ' + sanitizeLogValue(repo) + ':', sanitizeLogValue(e.message));
       }
     }
 
@@ -1014,10 +1106,10 @@ ipcMain.handle('github:get-feed', async () => {
       .sort((a, b) => new Date(b.ts) - new Date(a.ts))
       .slice(0, 40);
 
-    console.log('[Main] GitHub feed: ' + String(results.events.length).replace(/[\r\n]/g, '') + ' events, ' + String(results.unreadCount).replace(/[\r\n]/g, '') + ' unread');
+    console.log('[Main] GitHub feed: ' + sanitizeLogValue(results.events.length) + ' events, ' + sanitizeLogValue(results.unreadCount) + ' unread');
     return results;
   } catch (err) {
-    console.error('[Main] GitHub feed error:', String(err.message || '').replace(/[\r\n]/g, ''));
+    console.error('[Main] GitHub feed error:', err.message);
     return { events: [], unreadCount: 0 };
   }
 });

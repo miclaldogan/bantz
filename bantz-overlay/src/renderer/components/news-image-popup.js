@@ -11,16 +11,18 @@
 // ─── Configuration ──────────────────────────────────────────────
 const IMAGE_CONFIG = {
   maxConcurrent: 3,
-  autoDismissMs: 8000,
+  autoDismissMs: 45000,
   fadeInMs: 400,
   fadeOutMs: 300,
-  popupWidth: 280,
-  popupHeight: 200,
-  captionMaxChars: 60,
-  stackOffsetX: 20,     // px offset per stacked popup
-  stackOffsetY: 15,
-  baseTop: 10,          // % from top of HUD
-  baseRight: -140,      // px (overflows right, near news feed)
+  popupWidth: 560,
+  popupHeight: 380,
+  captionMaxChars: 90,
+  // Three corners: top-left, top-right, bottom-left
+  spreadSlots: [
+    { top: '4%',    left: '2%',   right: 'auto', bottom: 'auto' },
+    { top: '4%',    right: '2%',  left: 'auto',  bottom: 'auto' },
+    { bottom: '4%', left: '2%',   right: 'auto', top: 'auto'    },
+  ],
 };
 
 const ERROR_PLACEHOLDER = `
@@ -52,12 +54,23 @@ class NewsImagePopup {
    * @param {{ image_url: string, title?: string, source?: string, url?: string }} article
    */
   show(article) {
+    const imageUrls = Array.isArray(article.image_urls)
+      ? article.image_urls.filter(Boolean)
+      : [article.image_url].filter(Boolean);
+    if (imageUrls.length === 0) return;
+
+    for (const imageUrl of imageUrls.slice(0, IMAGE_CONFIG.maxConcurrent)) {
+      this._showSingle({ ...article, image_url: imageUrl });
+    }
+  }
+
+  _showSingle(article) {
     // FIFO: dismiss oldest if at max
     while (this._popups.length >= IMAGE_CONFIG.maxConcurrent) {
       this._dismiss(0);
     }
 
-    const index = this._popups.length;
+    const index = this._popups.length % IMAGE_CONFIG.maxConcurrent;
     const popup = this._createPopup(article, index);
     this._parent.appendChild(popup);
     this._popups.push(popup);
@@ -121,15 +134,15 @@ class NewsImagePopup {
     const popup = document.createElement('div');
     popup.className = 'news-image-popup terminal-panel';
 
-    // Position with stacking offset
-    const offsetX = index * IMAGE_CONFIG.stackOffsetX;
-    const offsetY = index * IMAGE_CONFIG.stackOffsetY;
-    const rotation = -2 + Math.random() * 5; // -2° to +3°
+    const slot = IMAGE_CONFIG.spreadSlots[index] || IMAGE_CONFIG.spreadSlots[0];
+    const rotation = -1.5 + Math.random() * 3; // -1.5° to +1.5°
 
     popup.style.cssText = `
-      position: absolute;
-      top: calc(${IMAGE_CONFIG.baseTop}% + ${offsetY}px);
-      right: ${IMAGE_CONFIG.baseRight - offsetX}px;
+      position: fixed;
+      top: ${slot.top || 'auto'};
+      bottom: ${slot.bottom || 'auto'};
+      left: ${slot.left || 'auto'};
+      right: ${slot.right || 'auto'};
       width: ${IMAGE_CONFIG.popupWidth}px;
       height: ${IMAGE_CONFIG.popupHeight}px;
       transform: scale(0.95) rotate(${rotation}deg);
@@ -140,6 +153,7 @@ class NewsImagePopup {
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      pointer-events: auto;
     `;
 
     // Header
@@ -176,14 +190,15 @@ class NewsImagePopup {
     // Load image
     const img = document.createElement('img');
     img.style.cssText = `
-      max-width: 100%;
-      max-height: 100%;
+      width: 100%;
+      height: 100%;
       object-fit: cover;
       display: none;
       cursor: pointer;
     `;
     img.alt = article.title || 'Haber görseli';
-    img.loading = 'lazy';
+    // Do NOT set loading="lazy" — Electron's transparent UI may not
+    // trigger IntersectionObserver correctly, preventing load events.
 
     img.onload = () => {
       skeleton.style.display = 'none';
@@ -202,11 +217,8 @@ class NewsImagePopup {
     // Click → open in browser
     if (article.url) {
       img.addEventListener('click', () => {
-        if (window.overlayAPI && window.overlayAPI.sendDaemonEvent) {
-          window.overlayAPI.sendDaemonEvent({
-            type: 'open_url',
-            url: article.url,
-          });
+        if (window.overlayAPI && window.overlayAPI.openExternal) {
+          window.overlayAPI.openExternal(article.url);
         }
       });
     }
@@ -261,10 +273,11 @@ class NewsImagePopup {
    */
   _repositionPopups() {
     this._popups.forEach((popup, i) => {
-      const offsetX = i * IMAGE_CONFIG.stackOffsetX;
-      const offsetY = i * IMAGE_CONFIG.stackOffsetY;
-      popup.style.top = `calc(${IMAGE_CONFIG.baseTop}% + ${offsetY}px)`;
-      popup.style.right = `${IMAGE_CONFIG.baseRight - offsetX}px`;
+      const slot = IMAGE_CONFIG.spreadSlots[i] || IMAGE_CONFIG.spreadSlots[0];
+      popup.style.top    = slot.top    || 'auto';
+      popup.style.bottom = slot.bottom || 'auto';
+      popup.style.left   = slot.left   || 'auto';
+      popup.style.right  = slot.right  || 'auto';
       popup.style.zIndex = `${50 + i}`;
     });
   }

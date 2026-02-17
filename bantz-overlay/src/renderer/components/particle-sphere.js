@@ -19,26 +19,26 @@ import * as THREE from '../vendor/three.min.js';
 
 // ─── Configuration ──────────────────────────────────────────────
 const CONFIG = {
-  sphereParticles: 700,    // total sphere surface particles
+  sphereParticles: 8000,   // total sphere surface particles
   sphereRadius: 85,        // radius of the sphere
-  particleSize: 4.5,       // base particle size (larger = more prominent)
-  particleSizeVariation: 1.5, // random ± size variation
+  particleSize: 2.2,       // base particle size (smaller for denser look)
+  particleSizeVariation: 1.0, // random ± size variation
   color: 0x00e5ff,         // Cyan
   colorCore: 0x99ffff,     // Bright cyan for prominent dots
   colorDim: 0x00aacc,      // Dimmer cyan for smaller dots
   rotationSpeed: 0.002,    // radians per frame (idle) — dual axis
   cameraDistance: 240,
   glowColor: 0x00e5ff,
-  glowParticleCount: 120,
+  glowParticleCount: 300,
   glowRadius: 130,
-  glowParticleSize: 5.0,
-  glowOpacity: 0.12,
+  glowParticleSize: 3.5,
+  glowOpacity: 0.10,
   // Breathing/pulse animation
   breatheSpeed: 0.008,     // radians per frame for pulse
   breatheAmplitude: 0.08,  // scale oscillation ±8%
   // Prominent dots (interactive highlights)
-  prominentCount: 30,      // number of larger "node" particles
-  prominentSize: 7.0,      // size of prominent particles
+  prominentCount: 80,      // number of larger "node" particles
+  prominentSize: 5.0,      // size of prominent particles
 };
 
 /**

@@ -22,6 +22,8 @@ const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const typewriterText = document.getElementById('typewriter-text');
 const sphereContainer = document.getElementById('sphere-container');
+const bootLogEl = document.getElementById('boot-log');
+const bootLayer = document.getElementById('boot-layer');
 
 // ─── Particle Sphere ───────────────────────────────────────────
 let sphere = null;
@@ -131,6 +133,7 @@ function initSystemStatus() {
 
   console.log('[Overlay] System status initialized');
 }
+
 // ─── Unified Inbox Panel ───────────────────────────────────────
 let inboxPanel = null;
 
@@ -168,24 +171,6 @@ function initClockPanel() {
 
   console.log('[Overlay] Clock panel initialized');
 }
-// ─── GitHub Feed Panel ─────────────────────────────────────────
-let githubFeed = null;
-
-function initGitHubFeed() {
-  if (!window.GitHubFeedPanel) {
-    console.warn('[Overlay] GitHubFeedPanel not loaded');
-    return;
-  }
-  githubFeed = new window.GitHubFeedPanel(hudPanel);
-  githubFeed.mount();
-  githubFeed.show();
-  window.bantzGitHubFeed = githubFeed;
-
-  // Register with layout engine
-  if (layoutEngine) layoutEngine.register('github-feed', githubFeed, 'right');
-
-  console.log('[Overlay] GitHub feed initialized');
-}
 
 // ─── Typewriter Speech Output ─────────────────────────────────
 let typewriter = null;
@@ -217,6 +202,113 @@ function initGlitchEffects() {
 // ─── Panel Transitions ───────────────────────────────────────────
 let panelTransitions = null;
 let previousState = 'idle';
+
+// ─── Once-per-session system alert flags ─────────────────────
+const _sysAlerted = { cpu: false, ram: false, disk: false };
+
+// ─── Boot Sequence ────────────────────────────────────────────
+const bootLines = [];
+
+function setPhase(phase) {
+  document.body.classList.remove('phase-boot', 'phase-transition', 'phase-live');
+  document.body.classList.add(phase);
+}
+
+function pushBootLog(line) {
+  if (!bootLogEl || !line) return;
+  bootLines.push(`> ${line}`);
+  if (bootLines.length > 120) bootLines.shift();
+  bootLogEl.textContent = bootLines.join('\n');
+  // Auto-scroll to latest entry
+  requestAnimationFrame(() => {
+    bootLogEl.scrollTop = bootLogEl.scrollHeight;
+  });
+}
+
+function startBootSequence() {
+  if (!bootLayer) return;
+  setPhase('phase-boot');
+
+  const initial = [
+    '[ 0.000000] Bantz kernel v6.8.0-bantz SMP PREEMPT_DYNAMIC',
+    '[ 0.001024] CPU: 12c/24t @ 4.7GHz  |  RAM: 32768 MB DDR5',
+    '[ 0.002341] GPU: NVIDIA RTX 4060 VRAM 8192 MB',
+    '[ 0.003456] NET: eth0 UP 192.168.1.47/24 MTU 1500',
+    '[ 0.004567] ipc: initializing bantz overlay transport...',
+    '[ 0.005678] skills: loading (news, calendar, gmail, weather)',
+    '[ 0.006789] overlay: hardware-accelerated rendering OK',
+  ];
+  initial.forEach(pushBootLog);
+
+  // Rapid hacker lines scrolling
+  const hackerLines = [
+    '[ 0.012345] ACPI: RSDP 0x00000000000F0490 000024 (v02 BOCHS )',
+    '[ 0.023456] PCI: Using configuration type 1 for base access',
+    '[ 0.034567] VFS: Mounted root filesystem (ext4) read-write',
+    '[ 0.045678] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff] usable',
+    '[ 0.056789] initrd loaded at 0x1000000 (size: 45.2 MB)',
+    '[ 0.067890] libata: version 3.00 — SATA link up 6.0 Gbps',
+    '[ 0.078901] usb: xhci_hcd USB 3.2 SuperSpeed 20 Gbps',
+    '[ 0.089012] input: AT Translated Set 2 keyboard as /dev/input/event0',
+    '[ 0.100123] EFI: getvar ExitBootServiceCount failed (0x8000000000000002)',
+    '[ 0.111234] pci 0000:01:00.0 [10de:2882] type 00 class 0x030200',
+    '[ 0.122345] Loaded kernel module: nvidia-drm    v560.35.03',
+    '[ 0.133456] NVRM: loading NVIDIA UNIX x86_64 Kernel Module 560.35.03',
+    '[ 0.144567] PM: hibernation: Registered platform driver pcie_port',
+    '[ 0.155678] NET: Registered PF_INET6 protocol family',
+    '[ 0.166789] ip6_tables: (C) 2000-2006 Netfilter Core Team',
+    '[ 0.177890] ip_tables: (C) 2000-2006 Netfilter Core Team',
+    '[ OK ] Started System Logging Service.',
+    '[ OK ] Reached target Basic System.',
+    '[ OK ] Started D-Bus System Message Bus.',
+    '[ OK ] Started Network Manager.',
+    '[ OK ] Reached target Network.',
+    '[ OK ] Started Avahi mDNS/DNS-SD Daemon.',
+    '[ OK ] Started Neural Network Interface Daemon.',
+    '[ OK ] Started Bantz LLM Core Service.',
+    '[ OK ] Started PulseAudio Sound System.',
+    '[ OK ] Reached target Sound Card.',
+    '[ OK ] Reached target Graphical Interface.',
+    'bantz: loading config from ~/.config/bantz/config.yaml',
+    'graph: autolinker v2.1.0 — connecting to graph.db',
+    'graph: SQLite WAL mode enabled — nodes:4 edges:2',
+    'ipc: socket /home/.local/share/bantz/ipc/overlay.sock',
+    'ipc: listening for daemon connection...',
+    'mem: heap 256 MB / 32768 MB allocated',
+    'llm: router  qwen2.5-coder:7b ✓',
+    'llm: final   gemini-2.0-flash ✓',
+    'skills: 76 tools registered and verified',
+    'calendar: OAuth token valid (expires in 89 days)',
+    'gmail: IMAP connection established (STARTTLS)',
+    'weather: OpenMeteo API endpoint responsive',
+    'news: RSS feeds indexed (15 articles ready)',
+    'vision: OpenCV 4.9 — initialized',
+    'voice: Whisper STT model v3 loaded',
+    'audio: PulseAudio pulse:0 @ 48000 Hz stereo',
+    'overlay: all subsystems operational',
+    '> BANTZ OVERLAY v0.3 — READY',
+  ];
+
+  let hackerIdx = 0;
+  const hackerInterval = setInterval(() => {
+    if (hackerIdx < hackerLines.length) {
+      pushBootLog(hackerLines[hackerIdx++]);
+    } else {
+      clearInterval(hackerInterval);
+    }
+  }, 85);
+
+  setTimeout(() => {
+    clearInterval(hackerInterval);
+    setPhase('phase-transition');
+  }, 3800);
+  setTimeout(() => {
+    setPhase('phase-live');
+    setTimeout(() => {
+      if (bootLayer) bootLayer.classList.add('hidden');
+    }, 400);
+  }, 4500);
+}
 
 function initPanelTransitions() {
   if (!window.PanelTransitions) {
@@ -307,6 +399,7 @@ function updateConnectionStatus(state) {
     case 'connected':
       statusDot.classList.add('connected');
       statusText.textContent = 'Daemon connected';
+      pushBootLog('bantz: daemon connected');
       break;
     case 'connecting':
       statusDot.classList.add('connecting');
@@ -433,7 +526,9 @@ if (window.overlayAPI && window.overlayAPI.onDaemonMessage) {
       case 'briefing_start':
       case 'briefing_card':
       case 'briefing_end':
-        handleBriefingMessage(message);
+        Promise.resolve(handleBriefingMessage(message)).catch((err) => {
+          console.warn('[Overlay] briefing handler failed:', err);
+        });
         break;
       case 'ping':
         // Respond with pong via main process
@@ -447,6 +542,10 @@ if (window.overlayAPI && window.overlayAPI.onDaemonMessage) {
         // Handle voice pipeline state changes (Issue #1440)
         handleVoiceStateMessage(message);
         break;
+      case 'response':
+        // Handle text command response from daemon
+        handleResponseMessage(message);
+        break;
       default:
         console.log('[Overlay] Unknown message type:', message.type);
     }
@@ -455,7 +554,19 @@ if (window.overlayAPI && window.overlayAPI.onDaemonMessage) {
 
 // ─── Message Handlers (stubs) ─────────────────────────────────
 
+function handleResponseMessage(msg) {
+  // Display daemon's response to user's text command
+  const text = msg.text || '';
+  console.log('[Overlay] Response from daemon:', text.substring(0, 100));
+  if (typewriter && text) {
+    typewriter.clear();
+    typewriter.type(text);
+  }
+}
+
 function handleStateMessage(msg) {
+  if (msg.state) pushBootLog(`state: ${msg.state}`);
+
   // Update sphere state animation based on assistant state
   if (stateAnimator && msg.state) {
     // Choreograph state transition animations
@@ -621,15 +732,17 @@ function handleDaemonEvent(msg) {
   }
 }
 
-function handleBriefingMessage(msg) {
+async function handleBriefingMessage(msg) {
   switch (msg.type) {
     case 'briefing_card':
       // Route news cards to the news feed panel
       if (msg.category === 'news' && newsFeed) {
+        const articleLink = msg.url || msg.link || '';
         const articleId = newsFeed.addArticle({
           title: msg.title || msg.headline,
           source: msg.source,
           summary: msg.summary || msg.body,
+          link: articleLink,
           id: msg.id,
           ts: msg.ts,
         });
@@ -637,14 +750,34 @@ function handleBriefingMessage(msg) {
         if (msg.active) {
           newsFeed.highlightArticle(articleId);
         }
-        // Show image popup if article has an image
-        if (msg.image_url && newsImagePopup) {
-          newsImagePopup.show({
-            image_url: msg.image_url,
-            title: msg.title || msg.headline,
-            source: msg.source,
-            url: msg.url,
-          });
+        // Show image popup spread (up to 3) with OG-image fallback.
+        if (newsImagePopup) {
+          const imageCandidates = [
+            msg.image_url,
+            msg.image,
+            msg.thumbnail_url,
+            ...(Array.isArray(msg.image_urls) ? msg.image_urls : []),
+          ].filter(Boolean);
+
+          if (imageCandidates.length === 0 && articleLink && window.overlayAPI?.getArticleImage) {
+            try {
+              const resolved = await window.overlayAPI.getArticleImage(articleLink);
+              if (resolved) imageCandidates.push(resolved);
+            } catch (e) {
+              console.warn('[Overlay] getArticleImage failed:', e);
+            }
+          }
+
+          if (imageCandidates.length > 0) {
+            const uniqueUrls = Array.from(new Set(imageCandidates)).slice(0, 3);
+            newsImagePopup.show({
+              image_urls: uniqueUrls,
+              image_url: uniqueUrls[0],
+              title: msg.title || msg.headline,
+              source: msg.source,
+              url: articleLink,
+            });
+          }
         }
       }
       // Route calendar cards to daily tasks panel
@@ -692,11 +825,20 @@ function handleBriefingMessage(msg) {
           disk: msg.disk,
           uptime_seconds: msg.uptime_seconds,
         });
-        // Also route critical system alerts to inbox panel
+        // Also route critical system alerts to inbox panel (once per session)
         if (inboxPanel) {
-          if (msg.cpu > 90) inboxPanel.addSystemNotification(`CPU usage critical: ${msg.cpu}%`);
-          if (msg.ram > 90) inboxPanel.addSystemNotification(`RAM usage critical: ${msg.ram}%`);
-          if (msg.disk > 90) inboxPanel.addSystemNotification(`Disk usage critical: ${msg.disk}%`);
+          if (msg.cpu > 90 && !_sysAlerted.cpu) {
+            _sysAlerted.cpu = true;
+            inboxPanel.addSystemNotification(`CPU usage critical: ${msg.cpu}%`);
+          }
+          if (msg.ram > 90 && !_sysAlerted.ram) {
+            _sysAlerted.ram = true;
+            inboxPanel.addSystemNotification(`RAM usage critical: ${msg.ram}%`);
+          }
+          if (msg.disk > 85 && !_sysAlerted.disk) {
+            _sysAlerted.disk = true;
+            inboxPanel.addSystemNotification(`Disk usage high: ${msg.disk}% — consider cleanup`);
+          }
         }
       }
       // Route mail cards to inbox panel
@@ -748,8 +890,11 @@ if (window.overlayAPI && window.overlayAPI.onVisibilityChange) {
 
 // ─── Init Log ─────────────────────────────────────────────────
 console.log('[Overlay] Renderer initialized');
+startBootSequence();
+pushBootLog('renderer: module initialized');
 window.overlayAPI.getDisplayInfo().then((info) => {
   console.log(`[Overlay] Display: ${info.width}x${info.height} @${info.scaleFactor}x`);
+  pushBootLog(`display: ${info.width}x${info.height} @${info.scaleFactor}x`);
 });
 
 // ─── Initialize Particle Sphere ─────────────────────────────
@@ -764,17 +909,14 @@ initNewsFeed();
 // ─── Initialize Daily Tasks ─────────────────────────────────
 initDailyTasks();
 
-// ─── Initialize System Status ───────────────────────────────
-initSystemStatus();
+// ─── Initialize System Status (disabled — blocks chat text) ───
+// initSystemStatus();
 
 // ─── Initialize Inbox Panel ─────────────────────────────────
 initInboxPanel();
 
 // ─── Initialize Clock Panel ─────────────────────────────────
 initClockPanel();
-
-// ─── Initialize GitHub Feed ──────────────────────────────
-initGitHubFeed();
 
 // ─── Initialize Typewriter ─────────────────────────────────
 initTypewriter();
@@ -809,6 +951,45 @@ function initPhoneCallOverlay() {
 
 initPhoneCallOverlay();
 
+// ─── Initialize Floating Text Input ─────────────────────────
+let textInput = null;
+let _textInputRetries = 0;
+
+function initTextInput() {
+  const Cls = window.FloatingTextInput;
+  if (!Cls) {
+    if (_textInputRetries < 8) {
+      _textInputRetries++;
+      setTimeout(initTextInput, 250);  // retry up to 2 seconds
+    } else {
+      console.warn('[Overlay] FloatingTextInput not loaded after retries');
+    }
+    return;
+  }
+  try {
+    textInput = new Cls();
+    textInput.mount(document.body);
+    textInput.onSend((text) => {
+      // Echo to typewriter
+      if (typewriter && typewriter.clear && typewriter.type) {
+        typewriter.clear();
+        typewriter.type(`> ${text}`);
+      }
+      // Send to daemon
+      if (window.overlayAPI && window.overlayAPI.sendCommand) {
+        window.overlayAPI.sendCommand(text);
+      }
+      console.log('[Overlay] Text command sent:', text.substring(0, 80));
+    });
+    window.bantzTextInput = textInput;
+    console.log('[Overlay] Floating text input initialized ✓');
+  } catch (e) {
+    console.warn('[Overlay] FloatingTextInput init error:', e);
+  }
+}
+
+initTextInput();
+
 // ─── Diagnostic Summary ─────────────────────────────────────
 console.log('[Overlay] ═══ INIT SUMMARY ═══');
 console.log('[Overlay]   sphere:', !!sphere);
@@ -818,13 +999,13 @@ console.log('[Overlay]   dailyTasks:', !!dailyTasks);
 console.log('[Overlay]   systemStatus:', !!systemStatus);
 console.log('[Overlay]   inboxPanel:', !!inboxPanel);
 console.log('[Overlay]   clockPanel:', !!clockPanel);
-console.log('[Overlay]   githubFeed:', !!githubFeed);
 console.log('[Overlay]   typewriter:', !!typewriter);
 console.log('[Overlay]   glitchEffects:', !!glitchEffects);
 console.log('[Overlay]   panelTransitions:', !!panelTransitions);
 console.log('[Overlay]   ttsSync:', !!ttsSync);
 console.log('[Overlay]   reasoningChain:', !!reasoningChain);
 console.log('[Overlay]   phoneCallOverlay:', !!phoneCallOverlay);
+console.log('[Overlay]   textInput:', !!textInput);
 console.log('[Overlay]   hudPanel:', !!hudPanel);
 console.log('[Overlay]   sphereContainer:', !!sphereContainer);
 console.log('[Overlay] ═══════════════════');
@@ -939,3 +1120,5 @@ function initDemoMode() {
 }
 
 initDemoMode();
+
+pushBootLog('overlay: live UI ready');

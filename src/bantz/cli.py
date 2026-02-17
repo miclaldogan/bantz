@@ -199,6 +199,19 @@ def run_interactive_with_server(
     # Initial HUD
     print_hud({"mode": "normal", "browser": "kapalı", "queue_active": False, "pending": False})
 
+    # Daemon-only mode: if stdin is not an interactive TTY, skip the REPL and
+    # just keep the server running until SIGTERM/KeyboardInterrupt (Issue #1465)
+    import sys as _sys
+    if not _sys.stdin or not _sys.stdin.isatty():
+        import time as _svc_time
+        print(f"\n{Colors.DIM}[Daemon] Arka plan modu — stdin mevcut değil. Durdurmak için SIGTERM gönderin.{Colors.RESET}", flush=True)
+        try:
+            while True:
+                _svc_time.sleep(30)
+        except (KeyboardInterrupt, SystemExit):
+            pass
+        return 0
+
     while True:
         # Check for proactive messages before blocking on input
         while not proactive_queue.empty():
@@ -226,6 +239,17 @@ def run_interactive_with_server(
             text = input(f"{Colors.GREEN}>{Colors.RESET} ").strip()
         except (EOFError, KeyboardInterrupt):
             print(f"\n{Colors.DIM}👋 Hoşça kal!{Colors.RESET}")
+            break
+        except OSError:
+            # stdin is not a real tty (e.g. running as background daemon)
+            # Park in daemon-only mode: service keeps running, no interactive prompt
+            import time as _time
+            print(f"\n{Colors.DIM}[Daemon] stdin mevcut değil — arka plan modu aktif. Durdurmak için SIGTERM gönderin.{Colors.RESET}", flush=True)
+            try:
+                while True:
+                    _time.sleep(60)
+            except (KeyboardInterrupt, SystemExit):
+                break
             break
 
         if not text:
