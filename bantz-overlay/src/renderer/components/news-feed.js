@@ -17,8 +17,8 @@ const NEWS_CONFIG = {
   scrollSpeed: 30,           // px/s auto-scroll
   highlightDuration: 3000,   // ms for active article highlight
   tooltipDelay: 400,         // ms before showing tooltip
-  panelWidth: 300,
-  panelHeight: 400,
+  panelWidth: 340,
+  panelHeight: 440,
 };
 
 /**
@@ -52,6 +52,9 @@ class NewsFeedPanel {
     this._cursorEl = null;
   }
 
+  /** @returns {HTMLElement|null} The underlying DOM element */
+  get element() { return this._panel ? this._panel.element : null; }
+
   // ─── Public API ───────────────────────────────────────────────
 
   /**
@@ -62,9 +65,9 @@ class NewsFeedPanel {
 
     // Get the panel's content container
     const panelEl = this._parent.querySelector('#terminal-news-feed');
-    if (!panelEl) return;
+    if (!panelEl) { console.error('[NewsFeed] Panel element not found'); return; }
 
-    const content = panelEl.querySelector('.terminal-content');
+    const content = panelEl.querySelector('.terminal-content, .terminal-panel-content');
     if (!content) return;
 
     this._contentEl = content;
@@ -115,7 +118,7 @@ class NewsFeedPanel {
 
   /**
    * Add a news article from a briefing_card message.
-   * @param {{ title: string, source?: string, summary?: string, id?: string, ts?: number }} article
+   * @param {{ title: string, source?: string, summary?: string, link?: string, id?: string, ts?: number }} article
    */
   addArticle(article) {
     const now = new Date(article.ts || Date.now());
@@ -126,6 +129,7 @@ class NewsFeedPanel {
       title: article.title || 'Untitled',
       source: article.source || '',
       summary: article.summary || '',
+      link: article.link || '',
       time,
       element: null,
     };
@@ -227,6 +231,16 @@ class NewsFeedPanel {
     // Tooltip on hover
     line.addEventListener('mouseenter', (e) => this._showTooltip(entry, e));
     line.addEventListener('mouseleave', () => this._hideTooltip());
+
+    // Click to open article in browser
+    if (entry.link) {
+      line.style.cursor = 'pointer';
+      line.addEventListener('click', () => {
+        if (window.overlayAPI && window.overlayAPI.openExternal) {
+          window.overlayAPI.openExternal(entry.link);
+        }
+      });
+    }
 
     // Insert before cursor
     this._contentEl.insertBefore(line, this._cursorEl);

@@ -55,6 +55,37 @@
   <script src="components/glitch-effects.js"></script>
   <script src="components/panel-transitions.js"></script>
   <script src="components/tts-sync.js"></script>
+  <script src="components/clock-panel.js"></script>
+  <script src="components/phone-call-overlay.js"></script>
+  <script src="components/demo-mode.js"></script>
+  <!-- Error catcher for ES module loading -->
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      console.error('[ErrorCatcher] ' + msg + ' @ ' + src + ':' + line + ':' + col);
+      return false;
+    };
+    window.addEventListener('unhandledrejection', function(e) {
+      console.error('[ErrorCatcher] Unhandled rejection: ' + (e.reason ? e.reason.message || e.reason : 'unknown'));
+    });
+  </script>
   <script type="module" src="renderer.js"></script>
+  <script type="module">
+    // Diagnostic: test each import individually
+    import('./vendor/three.min.js')
+      .then(() => console.log('[ModuleDiag] three.min.js OK'))
+      .catch(e => console.error('[ModuleDiag] three.min.js FAIL: ' + e.message));
+    import('./components/particle-sphere.js')
+      .then(() => console.log('[ModuleDiag] particle-sphere.js OK'))
+      .catch(e => console.error('[ModuleDiag] particle-sphere.js FAIL: ' + e.message));
+    import('./components/particle-scatter.js')
+      .then(() => console.log('[ModuleDiag] particle-scatter.js OK'))
+      .catch(e => console.error('[ModuleDiag] particle-scatter.js FAIL: ' + e.message));
+    import('./components/sphere-state.js')
+      .then(() => console.log('[ModuleDiag] sphere-state.js OK'))
+      .catch(e => console.error('[ModuleDiag] sphere-state.js FAIL: ' + e.message));
+    import('./renderer.js')
+      .then(() => console.log('[ModuleDiag] renderer.js OK'))
+      .catch(e => console.error('[ModuleDiag] renderer.js FAIL: ' + e.message));
+  </script>
 </body>
 </html>

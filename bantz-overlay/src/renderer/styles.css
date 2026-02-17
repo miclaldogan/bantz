@@ -32,8 +32,8 @@
 
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono',
                'Consolas', monospace;
-  --radius-panel: 6px;
-  --radius-hud: 10px;
+  --radius-panel: 0px;
+  --radius-hud: 0px;
 
   /* Glass morphism */
   --glass-blur: 18px;
@@ -83,10 +83,10 @@ html, body {
 /* ── HUD Panel (main transparent rectangle) ─────────────────────── */
 .hud-panel {
   position: relative;
-  width: 65vw;
-  height: 55vh;
-  min-width: 600px;
-  min-height: 400px;
+  width: 44vw;
+  height: 52vh;
+  min-width: 440px;
+  min-height: 380px;
 
   /* Glass morphism: transparent orange base + blur */
   background: var(--color-base);
@@ -215,19 +215,55 @@ html, body {
 
 /* ── Sphere Container ───────────────────────────────────────────── */
 .sphere-container {
-  width: 220px;
-  height: 220px;
+  width: 340px;
+  height: 340px;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
 }
 
+.sphere-container canvas {
+  filter: brightness(1.5) contrast(1.15) drop-shadow(0 0 12px rgba(0, 229, 255, 0.4));
+}
+
+/* Ambient glow behind the sphere */
+.sphere-container::before {
+  content: '';
+  position: absolute;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(0, 229, 255, 0.12) 0%,
+    rgba(0, 229, 255, 0.06) 40%,
+    rgba(0, 229, 255, 0.02) 60%,
+    transparent 70%
+  );
+  z-index: -1;
+  pointer-events: none;
+  animation: sphere-pulse 4s ease-in-out infinite;
+}
+
+@keyframes sphere-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
 /* ── Speech Area (bottom) ───────────────────────────────────────── */
 .speech-area {
   padding: 10px 24px 18px;
   position: relative;
-  z-index: 5;
+  z-index: 50;  /* Above all sub-panels */
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(20, 15, 5, 0.85) 20%,
+    rgba(20, 15, 5, 0.95) 100%
+  );
+  border-top: 1px solid rgba(255, 140, 0, 0.08);
+  pointer-events: none;
 }
 
 /* ── Reasoning Chain (above speech) ─────────────────────────────── */
@@ -363,7 +399,7 @@ html, body {
 
 .terminal-panel-content::-webkit-scrollbar-thumb {
   background: rgba(0, 229, 255, 0.2);
-  border-radius: 3px;
+  border-radius: 0px;
 }
 
 /* ── Chromatic Aberration (on state change) ─────────────────────── */

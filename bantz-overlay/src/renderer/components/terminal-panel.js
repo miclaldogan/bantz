@@ -245,7 +245,7 @@ class TerminalPanel {
   _build() {
     // Root element
     this._element = document.createElement('div');
-    this._element.id = `panel-${this.id}`;
+    this._element.id = `terminal-${this.id}`;
     this._element.className = 'terminal-panel';
     this._element.style.width = `${this.width}px`;
     this._element.style.height = `${this.height}px`;
@@ -281,7 +281,7 @@ class TerminalPanel {
 
     // Content area
     this._contentEl = document.createElement('div');
-    this._contentEl.className = 'terminal-panel-content';
+    this._contentEl.className = 'terminal-panel-content terminal-content';
     this._element.appendChild(this._contentEl);
 
     // Mouse interaction: pause auto-scroll on hover
@@ -303,6 +303,10 @@ class TerminalPanel {
 }
 
 // Export for use in renderer
+window.TerminalPanel = TerminalPanel;
+window.PanelSlot = PanelSlot;
+window.SLOT_STYLES = SLOT_STYLES;
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { TerminalPanel, PanelSlot, SLOT_STYLES };
 }
