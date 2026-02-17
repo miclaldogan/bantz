@@ -15,8 +15,10 @@
 const { app, BrowserWindow, globalShortcut, screen, ipcMain } = require('electron');
 const path = require('path');
 const { IPCClient, ConnectionState } = require('./ipc-client');
+const { createTray, updateContextMenu, updateTrayConnectionState } = require('./tray');
 
 let overlayWindow = null;
+let tray = null;
 
 /** Whether the overlay is currently visible. */
 let isVisible = true;
@@ -178,6 +180,14 @@ ipcMain.on('daemon:event', (_event, msg) => {
   ipcClient.send(msg);
 });
 
+/**
+ * Renderer requests IPC reconnection.
+ */
+ipcMain.on('daemon:reconnect', () => {
+  console.log('[Main] Reconnect requested by renderer');
+  ipcClient.connect();
+});
+
 // ─── IPC: Daemon Socket ─────────────────────────────────────────────
 
 /**
@@ -196,6 +206,8 @@ function startIPCClient() {
     if (overlayWindow && overlayWindow.webContents) {
       overlayWindow.webContents.send('daemon:connection-state', state);
     }
+    // Update tray tooltip
+    if (tray) updateTrayConnectionState(tray, state);
     console.log(`[Main] IPC state: ${state}`);
   });
 
@@ -224,6 +236,32 @@ if (detectDisplayServer() === 'wayland') {
 app.whenReady().then(() => {
   createOverlayWindow();
   startIPCClient();
+
+  // Create system tray
+  tray = createTray({
+    onToggleOverlay: toggleOverlay,
+    onQuit: () => {
+      app.isQuitting = true;
+      app.quit();
+    },
+    getVisibility: () => isVisible,
+    getConnectionState: () => ipcClient.state || 'disconnected',
+    onEffectIntensity: (level) => {
+      if (overlayWindow && overlayWindow.webContents) {
+        overlayWindow.webContents.send('tray:effect-intensity', level);
+      }
+    },
+    onAnimationSpeed: (speed) => {
+      if (overlayWindow && overlayWindow.webContents) {
+        overlayWindow.webContents.send('tray:animation-speed', speed);
+      }
+    },
+    onTogglePanel: (panelId, visible) => {
+      if (overlayWindow && overlayWindow.webContents) {
+        overlayWindow.webContents.send('tray:toggle-panel', { panelId, visible });
+      }
+    },
+  });
 
   // Register global toggle shortcut
   const registered = globalShortcut.register('Super+Shift+B', toggleOverlay);

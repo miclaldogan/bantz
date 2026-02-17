@@ -58,4 +58,34 @@ contextBridge.exposeInMainWorld('overlayAPI', {
   onVisibilityChange: (callback) => {
     ipcRenderer.on('overlay:visibility', (_event, visible) => callback(visible));
   },
+
+  // ─── Tray Commands ────────────────────────────────────────────
+  /**
+   * Listen for effect intensity changes from system tray.
+   * @param {(level: string) => void} callback
+   */
+  onEffectIntensity: (callback) => {
+    ipcRenderer.on('tray:effect-intensity', (_event, level) => callback(level));
+  },
+
+  /**
+   * Listen for animation speed changes from system tray.
+   * @param {(speed: number) => void} callback
+   */
+  onAnimationSpeed: (callback) => {
+    ipcRenderer.on('tray:animation-speed', (_event, speed) => callback(speed));
+  },
+
+  /**
+   * Listen for panel toggle commands from system tray.
+   * @param {(data: {panelId: string, visible: boolean}) => void} callback
+   */
+  onTogglePanel: (callback) => {
+    ipcRenderer.on('tray:toggle-panel', (_event, data) => callback(data));
+  },
+
+  /**
+   * Request IPC reconnection.
+   */
+  reconnect: () => ipcRenderer.send('daemon:reconnect'),
 });
