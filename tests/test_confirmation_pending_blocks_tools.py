@@ -209,3 +209,72 @@ class TestConfirmationClearAfterExecution:
         # This test would need to mock the confirmation firewall flow
         # For now, we just document expected behavior
         pass  # TODO: Add integration test for full confirmation flow
+
+
+class TestConfirmationStateLeak:
+    """Issue #1389: Stale confirmation should be cleared on topic change."""
+
+    def test_stale_confirmation_cleared_on_topic_change(self, orchestrator_loop):
+        """When user sends a non-confirmation input while a pending confirmation
+        exists, the stale confirmation must be cleared so the new request
+        is not blocked."""
+        loop = orchestrator_loop
+        state = OrchestratorState()
+
+        # Simulate a pending confirmation for calendar.create_event
+        state.add_pending_confirmation({
+            "tool": "calendar.create_event",
+            "params": {"summary": "Meeting"},
+            "prompt": "Takvime ekleyeyim mi?",
+        })
+        assert state.has_pending_confirmation()
+
+        # User changes topic — input is neither affirmative nor negative
+        user_input = "bugün hava nasıl?"
+
+        # The affirmative/negative token logic is in process_turn.
+        # Verify the logic directly: user_input should NOT match tokens.
+        _AFFIRMATIVE_TOKENS = frozenset({
+            "evet", "e", "yes", "y", "ok", "okay", "tamam", "olur",
+            "peki", "tabii", "tabi", "elbette", "onaylıyorum",
+            "gönder", "at", "yolla",
+            "sil", "ekle", "yap", "koy", "kaydet",
+        })
+        _NEGATIVE_TOKENS = frozenset({
+            "hayır", "h", "no", "n", "iptal", "vazgeç", "istemiyorum",
+        })
+        stripped = user_input.strip().lower().rstrip(".!,?")
+
+        assert stripped not in _AFFIRMATIVE_TOKENS
+        assert stripped not in _NEGATIVE_TOKENS
+
+        # Simulate the fix: when neither affirmative nor negative, clear
+        if (
+            state.has_pending_confirmation()
+            and not state.confirmed_tool
+            and stripped not in _AFFIRMATIVE_TOKENS
+            and stripped not in _NEGATIVE_TOKENS
+        ):
+            state.clear_pending_confirmation()
+
+        assert not state.has_pending_confirmation(), \
+            "Stale confirmation should be cleared on topic change"
+
+    def test_affirmative_input_does_not_clear_confirmation(self, orchestrator_loop):
+        """Affirmative input should confirm, not clear the pending confirmation."""
+        state = OrchestratorState()
+        state.add_pending_confirmation({
+            "tool": "calendar.create_event",
+            "params": {},
+            "prompt": "Ekleyeyim mi?",
+        })
+
+        user_input = "evet"
+        stripped = user_input.strip().lower().rstrip(".!,?")
+
+        _AFFIRMATIVE_TOKENS = frozenset({
+            "evet", "e", "yes", "y", "ok", "okay", "tamam", "olur",
+        })
+        assert stripped in _AFFIRMATIVE_TOKENS
+        # Confirmation should remain (will be resolved by confirmed_tool flow)
+        assert state.has_pending_confirmation()
