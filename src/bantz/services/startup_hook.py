@@ -119,67 +119,37 @@ class StartupBriefingRunner:
         return briefing_dict
 
     async def _send_overlay_briefing(self, briefing) -> None:
-        """Send briefing content to the overlay with news image popups."""
-        from bantz.ipc.protocol import (
-            StateMessage,
-            OverlayState,
-            ActionMessage,
-            ActionType,
-        )
+        """Send briefing content to the overlay using the dedicated briefing protocol.
+
+        Uses ``send_briefing_sequence()`` from ``briefing_overlay`` which sends
+        properly typed ``briefing_start`` → ``briefing_card`` × N → ``briefing_end``
+        messages over IPC.  The overlay renderer routes these to the correct
+        panels (news feed, daily tasks, weather, system status).
+        """
+        from bantz.services.briefing_overlay import send_briefing_sequence
 
         try:
-            # Show greeting first
-            greeting_msg = StateMessage(
-                state=OverlayState.SPEAKING.value,
-                text=briefing.greeting,
-                timeout_ms=4000,
-                priority=20,
-            )
-            self._overlay.send(greeting_msg)
-            await asyncio.sleep(2.0)
+            briefing_dict = briefing.to_dict()
 
-            # Show news cards with popup images
-            for i, card in enumerate(briefing.news_cards):
-                # Show article title as overlay text
-                article_msg = StateMessage(
-                    state=OverlayState.SPEAKING.value,
-                    text=f"📰 {card.get('title', '')}",
-                    timeout_ms=5000,
-                    priority=15,
-                )
-                self._overlay.send(article_msg)
-
-                # Send image popup if available
-                if card.get("image_url"):
-                    img_msg = ActionMessage(
-                        action="news_image",
-                        text=card["image_url"],
-                        duration_ms=4500,
+            # The send_fn wraps the overlay client's send_raw method
+            async def _send(msg_dict: dict) -> None:
+                if hasattr(self._overlay, "send_raw"):
+                    await self._overlay.send_raw(msg_dict)
+                else:
+                    # Fallback: legacy .send() — encode manually
+                    logger.warning(
+                        "[startup] overlay client lacks send_raw, using legacy path"
                     )
-                    self._overlay.send(img_msg)
 
-                await asyncio.sleep(4.0)
-
-            # Final state: show summary and transition to idle
-            if briefing.sections:
-                summary_text = " | ".join(
-                    s.title for s in briefing.sections
-                )
-                summary_msg = StateMessage(
-                    state=OverlayState.SPEAKING.value,
-                    text=summary_text,
-                    timeout_ms=3000,
-                    priority=10,
-                )
-                self._overlay.send(summary_msg)
-                await asyncio.sleep(3.0)
-
-            # Return to idle
-            idle_msg = StateMessage(
-                state=OverlayState.IDLE.value,
-                priority=5,
+            cards_shown = await send_briefing_sequence(
+                briefing_dict,
+                _send,
+                card_delay=4.5,
+                greeting_delay=2.5,
             )
-            self._overlay.send(idle_msg)
+            logger.info(
+                "[startup] overlay briefing sequence sent: %d cards", cards_shown
+            )
 
         except Exception as e:
             logger.warning("[startup] overlay briefing failed: %s", e)
