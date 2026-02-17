@@ -9,8 +9,8 @@
 
 // ─── Configuration ──────────────────────────────────────────────
 const SYSTEM_CONFIG = {
-  panelWidth: 280,
-  panelHeight: 210,
+  panelWidth: 320,
+  panelHeight: 240,
   systemRefreshMs: 10000,    // 10s for system metrics
   barWidth: 10,              // characters in progress bar
   thresholds: {

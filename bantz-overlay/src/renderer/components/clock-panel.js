@@ -10,8 +10,8 @@
 'use strict';
 
 const CLOCK_CONFIG = {
-  panelWidth: 220,
-  panelHeight: 95,
+  panelWidth: 260,
+  panelHeight: 100,
   refreshMs: 1000,
 };
 

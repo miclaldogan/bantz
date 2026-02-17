@@ -9,8 +9,8 @@
 
 // ─── Configuration ──────────────────────────────────────────────
 const AGENDA_CONFIG = {
-  panelWidth: 310,
-  panelHeight: 380,
+  panelWidth: 360,
+  panelHeight: 420,
   refreshInterval: 5 * 60 * 1000, // 5 minutes
   emptyMessage: 'Bugün takvimde etkinlik yok, efendim.',
 };

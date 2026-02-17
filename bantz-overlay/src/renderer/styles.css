@@ -83,10 +83,10 @@ html, body {
 /* ── HUD Panel (main transparent rectangle) ─────────────────────── */
 .hud-panel {
   position: relative;
-  width: 44vw;
-  height: 52vh;
-  min-width: 440px;
-  min-height: 380px;
+  width: 36vw;
+  height: 50vh;
+  min-width: 360px;
+  min-height: 340px;
 
   /* Glass morphism: transparent orange base + blur */
   background: var(--color-base);
