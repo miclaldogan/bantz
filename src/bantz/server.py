@@ -907,6 +907,272 @@ class BantzServer:
         self._last_scan = scan
         return self._format_scan_result(scan)
 
+    def _run_startup_briefing(self, overlay_hook: "IPCOverlayHook") -> None:
+        """Run startup briefing in background thread — sends news, calendar,
+        weather, and system data to the overlay via IPC.
+
+        This wires together:
+        - DailyBriefingService (news, calendar, email sections)
+        - BriefingOverlay protocol (briefing_start/card/end IPC messages)
+        - Calendar + weather data fetched from IngestStore or live APIs
+        """
+        import threading
+
+        def _briefing_thread() -> None:
+            import asyncio as _aio
+
+            loop = _aio.new_event_loop()
+            _aio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    self._send_startup_briefing_async(overlay_hook)
+                )
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "[STARTUP_BRIEFING] failed: %s", e
+                )
+            finally:
+                loop.close()
+
+        t = threading.Thread(
+            target=_briefing_thread,
+            daemon=True,
+            name="bantz-startup-briefing",
+        )
+        t.start()
+        print("   Startup Briefing: arka planda hazırlanıyor...")
+
+    async def _send_startup_briefing_async(
+        self, overlay_hook: "IPCOverlayHook"
+    ) -> None:
+        """Async startup briefing — fetches live data and sends to overlay."""
+        from bantz.services.briefing_overlay import (
+            BriefingStartMessage,
+            BriefingCardMessage,
+            BriefingEndMessage,
+        )
+
+        _log = logging.getLogger(__name__)
+
+        # ── Helper: send a dict to the overlay ──
+        def _send_msg(msg_dict: dict) -> None:
+            if overlay_hook._client and overlay_hook._client.connected:
+                try:
+                    import asyncio as _aio2
+
+                    if overlay_hook._loop and overlay_hook._loop.is_running():
+                        fut = _aio2.run_coroutine_threadsafe(
+                            overlay_hook._client.send_raw(msg_dict),
+                            overlay_hook._loop,
+                        )
+                        fut.result(timeout=5.0)
+                    else:
+                        _log.debug("[BRIEFING] overlay loop not running")
+                except Exception as e:
+                    _log.debug("[BRIEFING] send failed: %s", e)
+
+        # ── 1. Generate briefing via DailyBriefingService ──
+        calendar_events = []
+        unread_emails = 0
+        important_emails = 0
+
+        # Try to fetch calendar data from IngestStore (synced data)
+        try:
+            from bantz.data.ingest_store import IngestStore
+
+            store = IngestStore()
+            cached_cal = store.query(source="calendar_sync", limit=20)
+            if cached_cal:
+                import json
+
+                for rec in cached_cal:
+                    try:
+                        data = (
+                            json.loads(rec.content)
+                            if isinstance(rec.content, str)
+                            else rec.content
+                        )
+                        if isinstance(data, dict):
+                            calendar_events.append(data)
+                    except Exception:
+                        pass
+                _log.info(
+                    "[BRIEFING] %d calendar events from IngestStore",
+                    len(calendar_events),
+                )
+        except Exception as e:
+            _log.debug("[BRIEFING] IngestStore calendar fetch failed: %s", e)
+
+        # Fallback: fetch calendar from Google API directly
+        if not calendar_events:
+            try:
+                from bantz.google.calendar import list_events
+
+                raw_events = list_events(max_results=10)
+                if isinstance(raw_events, list):
+                    calendar_events = raw_events
+                elif isinstance(raw_events, dict):
+                    calendar_events = raw_events.get("events", [])
+                _log.info(
+                    "[BRIEFING] %d calendar events from Google API",
+                    len(calendar_events),
+                )
+            except Exception as e:
+                _log.debug("[BRIEFING] Google Calendar fetch failed: %s", e)
+
+        # Try to get Gmail summary from IngestStore
+        try:
+            from bantz.data.ingest_store import IngestStore
+
+            store = IngestStore()
+            cached_mail = store.query(source="gmail_sync", limit=50)
+            if cached_mail:
+                unread_emails = len(cached_mail)
+                # Rough heuristic: emails from classified "important" sources
+                important_emails = sum(
+                    1
+                    for r in cached_mail
+                    if r.meta
+                    and r.meta.get("classification", {}).get("category") in (
+                        "work", "bank", "tubitak", "education",
+                    )
+                )
+        except Exception:
+            pass
+
+        # ── 2. Run the briefing service ──
+        from bantz.services.startup_hook import run_startup_briefing
+
+        briefing_dict = await run_startup_briefing(
+            event_bus=self._event_bus,
+            overlay_client=None,  # We handle overlay sending ourselves
+            calendar_events=calendar_events,
+            unread_emails=unread_emails,
+            important_emails=important_emails,
+        )
+
+        # ── 3. Send briefing_start ──
+        import asyncio
+
+        news_cards = briefing_dict.get("news_cards", [])
+        sections = briefing_dict.get("sections", [])
+
+        # Count total cards we'll send
+        cal_events = []
+        for sec in sections:
+            if sec.get("type") == "calendar":
+                cal_events = sec.get("items", [])
+
+        total_cards = len(news_cards) + len(cal_events) + 1  # +1 for weather
+
+        start_msg = BriefingStartMessage(
+            greeting=briefing_dict.get("greeting", ""),
+            time_context=briefing_dict.get("time_context", {}),
+            total_cards=total_cards,
+            days_away=briefing_dict.get("days_away", 0),
+        )
+        _send_msg(start_msg.to_dict())
+        await asyncio.sleep(2.0)
+
+        cards_shown = 0
+
+        # ── 4. Send news cards ──
+        for i, card in enumerate(news_cards):
+            card_msg = BriefingCardMessage(
+                index=i,
+                total=total_cards,
+                title=card.get("title", ""),
+                summary=card.get("summary", ""),
+                source=card.get("source", ""),
+                category="news",
+                image_url=card.get("image_url"),
+                url=card.get("url", ""),
+            )
+            _send_msg(card_msg.to_dict())
+            cards_shown += 1
+            await asyncio.sleep(3.0)
+
+        # ── 5. Send calendar cards ──
+        for i, evt in enumerate(cal_events):
+            cal_card = {
+                "type": "briefing_card",
+                "category": "calendar",
+                "title": evt.get("title", evt.get("summary", "")),
+                "start": evt.get("start", evt.get("start_time", "")),
+                "end": evt.get("end", evt.get("end_time", "")),
+                "all_day": evt.get("all_day", False),
+                "id": evt.get("id", f"cal-{i}"),
+            }
+            _send_msg(cal_card)
+            cards_shown += 1
+            await asyncio.sleep(0.3)
+
+        # ── 6. Send weather card ──
+        try:
+            import urllib.request
+            import json as _json
+
+            location = os.environ.get(
+                "BANTZ_WEATHER_LOCATION",
+                os.environ.get("BANTZ_LOCATION", "Corum"),
+            )
+            url = f"https://wttr.in/{location}?format=j1"
+            req = urllib.request.Request(url, headers={"User-Agent": "bantz/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                weather_data = _json.loads(resp.read())
+
+            current = weather_data.get("current_condition", [{}])[0]
+            weather_card = {
+                "type": "briefing_card",
+                "category": "weather",
+                "temperature": int(current.get("temp_C", 0)),
+                "condition": current.get("weatherDesc", [{}])[0].get("value", ""),
+                "humidity": int(current.get("humidity", 0)),
+                "wind_speed": int(current.get("windspeedKmph", 0)),
+            }
+            _send_msg(weather_card)
+            cards_shown += 1
+        except Exception as e:
+            _log.debug("[BRIEFING] weather fetch failed: %s", e)
+
+        # ── 7. Send system metrics card ──
+        try:
+            import psutil
+
+            cpu = psutil.cpu_percent(interval=0.5)
+            mem = psutil.virtual_memory()
+            disk = psutil.disk_usage("/")
+            uptime = int(time.time() - psutil.boot_time())
+
+            sys_card = {
+                "type": "briefing_card",
+                "category": "system",
+                "cpu": round(cpu, 1),
+                "ram": round(mem.percent, 1),
+                "disk": round(disk.percent, 1),
+                "uptime_seconds": uptime,
+            }
+            _send_msg(sys_card)
+            cards_shown += 1
+        except Exception as e:
+            _log.debug("[BRIEFING] system metrics failed: %s", e)
+
+        await asyncio.sleep(1.0)
+
+        # ── 8. Send briefing_end ──
+        end_msg = BriefingEndMessage(
+            total_shown=cards_shown,
+            summary=briefing_dict.get("spoken_text", ""),
+        )
+        _send_msg(end_msg.to_dict())
+
+        _log.info(
+            "[STARTUP_BRIEFING] complete: %d cards sent (news=%d, cal=%d)",
+            cards_shown,
+            len(news_cards),
+            len(cal_events),
+        )
+
     def run(self) -> None:
         """Start the server loop."""
         self._cleanup_socket()
@@ -938,6 +1204,10 @@ class BantzServer:
             print("   Extension Bridge: ws://localhost:9876 ✓")
         else:
             print("   Extension Bridge: devre dışı (websockets yükleyin)")
+
+        # ── Startup Briefing (news, calendar, weather → overlay) ──
+        if overlay_started:
+            self._run_startup_briefing(overlay_hook)
 
         print(f"🚀 Bantz Server başlatıldı (session: {self.session_name})")
         print(f"   Socket: {self.socket_path}")
