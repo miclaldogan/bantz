@@ -366,6 +366,7 @@ class OrchestratorLoop:
 
         # Issue #942: Caches to avoid redundant work in _llm_planning_phase
         # Issue #1010: Context assembly extracted to ContextBuilder
+        # NOTE: Initialized with placeholders; bridges are wired after init below.
         self._context_builder = ContextBuilder(
             memory=self.memory,
             user_memory=self.user_memory,
@@ -415,6 +416,12 @@ class OrchestratorLoop:
                 )
         except Exception as _gbx:
             logger.warning("[ORCHESTRATOR] GraphBridge init failed: %s", _gbx)
+
+        # Wire IngestBridge + GraphBridge into ContextBuilder for live data enrichment
+        if getattr(self, "_ingest_bridge", None) is not None:
+            self._context_builder._ingest_bridge = self._ingest_bridge
+        if getattr(self, "_graph_bridge", None) is not None:
+            self._context_builder._graph_bridge = self._graph_bridge
 
         # Issue #1297: Wire event bus subscribers — decoupled observability
         self._event_subscribers: dict[str, Any] = {}
