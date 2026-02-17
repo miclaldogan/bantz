@@ -372,10 +372,10 @@ class SignalCollector:
             return signal
 
         result = await asyncio.to_thread(
-            _call_tool_sync, self._tool_registry, "news.headlines",
+            _call_tool_sync, self._tool_registry, "news.latest",
         )
         if result.get("ok"):
-            headlines = result.get("headlines", result.get("data", []))
+            headlines = result.get("articles", result.get("data", []))
             if isinstance(headlines, list):
                 signal.headlines = [
                     h if isinstance(h, dict) else {"title": str(h)}
