@@ -452,6 +452,7 @@ class OrchestratorLoop:
             ("system", "time"): ["time.now"],
             ("system", "status"): ["system.status"],
             ("system", "volume"): ["system.volume"],
+            ("system", "open_app"): ["pc.launch_app"],
             ("system", "query"): ["time.now"],  # Default for system queries
         }
 

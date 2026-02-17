@@ -121,7 +121,7 @@ VALID_ROUTES = frozenset({"calendar", "gmail", "contacts", "keep", "news", "smal
 VALID_CALENDAR_INTENTS = frozenset({"create", "modify", "cancel", "query", "none"})
 VALID_NEWS_INTENTS = frozenset({"briefing", "search", "none"})
 VALID_GMAIL_INTENTS = frozenset({"list", "search", "read", "send", "none"})
-VALID_SYSTEM_INTENTS = frozenset({"time", "status", "battery", "disk", "none"})
+VALID_SYSTEM_INTENTS = frozenset({"time", "status", "battery", "disk", "volume", "open_app", "none"})
 VALID_CONTACTS_INTENTS = frozenset({"list", "search", "create", "delete", "none"})
 VALID_KEEP_INTENTS = frozenset({"create", "list", "search", "none"})
 
@@ -384,7 +384,7 @@ class JarvisLLMOrchestrator:
         "google.contacts.search", "google.contacts.get", "google.contacts.create",
         "google.keep.list", "google.keep.create", "google.keep.search",
         "news.latest", "news.search",
-        "time.now", "system.status", "system.volume",
+        "time.now", "system.status", "system.volume", "pc.launch_app",
     })
 
     # Issue #1275: Class-level registry reference for route-based schema injection
@@ -481,10 +481,11 @@ TIME: 1-6 without "morning" → PM (one→13, two→14, three→15, four→16, f
     # ── DETAIL BLOCK (~120 tokens) ─── stripped when budget tight ────────
     _SYSTEM_PROMPT_DETAIL = """
 GMAIL: gmail.list_messages query="from:X subject:Y after:YYYY/MM/DD". gmail.smart_search natural_query in plain language ("starred","social","promotions","important").
-SYSTEM: "what time"→time.now (system_intent="time"), "cpu/ram/status"→system.status (system_intent="status"), "battery"→system.status (system_intent="battery"), "volume/ses"→system.volume (system_intent="volume").
+SYSTEM: "what time"→time.now (system_intent="time"), "cpu/ram/status"→system.status (system_intent="status"), "battery"→system.status (system_intent="battery"), "volume/ses"→system.volume (system_intent="volume"), "X aç/başlat"→pc.launch_app (system_intent="open_app").
 CONTACTS: "list contacts"→google.contacts.search (contacts_intent="list"), "search contacts"→google.contacts.search (contacts_intent="search").
 KEEP: "create a note"→google.keep.create (keep_intent="create"), "show my notes"→google.keep.list (keep_intent="list"), "search notes"→google.keep.search (keep_intent="search").
 NEWS: "show latest news"→news.latest (news_intent="briefing"), "what's trending"→news.latest (news_intent="briefing"), "tech news"→news.latest (news_intent="briefing"), "search news"→news.search (news_intent="search").
+UNKNOWN: code writing ("write a function"), translation ("translate X to Y"), general knowledge, math → route=unknown with assistant_reply.
 TIME: five o'clock→17:00, five in the morning→05:00, six in the evening→18:00, noon→12:00, eleven at night→23:00.
 
 MULTI-STEP TASKS (Issue #1279): For complex requests add a "subtasks" list:
@@ -504,7 +505,13 @@ U: show my contacts → {"route":"contacts","contacts_intent":"list","confidence
 U: create a note go to market tomorrow → {"route":"keep","keep_intent":"create","slots":{"title":"go to market tomorrow"},"confidence":0.9,"tool_plan":["google.keep.create"],"status":"done","requires_confirmation":true,"assistant_reply":""}
 U: show system status → {"route":"system","system_intent":"status","confidence":0.9,"tool_plan":["system.status"],"status":"done","assistant_reply":""}
 U: show latest news → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}
-U: tech news → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}"""
+U: tech news → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}
+U: bugünkü teknoloji haberleri → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}
+U: sesi kıs → {"route":"system","system_intent":"volume","confidence":0.9,"tool_plan":["system.volume"],"status":"done","assistant_reply":""}
+U: ses seviyesini %50 yap → {"route":"system","system_intent":"volume","confidence":0.9,"tool_plan":["system.volume"],"status":"done","assistant_reply":""}
+U: spotify aç → {"route":"system","system_intent":"open_app","confidence":0.9,"tool_plan":["pc.launch_app"],"status":"done","assistant_reply":""}
+U: Python ile fibonacci fonksiyonu yaz → {"route":"unknown","confidence":0.9,"tool_plan":[],"status":"done","assistant_reply":"İşte fibonacci fonksiyonu:\\n```python\\ndef fibonacci(n):\\n    if n <= 1: return n\\n    return fibonacci(n-1) + fibonacci(n-2)\\n```"}
+U: hello world Türkçeye çevir → {"route":"unknown","confidence":0.9,"tool_plan":[],"status":"done","assistant_reply":"Merhaba Dünya"}"""
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
@@ -1915,7 +1922,7 @@ ASSISTANT (JSON only):"""
     _ROUTE_KEYWORDS: dict[str, list[str]] = {
         "calendar": [
             "etkinlik", "takvim", "randevu", "toplantı",
-            "yarın", "bugün", "akşam", "sabah", "öğle",
+            "yarın", "akşam", "sabah", "öğle",
             "ekle", "oluştur", "planla", "ne yapıyoruz",
             "programım", "programda",
             # Issue #1071: Replaced generic "plan" and "iptal" with
@@ -1929,11 +1936,17 @@ ASSISTANT (JSON only):"""
             "saat kaçta",
             # Declarative calendar: "olacak" (will be/happen)
             "olacak",
+            # Issue #1391: "bugün" only as multi-word to avoid prefix
+            # match on "bugünkü haberleri" etc.
+            "bugün ne", "bugün var", "bugünkü etkinlik",
+            "bugünkü toplantı", "bugünkü randevu",
         ],
         "gmail": [
             "mail", "e-posta", "eposta", "mesaj", "gönder",
             "oku", "inbox", "gelen kutusu", "draft", "taslak",
-            "yaz", "cevapla", "reply",
+            # Issue #1391: "yaz" removed — conflicts with "kod yaz" etc.
+            # Use multi-word "mail yaz" instead.
+            "mail yaz", "cevapla", "reply",
             # Issue #1214: Additional gmail-context keywords
             "güncelleme", "içerik", "bildirim", "notification",
         ],
@@ -1942,6 +1955,8 @@ ASSISTANT (JSON only):"""
             "sistem", "ayar", "volume", "ses",
             # Issue #1359: system.status keywords
             "cpu", "ram", "bellek", "disk", "durum",
+            # Issue #1391: app launch keywords
+            "aç", "başlat", "kapat",
         ],
         "contacts": [
             # Issue #1360: contacts route keywords
@@ -1958,6 +1973,8 @@ ASSISTANT (JSON only):"""
             "haber", "haberler", "gündem", "son haberler",
             "teknoloji haberleri", "spor haberleri", "ekonomi haberleri",
             "haberleri göster", "haberlerde ara",
+            # Issue #1391: "bugünkü" + news context
+            "bugünkü haber",
         ],
         "smalltalk": [
             "nasılsın", "merhaba", "selam", "teşekkür",
@@ -2083,7 +2100,9 @@ ASSISTANT (JSON only):"""
         ("system", "status"): "system.status",
         ("system", "battery"): "system.status",
         ("system", "disk"): "system.status",
+        # Issue #1391: volume and app launch intents
         ("system", "volume"): "system.volume",
+        ("system", "open_app"): "pc.launch_app",
         # Issue #1360: contacts route tool resolution
         ("contacts", "list"): "google.contacts.search",
         ("contacts", "search"): "google.contacts.search",
@@ -2322,8 +2341,13 @@ ASSISTANT (JSON only):"""
             _SYS_BATTERY_WORDS = {"pil", "batarya", "şarj"}
             _SYS_DISK_WORDS = {"disk", "depolama", "alan", "storage"}
             _SYS_TIME_WORDS = {"saat", "tarih", "zaman"}
+            # Issue #1391: volume and app launch intents
+            _SYS_VOLUME_WORDS = {"ses", "volume", "sessiz", "sesli", "kıs", "aç"}
+            _SYS_APP_WORDS = {"başlat", "kapat"}
 
-            if _input_tokens & _SYS_STATUS_WORDS:
+            if _input_tokens & _SYS_VOLUME_WORDS and any(w in _input_lower for w in ("ses", "volume", "sessiz")):
+                normalized["system_intent"] = "volume"
+            elif _input_tokens & _SYS_STATUS_WORDS:
                 normalized["system_intent"] = "status"
             elif _input_tokens & _SYS_BATTERY_WORDS:
                 normalized["system_intent"] = "battery"
@@ -2331,6 +2355,8 @@ ASSISTANT (JSON only):"""
                 normalized["system_intent"] = "disk"
             elif _input_tokens & _SYS_TIME_WORDS or "saat kaç" in _input_lower:
                 normalized["system_intent"] = "time"
+            elif _input_tokens & _SYS_APP_WORDS or any(w in _input_lower for w in ("aç", "başlat", "çalıştır")):
+                normalized["system_intent"] = "open_app"
             else:
                 normalized["system_intent"] = "status"  # default for system route
             logger.info("[intent_inference] system intent inferred: '%s'", normalized["system_intent"])
