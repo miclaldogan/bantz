@@ -11,6 +11,7 @@ Handles:
 """
 
 import asyncio
+import json
 import logging
 import subprocess
 import sys
@@ -227,6 +228,40 @@ class OverlayClient:
 
         except Exception as e:
             logger.error(f"[OverlayClient] Action send error: {e}")
+            await self._handle_disconnect()
+            return False
+
+    async def send_raw(self, msg_dict: dict) -> bool:
+        """Send an arbitrary message dict to the overlay (JSONL).
+
+        Used for briefing-specific messages (briefing_start, briefing_card,
+        briefing_end) that don't map to StateMessage/ActionMessage.
+
+        Parameters
+        ----------
+        msg_dict:
+            Pre-serialized message dict with at least a 'type' field.
+
+        Returns
+        -------
+        True if sent successfully.
+        """
+        if not self._connected or not self._writer:
+            logger.warning("[OverlayClient] Not connected, cannot send raw message")
+            return False
+
+        try:
+            json_str = json.dumps(msg_dict, ensure_ascii=False, separators=(",", ":"))
+            data = (json_str + "\n").encode("utf-8")
+            self._writer.write(data)
+            await self._writer.drain()
+            logger.debug(
+                "[OverlayClient] Sent raw: type=%s",
+                msg_dict.get("type", "unknown"),
+            )
+            return True
+        except Exception as e:
+            logger.error("[OverlayClient] Raw send error: %s", e)
             await self._handle_disconnect()
             return False
 

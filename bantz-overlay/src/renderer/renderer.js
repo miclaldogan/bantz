@@ -222,11 +222,89 @@ function updateConnectionStatus(state) {
 // Start as connecting
 updateConnectionStatus('connecting');
 
+// ─── IPC Reconnection Logic ──────────────────────────────────
+let reconnectTimer = null;
+let briefingInProgress = false;
+const RECONNECT_INTERVAL = 2000; // retry every 2s
+
+function startReconnect() {
+  if (reconnectTimer) return;
+  updateConnectionStatus('connecting');
+  reconnectTimer = setInterval(() => {
+    if (connectionState === 'connected') {
+      clearInterval(reconnectTimer);
+      reconnectTimer = null;
+      return;
+    }
+    console.log('[Overlay] Retrying IPC connection...');
+    if (window.overlayAPI && window.overlayAPI.reconnect) {
+      window.overlayAPI.reconnect();
+    }
+  }, RECONNECT_INTERVAL);
+}
+
+// ─── First-Boot & Absence Detection ──────────────────────────
+const LAST_SEEN_KEY = 'bantz_last_seen_ts';
+const ABSENCE_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours in ms
+
+function checkFirstBootOrAbsence() {
+  const lastSeen = localStorage.getItem(LAST_SEEN_KEY);
+  const now = Date.now();
+
+  // Update last seen
+  localStorage.setItem(LAST_SEEN_KEY, String(now));
+
+  if (!lastSeen) {
+    // First boot ever
+    console.log('[Overlay] First boot detected — welcome animation');
+    if (typewriter) {
+      typewriter.beginSpeech();
+      typewriter.addToken('Merhaba! ');
+      typewriter.addToken('Ben Bantz, ');
+      typewriter.addToken('kişisel AI asistanınız. ');
+      typewriter.addToken('Hazırım.');
+      setTimeout(() => typewriter.endSpeech(), 3000);
+    }
+    return 'first-boot';
+  }
+
+  const elapsed = now - parseInt(lastSeen, 10);
+  if (elapsed > ABSENCE_THRESHOLD) {
+    // Long absence
+    const hours = Math.floor(elapsed / (60 * 60 * 1000));
+    console.log(`[Overlay] Absence detected: ${hours}h`);
+    if (typewriter) {
+      typewriter.beginSpeech();
+      typewriter.addToken('Uzun zamandır görüşemedik! ');
+      typewriter.addToken('Sizi tekrar görmek güzel.');
+      setTimeout(() => typewriter.endSpeech(), 3000);
+    }
+    return 'absence';
+  }
+
+  return 'normal';
+}
+
 // ─── Daemon Connection State ──────────────────────────────────
 // Listen for connection state changes from the IPC client.
 if (window.overlayAPI && window.overlayAPI.onDaemonConnectionState) {
   window.overlayAPI.onDaemonConnectionState((state) => {
     updateConnectionStatus(state);
+
+    if (state === 'disconnected') {
+      // If disconnected mid-briefing, show fallback
+      if (briefingInProgress) {
+        briefingInProgress = false;
+        console.warn('[Overlay] IPC lost during briefing — fallback state');
+        if (typewriter) {
+          typewriter.beginSpeech();
+          typewriter.addToken('Bağlantı kesildi. Tekrar bağlanıyorum...');
+          setTimeout(() => typewriter.endSpeech(), 2000);
+        }
+      }
+      // Start reconnection attempts
+      startReconnect();
+    }
   });
 }
 
@@ -395,6 +473,7 @@ function handleBriefingMessage(msg) {
       break;
     case 'briefing_start':
       console.log('[Overlay] Briefing started');
+      briefingInProgress = true;
       // Play boot sequence animation
       if (panelTransitions) {
         panelTransitions.playBootSequence(
@@ -408,7 +487,11 @@ function handleBriefingMessage(msg) {
       }
       break;
     case 'briefing_end':
-      console.log('[Overlay] Briefing ended');
+      console.log('[Overlay] Briefing ended — panels persist');
+      briefingInProgress = false;
+      // Panels stay visible (persistent mode)
+      // Transition sphere to idle
+      if (stateAnimator) stateAnimator.setState('idle');
       break;
   }
 }
@@ -449,6 +532,9 @@ initGlitchEffects();
 
 // ─── Initialize Panel Transitions ───────────────────────────
 initPanelTransitions();
+
+// ─── Check First Boot / Absence ─────────────────────────────
+checkFirstBootOrAbsence();
 
 // ─── Initialize Reasoning Chain ─────────────────────────────
 initReasoningChain();
