@@ -17,8 +17,8 @@ const NEWS_CONFIG = {
   scrollSpeed: 30,           // px/s auto-scroll
   highlightDuration: 3000,   // ms for active article highlight
   tooltipDelay: 400,         // ms before showing tooltip
-  panelWidth: 340,
-  panelHeight: 440,
+  panelWidth: 380,
+  panelHeight: 480,
 };
 
 /**

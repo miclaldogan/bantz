@@ -40,28 +40,28 @@ const REPOSITION_DEBOUNCE = 150;  // ms
 const SLOT_DEFINITIONS = {
   left: {
     anchor: 'left',
-    overflowPct: 0.65,       // 65% of panel width overflows left
+    overflowPct: 0.75,       // 75% of panel width overflows left
     baseZIndex: 20,
     slideAnim: 'slide-in-left',
-    verticalAlign: 0.06,     // 6% from top
+    verticalAlign: 0.05,     // 5% from top
   },
   right: {
     anchor: 'right',
-    overflowPct: 0.65,       // 65% of panel width overflows right
+    overflowPct: 0.75,       // 75% of panel width overflows right
     baseZIndex: 20,
     slideAnim: 'slide-in-right',
-    verticalAlign: 0.06,
+    verticalAlign: 0.05,
   },
   'bottom-left': {
     anchor: 'bottom-left',
-    overflowPct: 0.55,       // 55% overflow on both bottom and left
+    overflowPct: 0.65,       // 65% overflow on both bottom and left
     baseZIndex: 15,
     slideAnim: 'slide-in-bottom',
     verticalAlign: null,     // computed from bottom
   },
   'bottom-right': {
     anchor: 'bottom-right',
-    overflowPct: 0.55,       // 55% overflow on both bottom and right
+    overflowPct: 0.65,       // 65% overflow on both bottom and right
     baseZIndex: 15,
     slideAnim: 'slide-in-bottom',
     verticalAlign: null,
