@@ -402,6 +402,10 @@ if (window.overlayAPI && window.overlayAPI.onDaemonMessage) {
         // Handle daemon events (phone calls, etc.)
         handleDaemonEvent(message);
         break;
+      case 'voice_state':
+        // Handle voice pipeline state changes (Issue #1440)
+        handleVoiceStateMessage(message);
+        break;
       default:
         console.log('[Overlay] Unknown message type:', message.type);
     }
@@ -481,6 +485,47 @@ function handleStateMessage(msg) {
 function handleActionMessage(msg) {
   // Will be implemented in #1401+ (panel actions)
   console.log('[Overlay] Action:', msg.action_type);
+}
+
+// ─── Voice State Handler (Issue #1440) ────────────────────────
+function handleVoiceStateMessage(msg) {
+  const voiceState = msg.state;
+  if (!voiceState) return;
+
+  // Map voice state to sphere state (same enum: idle, wake, listening, thinking, speaking)
+  if (stateAnimator) {
+    stateAnimator.setState(voiceState);
+  }
+
+  // Trigger glitch effects on voice state transitions
+  if (glitchEffects) {
+    if (voiceState === 'wake') {
+      glitchEffects.triggerWakeFlicker();
+      glitchEffects.triggerChromatic('normal');
+    } else if (voiceState === 'thinking') {
+      glitchEffects.triggerChromatic('intense');
+    } else if (voiceState === 'listening') {
+      glitchEffects.triggerChromatic('normal');
+    }
+  }
+
+  // Choreograph panel transitions
+  if (panelTransitions && previousState !== voiceState) {
+    panelTransitions.choreographStateChange(previousState, voiceState, {
+      stateAnimator,
+      typewriter,
+      reasoningChain,
+      glitchEffects,
+    });
+    previousState = voiceState;
+  }
+
+  // Log wake word data if present
+  if (msg.data && msg.data.wake_word) {
+    console.log(`[Voice] Wake word: ${msg.data.wake_word} (${msg.data.confidence})`);
+  }
+
+  console.log('[Voice] State:', voiceState, msg.trigger || '');
 }
 
 function handleDaemonEvent(msg) {
