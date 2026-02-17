@@ -646,7 +646,7 @@ class TestStartupRunnerFullFlow:
         # Mock overlay, TTS, EventBus
         overlay_calls = []
         mock_overlay = MagicMock()
-        mock_overlay.send = lambda msg: overlay_calls.append(msg)
+        mock_overlay.send_raw = AsyncMock(side_effect=lambda msg: overlay_calls.append(msg))
 
         tts_texts = []
         async def mock_tts(text):

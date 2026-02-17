@@ -235,6 +235,13 @@ async def send_briefing_sequence(
     """
     news_cards = briefing_data.get("news_cards", [])
 
+    async def _call_send(msg_dict):
+        """Call send_fn — supports both sync and async callables."""
+        import inspect
+        result = send_fn(msg_dict)
+        if inspect.isawaitable(result):
+            await result
+
     # 1. Send briefing start
     start_msg = BriefingStartMessage(
         greeting=briefing_data.get("greeting", ""),
@@ -242,7 +249,7 @@ async def send_briefing_sequence(
         total_cards=len(news_cards),
         days_away=briefing_data.get("days_away", 0),
     )
-    send_fn(start_msg.to_dict())
+    await _call_send(start_msg.to_dict())
     await asyncio.sleep(greeting_delay)
 
     # 2. Send news cards one by one
@@ -258,7 +265,7 @@ async def send_briefing_sequence(
             image_url=card.get("image_url"),
             url=card.get("url", ""),
         )
-        send_fn(card_msg.to_dict())
+        await _call_send(card_msg.to_dict())
         cards_shown += 1
         await asyncio.sleep(card_delay)
 
@@ -266,7 +273,7 @@ async def send_briefing_sequence(
     end_msg = BriefingEndMessage(
         total_shown=cards_shown,
     )
-    send_fn(end_msg.to_dict())
+    await _call_send(end_msg.to_dict())
 
     logger.info("[briefing_overlay] sequence complete: %d cards shown", cards_shown)
     return cards_shown
