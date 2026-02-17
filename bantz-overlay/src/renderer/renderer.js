@@ -51,6 +51,21 @@ function initSphere() {
   });
 }
 
+// ─── News Feed Panel ───────────────────────────────────────────
+let newsFeed = null;
+
+function initNewsFeed() {
+  if (!window.NewsFeedPanel) {
+    console.warn('[Overlay] NewsFeedPanel not loaded');
+    return;
+  }
+  newsFeed = new window.NewsFeedPanel(hudPanel);
+  newsFeed.mount();
+  newsFeed.show();
+  window.bantzNewsFeed = newsFeed;
+  console.log('[Overlay] News feed initialized');
+}
+
 // ─── Mouse Interaction Zones ──────────────────────────────────
 // When the mouse enters the HUD panel, we enable mouse events
 // so the user can interact with panels/sphere. When it leaves,
@@ -147,8 +162,30 @@ function handleActionMessage(msg) {
 }
 
 function handleBriefingMessage(msg) {
-  // Will be implemented in #1405-#1407 (content panels), #1414 (integration)
-  console.log('[Overlay] Briefing:', msg.type);
+  switch (msg.type) {
+    case 'briefing_card':
+      // Route news cards to the news feed panel
+      if (msg.category === 'news' && newsFeed) {
+        const articleId = newsFeed.addArticle({
+          title: msg.title || msg.headline,
+          source: msg.source,
+          summary: msg.summary || msg.body,
+          id: msg.id,
+          ts: msg.ts,
+        });
+        // If the assistant is currently speaking about this article
+        if (msg.active) {
+          newsFeed.highlightArticle(articleId);
+        }
+      }
+      break;
+    case 'briefing_start':
+      console.log('[Overlay] Briefing started');
+      break;
+    case 'briefing_end':
+      console.log('[Overlay] Briefing ended');
+      break;
+  }
 }
 
 // ─── Visibility Change ────────────────────────────────────────
@@ -166,3 +203,6 @@ window.overlayAPI.getDisplayInfo().then((info) => {
 
 // ─── Initialize Particle Sphere ─────────────────────────────
 initSphere();
+
+// ─── Initialize News Feed ───────────────────────────────────
+initNewsFeed();
