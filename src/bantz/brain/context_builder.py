@@ -64,12 +64,19 @@ class ContextBuilder:
         personality_injector: Any = None,
         pii_filter: bool = False,
         memory_max_tokens: int = 2048,
+        ingest_bridge: Any = None,
+        graph_bridge: Any = None,
     ):
         self._memory = memory
         self._user_memory = user_memory
         self._personality_injector = personality_injector
         self._pii_filter = pii_filter
         self._memory_max_tokens = memory_max_tokens
+        self._ingest_bridge = ingest_bridge
+        self._graph_bridge = graph_bridge
+
+        # Lazy-init retriever
+        self._hybrid_retriever: Any = None
 
         # PII redaction cache (Issue #942)
         self._cached_pii_summary: str | None = None
@@ -124,6 +131,12 @@ class ContextBuilder:
 
         # 6. Anaphora reference table
         self._inject_reference_table(tool_results, context_parts, state)
+
+        # 7. Ingest Store context — recent synced Gmail/Calendar data
+        self._inject_ingest_context(user_input, context_parts)
+
+        # 8. Graph context — entity relationships from knowledge graph
+        self._inject_graph_context(user_input, context_parts)
 
         result.enhanced_summary = (
             "\n\n".join(context_parts) if context_parts else None
@@ -389,3 +402,161 @@ class ContextBuilder:
                 state.reference_table = ref_table
         except Exception as exc:
             logger.debug("[CONTEXT_BUILDER] reference table failed: %s", exc)
+
+    def _inject_ingest_context(
+        self,
+        user_input: str,
+        context_parts: list[str],
+    ) -> None:
+        """Inject recent cached data from IngestStore (synced Gmail, Calendar, etc.).
+
+        This gives the LLM access to background-synced data so the user can
+        ask "what emails did I get?" without triggering a live API call.
+        """
+        if self._ingest_bridge is None:
+            return
+
+        # Detect if user is asking about email or calendar
+        _input_lower = user_input.lower()
+        _email_keywords = {
+            "mail", "email", "e-posta", "eposta", "gmail", "inbox",
+            "gelen kutusu", "mesaj", "okunmamış", "gönder",
+        }
+        _cal_keywords = {
+            "takvim", "calendar", "toplantı", "etkinlik", "randevu",
+            "bugün", "yarın", "hafta", "program", "ajanda", "event",
+        }
+
+        sources_to_query: list[str] = []
+        if any(kw in _input_lower for kw in _email_keywords):
+            sources_to_query.append("gmail_sync")
+        if any(kw in _input_lower for kw in _cal_keywords):
+            sources_to_query.append("calendar_sync")
+
+        if not sources_to_query:
+            return
+
+        try:
+            store = self._ingest_bridge._store
+            ingest_lines = ["SYNCED_DATA:"]
+            total_items = 0
+
+            for source in sources_to_query:
+                records = store.query(source=source, limit=10)
+                if not records:
+                    continue
+
+                import json
+
+                source_label = "Email" if "gmail" in source else "Calendar"
+                ingest_lines.append(f"  [{source_label}] ({len(records)} recent items):")
+
+                for rec in records[:8]:  # Cap at 8 per source
+                    try:
+                        data = (
+                            json.loads(rec.content)
+                            if isinstance(rec.content, str)
+                            else rec.content
+                        )
+                        if isinstance(data, dict):
+                            # Extract key fields for context
+                            if "gmail" in source:
+                                subj = data.get("subject", data.get("title", ""))[:80]
+                                sender = data.get("from", data.get("sender", ""))[:40]
+                                snippet = data.get("snippet", "")[:60]
+                                cat = ""
+                                if rec.meta:
+                                    cat = rec.meta.get("classification", {}).get(
+                                        "category", ""
+                                    )
+                                cat_str = f" [{cat}]" if cat else ""
+                                ingest_lines.append(
+                                    f"    - {sender}: {subj}{cat_str}"
+                                )
+                                if snippet:
+                                    ingest_lines.append(f"      {snippet}")
+                            else:
+                                title = data.get(
+                                    "summary", data.get("title", "")
+                                )[:80]
+                                start = data.get(
+                                    "start", data.get("start_time", "")
+                                )
+                                ingest_lines.append(
+                                    f"    - {start}: {title}"
+                                )
+                        total_items += 1
+                    except Exception:
+                        pass
+
+            if total_items > 0:
+                context_parts.append("\n".join(ingest_lines))
+                logger.debug(
+                    "[CONTEXT_BUILDER] injected %d ingest items", total_items
+                )
+
+        except Exception as exc:
+            logger.debug("[CONTEXT_BUILDER] ingest context failed: %s", exc)
+
+    def _inject_graph_context(
+        self,
+        user_input: str,
+        context_parts: list[str],
+    ) -> None:
+        """Inject graph entity context via HybridRetriever.
+
+        Uses keyword + graph expansion to find relevant entities
+        (people, emails, events) for the current user query.
+        """
+        if self._graph_bridge is None:
+            return
+
+        try:
+            graph_store = getattr(self._graph_bridge, "_store", None)
+            if graph_store is None:
+                return
+
+            # Lazy-init retriever
+            if self._hybrid_retriever is None:
+                from bantz.data.hybrid_retriever import HybridRetriever
+
+                self._hybrid_retriever = HybridRetriever(
+                    graph_store, max_depth=1, expansion_decay=0.5,
+                )
+
+            # Run recall synchronously (retriever is async)
+            import asyncio
+
+            try:
+                loop = asyncio.get_running_loop()
+                # Already in async context — skip to avoid deadlock
+                return
+            except RuntimeError:
+                pass
+
+            results = asyncio.get_event_loop().run_until_complete(
+                self._hybrid_retriever.recall(user_input, top_k=5)
+            )
+
+            if not results:
+                return
+
+            graph_lines = ["GRAPH_CONTEXT:"]
+            for r in results:
+                props = r.node.properties or {}
+                name = props.get("name", props.get("subject", r.node.id[:12]))
+                label = r.node.label
+                path_str = " → ".join(r.path) if r.path else ""
+                graph_lines.append(
+                    f"  [{label}] {name} (score={r.score:.2f}) {path_str}"
+                )
+
+            if len(graph_lines) > 1:
+                context_parts.append("\n".join(graph_lines))
+                logger.debug(
+                    "[CONTEXT_BUILDER] injected %d graph results",
+                    len(results),
+                )
+
+        except Exception as exc:
+            logger.debug("[CONTEXT_BUILDER] graph context failed: %s", exc)
