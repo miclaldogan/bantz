@@ -212,15 +212,15 @@ class TestEncodeBriefingMessage:
 
     def test_card_roundtrip(self):
         msg = BriefingCardMessage(
-            title="Haberi Oku",
-            summary="Özet",
+            title="Breaking News",
+            summary="Brief summary of the article",
             source="NTV",
             category="turkey",
             image_url="https://img.ntv.com/pic.jpg",
         )
         encoded = encode_briefing_message(msg)
         parsed = json.loads(encoded.decode("utf-8").strip())
-        assert parsed["title"] == "Haberi Oku"
+        assert parsed["title"] == "Breaking News"
         assert parsed["image_url"] == "https://img.ntv.com/pic.jpg"
 
     def test_unicode_preserved(self):
