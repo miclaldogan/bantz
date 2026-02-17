@@ -238,7 +238,11 @@
 
     "pdf.extract_text":         "safe",
     "pdf.summarize":            "safe",
-    "pdf.from_attachment":      "moderate"
+    "pdf.from_attachment":      "moderate",
+
+    "google.classroom.courses":     "safe",
+    "google.classroom.coursework":  "safe",
+    "google.classroom.submissions": "safe"
   },
 
   "always_confirm_tools": [
