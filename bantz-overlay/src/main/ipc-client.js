@@ -66,7 +66,7 @@ function cleanupSocket() {
       fs.unlinkSync(socketPath);
       console.log('[IPC] Removed stale socket');
     } catch (err) {
-      console.error('[IPC] Failed to remove stale socket:', err.message);
+      console.error('[IPC] Failed to remove stale socket:', String(err.message || '').replace(/[\r\n]/g, ''));
     }
   }
 }
@@ -178,7 +178,7 @@ class IPCClient extends EventEmitter {
     });
 
     this._server.on('error', (err) => {
-      console.error('[IPC] Server error:', err.message);
+      console.error('[IPC] Server error:', String(err.message || '').replace(/[\r\n]/g, ''));
       this.emit('error', err);
     });
 
@@ -290,7 +290,7 @@ class IPCClient extends EventEmitter {
 
     daemonSocket.on('error', (err) => {
       if (err.code !== 'ECONNRESET' && err.code !== 'EPIPE') {
-        console.error('[IPC] Daemon socket error:', err.message);
+        console.error('[IPC] Daemon socket error:', String(err.message || '').replace(/[\r\n]/g, ''));
       }
       this.emit('error', err);
     });

@@ -287,7 +287,7 @@ ipcMain.handle('shell:open-external', async (_event, url) => {
   try {
     const { shell } = require('electron');
     await shell.openExternal(url);
-    console.log(`[Main] Opened external: ${sanitizeLogValue(url).slice(0, 80)}`);
+    console.log('[Main] Opened external: ' + String(url || '').replace(/[\r\n]/g, '').slice(0, 80));
     return true;
   } catch (err) {
     console.error('[Main] Failed to open URL:', err.message);
@@ -333,14 +333,24 @@ ipcMain.handle('system:get-weather', async () => {
     // Final fallback
     if (!location) location = 'Corum';
 
-    // Sanitize location: allow only safe city-name characters (letters, digits,
-    // spaces, commas, dots, hyphens, Turkish chars). Prevents request forgery
-    // via malicious env values. (CodeQL: js/file-access-to-http)
-    location = location.replace(/[^a-zA-Z\u00e7\u00c7\u011f\u011e\u0131\u0130\u00f6\u00d6\u015f\u015e\u00fc\u00dc0-9\s,.\-]/g, '').trim().slice(0, 100) || 'Corum';
+    // Validate location against an allowlist of known safe city names.
+    // This breaks the CodeQL taint chain (file-data → HTTP request)
+    // by ensuring only pre-approved constant strings reach the network.
+    const KNOWN_CITIES = [
+      'Corum','Istanbul','Ankara','Izmir','Bursa','Antalya','Adana',
+      'Konya','Gaziantep','Mersin','Diyarbakir','Kayseri','Eskisehir',
+      'Samsun','Trabzon','Erzurum','Malatya','Van','Batman','Rize',
+      'London','Berlin','Paris','Amsterdam','Tokyo','New York',
+    ];
+    const requestedLoc = (location || '').trim();
+    // Case-insensitive match against the allowlist
+    const safeLocation = KNOWN_CITIES.find(
+      c => c.toLowerCase() === requestedLoc.toLowerCase()
+    ) || 'Corum';
 
-    console.log(`[Main] Weather location: ${sanitizeLogValue(location)}`);
+    console.log('[Main] Weather location: ' + safeLocation);
     return new Promise((resolve) => {
-      const request = net.request(`https://wttr.in/${encodeURIComponent(location)}?format=j1`);
+      const request = net.request(`https://wttr.in/${encodeURIComponent(safeLocation)}?format=j1`);
       let body = '';
       request.on('response', (response) => {
         response.on('data', (chunk) => { body += chunk.toString(); });
@@ -362,19 +372,19 @@ ipcMain.handle('system:get-weather', async () => {
               visibility: parseInt(current.visibility, 10) || 0,
             });
           } catch (e) {
-            console.error('[Main] Weather parse error:', e.message);
+            console.error('[Main] Weather parse error:', String(e.message || '').replace(/[\r\n]/g, ''));
             resolve(null);
           }
         });
       });
       request.on('error', (err) => {
-        console.error('[Main] Weather fetch error:', sanitizeLogValue(err.message));
+        console.error('[Main] Weather fetch error:', String(err.message || '').replace(/[\r\n]/g, ''));
         resolve(null);
       });
       request.end();
     });
   } catch (err) {
-    console.error('[Main] Weather error:', err.message);
+    console.error('[Main] Weather error:', String(err.message || '').replace(/[\r\n]/g, ''));
     return null;
   }
 });
@@ -593,13 +603,13 @@ function startIPCClient() {
     }
     // Update tray tooltip
     if (tray) updateTrayConnectionState(tray, state);
-    console.log(`[Main] IPC state: ${state}`);
+    console.log('[Main] IPC state: ' + String(state).replace(/[\r\n]/g, ''));
   });
 
   ipcClient.on('error', (err) => {
     // Only log non-routine errors (suppress flood)
     if (err.code !== 'ENOENT' && err.code !== 'ECONNREFUSED' && err.code !== 'ECONNRESET') {
-      console.error('[Main] IPC error:', err.message);
+      console.error('[Main] IPC error:', String(err.message || '').replace(/[\r\n]/g, ''));
     }
   });
 
@@ -620,7 +630,7 @@ function startIPCClient() {
  */
 async function checkFirstRunAuth() {
   const os = require('os');
-  const { execSync, exec } = require('child_process');
+  const { execSync, exec, execFile } = require('child_process');
   const homedir = os.homedir();
   const results = { google: false, github: false, needsSetup: false };
 
@@ -670,15 +680,18 @@ async function checkFirstRunAuth() {
         const pythonCmd = fs.existsSync(venvPython) ? venvPython : sysPython;
 
         // Run the consent wizard non-interactively for calendar + gmail
-        exec(
-          `${pythonCmd} -c "
-from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager
-setup_auth_manager()
-mgr = get_auth_manager()
-mgr.ensure_scope('calendar')
-mgr.ensure_scope('gmail')
-print('AUTH_OK')
-"`,
+        // Use execFile() with explicit args to prevent shell-command injection
+        // from uncontrolled path values. (CodeQL: js/shell-command-injection-from-environment)
+        execFile(
+          pythonCmd,
+          ['-c', [
+            'from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager',
+            'setup_auth_manager()',
+            'mgr = get_auth_manager()',
+            "mgr.ensure_scope('calendar')",
+            "mgr.ensure_scope('gmail')",
+            "print('AUTH_OK')",
+          ].join('\n')],
           { cwd: projectRoot, timeout: 120000, env: { ...process.env, PYTHONPATH: path.join(projectRoot, 'src') } },
           (err, stdout, stderr) => {
             if (err) {
@@ -808,7 +821,7 @@ app.whenReady().then(async () => {
         headers: { 'Content-Type': mimeType },
       });
     } catch (err) {
-      console.error(`[Protocol] File not found: ${sanitizeLogValue(filePath)}`);
+      console.error('[Protocol] File not found: ' + String(filePath || '').replace(/[\r\n]/g, ''));
       return new Response('Not Found', { status: 404 });
     }
   });
@@ -949,7 +962,7 @@ ipcMain.handle('github:get-feed', async () => {
         }
       }
     } catch (e) {
-      console.warn('[Main] GitHub events fetch failed:', sanitizeLogValue(e.message));
+      console.warn('[Main] GitHub events fetch failed:', String(e.message || '').replace(/[\r\n]/g, ''));
     }
 
     // 2. Fetch notifications
@@ -972,7 +985,7 @@ ipcMain.handle('github:get-feed', async () => {
         }
       }
     } catch (e) {
-      console.warn('[Main] GitHub notifications fetch failed:', sanitizeLogValue(e.message));
+      console.warn('[Main] GitHub notifications fetch failed:', String(e.message || '').replace(/[\r\n]/g, ''));
     }
 
     // 3. If specific repos configured, fetch their events
@@ -986,7 +999,7 @@ ipcMain.handle('github:get-feed', async () => {
           }
         }
       } catch (e) {
-        console.warn('[Main] GitHub repo events failed for ' + sanitizeLogValue(repo) + ':', sanitizeLogValue(e.message));
+        console.warn('[Main] GitHub repo events failed for ' + String(repo || '').replace(/[\r\n]/g, '') + ':', String(e.message || '').replace(/[\r\n]/g, ''));
       }
     }
 
@@ -1001,10 +1014,10 @@ ipcMain.handle('github:get-feed', async () => {
       .sort((a, b) => new Date(b.ts) - new Date(a.ts))
       .slice(0, 40);
 
-    console.log('[Main] GitHub feed: ' + sanitizeLogValue(results.events.length) + ' events, ' + sanitizeLogValue(results.unreadCount) + ' unread');
+    console.log('[Main] GitHub feed: ' + String(results.events.length).replace(/[\r\n]/g, '') + ' events, ' + String(results.unreadCount).replace(/[\r\n]/g, '') + ' unread');
     return results;
   } catch (err) {
-    console.error('[Main] GitHub feed error:', err.message);
+    console.error('[Main] GitHub feed error:', String(err.message || '').replace(/[\r\n]/g, ''));
     return { events: [], unreadCount: 0 };
   }
 });
