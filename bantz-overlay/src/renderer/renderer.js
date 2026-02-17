@@ -53,6 +53,7 @@ function initSphere() {
 
 // ─── News Feed Panel ───────────────────────────────────────────
 let newsFeed = null;
+let newsImagePopup = null;
 
 function initNewsFeed() {
   if (!window.NewsFeedPanel) {
@@ -63,6 +64,13 @@ function initNewsFeed() {
   newsFeed.mount();
   newsFeed.show();
   window.bantzNewsFeed = newsFeed;
+
+  // Image popup
+  if (window.NewsImagePopup) {
+    newsImagePopup = new window.NewsImagePopup(hudPanel);
+    window.bantzNewsImagePopup = newsImagePopup;
+  }
+
   console.log('[Overlay] News feed initialized');
 }
 
@@ -176,6 +184,15 @@ function handleBriefingMessage(msg) {
         // If the assistant is currently speaking about this article
         if (msg.active) {
           newsFeed.highlightArticle(articleId);
+        }
+        // Show image popup if article has an image
+        if (msg.image_url && newsImagePopup) {
+          newsImagePopup.show({
+            image_url: msg.image_url,
+            title: msg.title || msg.headline,
+            source: msg.source,
+            url: msg.url,
+          });
         }
       }
       break;
