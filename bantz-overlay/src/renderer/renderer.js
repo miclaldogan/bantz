@@ -74,6 +74,21 @@ function initNewsFeed() {
   console.log('[Overlay] News feed initialized');
 }
 
+// ─── Daily Tasks Panel ─────────────────────────────────────────
+let dailyTasks = null;
+
+function initDailyTasks() {
+  if (!window.DailyTasksPanel) {
+    console.warn('[Overlay] DailyTasksPanel not loaded');
+    return;
+  }
+  dailyTasks = new window.DailyTasksPanel(hudPanel);
+  dailyTasks.mount();
+  dailyTasks.show();
+  window.bantzDailyTasks = dailyTasks;
+  console.log('[Overlay] Daily tasks initialized');
+}
+
 // ─── Mouse Interaction Zones ──────────────────────────────────
 // When the mouse enters the HUD panel, we enable mouse events
 // so the user can interact with panels/sphere. When it leaves,
@@ -195,6 +210,24 @@ function handleBriefingMessage(msg) {
           });
         }
       }
+      // Route calendar cards to daily tasks panel
+      if (msg.category === 'calendar' && dailyTasks) {
+        dailyTasks.addEvent({
+          title: msg.title,
+          start: msg.start,
+          end: msg.end,
+          all_day: msg.all_day,
+          id: msg.id,
+        });
+      }
+      // Route task cards
+      if (msg.category === 'task' && dailyTasks) {
+        dailyTasks.addTask({
+          title: msg.title,
+          completed: msg.completed,
+          id: msg.id,
+        });
+      }
       break;
     case 'briefing_start':
       console.log('[Overlay] Briefing started');
@@ -223,3 +256,6 @@ initSphere();
 
 // ─── Initialize News Feed ───────────────────────────────────
 initNewsFeed();
+
+// ─── Initialize Daily Tasks ─────────────────────────────────
+initDailyTasks();
