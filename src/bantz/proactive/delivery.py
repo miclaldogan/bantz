@@ -103,3 +103,39 @@ class CallbackDelivery(DeliveryChannel):
     async def deliver(self, text: str) -> None:
         if self._callback:
             await self._callback(text)
+
+
+class OverlayDelivery(DeliveryChannel):
+    """Deliver briefs to the Electron overlay via IPC.
+
+    Sends a ``briefing_card`` message with ``category='notification'``
+    so the overlay can display proactive notifications in-context.
+    Falls back to EventBusDelivery if the overlay is not connected.
+    """
+
+    def __init__(self, overlay_hook: Any = None) -> None:
+        self._overlay_hook = overlay_hook
+
+    async def deliver(self, text: str) -> None:
+        if self._overlay_hook is None:
+            return
+
+        client = getattr(self._overlay_hook, "_client", None)
+        if client is None or not getattr(client, "connected", False):
+            logger.debug("OverlayDelivery: overlay not connected — skipping")
+            return
+
+        try:
+            msg = {
+                "type": "briefing_card",
+                "category": "notification",
+                "title": "Proactive Brief",
+                "summary": text[:500],
+                "id": f"proactive-{id(text) & 0xFFFF:04x}",
+            }
+            if hasattr(client, "send_raw"):
+                await client.send_raw(msg)
+            else:
+                logger.debug("OverlayDelivery: client lacks send_raw")
+        except Exception as exc:
+            logger.warning("OverlayDelivery failed: %s", exc)
