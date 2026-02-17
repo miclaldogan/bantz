@@ -433,6 +433,24 @@ permissions:
     risk: "low"
     decision: "allow"
 
+  # ── PDF Tools (Issue #1211) ────────────────────────────────
+  - tool: "pdf.extract_text"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pdf.summarize"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pdf.from_attachment"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+    conditions:
+      max_per_session: 30
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"

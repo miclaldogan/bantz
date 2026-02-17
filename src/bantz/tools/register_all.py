@@ -51,6 +51,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_news(registry)
     count += _register_weather(registry)
     count += _register_phone(registry)
+    count += _register_pdf(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -2887,6 +2888,66 @@ def _register_phone(registry: "ToolRegistry") -> int:
         ),
         phone_call_log_tool,
         risk="low",
+    )
+
+    return n
+
+
+# ── PDF (3) ──────────────────────────────────────────────────────────────
+
+def _register_pdf(registry: "ToolRegistry") -> int:
+    """Register PDF tools (Issue #1211)."""
+    try:
+        from bantz.tools.pdf_tools import (
+            pdf_extract_text_tool,
+            pdf_summarize_tool,
+            pdf_from_attachment_tool,
+        )
+    except ImportError as e:
+        logger.warning(f"[ToolGap] pdf import: {e}")
+        return 0
+
+    n = 0
+    n += _reg(
+        registry,
+        "pdf.extract_text",
+        "Extract text content from a PDF file.",
+        _obj(
+            ("path", "string", "Absolute path to the PDF file"),
+            ("max_pages", "integer", "Maximum pages to extract (default 200)"),
+            required=["path"],
+        ),
+        pdf_extract_text_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "pdf.summarize",
+        "Extract text from a PDF and prepare for summarization.",
+        _obj(
+            ("path", "string", "Absolute path to the PDF file"),
+            ("max_pages", "integer", "Maximum pages to process (default 50)"),
+            ("language", "string", "Summary language: tr or en (default tr)"),
+            required=["path"],
+        ),
+        pdf_summarize_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "pdf.from_attachment",
+        "Download a Gmail PDF attachment and extract its text content.",
+        _obj(
+            ("message_id", "string", "Gmail message ID"),
+            ("attachment_id", "string", "Gmail attachment ID"),
+            ("filename", "string", "Original filename for display"),
+            required=["message_id", "attachment_id"],
+        ),
+        pdf_from_attachment_tool,
+        risk="medium",
+        confirm=True,
     )
 
     return n
