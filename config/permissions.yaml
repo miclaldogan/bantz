@@ -400,6 +400,39 @@ permissions:
     risk: "low"
     decision: "allow"
 
+  # ── Phone Call (Issue #1438) ────────────────────────────────
+  - tool: "phone.call"
+    action: "execute"
+    risk: "high"
+    decision: "confirm"
+    conditions:
+      max_per_session: 20
+
+  - tool: "phone.hangup"
+    action: "execute"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "phone.mute"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "phone.speaker"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "phone.status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "phone.call_log"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"

@@ -50,6 +50,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_sync_search(registry)
     count += _register_news(registry)
     count += _register_weather(registry)
+    count += _register_phone(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -2804,6 +2805,88 @@ def _register_weather(registry: "ToolRegistry") -> int:
             ("date", "string", "Date to check (YYYY-MM-DD, default today)"),
         ),
         weather_check_outdoor_tool,
+    )
+
+    return n
+
+
+# ── Phone (6) ────────────────────────────────────────────────────────
+
+def _register_phone(registry: "ToolRegistry") -> int:
+    """Register phone call tools (Issue #1438)."""
+    try:
+        from bantz.tools.phone_tools import (
+            phone_call_tool,
+            phone_hangup_tool,
+            phone_mute_tool,
+            phone_speaker_tool,
+            phone_status_tool,
+            phone_call_log_tool,
+        )
+    except ImportError as e:
+        logger.warning(f"[ToolGap] phone import: {e}")
+        return 0
+
+    n = 0
+    n += _reg(
+        registry,
+        "phone.call",
+        "Initiate a phone call to a number or contact.",
+        _obj(
+            ("number", "string", "Phone number to dial"),
+            ("contact_name", "string", "Contact name for display"),
+            required=["number"],
+        ),
+        phone_call_tool,
+        risk="high",
+        confirm=True,
+    )
+
+    n += _reg(
+        registry,
+        "phone.hangup",
+        "End the active phone call.",
+        _obj(),
+        phone_hangup_tool,
+        risk="medium",
+    )
+
+    n += _reg(
+        registry,
+        "phone.mute",
+        "Toggle mute on the active phone call.",
+        _obj(),
+        phone_mute_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "phone.speaker",
+        "Toggle speaker mode on the active phone call.",
+        _obj(),
+        phone_speaker_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "phone.status",
+        "Get current phone call status (state, caller, duration).",
+        _obj(),
+        phone_status_tool,
+        risk="low",
+    )
+
+    n += _reg(
+        registry,
+        "phone.call_log",
+        "Get recent call history.",
+        _obj(
+            ("limit", "integer", "Max entries (default 10)"),
+        ),
+        phone_call_log_tool,
+        risk="low",
     )
 
     return n
