@@ -155,6 +155,20 @@ function initGlitchEffects() {
   console.log('[Overlay] Glitch effects initialized');
 }
 
+// ─── Panel Transitions ───────────────────────────────────────────
+let panelTransitions = null;
+let previousState = 'idle';
+
+function initPanelTransitions() {
+  if (!window.PanelTransitions) {
+    console.warn('[Overlay] PanelTransitions not loaded');
+    return;
+  }
+  panelTransitions = new window.PanelTransitions(hudPanel);
+  window.bantzTransitions = panelTransitions;
+  console.log('[Overlay] Panel transitions initialized');
+}
+
 // ─── Reasoning Chain Display ─────────────────────────────────
 let reasoningChain = null;
 
@@ -254,6 +268,17 @@ if (window.overlayAPI && window.overlayAPI.onDaemonMessage) {
 function handleStateMessage(msg) {
   // Update sphere state animation based on assistant state
   if (stateAnimator && msg.state) {
+    // Choreograph state transition animations
+    if (panelTransitions && previousState !== msg.state) {
+      panelTransitions.choreographStateChange(previousState, msg.state, {
+        stateAnimator,
+        typewriter,
+        reasoningChain,
+        glitchEffects,
+      });
+    }
+    previousState = msg.state;
+
     stateAnimator.setState(msg.state);
 
     // Trigger glitch effects on state transitions
@@ -370,6 +395,17 @@ function handleBriefingMessage(msg) {
       break;
     case 'briefing_start':
       console.log('[Overlay] Briefing started');
+      // Play boot sequence animation
+      if (panelTransitions) {
+        panelTransitions.playBootSequence(
+          {
+            'daily-tasks': dailyTasks,
+            'news-feed': newsFeed,
+            'system-status': systemStatus,
+          },
+          sphere
+        );
+      }
       break;
     case 'briefing_end':
       console.log('[Overlay] Briefing ended');
@@ -410,6 +446,9 @@ initTypewriter();
 
 // ─── Initialize Glitch Effects ──────────────────────────────
 initGlitchEffects();
+
+// ─── Initialize Panel Transitions ───────────────────────────
+initPanelTransitions();
 
 // ─── Initialize Reasoning Chain ─────────────────────────────
 initReasoningChain();
