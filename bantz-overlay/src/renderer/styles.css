@@ -1,0 +1,146 @@
+/*
+ * Bantz Overlay HUD — Base Styles (scaffold)
+ *
+ * Minimal styling to verify the transparent window works.
+ * Full glass-morphism, CRT, and panel styles arrive in #1400.
+ */
+
+/* ── Reset ──────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ── Root: fully transparent, no scrollbar ──────────────────────── */
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono',
+               'Consolas', monospace;
+  color: #e0e0e0;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  /* Make the entire page click-through; interactive elements
+     will call overlayAPI.enableMouse() on hover. */
+  pointer-events: none;
+}
+
+/* ── Overlay Root ───────────────────────────────────────────────── */
+#overlay-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* ── HUD Panel (main transparent rectangle) ─────────────────────── */
+.hud-panel {
+  position: relative;
+  width: 65vw;
+  height: 55vh;
+  min-width: 600px;
+  min-height: 400px;
+
+  /* Transparent orange base — glass effect placeholder */
+  background: rgba(255, 140, 0, 0.06);
+  border: 1px solid rgba(255, 140, 0, 0.15);
+  border-radius: 8px;
+
+  display: flex;
+  flex-direction: column;
+
+  /* Panel itself is interactive */
+  pointer-events: auto;
+}
+
+/* ── Status Indicator ───────────────────────────────────────────── */
+.status-indicator {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff4444;
+  transition: background 0.3s;
+}
+
+.status-dot.connected {
+  background: #44ff44;
+}
+
+.status-dot.connecting {
+  background: #ffaa00;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+.status-text {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* ── Content Area (center — sphere, panels) ─────────────────────── */
+.content-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+/* ── Sphere Container (placeholder) ─────────────────────────────── */
+.sphere-container {
+  width: 200px;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.3;
+}
+
+/* ── Speech Area (bottom) ───────────────────────────────────────── */
+.speech-area {
+  padding: 12px 20px 16px;
+}
+
+.reasoning-chain {
+  font-size: 11px;
+  color: rgba(74, 153, 153, 0.4);
+  min-height: 16px;
+  margin-bottom: 4px;
+}
+
+.typewriter-output {
+  font-size: 15px;
+  color: rgba(255, 180, 60, 0.9);
+  line-height: 1.5;
+  min-height: 24px;
+}
+
+/* ── Cursor blink ───────────────────────────────────────────────── */
+.cursor {
+  animation: blink 1s step-start infinite;
+  color: rgba(255, 180, 60, 0.8);
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}

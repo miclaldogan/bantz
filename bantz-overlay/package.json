@@ -1,0 +1,29 @@
+{
+  "name": "bantz-overlay",
+  "version": "0.1.0",
+  "description": "Bantz Desktop Overlay HUD — transparent terminal-style assistant UI",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:linux": "electron-builder --linux"
+  },
+  "author": "iclaldogan",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^24.9.0"
+  },
+  "build": {
+    "appId": "com.bantz.overlay",
+    "productName": "Bantz Overlay",
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Utility"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}

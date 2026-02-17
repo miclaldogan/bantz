@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bantz Overlay</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!--
+    The overlay root container.
+    Everything transparent by default; only content panels are visible.
+  -->
+  <div id="overlay-root">
+
+    <!-- Main HUD panel (centered transparent rectangle) -->
+    <div id="hud-panel" class="hud-panel">
+
+      <!-- Status indicator: shows connection state -->
+      <div id="status-indicator" class="status-indicator">
+        <span class="status-dot" id="status-dot"></span>
+        <span class="status-text" id="status-text">Connecting...</span>
+      </div>
+
+      <!-- Placeholder: panels and sphere will be injected here by future issues -->
+      <div id="content-area" class="content-area">
+        <!-- Phase 2: Particle sphere (#1402) -->
+        <div id="sphere-container" class="sphere-container"></div>
+      </div>
+
+      <!-- Speech area at bottom -->
+      <div id="speech-area" class="speech-area">
+        <!-- Phase 4: Reasoning chain (#1410) will go here -->
+        <div id="reasoning-chain" class="reasoning-chain"></div>
+
+        <!-- Phase 4: Typewriter output (#1409) will go here -->
+        <div id="typewriter-output" class="typewriter-output">
+          <span id="typewriter-text"></span>
+          <span id="typewriter-cursor" class="cursor">█</span>
+        </div>
+      </div>
+
+    </div><!-- /#hud-panel -->
+
+  </div><!-- /#overlay-root -->
+
+  <script src="renderer.js"></script>
+</body>
+</html>
