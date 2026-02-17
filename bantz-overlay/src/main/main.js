@@ -658,6 +658,294 @@ app.whenReady().then(() => {
   }
 });
 
+
+// ─── IPC: GitHub Activity Feed ──────────────────────────────────────
+
+/**
+ * Fetch GitHub activity feed using the GitHub Events API and Notifications API.
+ * Uses GITHUB_TOKEN from environment for authenticated requests.
+ * Falls back to `gh` CLI token if available.
+ */
+
+const GITHUB_OWNER = process.env.GITHUB_OWNER || '';
+const GITHUB_REPOS = (process.env.GITHUB_REPOS || '').split(',').map(s => s.trim()).filter(Boolean);
+
+function getGitHubToken() {
+  // Prefer explicit env var
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+
+  // Try reading gh CLI config
+  try {
+    const os = require('os');
+    const path = require('path');
+    const fs = require('fs');
+    const hostsPath = path.join(os.homedir(), '.config', 'gh', 'hosts.yml');
+    if (fs.existsSync(hostsPath)) {
+      const hostsContent = fs.readFileSync(hostsPath, 'utf8');
+      // Simple YAML parse for oauth_token
+      const match = hostsContent.match(/oauth_token:\s*(.+)/);
+      if (match) return match[1].trim();
+    }
+  } catch (e) {
+    // Ignore
+  }
+  return null;
+}
+
+function githubFetch(urlPath) {
+  return new Promise((resolve, reject) => {
+    const { net } = require('electron');
+    const token = getGitHubToken();
+    const url = urlPath.startsWith('https://') ? urlPath : 'https://api.github.com' + urlPath;
+
+    const request = net.request({
+      url,
+      method: 'GET',
+    });
+
+    request.setHeader('Accept', 'application/vnd.github.v3+json');
+    request.setHeader('User-Agent', 'Bantz-Overlay/1.0');
+    if (token) {
+      request.setHeader('Authorization', 'Bearer ' + token);
+    }
+
+    let body = '';
+
+    request.on('response', (response) => {
+      if (response.statusCode !== 200) {
+        reject(new Error('GitHub API ' + response.statusCode));
+        return;
+      }
+      response.on('data', (chunk) => { body += chunk.toString(); });
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          reject(new Error('JSON parse error'));
+        }
+      });
+    });
+
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+ipcMain.handle('github:get-feed', async () => {
+  const token = getGitHubToken();
+  if (!token) {
+    console.warn('[Main] No GitHub token available — skipping feed');
+    return { events: [], unreadCount: 0 };
+  }
+
+  try {
+    console.log('[Main] Fetching GitHub activity feed...');
+
+    const results = { events: [], unreadCount: 0 };
+
+    // 1. Fetch user's received events (activity from repos they watch)
+    try {
+      const events = await githubFetch('/users/' + (GITHUB_OWNER || 'miclaldogan') + '/received_events?per_page=30');
+      if (Array.isArray(events)) {
+        for (const ev of events) {
+          const mapped = mapGitHubEvent(ev);
+          if (mapped) results.events.push(mapped);
+        }
+      }
+    } catch (e) {
+      console.warn('[Main] GitHub events fetch failed:', e.message);
+    }
+
+    // 2. Fetch notifications
+    try {
+      const notifications = await githubFetch('/notifications?per_page=20');
+      if (Array.isArray(notifications)) {
+        results.unreadCount = notifications.filter(n => n.unread).length;
+        for (const notif of notifications.slice(0, 10)) {
+          results.events.push({
+            type: 'notification',
+            repo: notif.repository?.full_name || '',
+            title: notif.subject?.title || 'Notification',
+            actor: '',
+            url: notif.subject?.url
+              ? notif.subject.url.replace('api.github.com/repos', 'github.com').replace('/pulls/', '/pull/')
+              : '',
+            ts: notif.updated_at || notif.last_read_at || new Date().toISOString(),
+            id: 'notif-' + notif.id,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[Main] GitHub notifications fetch failed:', e.message);
+    }
+
+    // 3. If specific repos configured, fetch their events
+    for (const repo of GITHUB_REPOS.slice(0, 3)) {
+      try {
+        const repoEvents = await githubFetch('/repos/' + repo + '/events?per_page=10');
+        if (Array.isArray(repoEvents)) {
+          for (const ev of repoEvents) {
+            const mapped = mapGitHubEvent(ev);
+            if (mapped) results.events.push(mapped);
+          }
+        }
+      } catch (e) {
+        console.warn('[Main] GitHub repo events failed for ' + repo + ':', e.message);
+      }
+    }
+
+    // Sort by timestamp (newest first) and deduplicate
+    const seen = new Set();
+    results.events = results.events
+      .filter(e => {
+        if (seen.has(e.id)) return false;
+        seen.add(e.id);
+        return true;
+      })
+      .sort((a, b) => new Date(b.ts) - new Date(a.ts))
+      .slice(0, 40);
+
+    console.log('[Main] GitHub feed: ' + results.events.length + ' events, ' + results.unreadCount + ' unread');
+    return results;
+  } catch (err) {
+    console.error('[Main] GitHub feed error:', err.message);
+    return { events: [], unreadCount: 0 };
+  }
+});
+
+/**
+ * Map a GitHub API event to our internal format.
+ */
+function mapGitHubEvent(ev) {
+  if (!ev || !ev.type) return null;
+
+  const repo = ev.repo?.name || '';
+  const actor = ev.actor?.login || '';
+  const ts = ev.created_at || new Date().toISOString();
+  const id = ev.id ? 'ev-' + ev.id : 'ev-' + Date.now();
+  const payload = ev.payload || {};
+
+  switch (ev.type) {
+    case 'PushEvent':
+      return {
+        type: 'push',
+        repo,
+        title: (payload.commits && payload.commits.length > 0)
+          ? payload.commits[0].message.split('\n')[0]
+          : 'Push',
+        actor,
+        url: 'https://github.com/' + repo + '/commits/' + (payload.head || 'main'),
+        ts,
+        id,
+        branch: (payload.ref || '').replace('refs/heads/', ''),
+      };
+
+    case 'PullRequestEvent':
+      return {
+        type: 'pull_request',
+        repo,
+        title: payload.pull_request?.title || 'Pull Request',
+        actor,
+        url: payload.pull_request?.html_url || 'https://github.com/' + repo,
+        ts,
+        id,
+        number: payload.pull_request?.number,
+      };
+
+    case 'IssuesEvent':
+      return {
+        type: 'issue',
+        repo,
+        title: payload.issue?.title || 'Issue',
+        actor,
+        url: payload.issue?.html_url || 'https://github.com/' + repo,
+        ts,
+        id,
+        number: payload.issue?.number,
+      };
+
+    case 'IssueCommentEvent':
+    case 'PullRequestReviewCommentEvent':
+    case 'CommitCommentEvent':
+      return {
+        type: 'comment',
+        repo,
+        title: payload.comment?.body?.substring(0, 80) || 'Comment',
+        actor,
+        url: payload.comment?.html_url || 'https://github.com/' + repo,
+        ts,
+        id,
+      };
+
+    case 'PullRequestReviewEvent':
+      return {
+        type: 'review',
+        repo,
+        title: 'Review on ' + (payload.pull_request?.title || 'PR'),
+        actor,
+        url: payload.review?.html_url || 'https://github.com/' + repo,
+        ts,
+        id,
+      };
+
+    case 'ReleaseEvent':
+      return {
+        type: 'release',
+        repo,
+        title: payload.release?.name || payload.release?.tag_name || 'Release',
+        actor,
+        url: payload.release?.html_url || 'https://github.com/' + repo,
+        ts,
+        id,
+      };
+
+    case 'WatchEvent':
+      return {
+        type: 'star',
+        repo,
+        title: 'Starred ' + repo,
+        actor,
+        url: 'https://github.com/' + repo,
+        ts,
+        id,
+      };
+
+    case 'ForkEvent':
+      return {
+        type: 'fork',
+        repo,
+        title: 'Forked to ' + (payload.forkee?.full_name || ''),
+        actor,
+        url: payload.forkee?.html_url || 'https://github.com/' + repo,
+        ts,
+        id,
+      };
+
+    case 'CreateEvent':
+      return {
+        type: 'push',
+        repo,
+        title: 'Created ' + (payload.ref_type || 'ref') + ' ' + (payload.ref || ''),
+        actor,
+        url: 'https://github.com/' + repo,
+        ts,
+        id,
+        branch: payload.ref || '',
+      };
+
+    default:
+      return {
+        type: 'default',
+        repo,
+        title: ev.type.replace(/Event$/, ''),
+        actor,
+        url: 'https://github.com/' + repo,
+        ts,
+        id,
+      };
+  }
+}
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });

@@ -123,6 +123,12 @@ contextBridge.exposeInMainWorld('overlayAPI', {
   getArticleImage: (url) => ipcRenderer.invoke('news:get-article-image', url),
 
   /**
+   * Get GitHub activity feed (events + notifications).
+   * @returns {Promise<{events: Array, unreadCount: number}|null>}
+   */
+  getGitHubFeed: () => ipcRenderer.invoke('github:get-feed'),
+
+  /**
    * Open a URL in the user's default browser.
    * @param {string} url - URL to open
    * @returns {Promise<boolean>}
