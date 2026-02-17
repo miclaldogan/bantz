@@ -104,6 +104,20 @@ function initSystemStatus() {
   console.log('[Overlay] System status initialized');
 }
 
+// ─── Typewriter Speech Output ─────────────────────────────────
+let typewriter = null;
+
+function initTypewriter() {
+  const typewriterContainer = document.getElementById('typewriter-output');
+  if (!typewriterContainer || !window.TypewriterOutput) {
+    console.warn('[Overlay] TypewriterOutput not available');
+    return;
+  }
+  typewriter = new window.TypewriterOutput(typewriterContainer);
+  window.bantzTypewriter = typewriter;
+  console.log('[Overlay] Typewriter initialized');
+}
+
 // ─── Mouse Interaction Zones ──────────────────────────────────
 // When the mouse enters the HUD panel, we enable mouse events
 // so the user can interact with panels/sphere. When it leaves,
@@ -191,6 +205,20 @@ function handleStateMessage(msg) {
   if (stateAnimator && msg.state) {
     stateAnimator.setState(msg.state);
   }
+
+  // Handle speech tokens for typewriter
+  if (typewriter) {
+    if (msg.speech_token) {
+      typewriter.addToken(msg.speech_token);
+    }
+    if (msg.speech_start) {
+      typewriter.beginSpeech();
+    }
+    if (msg.speech_end) {
+      typewriter.endSpeech();
+    }
+  }
+
   console.log('[Overlay] State:', msg.state);
 }
 
@@ -295,3 +323,6 @@ initDailyTasks();
 
 // ─── Initialize System Status ───────────────────────────────
 initSystemStatus();
+
+// ─── Initialize Typewriter ─────────────────────────────────
+initTypewriter();
