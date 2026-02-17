@@ -551,6 +551,12 @@ function startIPCClient() {
     }
   });
 
+  // Forward user text commands from renderer → daemon
+  ipcMain.on('daemon:command', (_event, text) => {
+    console.log(`[Main] Forwarding command to daemon: ${text.substring(0, 80)}`);
+    ipcClient.send({ type: 'command', text });
+  });
+
   // Forward connection state to renderer
   ipcClient.on('state-change', (state) => {
     if (overlayWindow && overlayWindow.webContents) {
@@ -577,6 +583,153 @@ function startIPCClient() {
 
 // ─── App Lifecycle ──────────────────────────────────────────────────
 
+// ─── First-Run Auth Detection ───────────────────────────────────────
+
+/**
+ * Check for required auth tokens on first run.
+ * If Google or GitHub auth is missing, guide user through setup.
+ */
+async function checkFirstRunAuth() {
+  const os = require('os');
+  const { execSync, exec } = require('child_process');
+  const homedir = os.homedir();
+  const results = { google: false, github: false, needsSetup: false };
+
+  // 1. Check Google OAuth tokens
+  const googleTokenPaths = [
+    path.join(homedir, '.config', 'bantz', 'google', 'token.json'),
+    path.join(homedir, '.config', 'bantz', 'google', 'gmail_token.json'),
+    path.join(homedir, '.config', 'bantz', 'google', 'google_unified_token.json'),
+  ];
+
+  const hasGoogleToken = googleTokenPaths.some(p => {
+    try { return fs.existsSync(p) && fs.statSync(p).size > 10; } catch { return false; }
+  });
+  results.google = hasGoogleToken;
+
+  // 2. Check GitHub CLI auth
+  try {
+    execSync('gh auth status', { stdio: 'pipe', timeout: 5000 });
+    results.github = true;
+  } catch {
+    results.github = false;
+  }
+
+  // 3. Check Google client_secret exists
+  const clientSecretPath = path.join(homedir, '.config', 'bantz', 'google', 'client_secret.json');
+  const hasClientSecret = fs.existsSync(clientSecretPath);
+
+  console.log(`[Auth] Google: ${results.google ? '✓' : '✗'}, GitHub: ${results.github ? '✓' : '✗'}, ClientSecret: ${hasClientSecret ? '✓' : '✗'}`);
+
+  // If any auth is missing, notify renderer and trigger setup
+  if (!results.google || !results.github) {
+    results.needsSetup = true;
+
+    // Notify renderer about auth status (for UI indicator)
+    if (overlayWindow && overlayWindow.webContents) {
+      overlayWindow.webContents.send('auth:status', results);
+    }
+
+    // Run Google OAuth if missing and client_secret exists
+    if (!results.google && hasClientSecret) {
+      console.log('[Auth] Google auth missing — launching consent flow...');
+      try {
+        // Find project root (2 levels up from main.js)
+        const projectRoot = path.resolve(__dirname, '..', '..', '..');
+        const venvPython = path.join(projectRoot, '..', '.venv', 'bin', 'python3');
+        const sysPython = 'python3';
+        const pythonCmd = fs.existsSync(venvPython) ? venvPython : sysPython;
+
+        // Run the consent wizard non-interactively for calendar + gmail
+        exec(
+          `${pythonCmd} -c "
+from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager
+setup_auth_manager()
+mgr = get_auth_manager()
+mgr.ensure_scope('calendar')
+mgr.ensure_scope('gmail')
+print('AUTH_OK')
+"`,
+          { cwd: projectRoot, timeout: 120000, env: { ...process.env, PYTHONPATH: path.join(projectRoot, 'src') } },
+          (err, stdout, stderr) => {
+            if (err) {
+              console.error('[Auth] Google consent failed:', err.message);
+            } else if (stdout.includes('AUTH_OK')) {
+              console.log('[Auth] Google auth completed successfully');
+              results.google = true;
+              if (overlayWindow && overlayWindow.webContents) {
+                overlayWindow.webContents.send('auth:status', { ...results, google: true });
+              }
+            }
+          }
+        );
+      } catch (e) {
+        console.error('[Auth] Google auth launch error:', e.message);
+      }
+    }
+
+    // Run GitHub auth if missing
+    if (!results.github) {
+      console.log('[Auth] GitHub auth missing — launching gh auth login...');
+      try {
+        exec('gh auth login --web -p ssh', { timeout: 120000 }, (err, stdout) => {
+          if (err) {
+            console.error('[Auth] GitHub auth failed:', err.message);
+          } else {
+            console.log('[Auth] GitHub auth completed');
+            results.github = true;
+            if (overlayWindow && overlayWindow.webContents) {
+              overlayWindow.webContents.send('auth:status', { ...results, github: true });
+            }
+          }
+        });
+      } catch (e) {
+        console.error('[Auth] GitHub auth launch error:', e.message);
+      }
+    }
+  } else {
+    console.log('[Auth] All auth tokens present — skipping setup');
+  }
+
+  return results;
+}
+
+// ─── Environment Loading ────────────────────────────────────────────
+
+/**
+ * Load environment variables from config/.env if not already set.
+ */
+function loadEnvFile() {
+  const projectRoot = path.resolve(__dirname, '..', '..', '..');
+  const envPath = path.join(projectRoot, 'config', '.env');
+
+  if (!fs.existsSync(envPath)) {
+    console.log('[Env] No config/.env found, using system environment');
+    return;
+  }
+
+  try {
+    const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+    let loaded = 0;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx <= 0) continue;
+      const key = trimmed.substring(0, eqIdx).trim();
+      const val = trimmed.substring(eqIdx + 1).trim();
+      // Don't override existing env vars
+      if (!process.env[key]) {
+        process.env[key] = val;
+        loaded++;
+      }
+    }
+    console.log(`[Env] Loaded ${loaded} vars from config/.env`);
+  } catch (e) {
+    console.warn('[Env] Failed to load .env:', e.message);
+  }
+}
+
 // Chromium flags for transparency on Linux
 app.commandLine.appendSwitch('enable-transparent-visuals');
 app.commandLine.appendSwitch('disable-gpu-compositing');
@@ -586,7 +739,10 @@ if (detectDisplayServer() === 'wayland') {
   app.commandLine.appendSwitch('ozone-platform', 'wayland');
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Load environment from config/.env
+  loadEnvFile();
+
   // Register the 'app' protocol handler to serve local files
   // This enables ES module imports to work correctly
   const rendererPath = path.join(__dirname, '../renderer');
@@ -622,6 +778,9 @@ app.whenReady().then(() => {
 
   createOverlayWindow();
   startIPCClient();
+
+  // Check first-run auth (non-blocking — runs in background)
+  checkFirstRunAuth().catch(e => console.warn('[Auth] Check failed:', e.message));
 
   // Create system tray
   tray = createTray({

@@ -86,6 +86,9 @@ class OverlayClient:
         # Event callback
         self._on_event: Optional[Callable[[EventMessage], Awaitable[None]]] = None
         
+        # Command callback (text commands from overlay UI)
+        self._on_command: Optional[Callable[[str], Awaitable[None]]] = None
+        
         # Tasks
         self._ping_task: Optional[asyncio.Task] = None
         self._receive_task: Optional[asyncio.Task] = None
@@ -113,6 +116,10 @@ class OverlayClient:
     def set_event_callback(self, callback: Callable[[EventMessage], Awaitable[None]]) -> None:
         """Set callback for overlay events (timeout, dismissed)."""
         self._on_event = callback
+    
+    def set_command_callback(self, callback: Callable[[str], Awaitable[None]]) -> None:
+        """Set callback for text commands from overlay UI."""
+        self._on_command = callback
     
     async def start(self, auto_spawn: bool = True) -> bool:
         """
@@ -462,7 +469,7 @@ class OverlayClient:
         """Connect to overlay socket."""
         socket_path = get_socket_path()
         
-        for attempt in range(5):
+        for attempt in range(20):
             try:
                 logger.debug(f"[OverlayClient] Connecting to {socket_path} (attempt {attempt + 1})")
                 
@@ -597,6 +604,17 @@ class OverlayClient:
                 # Parse message
                 data = decode_message(line)
                 if not data:
+                    continue
+                
+                # Handle command messages from Electron overlay (not in protocol enum)
+                if isinstance(data, dict) and data.get("type") == "command":
+                    text = data.get("text", "")
+                    logger.info(f"[OverlayClient] Received command: {text[:80]}")
+                    if self._on_command and text:
+                        try:
+                            await self._on_command(text)
+                        except Exception as e:
+                            logger.error(f"[OverlayClient] Command callback error: {e}")
                     continue
                 
                 msg = parse_message(data)

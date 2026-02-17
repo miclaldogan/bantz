@@ -1,15 +1,23 @@
 /**
- * Bantz Overlay — IPC Client
+ * Bantz Overlay — IPC Server
  *
- * Connects to the daemon's Unix domain socket (overlay.sock)
- * using JSONL (newline-delimited JSON) wire protocol.
+ * Creates a Unix domain socket server at overlay.sock that the daemon
+ * (OverlayClient) connects to.  Speaks JSONL (newline-delimited JSON).
+ *
+ * Architecture:
+ *   Electron overlay  ──creates──▶  overlay.sock  ◀──connects──  Python daemon
+ *
+ * This matches the original OverlayServer (Python/PyQt5) contract:
+ *   - The overlay process OWNS the socket (creates & cleans up)
+ *   - The daemon connects as a client
  *
  * Responsibilities:
- * - Auto-connect on startup with retry logic
- * - Parse incoming JSONL messages
+ * - Create overlay.sock and listen for incoming daemon connection
+ * - Parse incoming JSONL messages from daemon
  * - Send ack/event/pong messages back to daemon
  * - Emit connection state changes
  * - Handle ping/pong heartbeat
+ * - Allow only ONE daemon connection at a time
  *
  * Wire format matches src/bantz/ipc/protocol.py:
  *   Socket: ~/.local/share/bantz/ipc/overlay.sock
@@ -37,6 +45,33 @@ function getSocketPath() {
 }
 
 /**
+ * Ensure socket directory exists with correct permissions.
+ */
+function ensureSocketDir() {
+  const socketPath = getSocketPath();
+  const dir = path.dirname(socketPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    console.log(`[IPC] Created socket directory: ${dir}`);
+  }
+}
+
+/**
+ * Remove stale socket file if it exists.
+ */
+function cleanupSocket() {
+  const socketPath = getSocketPath();
+  if (fs.existsSync(socketPath)) {
+    try {
+      fs.unlinkSync(socketPath);
+      console.log('[IPC] Removed stale socket');
+    } catch (err) {
+      console.error('[IPC] Failed to remove stale socket:', err.message);
+    }
+  }
+}
+
+/**
  * Generate a 12-char hex message ID.
  */
 function generateId() {
@@ -61,7 +96,10 @@ const ConnectionState = {
 };
 
 /**
- * IPC Client for communicating with the Bantz daemon.
+ * IPC Server for communicating with the Bantz daemon.
+ *
+ * Creates a Unix socket server that the daemon's OverlayClient connects to.
+ * API-compatible with the old IPCClient so main.js needs minimal changes.
  *
  * Events emitted:
  * - 'message'         (msg: object) — parsed JSONL message from daemon
@@ -74,29 +112,22 @@ class IPCClient extends EventEmitter {
   /**
    * @param {object} [options]
    * @param {string} [options.socketPath]      - Override socket path
-   * @param {number} [options.retryIntervalMs] - Retry interval (default 2000)
-   * @param {number} [options.maxRetries]      - Max retries, 0 = infinite (default 0)
    * @param {number} [options.pingTimeoutMs]   - Ping timeout (default 5000)
    */
   constructor(options = {}) {
     super();
 
     this._socketPath = options.socketPath || getSocketPath();
-    this._retryIntervalMs = options.retryIntervalMs || 2000;
-    this._maxRetries = options.maxRetries || 0;
     this._pingTimeoutMs = options.pingTimeoutMs || 5000;
 
-    /** @type {net.Socket|null} */
+    /** @type {net.Server|null} */
+    this._server = null;
+
+    /** @type {net.Socket|null} - The connected daemon socket */
     this._socket = null;
 
     /** @type {ConnectionState} */
     this._state = ConnectionState.DISCONNECTED;
-
-    /** @type {number} */
-    this._retryCount = 0;
-
-    /** @type {NodeJS.Timeout|null} */
-    this._retryTimer = null;
 
     /** @type {NodeJS.Timeout|null} */
     this._pingTimer = null;
@@ -104,7 +135,7 @@ class IPCClient extends EventEmitter {
     /** Incoming data buffer for partial JSONL messages. */
     this._buffer = '';
 
-    /** Whether the client has been intentionally stopped. */
+    /** Whether the server has been intentionally stopped. */
     this._stopped = false;
   }
 
@@ -119,7 +150,7 @@ class IPCClient extends EventEmitter {
   }
 
   /**
-   * Whether currently connected.
+   * Whether a daemon client is currently connected.
    * @returns {boolean}
    */
   get connected() {
@@ -127,21 +158,45 @@ class IPCClient extends EventEmitter {
   }
 
   /**
-   * Start connecting to the daemon socket.
-   * Will retry automatically on failure.
+   * Create the Unix socket server and start listening.
+   * The daemon's OverlayClient will connect to us.
+   * Method name kept as connect() for API compatibility with main.js.
    */
   connect() {
+    if (this._server) return; // already listening
+
     this._stopped = false;
-    this._retryCount = 0;
-    this._doConnect();
+
+    // Ensure directory & clean stale socket
+    ensureSocketDir();
+    cleanupSocket();
+
+    this._setState(ConnectionState.CONNECTING);
+
+    this._server = net.createServer((daemonSocket) => {
+      this._onDaemonConnected(daemonSocket);
+    });
+
+    this._server.on('error', (err) => {
+      console.error('[IPC] Server error:', err.message);
+      this.emit('error', err);
+    });
+
+    this._server.listen(this._socketPath, () => {
+      // Set perms: user-only read/write
+      try {
+        fs.chmodSync(this._socketPath, 0o600);
+      } catch (_) { /* ignore */ }
+      console.log(`[IPC] Server listening on ${this._socketPath}`);
+      // Stay in CONNECTING until daemon actually connects
+    });
   }
 
   /**
-   * Disconnect and stop retrying.
+   * Stop the server, disconnect daemon, cleanup socket.
    */
   disconnect() {
     this._stopped = true;
-    this._clearRetryTimer();
     this._clearPingTimer();
 
     if (this._socket) {
@@ -149,6 +204,12 @@ class IPCClient extends EventEmitter {
       this._socket = null;
     }
 
+    if (this._server) {
+      this._server.close();
+      this._server = null;
+    }
+
+    cleanupSocket();
     this._setState(ConnectionState.DISCONNECTED);
   }
 
@@ -204,52 +265,46 @@ class IPCClient extends EventEmitter {
     return this.send({ type: 'event', event, reason });
   }
 
-  // ─── Internal: Connection ───────────────────────────────────
+  // ─── Internal: Connection Handling ──────────────────────────
 
   /**
-   * Attempt to connect to the socket.
+   * Handle a new daemon connection.
+   * Only ONE daemon connection is allowed at a time.
    * @private
    */
-  _doConnect() {
-    if (this._stopped) return;
-
-    // Check if socket file exists before attempting connection
-    if (!fs.existsSync(this._socketPath)) {
-      console.log(`[IPC] Socket not found: ${this._socketPath}`);
-      this._setState(ConnectionState.DISCONNECTED);
-      this._scheduleRetry();
+  _onDaemonConnected(daemonSocket) {
+    if (this._socket) {
+      console.warn('[IPC] Daemon already connected, rejecting new connection');
+      daemonSocket.destroy();
       return;
     }
 
-    this._setState(ConnectionState.CONNECTING);
-
-    this._socket = new net.Socket();
+    console.log('[IPC] Daemon connected');
+    this._socket = daemonSocket;
     this._buffer = '';
+    this._setState(ConnectionState.CONNECTED);
 
-    this._socket.connect(this._socketPath, () => {
-      console.log('[IPC] Connected to daemon');
-      this._retryCount = 0;
-      this._setState(ConnectionState.CONNECTED);
-    });
-
-    this._socket.on('data', (data) => {
+    daemonSocket.on('data', (data) => {
       this._onData(data);
     });
 
-    this._socket.on('error', (err) => {
-      // ENOENT = socket doesn't exist, ECONNREFUSED = daemon not listening
-      if (err.code !== 'ENOENT' && err.code !== 'ECONNREFUSED') {
-        console.error('[IPC] Socket error:', err.message);
+    daemonSocket.on('error', (err) => {
+      if (err.code !== 'ECONNRESET' && err.code !== 'EPIPE') {
+        console.error('[IPC] Daemon socket error:', err.message);
       }
       this.emit('error', err);
     });
 
-    this._socket.on('close', () => {
-      console.log('[IPC] Connection closed');
+    daemonSocket.on('close', () => {
+      console.log('[IPC] Daemon disconnected');
       this._socket = null;
-      this._setState(ConnectionState.DISCONNECTED);
+      this._buffer = '';
       this._clearPingTimer();
-      this._scheduleRetry();
+      this._setState(ConnectionState.DISCONNECTED);
+      // Server keeps listening — daemon may reconnect
+      if (!this._stopped) {
+        this._setState(ConnectionState.CONNECTING);
+      }
     });
   }
 
@@ -309,46 +364,6 @@ class IPCClient extends EventEmitter {
       this._state = newState;
       console.log(`[IPC] ${oldState} → ${newState}`);
       this.emit('state-change', newState);
-    }
-  }
-
-  // ─── Internal: Retry Logic ───────────────────────────────────
-
-  /**
-   * @private
-   */
-  _scheduleRetry() {
-    if (this._stopped) return;
-
-    if (this._maxRetries > 0 && this._retryCount >= this._maxRetries) {
-      console.log('[IPC] Max retries reached');
-      return;
-    }
-
-    this._clearRetryTimer();
-    this._retryCount++;
-
-    // Exponential backoff: 2s, 4s, 8s, max 30s
-    const delay = Math.min(
-      this._retryIntervalMs * Math.pow(1.5, Math.min(this._retryCount - 1, 6)),
-      30000
-    );
-
-    console.log(`[IPC] Retry #${this._retryCount} in ${Math.round(delay)}ms`);
-
-    this._retryTimer = setTimeout(() => {
-      this._retryTimer = null;
-      this._doConnect();
-    }, delay);
-  }
-
-  /**
-   * @private
-   */
-  _clearRetryTimer() {
-    if (this._retryTimer) {
-      clearTimeout(this._retryTimer);
-      this._retryTimer = null;
     }
   }
 

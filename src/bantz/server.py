@@ -209,6 +209,7 @@ class IPCOverlayHook(OverlayStateHook):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
+        self._server_ref = None  # Reference to BantzServer for command handling
     
     def start(self) -> bool:
         """Start overlay client and spawn overlay process."""
@@ -237,16 +238,20 @@ class IPCOverlayHook(OverlayStateHook):
                 return False
             
             # Start client in the async loop
+            # auto_spawn=False: Electron overlay is started independently
+            # and creates the socket server; we just connect to it.
             future = asyncio.run_coroutine_threadsafe(
-                self._client.start(auto_spawn=True),
+                self._client.start(auto_spawn=False),
                 self._loop,
             )
             
-            # Wait for connection (max 10 seconds)
-            connected = future.result(timeout=10.0)
+            # Wait for connection (max 30 seconds — overlay may still be booting)
+            connected = future.result(timeout=30.0)
             
             if connected:
                 print("   Overlay: bağlandı ✓")
+                # Wire command callback for text commands from overlay UI
+                self._client.set_command_callback(self._handle_overlay_command)
                 return True
             else:
                 print("   Overlay: bağlanamadı")
@@ -400,6 +405,53 @@ class IPCOverlayHook(OverlayStateHook):
     def is_connected(self) -> bool:
         """Check if overlay is connected."""
         return self._client is not None and self._client.connected
+    
+    def set_server_ref(self, server: 'BantzServer') -> None:
+        """Set reference to BantzServer for command processing."""
+        self._server_ref = server
+    
+    async def _handle_overlay_command(self, text: str) -> None:
+        """Handle text command from overlay UI — runs handle_command in thread."""
+        if not self._server_ref:
+            logger.warning("[IPCOverlayHook] No server reference, cannot process command")
+            return
+        
+        # Show thinking state
+        await self.thinking("Düşünüyorum...")
+        
+        try:
+            # Run blocking handle_command in executor
+            import asyncio as _asyncio
+            loop = _asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, self._server_ref.handle_command, text
+            )
+            
+            response_text = result.get("text", "")
+            
+            # Show speaking state with response
+            if response_text:
+                await self.speaking(response_text[:200])
+            else:
+                await self.speaking("Tamam!")
+            
+            # Send response as a raw message so the overlay can display it
+            if self._client:
+                await self._client.send_raw({
+                    "type": "response",
+                    "text": response_text,
+                    "ok": result.get("ok", False),
+                })
+            
+            # Auto-hide after a delay
+            await _asyncio.sleep(8)
+            await self.idle()
+            
+        except Exception as e:
+            logger.error(f"[IPCOverlayHook] Command processing error: {e}")
+            await self.speaking(f"Hata: {e}")
+            await _asyncio.sleep(3)
+            await self.idle()
 
 
 # Global overlay hook instance
@@ -764,6 +816,10 @@ class BantzServer:
                     if conf_prompt:
                         reply = conf_prompt
 
+                # Show speaking state on overlay
+                if overlay._client and overlay._client.connected and reply:
+                    overlay.speaking_sync(reply[:100])
+
                 return {
                     "ok": True,
                     "text": reply or "Anlayamadım efendim.",
@@ -785,12 +841,22 @@ class BantzServer:
                 }
             except Exception as e:
                 logging.getLogger(__name__).error("Brain handler failed: %s", e)
+                # Show error on overlay then idle
+                if overlay._client and overlay._client.connected:
+                    overlay.speaking_sync(f"Hata: {e}"[:100])
                 return {
                     "ok": False,
                     "text": f"İşlem sırasında hata oluştu: {e}",
                     "brain": True,
                     "route": "error",
                 }
+            finally:
+                # Always return overlay to idle after brain processing
+                if overlay._client and overlay._client.connected:
+                    try:
+                        overlay.idle_sync()
+                    except Exception:
+                        pass
 
         # Route command (Router path — browser_* intents or brain unavailable)
         router = self._get_router()
@@ -1172,6 +1238,40 @@ class BantzServer:
             len(news_cards),
             len(cal_events),
         )
+
+    def run_socket_only(self) -> None:
+        """Start ONLY the session socket accept loop.
+
+        Unlike ``run()`` this does NOT start overlay, extension bridge,
+        reminder scheduler or startup briefing — those are managed by the
+        orchestrator.  Use this when the server is embedded inside
+        ``BantzOrchestrator`` to avoid double-init.
+        """
+        self._cleanup_socket()
+
+        self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server_socket.bind(str(self.socket_path))
+        self._server_socket.listen(5)
+        self._server_socket.settimeout(1.0)
+
+        import atexit
+        atexit.register(self._cleanup_socket)
+        self._running = True
+
+        print(f"   Session socket: {self.socket_path}")
+
+        while self._running:
+            try:
+                conn, _ = self._server_socket.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            self._handle_client(conn)
+
+        self._server_socket.close()
+        self._cleanup_socket()
 
     def run(self) -> None:
         """Start the server loop."""
