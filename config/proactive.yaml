@@ -31,7 +31,7 @@ signals:
   tasks:
     enabled: true
   news:
-    enabled: false  # refs #839, enable when news skill is ready
+    enabled: true  # refs #839, news skill ready
 
 # ── Work Hours (for free-slot detection) ────────────────────────
 work_hours:
