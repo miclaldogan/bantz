@@ -234,7 +234,11 @@
     "phone.mute":               "safe",
     "phone.speaker":            "safe",
     "phone.status":             "safe",
-    "phone.call_log":           "safe"
+    "phone.call_log":           "safe",
+
+    "pdf.extract_text":         "safe",
+    "pdf.summarize":            "safe",
+    "pdf.from_attachment":      "moderate"
   },
 
   "always_confirm_tools": [
