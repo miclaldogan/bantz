@@ -14,11 +14,18 @@
 
 const { app, BrowserWindow, globalShortcut, screen, ipcMain } = require('electron');
 const path = require('path');
+const { IPCClient, ConnectionState } = require('./ipc-client');
 
 let overlayWindow = null;
 
 /** Whether the overlay is currently visible. */
 let isVisible = true;
+
+/** IPC client instance for daemon communication. */
+const ipcClient = new IPCClient({
+  retryIntervalMs: 2000,
+  maxRetries: 0, // retry forever
+});
 
 /**
  * Detect the compositor: X11 or Wayland.
@@ -164,6 +171,45 @@ ipcMain.handle('overlay:get-display-info', () => {
   };
 });
 
+/**
+ * Renderer sends an event to the daemon.
+ */
+ipcMain.on('daemon:event', (_event, msg) => {
+  ipcClient.send(msg);
+});
+
+// ─── IPC: Daemon Socket ─────────────────────────────────────────────
+
+/**
+ * Start the IPC client and wire it to the renderer.
+ */
+function startIPCClient() {
+  // Forward daemon messages to renderer
+  ipcClient.on('message', (msg) => {
+    if (overlayWindow && overlayWindow.webContents) {
+      overlayWindow.webContents.send('daemon:message', msg);
+    }
+  });
+
+  // Forward connection state to renderer
+  ipcClient.on('state-change', (state) => {
+    if (overlayWindow && overlayWindow.webContents) {
+      overlayWindow.webContents.send('daemon:connection-state', state);
+    }
+    console.log(`[Main] IPC state: ${state}`);
+  });
+
+  ipcClient.on('error', (err) => {
+    // Only log non-routine errors
+    if (err.code !== 'ENOENT' && err.code !== 'ECONNREFUSED') {
+      console.error('[Main] IPC error:', err.message);
+    }
+  });
+
+  ipcClient.connect();
+  console.log('[Main] IPC client started');
+}
+
 // ─── App Lifecycle ──────────────────────────────────────────────────
 
 // Chromium flags for transparency on Linux
@@ -177,6 +223,7 @@ if (detectDisplayServer() === 'wayland') {
 
 app.whenReady().then(() => {
   createOverlayWindow();
+  startIPCClient();
 
   // Register global toggle shortcut
   const registered = globalShortcut.register('Super+Shift+B', toggleOverlay);
@@ -198,4 +245,5 @@ app.on('window-all-closed', () => {
 // Mark quitting so the close handler doesn't prevent exit
 app.on('before-quit', () => {
   app.isQuitting = true;
+  ipcClient.disconnect();
 });
