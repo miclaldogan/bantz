@@ -2915,33 +2915,70 @@ class OrchestratorLoop:
                         continue
                 
                 # Execute tool (Issue #431: with timeout protection)
-                timeout = self.config.tool_timeout_seconds
-                try:
-                    exec_start = time.time()
-                    future = self._tool_executor.submit(tool.function, **params)
-                    result = future.result(timeout=timeout)
-                    elapsed_ms = int((time.time() - exec_start) * 1000)
-                except concurrent.futures.TimeoutError:
-                    elapsed_ms = int((time.time() - exec_start) * 1000) if "exec_start" in locals() else 0
-                    logger.error(
-                        "[TOOLS] Tool %s timed out after %.1fs",
-                        tool_name, timeout,
-                    )
-                    self.event_bus.publish("tool.timeout", {
-                        "tool": tool_name,
-                        "timeout_seconds": timeout,
-                    })
-                    tool_results.append({
-                        "tool": tool_name,
-                        "success": False,
-                        "error": f"Tool '{tool_name}' timed out after {timeout:.0f}s",
-                        "user_message": f"Efendim, '{tool_name}' işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.",
-                        "risk_level": risk_value,
-                        "params": params,
-                        "elapsed_ms": elapsed_ms,
-                    })
-                    state.add_tool_result(tool_name, f"timeout after {timeout}s", success=False)
-                    continue
+                # But first: check IngestStore cache for read-only tools
+                _cache_hit = None
+                _CACHEABLE_TOOLS = {
+                    "gmail_list_messages", "gmail_search", "gmail_get_message",
+                    "list_events", "find_free_slots", "system_info",
+                    "gmail_list_labels",
+                }
+                if (
+                    tool_name in _CACHEABLE_TOOLS
+                    and getattr(self, "_ingest_bridge", None) is not None
+                ):
+                    try:
+                        _cache_hit = self._ingest_bridge.get_cached(
+                            tool_name, params, max_age=300,
+                        )
+                        if _cache_hit is not None:
+                            logger.info(
+                                "[CACHE] Hit for %s — skipping live call", tool_name,
+                            )
+                    except Exception:
+                        _cache_hit = None
+
+                if _cache_hit is not None:
+                    # Use cached result
+                    import json as _json_cache
+
+                    try:
+                        result = (
+                            _json_cache.loads(_cache_hit.content)
+                            if isinstance(_cache_hit.content, str)
+                            else _cache_hit.content
+                        )
+                    except Exception:
+                        result = _cache_hit.content
+                    elapsed_ms = 0
+                else:
+                    # Live tool execution
+                    timeout = self.config.tool_timeout_seconds
+                    try:
+                        exec_start = time.time()
+                        future = self._tool_executor.submit(tool.function, **params)
+                        result = future.result(timeout=timeout)
+                        elapsed_ms = int((time.time() - exec_start) * 1000)
+                    except concurrent.futures.TimeoutError:
+                        elapsed_ms = int((time.time() - exec_start) * 1000) if "exec_start" in locals() else 0
+                        logger.error(
+                            "[TOOLS] Tool %s timed out after %.1fs",
+                            tool_name, timeout,
+                        )
+                        self.event_bus.publish("tool.timeout", {
+                            "tool": tool_name,
+                            "timeout_seconds": timeout,
+                        })
+                        tool_results.append({
+                            "tool": tool_name,
+                            "success": False,
+                            "error": f"Tool '{tool_name}' timed out after {timeout:.0f}s",
+                            "user_message": f"Efendim, '{tool_name}' işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.",
+                            "risk_level": risk_value,
+                            "params": params,
+                            "elapsed_ms": elapsed_ms,
+                        })
+                        state.add_tool_result(tool_name, f"timeout after {timeout}s", success=False)
+                        continue
 
                 # Convention: tool functions often return a tool-friendly dict
                 # like {"ok": bool, "error": ...}. Treat ok=false as failure so
