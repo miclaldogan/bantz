@@ -55,6 +55,14 @@
   // Start as connecting
   updateConnectionStatus('connecting');
 
+  // ─── Daemon Connection State ──────────────────────────────────
+  // Listen for connection state changes from the IPC client.
+  if (window.overlayAPI && window.overlayAPI.onDaemonConnectionState) {
+    window.overlayAPI.onDaemonConnectionState((state) => {
+      updateConnectionStatus(state);
+    });
+  }
+
   // ─── Daemon Message Handler ───────────────────────────────────
   // Future issues (#1399, #1405-#1410) will add real handlers here.
   // For now, just log and update connection status on first message.

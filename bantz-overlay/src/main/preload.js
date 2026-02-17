@@ -41,6 +41,15 @@ contextBridge.exposeInMainWorld('overlayAPI', {
    */
   sendDaemonEvent: (event) => ipcRenderer.send('daemon:event', event),
 
+  /**
+   * Register a callback for daemon connection state changes.
+   * State: 'connected' | 'connecting' | 'disconnected'
+   * @param {(state: string) => void} callback
+   */
+  onDaemonConnectionState: (callback) => {
+    ipcRenderer.on('daemon:connection-state', (_event, state) => callback(state));
+  },
+
   // ─── Lifecycle ─────────────────────────────────────────────────
   /**
    * Listen for overlay visibility changes.
