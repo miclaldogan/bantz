@@ -481,7 +481,7 @@ TIME: 1-6 without "morning" → PM (one→13, two→14, three→15, four→16, f
     # ── DETAIL BLOCK (~120 tokens) ─── stripped when budget tight ────────
     _SYSTEM_PROMPT_DETAIL = """
 GMAIL: gmail.list_messages query="from:X subject:Y after:YYYY/MM/DD". gmail.smart_search natural_query in plain language ("starred","social","promotions","important").
-SYSTEM: "what time"→time.now (system_intent="time"), "cpu/ram/status"→system.status (system_intent="status"), "battery"→system.status (system_intent="battery"), "volume/ses"→system.volume (system_intent="volume"), "X aç/başlat"→pc.launch_app (system_intent="open_app").
+SYSTEM: "what time"→time.now (system_intent="time"), "cpu/ram/status"→system.status (system_intent="status"), "battery"→system.status (system_intent="battery"), "volume/sound"→system.volume (system_intent="volume"), "open X/launch X"→pc.launch_app (system_intent="open_app").
 CONTACTS: "list contacts"→google.contacts.search (contacts_intent="list"), "search contacts"→google.contacts.search (contacts_intent="search").
 KEEP: "create a note"→google.keep.create (keep_intent="create"), "show my notes"→google.keep.list (keep_intent="list"), "search notes"→google.keep.search (keep_intent="search").
 NEWS: "show latest news"→news.latest (news_intent="briefing"), "what's trending"→news.latest (news_intent="briefing"), "tech news"→news.latest (news_intent="briefing"), "search news"→news.search (news_intent="search").
@@ -506,12 +506,12 @@ U: create a note go to market tomorrow → {"route":"keep","keep_intent":"create
 U: show system status → {"route":"system","system_intent":"status","confidence":0.9,"tool_plan":["system.status"],"status":"done","assistant_reply":""}
 U: show latest news → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}
 U: tech news → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}
-U: bugünkü teknoloji haberleri → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}
-U: sesi kıs → {"route":"system","system_intent":"volume","confidence":0.9,"tool_plan":["system.volume"],"status":"done","assistant_reply":""}
-U: ses seviyesini %50 yap → {"route":"system","system_intent":"volume","confidence":0.9,"tool_plan":["system.volume"],"status":"done","assistant_reply":""}
-U: spotify aç → {"route":"system","system_intent":"open_app","confidence":0.9,"tool_plan":["pc.launch_app"],"status":"done","assistant_reply":""}
-U: Python ile fibonacci fonksiyonu yaz → {"route":"unknown","confidence":0.9,"tool_plan":[],"status":"done","assistant_reply":"İşte fibonacci fonksiyonu:\\n```python\\ndef fibonacci(n):\\n    if n <= 1: return n\\n    return fibonacci(n-1) + fibonacci(n-2)\\n```"}
-U: hello world Türkçeye çevir → {"route":"unknown","confidence":0.9,"tool_plan":[],"status":"done","assistant_reply":"Merhaba Dünya"}"""
+U: today's tech news → {"route":"news","news_intent":"briefing","confidence":0.9,"tool_plan":["news.latest"],"status":"done","assistant_reply":""}
+U: turn down the volume → {"route":"system","system_intent":"volume","confidence":0.9,"tool_plan":["system.volume"],"status":"done","assistant_reply":""}
+U: set volume to 50% → {"route":"system","system_intent":"volume","confidence":0.9,"tool_plan":["system.volume"],"status":"done","assistant_reply":""}
+U: open spotify → {"route":"system","system_intent":"open_app","confidence":0.9,"tool_plan":["pc.launch_app"],"status":"done","assistant_reply":""}
+U: write a fibonacci function in Python → {"route":"unknown","confidence":0.9,"tool_plan":[],"status":"done","assistant_reply":"Here is the fibonacci function:\\n```python\\ndef fibonacci(n):\\n    if n <= 1: return n\\n    return fibonacci(n-1) + fibonacci(n-2)\\n```"}
+U: translate hello world to French → {"route":"unknown","confidence":0.9,"tool_plan":[],"status":"done","assistant_reply":"Bonjour le monde"}"""
 
     # Combined (full) prompt — used when system_prompt override is not provided
     SYSTEM_PROMPT = _SYSTEM_PROMPT_CORE + _SYSTEM_PROMPT_DETAIL + _SYSTEM_PROMPT_EXAMPLES
@@ -552,31 +552,30 @@ U: hello world Türkçeye çevir → {"route":"unknown","confidence":0.9,"tool_p
             return ""
 
     # Route keywords for schema injection (Issue #1275)
-    # Maps keywords (Turkish + English) to route names for pre-LLM schema detection.
+    # Maps keywords to route names for pre-LLM schema detection.
     _SCHEMA_ROUTE_KEYWORDS: dict[str, list[str]] = {
         "gmail": [
-            "mail", "e-posta", "eposta", "inbox", "gelen kutusu",
-            "gönder", "yanıtla", "reply", "draft", "taslak",
-            "etiket", "label", "okunmamış", "unread",
-            "email", "send", "starred", "compose",
+            "mail", "email", "e-mail", "inbox",
+            "send", "reply", "draft", "drafts",
+            "label", "unread",
+            "starred", "compose",
         ],
         "calendar": [
-            "takvim", "toplantı", "etkinlik", "randevu", "program",
-            "calendar", "event", "meeting", "müsait", "boş slot",
-            "schedule", "appointment", "agenda",
+            "calendar", "meeting", "event", "appointment", "schedule",
+            "agenda", "available", "free slot",
         ],
         "contacts": [
-            "kişi", "rehber", "contact", "telefon numarası",
-            "contacts", "phone number", "address book",
+            "contact", "contacts", "phone number",
+            "address book",
         ],
         "system": [
-            "cpu", "ram", "bellek", "disk", "sistem", "durum",
-            "saat kaç", "tarih",
-            "system", "status", "battery", "what time", "date",
+            "cpu", "ram", "memory", "disk", "system", "status",
+            "what time", "date",
+            "battery", "volume", "sound",
         ],
         "news": [
-            "haber", "haberler", "gündem", "haberleri göster",
             "news", "headlines", "trending", "bulletin",
+            "show news",
         ],
     }
 
@@ -732,9 +731,9 @@ U: hello world Türkçeye çevir → {"route":"unknown","confidence":0.9,"tool_p
             slots={},
             confidence=0.0,
             tool_plan=[],
-            assistant_reply="Efendim, şu an asistan hizmetinde teknik bir sorun var. Kısa süre sonra tekrar deneyin.",
+            assistant_reply="Sorry, the assistant service is experiencing a technical issue. Please try again shortly.",
             ask_user=True,
-            question="Efendim, şu an asistan hizmetinde teknik bir sorun var. Kısa süre sonra tekrar deneyin.",
+            question="Sorry, the assistant service is experiencing a technical issue. Please try again shortly.",
             raw_output={"error": "router_unhealthy", "fallback": True},
         )
 
@@ -1270,7 +1269,7 @@ ASSISTANT (JSON only):"""
             if tool_def is not None:
                 requires_confirmation = bool(tool_def.requires_confirmation)
             if requires_confirmation:
-                confirmation_prompt = f"{tool_plan[0]} çalıştırılsın mı?"
+                confirmation_prompt = f"Run {tool_plan[0]}?"
 
         # Confidence is high for structured calls (no JSON repair needed)
         confidence = 0.95
@@ -1918,98 +1917,96 @@ ASSISTANT (JSON only):"""
         # Final attempt: re-raise the original error
         return extract_first_json_object(text, strict=False), True
 
-    # ── Issue #LLM-quality: Route detection from Turkish user input ─────────
+    # ── Issue #LLM-quality: Route detection from user input ───────────────
     _ROUTE_KEYWORDS: dict[str, list[str]] = {
         "calendar": [
-            "etkinlik", "takvim", "randevu", "toplantı",
-            "yarın", "akşam", "sabah", "öğle",
-            "ekle", "oluştur", "planla", "ne yapıyoruz",
-            "programım", "programda",
-            # Issue #1071: Replaced generic "plan" and "iptal" with
+            "event", "calendar", "appointment", "meeting",
+            "tomorrow", "evening", "morning", "noon",
+            "add", "create", "schedule", "what are we doing",
+            "my schedule", "on schedule",
+            # Issue #1071: Replaced generic "plan" and "cancel" with
             # multi-word patterns to avoid false positives.
-            "takvim planı", "günlük plan", "haftalık plan",
-            "etkinlik iptal", "randevu iptal", "toplantı iptal",
-            # Bare "iptal" — often means event cancellation
-            "iptal",
-            # "saat kaçta" = "at what time" (calendar follow-up about
-            # event times) vs "saat kaç" = "what time is it" (system).
-            "saat kaçta",
-            # Declarative calendar: "olacak" (will be/happen)
-            "olacak",
-            # Issue #1391: "bugün" only as multi-word to avoid prefix
-            # match on "bugünkü haberleri" etc.
-            "bugün ne", "bugün var", "bugünkü etkinlik",
-            "bugünkü toplantı", "bugünkü randevu",
+            "calendar plan", "daily plan", "weekly plan",
+            "cancel event", "cancel appointment", "cancel meeting",
+            # Bare "cancel" — often means event cancellation
+            "cancel",
+            # "at what time" (calendar follow-up about event times)
+            # vs "what time is it" (system).
+            "at what time",
+            # Declarative calendar: "will be/happen"
+            "will be",
+            # Issue #1391: "today" only as multi-word to avoid prefix
+            # match on "today's news" etc.
+            "today what", "today any", "today's event",
+            "today's meeting", "today's appointment",
         ],
         "gmail": [
-            "mail", "e-posta", "eposta", "mesaj", "gönder",
-            "oku", "inbox", "gelen kutusu", "draft", "taslak",
-            # Issue #1391: "yaz" removed — conflicts with "kod yaz" etc.
-            # Use multi-word "mail yaz" instead.
-            "mail yaz", "cevapla", "reply",
+            "mail", "email", "e-mail", "message", "send",
+            "read", "inbox", "inbox folder", "draft", "drafts",
+            # Issue #1391: "write" removed — conflicts with "write code" etc.
+            # Use multi-word "write mail" instead.
+            "write mail", "reply",
             # Issue #1214: Additional gmail-context keywords
-            "güncelleme", "içerik", "bildirim", "notification",
+            "update", "content", "notification",
         ],
         "system": [
-            "saat kaç", "tarih", "gün ne", "pil", "batarya",
-            "sistem", "ayar", "volume", "ses",
+            "what time", "date", "what day", "battery",
+            "system", "settings", "volume", "sound",
             # Issue #1359: system.status keywords
-            "cpu", "ram", "bellek", "disk", "durum",
+            "cpu", "ram", "memory", "disk", "status",
             # Issue #1391: app launch keywords
-            "aç", "başlat", "kapat",
+            "open", "launch", "close",
         ],
         "contacts": [
             # Issue #1360: contacts route keywords
-            "kişi", "rehber", "kontaklar", "numara",
-            "iletişim", "adres defteri",
+            "contact", "contacts", "phone book", "number",
+            "address book",
         ],
         "keep": [
             # Issue #1363: keep/notes route keywords
-            "not ", "notlar", "memo", "hatırlatıcı",
-            "not oluştur", "not al", "not ekle",
+            "note", "notes", "memo", "reminder",
+            "create note", "take note", "add note",
         ],
         "news": [
             # Issue #1365: news route keywords
-            "haber", "haberler", "gündem", "son haberler",
-            "teknoloji haberleri", "spor haberleri", "ekonomi haberleri",
-            "haberleri göster", "haberlerde ara",
-            # Issue #1391: "bugünkü" + news context
-            "bugünkü haber",
+            "news", "headlines", "agenda", "latest news",
+            "tech news", "sports news", "economy news",
+            "show news", "search news",
+            # Issue #1391: "today's" + news context
+            "today's news",
         ],
         "smalltalk": [
-            "nasılsın", "merhaba", "selam", "teşekkür",
-            "günaydın", "iyi geceler", "hoşça kal",
+            "how are you", "hello", "hi", "thanks",
+            "good morning", "good night", "goodbye",
         ],
     }
 
     def _detect_route_from_input(self, user_input: str) -> str:
-        """Detect route from Turkish user input using token-based matching.
+        """Detect route from user input using token-based matching.
 
         Issue #896: Previous ``kw in text`` substring check produced false
-        positives for Turkish words (e.g. "ekosistem" matched "sistem").
+        positives (e.g. "ecosystem" matched "system").
         Now the input is tokenised on whitespace / punctuation and each
         keyword is compared against whole tokens only.
         """
         text = (user_input or "").lower()
-        # Tokenise: split on anything that isn't a Turkish-alphabet character.
-        tokens = set(re.split(r"[^a-zçğıöşü]+", text))
+        # Tokenise: split on anything that isn't an alphabetic character.
+        tokens = set(re.split(r"[^a-z]+", text))
         scores: dict[str, int] = {}
         for route, keywords in self._ROUTE_KEYWORDS.items():
             score = 0
             for kw in keywords:
-                # Multi-word keywords (e.g. "gelen kutusu") — check original
+                # Multi-word keywords (e.g. "inbox folder") — check original
                 # text but require a word boundary after the last word.
-                # This prevents "saat kaç" from matching "saat kaçta".
                 if " " in kw:
-                    pattern = re.escape(kw) + r"(?![a-zçğıöşü])"
+                    pattern = re.escape(kw) + r"(?![a-z])"
                     if re.search(pattern, text):
                         score += 1
                 else:
-                    # Turkish agglutination: "mail" → "mailleri",
-                    # "takvim" → "takvimde", etc.  Check if any token
-                    # starts with the keyword (prefix match).  Keywords
-                    # ≥3 chars avoid false positives; older exact-match
-                    # is kept as fallback for short keywords.
+                    # Check if any token starts with the keyword
+                    # (prefix match).  Keywords ≥3 chars avoid false
+                    # positives; exact-match is kept as fallback
+                    # for short keywords.
                     if kw in tokens:
                         score += 1
                     elif len(kw) >= 3 and any(t.startswith(kw) for t in tokens):
@@ -2029,48 +2026,44 @@ ASSISTANT (JSON only):"""
     _VALID_TIME_RE: re.Pattern[str] = re.compile(r"^\d{2}:\d{2}$")
     _VALID_DATE_RE: re.Pattern[str] = re.compile(r"^\d{4}-\d{2}-\d{2}$")
     _JUNK_VALUES: frozenset[str] = frozenset({
-        "pm", "am", "none", "null", "<route>", "<intent>", "<tool_adı>",
+        "pm", "am", "none", "null", "<route>", "<intent>", "<tool_name>",
     })
     _INSTRUCTION_FRAGMENTS: tuple[str, ...] = (
-        "kullanıcı", "etkinlik adı söylemedi", "söylemediği", "belirtilmedi",
-        "girilmedi", "verilmedi", "yoksa null", "veya null",
+        "user", "event name not specified", "not specified", "not provided",
+        "not entered", "not given", "if null", "or null",
     )
 
-    # Issue #1212: Anaphoric follow-up detection for Turkish
-    # Issue #1254: Added "başka", "içeriğinde", "ne var", "daha" etc.
-    # Issue #1319: Added missing Turkish demonstrative pronouns and
-    # anaphoric forms: accusatives (onu, bunu, şunu), genitives
-    # (bunun, onun), and context-reference words (yukarıdaki, önceki,
-    # aynı).  Note: bare "bu", "şu", "o" intentionally excluded to
-    # avoid false positives on common short utterances.
+    # Issue #1212: Anaphoric follow-up detection
+    # Issue #1254: Added "else", "inside", "what else", "more" etc.
+    # Issue #1319: Added demonstrative pronouns, accusative/genitive
+    # forms, and context-reference words.  Note: bare "this", "that"
+    # intentionally excluded to avoid false positives on common short
+    # utterances.
     _ANAPHORA_TOKENS: frozenset[str] = frozenset({
         # Plural demonstratives
-        "onlar", "bunlar", "şunlar",
-        # Accusative forms
-        "bunları", "onları", "şunları",
-        "onu", "bunu", "şunu",
-        # Genitive forms
-        "bunun", "onun",
+        "them", "these", "those",
+        # Object forms
+        "it", "its",
         # Interrogative / follow-up
-        "nelermiş", "neymiş", "neydi", "hangisi", "hangileri",
+        "which", "what",
         # Summarisation / continuation commands
-        "özetle", "detay", "ayrıntı", "devam", "devamı",
-        "tekrarla", "göster", "oku", "anlat",
-        # Issue #1254: Common follow-up words missing from original set
-        "başka", "içeriğinde", "içeriği", "içindeki", "daha",
-        "neler", "bana", "söyle", "açıkla",
-        # Issue #1319: Context-reference words
-        "yukarıdaki", "önceki", "aynı",
+        "summarize", "detail", "details", "continue", "more",
+        "repeat", "show", "read", "explain",
+        # Common follow-up words
+        "else", "inside", "content", "remaining",
+        "any", "tell",
+        # Context-reference words
+        "above", "previous", "same",
     })
 
     def _is_anaphoric_followup(self, user_input: str) -> bool:
-        """Detect if user input is an anaphoric follow-up (e.g. 'nelermiş onlar').
+        """Detect if user input is an anaphoric follow-up (e.g. 'show me those').
 
         Issue #1212: Short inputs with demonstrative pronouns or continuation
         words indicate the user is referring to previous tool results.
         """
         text = (user_input or "").strip().lower()
-        tokens = set(re.split(r"[^a-zçğıöşü]+", text))
+        tokens = set(re.split(r"[^a-z]+", text))
         # Must be a short utterance (≤6 words) with at least one anaphora token
         if len(tokens) > 6:
             return False
@@ -2220,7 +2213,7 @@ ASSISTANT (JSON only):"""
 
         # ── Issue #LLM-quality: Route override for misclassified inputs ──
         # 3B model sometimes picks a valid-but-wrong route (e.g. "system"
-        # for "bugün ne yapıyoruz" which is clearly calendar query).
+        # for "what are we doing today" which is clearly calendar query).
         # Check if keyword-based detection disagrees with model's route.
         # Issue #890/#891: Also catch misrouted gmail and system intents.
         _route_was_overridden = False
@@ -2239,7 +2232,7 @@ ASSISTANT (JSON only):"""
                     # Cross-route misroute: override when keyword confidence
                     # is significantly higher than the model route's score.
                     text_lower = (user_input or "").lower()
-                    tokens = set(re.split(r"[^a-zçğıöşü]+", text_lower))
+                    tokens = set(re.split(r"[^a-z]+", text_lower))
                     kw_score = 0
                     for kw in self._ROUTE_KEYWORDS.get(keyword_route, []):
                         if " " in kw:
@@ -2281,17 +2274,17 @@ ASSISTANT (JSON only):"""
             calendar_intent = raw_intent
 
         # ── Issue #LLM-quality: Intent inference from user input ──────────
-        # If route is calendar but intent is "none", infer intent from Turkish input
+        # If route is calendar but intent is "none", infer intent from input
         if route == "calendar" and calendar_intent == "none":
             _input_lower = (user_input or "").lower()
             # Issue #1105: Use word-boundary tokenized matching to avoid
-            # substring collisions (kur→kurumsal, sil→silikon).
+            # substring collisions.
             _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
-            _CREATE_WORDS = {"ekle", "ekleyebilir", "koy", "oluştur", "planla", "kur", "ayarla"}
-            _QUERY_WORDS_MULTI = ("ne yapıyoruz", "ne var", "neler var", "var mı", "ne yapacağız")
-            _QUERY_WORDS_SINGLE = {"planım", "programım", "gündem", "takvim", "bugün", "yarın", "planımız"}
-            _CANCEL_WORDS = {"iptal", "sil", "kaldır"}
-            _MODIFY_WORDS = {"değiştir", "ertele", "kaydır", "güncelle"}
+            _CREATE_WORDS = {"add", "create", "put", "make", "schedule", "set", "arrange"}
+            _QUERY_WORDS_MULTI = ("what are we doing", "anything on", "what do we have", "is there", "what will we do")
+            _QUERY_WORDS_SINGLE = {"plan", "schedule", "agenda", "calendar", "today", "tomorrow", "plans"}
+            _CANCEL_WORDS = {"cancel", "delete", "remove"}
+            _MODIFY_WORDS = {"change", "postpone", "move", "update"}
             
             if _input_tokens & _CREATE_WORDS:
                 calendar_intent = "create"
@@ -2312,12 +2305,12 @@ ASSISTANT (JSON only):"""
         _raw_gmail_intent = str(normalized.get("gmail_intent") or "none").strip().lower()
         if route == "gmail" and _raw_gmail_intent == "none" and user_input:
             _input_lower = (user_input or "").lower()
-            _GMAIL_SEND_WORDS = ("gönder", "yolla", "ilet")
-            _GMAIL_SEARCH_WORDS = ("ara", "bul", "yıldızlı", "etiketli", "arama")
-            _GMAIL_READ_WORDS = ("oku", "aç", "incele", "içeriğ")
+            _GMAIL_SEND_WORDS = ("send", "deliver", "forward")
+            _GMAIL_SEARCH_WORDS = ("search", "find", "starred", "labeled", "lookup")
+            _GMAIL_READ_WORDS = ("read", "open", "inspect", "content")
             _GMAIL_LIST_WORDS = (
-                "listele", "göster", "okunmamış", "gelen kutusu", "inbox",
-                "mailleri", "maillere", "mesajları", "kaç mail", "kaç mesaj",
+                "list", "show", "unread", "inbox folder", "inbox",
+                "emails", "messages", "how many mail", "how many message",
             )
 
             if any(w in _input_lower for w in _GMAIL_SEND_WORDS):
@@ -2337,15 +2330,15 @@ ASSISTANT (JSON only):"""
         if route == "system" and _raw_system_intent == "none" and user_input:
             _input_lower = (user_input or "").lower()
             _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
-            _SYS_STATUS_WORDS = {"cpu", "ram", "bellek", "durum", "kaynak", "kullanım", "performans"}
-            _SYS_BATTERY_WORDS = {"pil", "batarya", "şarj"}
-            _SYS_DISK_WORDS = {"disk", "depolama", "alan", "storage"}
-            _SYS_TIME_WORDS = {"saat", "tarih", "zaman"}
+            _SYS_STATUS_WORDS = {"cpu", "ram", "memory", "status", "resources", "usage", "performance"}
+            _SYS_BATTERY_WORDS = {"battery", "charge", "charging"}
+            _SYS_DISK_WORDS = {"disk", "storage", "space"}
+            _SYS_TIME_WORDS = {"time", "date", "clock"}
             # Issue #1391: volume and app launch intents
-            _SYS_VOLUME_WORDS = {"ses", "volume", "sessiz", "sesli", "kıs", "aç"}
-            _SYS_APP_WORDS = {"başlat", "kapat"}
+            _SYS_VOLUME_WORDS = {"sound", "volume", "mute", "unmute", "louder", "quieter"}
+            _SYS_APP_WORDS = {"launch", "close"}
 
-            if _input_tokens & _SYS_VOLUME_WORDS and any(w in _input_lower for w in ("ses", "volume", "sessiz")):
+            if _input_tokens & _SYS_VOLUME_WORDS and any(w in _input_lower for w in ("sound", "volume", "mute")):
                 normalized["system_intent"] = "volume"
             elif _input_tokens & _SYS_STATUS_WORDS:
                 normalized["system_intent"] = "status"
@@ -2353,9 +2346,9 @@ ASSISTANT (JSON only):"""
                 normalized["system_intent"] = "battery"
             elif _input_tokens & _SYS_DISK_WORDS:
                 normalized["system_intent"] = "disk"
-            elif _input_tokens & _SYS_TIME_WORDS or "saat kaç" in _input_lower:
+            elif _input_tokens & _SYS_TIME_WORDS or "what time" in _input_lower:
                 normalized["system_intent"] = "time"
-            elif _input_tokens & _SYS_APP_WORDS or any(w in _input_lower for w in ("aç", "başlat", "çalıştır")):
+            elif _input_tokens & _SYS_APP_WORDS or any(w in _input_lower for w in ("open", "launch", "run")):
                 normalized["system_intent"] = "open_app"
             else:
                 normalized["system_intent"] = "status"  # default for system route
@@ -2366,9 +2359,9 @@ ASSISTANT (JSON only):"""
         if route == "contacts" and _raw_contacts_intent == "none" and user_input:
             _input_lower = (user_input or "").lower()
             _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
-            _CONTACTS_CREATE_WORDS = {"ekle", "oluştur", "kaydet"}
-            _CONTACTS_DELETE_WORDS = {"sil", "kaldır"}
-            _CONTACTS_SEARCH_WORDS = {"ara", "bul"}
+            _CONTACTS_CREATE_WORDS = {"add", "create", "save"}
+            _CONTACTS_DELETE_WORDS = {"delete", "remove"}
+            _CONTACTS_SEARCH_WORDS = {"search", "find"}
 
             if _input_tokens & _CONTACTS_CREATE_WORDS:
                 normalized["contacts_intent"] = "create"
@@ -2385,10 +2378,10 @@ ASSISTANT (JSON only):"""
         if route == "keep" and _raw_keep_intent == "none" and user_input:
             _input_lower = (user_input or "").lower()
             _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
-            _KEEP_CREATE_WORDS = {"oluştur", "yaz", "ekle", "al"}
-            _KEEP_SEARCH_WORDS = {"ara", "bul"}
+            _KEEP_CREATE_WORDS = {"create", "write", "add", "take"}
+            _KEEP_SEARCH_WORDS = {"search", "find"}
 
-            if _input_tokens & _KEEP_CREATE_WORDS or "not oluştur" in _input_lower or "not al" in _input_lower:
+            if _input_tokens & _KEEP_CREATE_WORDS or "create note" in _input_lower or "take note" in _input_lower:
                 normalized["keep_intent"] = "create"
             elif _input_tokens & _KEEP_SEARCH_WORDS:
                 normalized["keep_intent"] = "search"
@@ -2400,10 +2393,10 @@ ASSISTANT (JSON only):"""
         _raw_news_intent = str(normalized.get("news_intent") or "none").strip().lower()
         if route == "news" and _raw_news_intent == "none" and user_input:
             _input_lower = (user_input or "").lower()
-            _NEWS_SEARCH_WORDS = {"ara", "bul", "arat"}
+            _NEWS_SEARCH_WORDS = {"search", "find", "lookup"}
             _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
 
-            if _input_tokens & _NEWS_SEARCH_WORDS or "haberlerde ara" in _input_lower:
+            if _input_tokens & _NEWS_SEARCH_WORDS or "search news" in _input_lower:
                 normalized["news_intent"] = "search"
             else:
                 normalized["news_intent"] = "briefing"  # default
@@ -2531,7 +2524,7 @@ ASSISTANT (JSON only):"""
 
         # ── Clear LLM assistant_reply when deterministic tools are planned ──
         # The LLM often generates wrong answers for factual queries like
-        # "saat kaç" (e.g. "üç yedi" instead of "dokuz yedi").  When a
+        # "what time is it" (e.g. LLM guesses wrong time).  When a
         # deterministic tool (time.now, system.status) is in the plan,
         # clear the reply so the tool result is used instead.
         _DETERMINISTIC_TOOLS = {"time.now", "system.status"}
@@ -2553,16 +2546,14 @@ ASSISTANT (JSON only):"""
         # Only accept title if it's a specific noun/phrase, not the whole request.
         # NOTE: Must run AFTER ask_user/question are extracted from parsed JSON.
         _TITLE_NOISE_WORDS = frozenset({
-            "etkinlik", "etkinik", "bir", "ekle", "ekleyebilir", "misin",
-            "koy", "koyabilir", "ekleyebilirmisin", "olsun", "yap",
-            # Turkish number words (used as time references, not event titles)
-            "bire", "ikiye", "üçe", "dörde", "beşe", "altıya", "yediye",
-            "sekize", "dokuza", "ona", "onbire", "onikiye",
-            "bir", "iki", "üç", "dört", "beş", "altı", "yedi",
-            "sekiz", "dokuz", "on", "onbir", "oniki",
+            "event", "an", "add", "create", "can",
+            "put", "could", "please", "make", "do",
+            # Number words (used as time references, not event titles)
+            "one", "two", "three", "four", "five", "six", "seven",
+            "eight", "nine", "ten", "eleven", "twelve",
             # Time-related words
-            "akşam", "sabah", "öğle", "gece", "yarın", "bugün",
-            "saat", "saate", "için",
+            "evening", "morning", "noon", "night", "tomorrow", "today",
+            "oclock", "at", "for",
         })
         if route == "calendar" and calendar_intent == "create" and user_input:
             slot_title = (slots.get("title") or "").strip()
@@ -2583,7 +2574,7 @@ ASSISTANT (JSON only):"""
                     slots = {**slots, "title": None}
                     ask_user = True
                     if not question:
-                        question = "Ne ekleyeyim efendim? Etkinlik adı nedir?"
+                        question = "What should I add? What is the event name?"
 
         reasoning_summary = parsed.get("reasoning_summary") or []
         if not isinstance(reasoning_summary, list):
@@ -2614,7 +2605,7 @@ ASSISTANT (JSON only):"""
                 tool_plan = []
                 tool_plan_with_args = []
                 if not assistant_reply:
-                    assistant_reply = "Efendim, tam anlayamadım. Tekrar eder misiniz?"
+                    assistant_reply = "Sorry, I didn't quite understand. Could you repeat that?"
                 ask_user = True
                 if not question:
                     question = assistant_reply
@@ -2629,7 +2620,7 @@ ASSISTANT (JSON only):"""
                 )
             elif _route_valid and ask_user:
                 # Model correctly identified route but is asking user for more info
-                # (e.g. missing title) — this is fine, don't block with "Tam anlayamadım"
+                # (e.g. missing title) — this is fine, don't block with fallback message
                 old_conf = confidence
                 confidence = max(confidence, self._confidence_threshold + 0.05)
                 logger.info(
@@ -2641,7 +2632,7 @@ ASSISTANT (JSON only):"""
                 tool_plan = []
                 tool_plan_with_args = []
                 if not assistant_reply:
-                    assistant_reply = "Efendim, tam anlayamadım. Tekrar eder misiniz?"
+                    assistant_reply = "Sorry, I didn't quite understand. Could you repeat that?"
                 ask_user = True
                 if not question:
                     question = assistant_reply
@@ -2725,7 +2716,7 @@ ASSISTANT (JSON only):"""
         # Attempt keyword based route + tool resolution
         kw_route = self._detect_route_from_input(user_input)
         tool_plan: list[str] = []
-        assistant_reply = "Efendim, tam anlayamadım. Tekrar eder misiniz?"
+        assistant_reply = "Sorry, I didn't quite understand. Could you repeat that?"
 
         if kw_route not in ("unknown", "smalltalk"):
             resolved = self._resolve_tool_from_intent(

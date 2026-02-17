@@ -138,12 +138,12 @@ class TestIssue1359SystemIntent:
     def test_route_keywords_include_system_status_words(self):
         """System route keywords must include cpu/ram/disk/durum."""
         system_kw = JarvisLLMOrchestrator._ROUTE_KEYWORDS.get("system", [])
-        for word in ("cpu", "ram", "disk", "durum"):
+        for word in ("cpu", "ram", "disk", "status"):
             assert word in system_kw, f"'{word}' missing from system keywords"
 
     def test_detect_route_system_durum(self):
         router = JarvisLLMOrchestrator(llm=MockLLM())
-        assert router._detect_route_from_input("sistem durumunu göster") == "system"
+        assert router._detect_route_from_input("show system status") == "system"
 
 
 # ====================================================================
@@ -190,11 +190,11 @@ class TestIssue1360ContactsRoute:
 
     def test_detect_route_contacts_keywords(self):
         router = JarvisLLMOrchestrator(llm=MockLLM())
-        assert router._detect_route_from_input("rehberimdeki kişileri göster") == "contacts"
+        assert router._detect_route_from_input("show my contacts") == "contacts"
 
     def test_detect_route_contacts_numara(self):
         router = JarvisLLMOrchestrator(llm=MockLLM())
-        route = router._detect_route_from_input("ali'nin numarasını bul")
+        route = router._detect_route_from_input("find ali's number")
         assert route == "contacts"
 
     def test_contacts_tools_in_valid_tools(self):
@@ -252,11 +252,11 @@ class TestIssue1363KeepRoute:
 
     def test_detect_route_keep_not_olustur(self):
         router = JarvisLLMOrchestrator(llm=MockLLM())
-        assert router._detect_route_from_input("notlarımı listele") == "keep"
+        assert router._detect_route_from_input("list my notes") == "keep"
 
     def test_detect_route_keep_notlar(self):
         router = JarvisLLMOrchestrator(llm=MockLLM())
-        assert router._detect_route_from_input("notlarımı göster") == "keep"
+        assert router._detect_route_from_input("show my notes") == "keep"
 
     def test_keep_tools_in_valid_tools(self):
         for tool in ("google.keep.list", "google.keep.create", "google.keep.search"):
@@ -410,7 +410,7 @@ class TestPlanVerifierNewRoutes:
             "calendar_intent": "none",
             "tool_plan": ["google.contacts.search"],
         }
-        ok, errors = verify_plan(plan, "kişileri göster", VALID_TOOLS)
+        ok, errors = verify_plan(plan, "show contacts", VALID_TOOLS)
         # Should not have route_tool_mismatch
         assert not any("route_tool_mismatch" in e for e in errors)
 
@@ -420,7 +420,7 @@ class TestPlanVerifierNewRoutes:
             "calendar_intent": "none",
             "tool_plan": ["google.keep.create"],
         }
-        ok, errors = verify_plan(plan, "not oluştur test", VALID_TOOLS)
+        ok, errors = verify_plan(plan, "create note test", VALID_TOOLS)
         assert not any("route_tool_mismatch" in e for e in errors)
 
     def test_verify_keep_route_wrong_tool(self):
@@ -429,7 +429,7 @@ class TestPlanVerifierNewRoutes:
             "calendar_intent": "none",
             "tool_plan": ["gmail.send"],
         }
-        ok, errors = verify_plan(plan, "not oluştur", VALID_TOOLS)
+        ok, errors = verify_plan(plan, "create note", VALID_TOOLS)
         assert any("route_tool_mismatch" in e for e in errors)
 
 

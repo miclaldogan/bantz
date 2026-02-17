@@ -5,7 +5,7 @@ Covers all 5 misrouting scenarios from the issue:
 2. Translation → should NOT go to smalltalk
 3. Volume → should go to system with volume intent
 4. App launch → should go to system with open_app intent
-5. "bugünkü teknoloji haberleri" → should go to news, not calendar
+5. "today's tech news" → should go to news, not calendar
 """
 
 from __future__ import annotations
@@ -24,57 +24,56 @@ class TestKeywordRouting:
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         self.router = JarvisLLMOrchestrator.__new__(JarvisLLMOrchestrator)
 
-    def test_bugunku_teknoloji_haberleri_routes_to_news(self):
-        """'bugünkü teknoloji haberleri' → news, NOT calendar (Issue #1391)."""
-        route = self.router._detect_route_from_input("bugünkü teknoloji haberleri neler")
+    def test_todays_tech_news_routes_to_news(self):
+        """'today's tech news' → news, NOT calendar (Issue #1391)."""
+        route = self.router._detect_route_from_input("today's tech news please")
         assert route == "news", f"Expected 'news', got '{route}'"
 
-    def test_bugunku_haberleri_routes_to_news(self):
-        """'bugünkü haberler' → news, NOT calendar."""
-        route = self.router._detect_route_from_input("bugünkü haberler")
+    def test_latest_news_routes_to_news(self):
+        """'latest news' → news, NOT calendar."""
+        route = self.router._detect_route_from_input("latest news")
         assert route == "news", f"Expected 'news', got '{route}'"
 
-    def test_bugun_ne_var_routes_to_calendar(self):
-        """'bugün ne var' → calendar (multi-word keyword preserved)."""
-        route = self.router._detect_route_from_input("bugün ne var")
+    def test_today_what_routes_to_calendar(self):
+        """'today what do we have' → calendar (multi-word keyword preserved)."""
+        route = self.router._detect_route_from_input("today what do we have")
         assert route == "calendar"
 
-    def test_ses_kisin_routes_to_system(self):
-        """'sesi kıs' → system (volume control)."""
-        route = self.router._detect_route_from_input("sesi kıs")
-        assert route == "system"
-
     def test_volume_routes_to_system(self):
-        """'volume %50 yap' → system."""
-        route = self.router._detect_route_from_input("volume %50 yap")
+        """'turn down the volume' → system (volume control)."""
+        route = self.router._detect_route_from_input("turn down the volume")
         assert route == "system"
 
-    def test_spotify_ac_routes_to_system(self):
-        """'spotify aç' → system (app launch)."""
-        route = self.router._detect_route_from_input("spotify aç")
+    def test_volume_percent_routes_to_system(self):
+        """'volume 50%' → system."""
+        route = self.router._detect_route_from_input("set volume to 50%")
         assert route == "system"
 
-    def test_yaz_alone_does_not_route_to_gmail(self):
-        """'yaz' alone should NOT be in gmail keywords anymore."""
+    def test_open_app_routes_to_system(self):
+        """'open spotify' → system (app launch)."""
+        route = self.router._detect_route_from_input("open spotify")
+        assert route == "system"
+
+    def test_write_alone_does_not_route_to_gmail(self):
+        """'write' alone should NOT be in gmail keywords anymore."""
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         gmail_keywords = JarvisLLMOrchestrator._ROUTE_KEYWORDS.get("gmail", [])
-        # "yaz" alone should not exist; "mail yaz" is allowed
-        assert "yaz" not in gmail_keywords
-        assert "mail yaz" in gmail_keywords
+        assert "write" not in gmail_keywords
+        assert "write mail" in gmail_keywords
 
-    def test_kod_yaz_does_not_route_to_gmail(self):
-        """'Python fibonacci kodu yaz' → NOT gmail."""
-        route = self.router._detect_route_from_input("Python fibonacci kodu yaz")
+    def test_code_request_does_not_route_to_gmail(self):
+        """'write a fibonacci function in Python' → NOT gmail."""
+        route = self.router._detect_route_from_input("write a fibonacci function in Python")
         assert route != "gmail", f"Code request incorrectly routed to gmail: '{route}'"
 
-    def test_mail_yaz_still_routes_to_gmail(self):
-        """'mail yaz' → gmail (multi-word keyword preserved)."""
-        route = self.router._detect_route_from_input("mail yaz ali'ye")
+    def test_write_mail_still_routes_to_gmail(self):
+        """'write mail to Ali' → gmail (multi-word keyword preserved)."""
+        route = self.router._detect_route_from_input("write mail to Ali")
         assert route == "gmail"
 
-    def test_haber_routes_to_news(self):
-        """'haber' → news."""
-        route = self.router._detect_route_from_input("son haberler")
+    def test_news_routes_to_news(self):
+        """'news' → news."""
+        route = self.router._detect_route_from_input("latest news")
         assert route == "news"
 
 
@@ -85,24 +84,22 @@ class TestSystemIntentInference:
         """Simulate normalize_output for system intent testing."""
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         router = JarvisLLMOrchestrator.__new__(JarvisLLMOrchestrator)
-        # Build minimal normalized output
         normalized = {
             "route": route,
             "system_intent": "none",
             "confidence": 0.9,
             "tool_plan": [],
         }
-        # Call the normalize method's system intent section
         _input_lower = user_input.lower()
         _input_tokens = set(re.split(r"[\s,;.!?]+", _input_lower))
-        _SYS_STATUS_WORDS = {"cpu", "ram", "bellek", "durum", "kaynak", "kullanım", "performans"}
-        _SYS_BATTERY_WORDS = {"pil", "batarya", "şarj"}
-        _SYS_DISK_WORDS = {"disk", "depolama", "alan", "storage"}
-        _SYS_TIME_WORDS = {"saat", "tarih", "zaman"}
-        _SYS_VOLUME_WORDS = {"ses", "volume", "sessiz", "sesli", "kıs", "aç"}
-        _SYS_APP_WORDS = {"başlat", "kapat"}
+        _SYS_STATUS_WORDS = {"cpu", "ram", "memory", "status", "resources", "usage", "performance"}
+        _SYS_BATTERY_WORDS = {"battery", "charge", "charging"}
+        _SYS_DISK_WORDS = {"disk", "storage", "space"}
+        _SYS_TIME_WORDS = {"time", "date", "clock"}
+        _SYS_VOLUME_WORDS = {"sound", "volume", "mute", "unmute", "louder", "quieter"}
+        _SYS_APP_WORDS = {"launch", "close"}
 
-        if _input_tokens & _SYS_VOLUME_WORDS and any(w in _input_lower for w in ("ses", "volume", "sessiz")):
+        if _input_tokens & _SYS_VOLUME_WORDS and any(w in _input_lower for w in ("sound", "volume", "mute")):
             normalized["system_intent"] = "volume"
         elif _input_tokens & _SYS_STATUS_WORDS:
             normalized["system_intent"] = "status"
@@ -110,47 +107,47 @@ class TestSystemIntentInference:
             normalized["system_intent"] = "battery"
         elif _input_tokens & _SYS_DISK_WORDS:
             normalized["system_intent"] = "disk"
-        elif _input_tokens & _SYS_TIME_WORDS or "saat kaç" in _input_lower:
+        elif _input_tokens & _SYS_TIME_WORDS or "what time" in _input_lower:
             normalized["system_intent"] = "time"
-        elif _input_tokens & _SYS_APP_WORDS or any(w in _input_lower for w in ("aç", "başlat", "çalıştır")):
+        elif _input_tokens & _SYS_APP_WORDS or any(w in _input_lower for w in ("open", "launch", "run")):
             normalized["system_intent"] = "open_app"
         else:
             normalized["system_intent"] = "status"
         return normalized
 
-    def test_ses_kis_infers_volume(self):
-        """'sesi kıs' → system_intent=volume."""
-        result = self._normalize("sesi kıs")
+    def test_turn_down_volume_infers_volume(self):
+        """'turn down the volume' → system_intent=volume."""
+        result = self._normalize("turn down the volume")
         assert result["system_intent"] == "volume"
 
-    def test_volume_50_infers_volume(self):
-        """'ses seviyesini %50 yap' → system_intent=volume."""
-        result = self._normalize("ses seviyesini %50 yap")
+    def test_set_volume_50_infers_volume(self):
+        """'set volume to 50%' → system_intent=volume."""
+        result = self._normalize("set volume to 50%")
         assert result["system_intent"] == "volume"
 
-    def test_sessiz_infers_volume(self):
-        """'sessiz moda al' → system_intent=volume."""
-        result = self._normalize("sessiz moda al")
+    def test_mute_infers_volume(self):
+        """'mute the sound' → system_intent=volume."""
+        result = self._normalize("mute the sound")
         assert result["system_intent"] == "volume"
 
-    def test_spotify_ac_infers_open_app(self):
-        """'spotify aç' → system_intent=open_app."""
-        result = self._normalize("spotify aç")
+    def test_open_spotify_infers_open_app(self):
+        """'open spotify' → system_intent=open_app."""
+        result = self._normalize("open spotify")
         assert result["system_intent"] == "open_app"
 
-    def test_chrome_baslat_infers_open_app(self):
-        """'chrome başlat' → system_intent=open_app."""
-        result = self._normalize("chrome başlat")
+    def test_launch_chrome_infers_open_app(self):
+        """'launch chrome' → system_intent=open_app."""
+        result = self._normalize("launch chrome")
         assert result["system_intent"] == "open_app"
 
     def test_cpu_still_infers_status(self):
-        """'CPU kullanımı ne' → system_intent=status (unchanged)."""
-        result = self._normalize("CPU kullanımı ne")
+        """'CPU usage' → system_intent=status (unchanged)."""
+        result = self._normalize("CPU usage")
         assert result["system_intent"] == "status"
 
-    def test_saat_kac_still_infers_time(self):
-        """'saat kaç' → system_intent=time (unchanged)."""
-        result = self._normalize("saat kaç")
+    def test_what_time_still_infers_time(self):
+        """'what time is it' → system_intent=time (unchanged)."""
+        result = self._normalize("what time is it")
         assert result["system_intent"] == "time"
 
 

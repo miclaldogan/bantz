@@ -34,11 +34,11 @@ def _make_registry() -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(Tool(
         name="calendar.create_event",
-        description="Takvime etkinlik ekler",
+        description="Adds an event to calendar",
         parameters={
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "Etkinlik başlığı"},
+                "title": {"type": "string", "description": "Event title"},
                 "date": {"type": "string", "description": "YYYY-MM-DD"},
                 "time": {"type": "string", "description": "HH:MM"},
             },
@@ -48,7 +48,7 @@ def _make_registry() -> ToolRegistry:
     ))
     reg.register(Tool(
         name="calendar.list_events",
-        description="Takvim etkinliklerini listeler",
+        description="Lists calendar events",
         parameters={
             "type": "object",
             "properties": {
@@ -60,7 +60,7 @@ def _make_registry() -> ToolRegistry:
     ))
     reg.register(Tool(
         name="gmail.send",
-        description="E-posta gönderir",
+        description="Sends an email",
         parameters={
             "type": "object",
             "properties": {
@@ -74,7 +74,7 @@ def _make_registry() -> ToolRegistry:
     ))
     reg.register(Tool(
         name="gmail.list_messages",
-        description="E-postaları listeler",
+        description="Lists emails",
         parameters={
             "type": "object",
             "properties": {
@@ -87,7 +87,7 @@ def _make_registry() -> ToolRegistry:
     ))
     reg.register(Tool(
         name="gmail.smart_search",
-        description="E-posta arar",
+        description="Searches emails",
         parameters={
             "type": "object",
             "properties": {
@@ -98,12 +98,12 @@ def _make_registry() -> ToolRegistry:
     ))
     reg.register(Tool(
         name="system.status",
-        description="Sistem durumunu gösterir",
+        description="Shows system status",
         parameters={"type": "object", "properties": {}, "required": []},
     ))
     reg.register(Tool(
         name="time.now",
-        description="Şu anki saati gösterir",
+        description="Shows the current time",
         parameters={"type": "object", "properties": {}, "required": []},
     ))
     return reg
@@ -313,10 +313,10 @@ class TestExtractFromToolCalls:
         tc = LLMToolCall(
             id="call_1",
             name="calendar.create_event",
-            arguments={"title": "Toplantı", "date": "2025-01-15", "time": "14:00"},
+            arguments={"title": "Meeting", "date": "2025-01-15", "time": "14:00"},
         )
         result = orch._extract_from_tool_calls(
-            [tc], content="", user_input="yarın iki de toplantı koy",
+            [tc], content="", user_input="schedule a meeting tomorrow at two",
             detected_route="calendar",
         )
         assert result.route == "calendar"
@@ -324,7 +324,7 @@ class TestExtractFromToolCalls:
         assert result.tool_plan == ["calendar.create_event"]
         assert result.confidence == 0.95
         assert result.requires_confirmation is True
-        assert result.slots.get("title") == "Toplantı"
+        assert result.slots.get("title") == "Meeting"
         assert result.slots.get("date") == "2025-01-15"
         assert result.slots.get("time") == "14:00"
         assert result.status == "done"
@@ -335,10 +335,10 @@ class TestExtractFromToolCalls:
         tc = LLMToolCall(
             id="call_2",
             name="gmail.send",
-            arguments={"to": "test@example.com", "subject": "Merhaba", "body": "Selam"},
+            arguments={"to": "test@example.com", "subject": "Hello", "body": "Hi there"},
         )
         result = orch._extract_from_tool_calls(
-            [tc], content="", user_input="test@gmail.com a merhaba gönder",
+            [tc], content="", user_input="send hello to test@gmail.com",
             detected_route="gmail",
         )
         assert result.route == "gmail"
@@ -346,7 +346,7 @@ class TestExtractFromToolCalls:
         assert result.tool_plan == ["gmail.send"]
         assert result.requires_confirmation is True
         assert result.gmail["to"] == "test@example.com"
-        assert result.gmail["subject"] == "Merhaba"
+        assert result.gmail["subject"] == "Hello"
 
     def test_gmail_list_messages(self):
         reg = _make_registry()
@@ -357,7 +357,7 @@ class TestExtractFromToolCalls:
             arguments={"query": "from:boss", "max_results": 5},
         )
         result = orch._extract_from_tool_calls(
-            [tc], content="", user_input="son 5 maili göster",
+            [tc], content="", user_input="show last 5 emails",
             detected_route="gmail",
         )
         assert result.route == "gmail"
@@ -385,7 +385,7 @@ class TestExtractFromToolCalls:
         orch = self._make_orchestrator(reg)
         tc = LLMToolCall(id="call_t", name="time.now", arguments={})
         result = orch._extract_from_tool_calls(
-            [tc], content="saat 3:47", user_input="saat kaç",
+            [tc], content="time is 3:47", user_input="what time is it",
             detected_route="system",
         )
         # time.now is deterministic → reply should be cleared
@@ -396,7 +396,7 @@ class TestExtractFromToolCalls:
         orch = self._make_orchestrator(reg)
         tc = LLMToolCall(id="call_m", name="calendar.list_events", arguments={})
         result = orch._extract_from_tool_calls(
-            [tc], content="", user_input="bugün ne var",
+            [tc], content="", user_input="what's on today",
             detected_route="calendar",
         )
         assert result.raw_output.get("_structured_tool_call") is True
@@ -407,7 +407,7 @@ class TestExtractFromToolCalls:
         tc1 = LLMToolCall(id="c1", name="calendar.list_events", arguments={"date": "2025-01-15"})
         tc2 = LLMToolCall(id="c2", name="calendar.create_event", arguments={"title": "Meeting"})
         result = orch._extract_from_tool_calls(
-            [tc1, tc2], content="", user_input="bugün ne var, bir de toplantı ekle",
+            [tc1, tc2], content="", user_input="what's on today, also add a meeting",
             detected_route="calendar",
         )
         assert len(result.tool_plan) == 2
@@ -420,7 +420,7 @@ class TestExtractFromToolCalls:
         orch = self._make_orchestrator(reg)
         tc = LLMToolCall(id="c", name="system.status", arguments={})
         result = orch._extract_from_tool_calls(
-            [tc], content="", user_input="sistem durumu",
+            [tc], content="", user_input="system status",
             detected_route="calendar",  # Wrong detected route
         )
         # Route should be corrected from tool prefix
@@ -460,7 +460,7 @@ class TestTryStructuredToolCall:
         JarvisLLMOrchestrator._tool_registry = None
 
         result = orch._try_structured_tool_call(
-            user_input="bugün ne var",
+            user_input="what's on today",
             session_context=None,
             prompt="test prompt",
             call_temperature=0.0,
@@ -473,7 +473,7 @@ class TestTryStructuredToolCall:
         reg = _make_registry()
         orch, _ = self._make_orchestrator(reg)
         result = orch._try_structured_tool_call(
-            user_input="nasılsın",  # No route keywords match
+            user_input="how are you",  # No route keywords match
             session_context=None,
             prompt="test",
             call_temperature=0.0,
@@ -495,7 +495,7 @@ class TestTryStructuredToolCall:
         orch, mock_llm = self._make_orchestrator(reg, llm_response=resp)
 
         result = orch._try_structured_tool_call(
-            user_input="bugün takvimde ne var",
+            user_input="what's on the calendar today",
             session_context=None,
             prompt="test",
             call_temperature=0.0,
@@ -519,7 +519,7 @@ class TestTryStructuredToolCall:
         orch, _ = self._make_orchestrator(reg, llm_response=resp)
 
         result = orch._try_structured_tool_call(
-            user_input="bugün takvimde ne var",
+            user_input="what's on the calendar today",
             session_context=None,
             prompt="test",
             call_temperature=0.0,
@@ -534,7 +534,7 @@ class TestTryStructuredToolCall:
         mock_llm.chat_with_tools.side_effect = RuntimeError("Connection refused")
 
         result = orch._try_structured_tool_call(
-            user_input="bugün takvimde ne var",
+            user_input="what's on the calendar today",
             session_context=None,
             prompt="test",
             call_temperature=0.0,
@@ -555,7 +555,7 @@ class TestTryStructuredToolCall:
         JarvisLLMOrchestrator.sync_valid_tools(set(reg.names()), registry=reg)
 
         result = orch._try_structured_tool_call(
-            user_input="bugün takvimde ne var",
+            user_input="what's on the calendar today",
             session_context=None,
             prompt="test",
             call_temperature=0.0,
@@ -605,7 +605,7 @@ class TestFeatureFlag:
         JarvisLLMOrchestrator.sync_valid_tools(set(reg.names()), registry=reg)
 
         with patch.dict(os.environ, {"BANTZ_STRUCTURED_TOOLS": env_val}):
-            result = orch.route(user_input="bugün takvimde ne var")
+            result = orch.route(user_input="what's on the calendar today")
 
         return result, mock_llm
 
@@ -662,7 +662,7 @@ class TestFeatureFlag:
         JarvisLLMOrchestrator.sync_valid_tools(set(reg.names()), registry=reg)
 
         with patch.dict(os.environ, {"BANTZ_STRUCTURED_TOOLS": "1"}):
-            result = orch.route(user_input="bugün takvimde ne var")
+            result = orch.route(user_input="what's on the calendar today")
 
         # Structured failed → legacy used
         mock_llm.complete_text.assert_called()

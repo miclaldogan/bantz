@@ -159,7 +159,7 @@ class TestLLMRouterClassLevelRegex:
     def test_instruction_fragments(self):
         from bantz.brain.llm_router import JarvisLLMOrchestrator as J
 
-        assert "belirtilmedi" in J._INSTRUCTION_FRAGMENTS
+        assert "not specified" in J._INSTRUCTION_FRAGMENTS
         assert isinstance(J._INSTRUCTION_FRAGMENTS, tuple)
 
 

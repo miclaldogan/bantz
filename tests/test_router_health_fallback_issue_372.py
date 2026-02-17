@@ -89,7 +89,7 @@ class TestFallbackRoute:
         assert result.confidence == 0.0
         assert result.tool_plan == []
         assert result.ask_user is True
-        assert "teknik bir sorun" in result.assistant_reply
+        assert "technical issue" in result.assistant_reply
         assert result.raw_output.get("fallback") is True
 
     def test_unhealthy_router_does_not_call_llm(self):
