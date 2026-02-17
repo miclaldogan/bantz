@@ -48,6 +48,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_music(registry)
     count += _register_health(registry)
     count += _register_sync_search(registry)
+    count += _register_news(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -2686,6 +2687,71 @@ def _register_sync_search(registry: "ToolRegistry") -> int:
         ),
         sync_now_tool,
         risk="low",
+    )
+
+    return n
+
+
+# ── News (4) ─────────────────────────────────────────────────────────
+
+def _register_news(registry: "ToolRegistry") -> int:
+    """Register news tools (Issue #839)."""
+    try:
+        from bantz.tools.news_tools import (
+            news_latest_tool,
+            news_search_tool,
+            news_briefing_tool,
+            news_category_tool,
+        )
+    except ImportError as e:
+        logger.warning("[ToolGap] news tools import: %s", e)
+        return 0
+
+    n = 0
+
+    n += _reg(
+        registry,
+        "news.latest",
+        "Get the latest news headlines from all configured categories.",
+        _obj(
+            ("max_items", "integer", "Maximum number of headlines to return (default: 5)"),
+        ),
+        news_latest_tool,
+    )
+
+    n += _reg(
+        registry,
+        "news.search",
+        "Search news articles by keyword or topic.",
+        _obj(
+            ("query", "string", "Search query (e.g. 'artificial intelligence', 'Turkey economy')"),
+            ("max_results", "integer", "Maximum results (default: 10)"),
+            required=["query"],
+        ),
+        news_search_tool,
+    )
+
+    n += _reg(
+        registry,
+        "news.briefing",
+        "Get a multi-category news briefing (AI, tech, world, Turkey, etc.).",
+        _obj(
+            ("categories", "string", "Comma-separated categories: ai,tech,world,turkey,science,business"),
+            ("max_items", "integer", "Max articles per category (default: 3)"),
+        ),
+        news_briefing_tool,
+    )
+
+    n += _reg(
+        registry,
+        "news.category",
+        "Get news for a specific category (ai, tech, world, turkey, science, business).",
+        _obj(
+            ("category", "string", "Category: ai, tech, world, turkey, science, business"),
+            ("max_items", "integer", "Max articles (default: 5)"),
+            required=["category"],
+        ),
+        news_category_tool,
     )
 
     return n

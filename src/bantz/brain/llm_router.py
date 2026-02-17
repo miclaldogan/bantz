@@ -383,7 +383,7 @@ class JarvisLLMOrchestrator:
         "contacts.upsert", "contacts.resolve", "contacts.list", "contacts.delete",
         "google.contacts.search", "google.contacts.get", "google.contacts.create",
         "google.keep.list", "google.keep.create", "google.keep.search",
-        "news.latest", "news.search",
+        "news.latest", "news.search", "news.briefing", "news.category",
         "time.now", "system.status", "system.volume", "pc.launch_app",
     })
 
