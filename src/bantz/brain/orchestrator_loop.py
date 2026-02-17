@@ -693,6 +693,24 @@ class OrchestratorLoop:
                 self._update_state_phase(user_input, rejection_output, [], state)
                 return (rejection_output, state)
 
+            # ── Issue #1389 fix: If a pending confirmation exists but the
+            # user's input is neither affirmative nor negative, the user has
+            # changed topic.  Clear the stale confirmation so the new
+            # request is not blocked.
+            elif (
+                state.has_pending_confirmation()
+                and not state.confirmed_tool
+            ):
+                stale = state.peek_pending_confirmation() or {}
+                stale_tool = str(stale.get("tool", "")).strip()
+                state.clear_pending_confirmation()
+                logger.info(
+                    "[CONFIRMATION] User sent non-confirmation input '%s' "
+                    "while pending confirmation for '%s' exists — clearing "
+                    "stale confirmation (topic change).",
+                    user_input, stale_tool,
+                )
+
             # ── Issue #869 fix: When a confirmed_tool is set and there is a
             # pending confirmation, skip LLM planning entirely.  The prerouter
             # would otherwise intercept "evet" as AFFIRMATIVE/smalltalk and

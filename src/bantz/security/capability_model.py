@@ -127,9 +127,9 @@ _TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     "gmail.remove_label": ToolCapability("gmail.remove_label", frozenset({Capability.WRITE}), "safe"),
     "gmail.archive": ToolCapability("gmail.archive", frozenset({Capability.WRITE}), "moderate"),
     # Gmail — send
-    "gmail.send": ToolCapability("gmail.send", frozenset({Capability.SEND}), "moderate"),
-    "gmail.send_draft": ToolCapability("gmail.send_draft", frozenset({Capability.SEND}), "moderate"),
-    "gmail.send_to_contact": ToolCapability("gmail.send_to_contact", frozenset({Capability.SEND}), "moderate"),
+    "gmail.send": ToolCapability("gmail.send", frozenset({Capability.SEND}), "destructive"),
+    "gmail.send_draft": ToolCapability("gmail.send_draft", frozenset({Capability.SEND}), "destructive"),
+    "gmail.send_to_contact": ToolCapability("gmail.send_to_contact", frozenset({Capability.SEND}), "destructive"),
     "gmail.generate_reply": ToolCapability("gmail.generate_reply", frozenset({Capability.SEND, Capability.WRITE}), "moderate"),
     # Gmail — delete
     "gmail.delete_draft": ToolCapability("gmail.delete_draft", frozenset({Capability.DELETE}), "moderate"),
@@ -137,6 +137,8 @@ _TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     # Contacts
     "contacts.list": ToolCapability("contacts.list", frozenset({Capability.READ}), "safe"),
     "contacts.resolve": ToolCapability("contacts.resolve", frozenset({Capability.READ}), "safe"),
+    "contacts.search": ToolCapability("contacts.search", frozenset({Capability.READ}), "safe"),
+    "contacts.get": ToolCapability("contacts.get", frozenset({Capability.READ}), "safe"),
     "contacts.upsert": ToolCapability("contacts.upsert", frozenset({Capability.WRITE}), "safe"),
     "contacts.delete": ToolCapability("contacts.delete", frozenset({Capability.DELETE}), "destructive"),
     # File system
