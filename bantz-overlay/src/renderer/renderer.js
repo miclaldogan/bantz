@@ -9,6 +9,7 @@
  */
 
 import { ParticleSphere } from './components/particle-sphere.js';
+import { ParticleScatter } from './components/particle-scatter.js';
 
 // ─── DOM References ───────────────────────────────────────────
 const hudPanel = document.getElementById('hud-panel');
@@ -26,10 +27,16 @@ function initSphere() {
     return;
   }
   sphere = new ParticleSphere(sphereContainer);
+
+  // Attach scatter/dust interaction plugin
+  const scatter = new ParticleScatter(sphere, sphereContainer);
+  sphere.addPlugin(scatter);
+
   sphere.start();
 
   // Expose for debugging and external access (e.g., state animations)
   window.bantzSphere = sphere;
+  window.bantzScatter = scatter;
 
   // Handle window resize
   window.addEventListener('resize', () => {
