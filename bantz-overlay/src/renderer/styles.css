@@ -74,17 +74,44 @@ html, body {
 #overlay-root {
   position: fixed;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: 300px 1fr 340px;
+  grid-template-rows: 1fr;
+  gap: 0;
   pointer-events: none;
 }
 
-/* ── HUD Panel (main transparent rectangle) ─────────────────────── */
+/* ── Regions (left / center / right columns) ───────────────────── */
+.region {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.region-left {
+  padding: 20px 0 20px 16px;
+  gap: 12px;
+}
+
+.region-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.region-right {
+  padding: 20px 16px 20px 0;
+  gap: 12px;
+}
+
+/* ── HUD Panel (center sphere + speech area) ────────────────────── */
 .hud-panel {
   position: relative;
-  width: 36vw;
-  height: 50vh;
+  width: 100%;
+  max-width: 600px;
+  height: 80vh;
   min-width: 360px;
   min-height: 340px;
 
@@ -102,7 +129,7 @@ html, body {
 
   display: flex;
   flex-direction: column;
-  overflow: visible; /* Allow sub-panels to overflow edges */
+  overflow: visible;
   pointer-events: auto;
 }
 
@@ -329,7 +356,7 @@ html, body {
 
 /* ── Terminal Sub-Panel Base ────────────────────────────────────── */
 .terminal-panel {
-  position: absolute;
+  position: relative;
   background: var(--color-panel-bg);
   border: 1px solid var(--color-panel-border);
   border-radius: var(--radius-panel);
@@ -341,6 +368,8 @@ html, body {
   flex-direction: column;
   pointer-events: auto;
   transition: opacity 0.3s, transform 0.3s;
+  flex-shrink: 0;
+  width: 100%;
 }
 
 /* Panel header bar (title with ●●● dots) */

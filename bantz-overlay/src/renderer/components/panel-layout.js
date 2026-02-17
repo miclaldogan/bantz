@@ -1,22 +1,26 @@
 /**
- * Bantz Overlay — Panel Layout Engine (#1412)
+ * Bantz Overlay — Panel Layout Engine (#1412, #1450)
  *
- * Positions terminal sub-panels around the main HUD rectangle
- * with controlled "harmonious overflow" — panels partially extend
- * beyond the overlay edges.
+ * Positions terminal sub-panels in a full-screen 3-column grid layout.
+ * Panels are placed into their respective region containers
+ * (left, center, right) as flow elements, not overflowing HUD edges.
  *
- * Layout slots:
- *   left          — Left edge, 40% overflow left
- *   right         — Right edge, 40% overflow right
- *   bottom-left   — Bottom-left corner, overflow bottom+left
- *   top-float     — Floating above, free-positioned with rotation
+ * Layout regions:
+ *   #region-left    — Left column (300px), vertical stack
+ *   #region-center  — Center column (flexible), HUD panel
+ *   #region-right   — Right column (340px), vertical stack
+ *
+ * Slot → Region mapping:
+ *   left, bottom-left   → #region-left
+ *   right, bottom-right → #region-right
+ *   top-float           → #region-center (absolute positioned)
  *
  * Features:
- *   - Slot-based anchor positioning with overflow percentages
- *   - Responsive reflow on viewport resize
+ *   - Region-based placement (panels flow inside their column)
  *   - Panel z-index management (active panel on top)
  *   - Individual panel visibility toggle
  *   - Min-width collapse: panels auto-hide below threshold
+ *   - Responsive reflow on viewport resize
  *
  * @module panel-layout
  */
@@ -24,59 +28,53 @@
 'use strict';
 
 // ── Layout Constants ──────────────────────────────────────────────
-const MIN_VIEWPORT_WIDTH = 800;   // Below this, overflow panels collapse
+const MIN_VIEWPORT_WIDTH = 800;   // Below this, side panels collapse
 const REPOSITION_DEBOUNCE = 150;  // ms
 
 /**
- * Slot definition: anchor point + overflow configuration.
- * Positions are computed relative to HUD panel bounding rect.
+ * Slot definition: region target + styling config.
  *
  * @typedef {object} SlotDef
- * @property {string} anchor      — CSS anchor edge ('left'|'right'|'bottom-left'|'top')
- * @property {number} overflowPct — % of panel that overflows beyond HUD boundary
- * @property {number} baseZIndex  — Default z-index for this slot
- * @property {string} slideAnim   — CSS animation class for entry
+ * @property {string}  region     — Target region element ID
+ * @property {number}  baseZIndex — Default z-index for this slot
+ * @property {string}  slideAnim  — CSS animation class for entry
+ * @property {boolean} absolute   — If true, use absolute positioning inside region
  */
 const SLOT_DEFINITIONS = {
   left: {
-    anchor: 'left',
-    overflowPct: 0.75,       // 75% of panel width overflows left
+    region: 'region-left',
     baseZIndex: 20,
     slideAnim: 'slide-in-left',
-    verticalAlign: 0.05,     // 5% from top
+    absolute: false,
   },
   right: {
-    anchor: 'right',
-    overflowPct: 0.75,       // 75% of panel width overflows right
+    region: 'region-right',
     baseZIndex: 20,
     slideAnim: 'slide-in-right',
-    verticalAlign: 0.05,
+    absolute: false,
   },
   'bottom-left': {
-    anchor: 'bottom-left',
-    overflowPct: 0.65,       // 65% overflow on both bottom and left
+    region: 'region-left',
     baseZIndex: 15,
     slideAnim: 'slide-in-bottom',
-    verticalAlign: null,     // computed from bottom
+    absolute: false,
   },
   'bottom-right': {
-    anchor: 'bottom-right',
-    overflowPct: 0.65,       // 65% overflow on both bottom and right
+    region: 'region-right',
     baseZIndex: 15,
     slideAnim: 'slide-in-bottom',
-    verticalAlign: null,
+    absolute: false,
   },
   'top-float': {
-    anchor: 'top',
-    overflowPct: 0.15,       // 15% above top edge
-    baseZIndex: 30,          // floaters on top
+    region: 'region-center',
+    baseZIndex: 30,
     slideAnim: 'fade-in',
-    verticalAlign: null,
+    absolute: true,   // floats above center content
   },
 };
 
 /**
- * Panel Layout Engine — manages panel positioning and lifecycle.
+ * Panel Layout Engine — manages panel placement in grid regions.
  */
 class PanelLayoutEngine {
   /**
@@ -85,6 +83,13 @@ class PanelLayoutEngine {
   constructor(hudPanel) {
     /** @type {HTMLElement} */
     this._hud = hudPanel;
+
+    /** @type {Map<string, HTMLElement>} Region elements cache */
+    this._regions = new Map();
+    for (const id of ['region-left', 'region-center', 'region-right']) {
+      const el = document.getElementById(id);
+      if (el) this._regions.set(id, el);
+    }
 
     /**
      * Registered panels: id → { panel, slot, el, visible, pinned }
@@ -129,6 +134,15 @@ class PanelLayoutEngine {
       return;
     }
 
+    const slotDef = SLOT_DEFINITIONS[slot];
+    const regionEl = this._regions.get(slotDef.region);
+
+    // Move panel to its region container (instead of staying in hud-panel)
+    if (regionEl && el.parentNode !== regionEl) {
+      if (el.parentNode) el.parentNode.removeChild(el);
+      regionEl.appendChild(el);
+    }
+
     this._panels.set(id, {
       panel,
       slot,
@@ -141,7 +155,7 @@ class PanelLayoutEngine {
 
     // Apply initial position
     this._positionPanel(id);
-    console.log(`[PanelLayout] Registered "${id}" → slot "${slot}"`);
+    console.log(`[PanelLayout] Registered "${id}" → slot "${slot}" → region "${slotDef.region}"`);
   }
 
   /**
@@ -268,70 +282,17 @@ class PanelLayoutEngine {
     const slotDef = SLOT_DEFINITIONS[entry.slot];
     if (!slotDef) return;
 
-    const hudRect = this._hud.getBoundingClientRect();
     const el = entry.el;
-    const pw = entry.width;
-    const ph = entry.height;
-    const overflow = slotDef.overflowPct;
 
-    // Reset positioning
-    el.style.position = 'absolute';
-
-    switch (slotDef.anchor) {
-      case 'left': {
-        // Panel on left edge, overflowing left
-        const overflowPx = Math.round(pw * overflow);
-        el.style.left = `${-overflowPx}px`;
-        el.style.right = '';
-        el.style.top = `${Math.round(hudRect.height * (slotDef.verticalAlign || 0.1))}px`;
-        el.style.bottom = '';
-        break;
-      }
-
-      case 'right': {
-        // Panel on right edge, overflowing right
-        const overflowPx = Math.round(pw * overflow);
-        el.style.right = `${-overflowPx}px`;
-        el.style.left = '';
-        el.style.top = `${Math.round(hudRect.height * (slotDef.verticalAlign || 0.1))}px`;
-        el.style.bottom = '';
-        break;
-      }
-
-      case 'bottom-left': {
-        // Panel at bottom-left corner, overflowing both
-        const overflowX = Math.round(pw * overflow);
-        const overflowY = Math.round(ph * overflow);
-        el.style.left = `${-overflowX}px`;
-        el.style.right = '';
-        el.style.top = '';
-        el.style.bottom = `${-overflowY}px`;
-        break;
-      }
-
-      case 'bottom-right': {
-        // Panel at bottom-right corner, overflowing both
-        const overflowX = Math.round(pw * overflow);
-        const overflowY = Math.round(ph * overflow);
-        el.style.right = `${-overflowX}px`;
-        el.style.left = '';
-        el.style.top = '';
-        el.style.bottom = `${-overflowY}px`;
-        break;
-      }
-
-      case 'top': {
-        // Floating above, right-aligned with slight offset
-        const overflowY = Math.round(ph * overflow);
-        el.style.top = `${-overflowY}px`;
-        el.style.bottom = '';
-        el.style.right = '15%';
-        el.style.left = '';
-        break;
-      }
-
-      default:
-        break;
+    if (slotDef.absolute) {
+      // Absolute-positioned panels (top-float) inside their region
+      el.style.position = 'absolute';
+      el.style.top = '20px';
+      el.style.right = '15%';
+    } else {
+      // Flow-positioned panels stack in their region column
+      el.style.position = 'relative';
+      el.style.width = '100%'; // Fill region width
     }
 
     // Set base z-index if not explicitly brought to front
@@ -357,6 +318,12 @@ class PanelLayoutEngine {
           }
         }
       }
+
+      // Hide/show region columns based on viewport width
+      const leftRegion = this._regions.get('region-left');
+      const rightRegion = this._regions.get('region-right');
+      if (leftRegion) leftRegion.style.display = vw < MIN_VIEWPORT_WIDTH ? 'none' : '';
+      if (rightRegion) rightRegion.style.display = vw < MIN_VIEWPORT_WIDTH ? 'none' : '';
 
       // Reposition all visible panels
       this.repositionAll();

@@ -134,12 +134,20 @@ class SystemStatusPanel {
   // ─── Internal ─────────────────────────────────────────────────
 
   /**
-   * Request system metrics via IPC.
+   * Request system metrics via IPC (Electron main process).
+   * Uses the direct invoke channel which is handled locally by Electron.
    * @private
    */
-  _requestSystemMetrics() {
-    if (window.overlayAPI && window.overlayAPI.sendDaemonEvent) {
-      window.overlayAPI.sendDaemonEvent({ type: 'request_system_metrics' });
+  async _requestSystemMetrics() {
+    if (!window.overlayAPI || !window.overlayAPI.getSystemMetrics) return;
+
+    try {
+      const metrics = await window.overlayAPI.getSystemMetrics();
+      if (metrics) {
+        this.setSystemMetrics(metrics);
+      }
+    } catch (err) {
+      console.warn('[SystemStatus] Failed to get system metrics:', err);
     }
   }
 

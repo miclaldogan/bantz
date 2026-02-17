@@ -13,34 +13,37 @@
   -->
   <div id="overlay-root">
 
-    <!-- Main HUD panel (centered transparent rectangle) -->
-    <div id="hud-panel" class="hud-panel">
+    <!-- Left column: inbox / notifications / daily tasks / system status -->
+    <div id="region-left" class="region region-left"></div>
 
-      <!-- Status indicator: shows connection state -->
-      <div id="status-indicator" class="status-indicator">
-        <span class="status-dot" id="status-dot"></span>
-        <span class="status-text" id="status-text">Connecting...</span>
-      </div>
+    <!-- Center column: sphere + speech (the original HUD core) -->
+    <div id="region-center" class="region region-center">
+      <div id="hud-panel" class="hud-panel">
 
-      <!-- Placeholder: panels and sphere will be injected here by future issues -->
-      <div id="content-area" class="content-area">
-        <!-- Phase 2: Particle sphere (#1402) -->
-        <div id="sphere-container" class="sphere-container"></div>
-      </div>
-
-      <!-- Speech area at bottom -->
-      <div id="speech-area" class="speech-area">
-        <!-- Phase 4: Reasoning chain (#1410) will go here -->
-        <div id="reasoning-chain" class="reasoning-chain"></div>
-
-        <!-- Phase 4: Typewriter output (#1409) will go here -->
-        <div id="typewriter-output" class="typewriter-output">
-          <span id="typewriter-text"></span>
-          <span id="typewriter-cursor" class="cursor">█</span>
+        <!-- Status indicator: shows connection state -->
+        <div id="status-indicator" class="status-indicator">
+          <span class="status-dot" id="status-dot"></span>
+          <span class="status-text" id="status-text">Connecting...</span>
         </div>
-      </div>
 
-    </div><!-- /#hud-panel -->
+        <div id="content-area" class="content-area">
+          <div id="sphere-container" class="sphere-container"></div>
+        </div>
+
+        <!-- Speech area at bottom -->
+        <div id="speech-area" class="speech-area">
+          <div id="reasoning-chain" class="reasoning-chain"></div>
+          <div id="typewriter-output" class="typewriter-output">
+            <span id="typewriter-text"></span>
+            <span id="typewriter-cursor" class="cursor">█</span>
+          </div>
+        </div>
+
+      </div><!-- /#hud-panel -->
+    </div><!-- /#region-center -->
+
+    <!-- Right column: github feed / news / clock -->
+    <div id="region-right" class="region region-right"></div>
 
   </div><!-- /#overlay-root -->
 
@@ -70,7 +73,7 @@
   </script>
   <script type="module" src="renderer.js"></script>
   <script type="module">
-    // Diagnostic: test each import individually
+    // Diagnostic: test ES module imports (does NOT re-execute renderer.js)
     import('./vendor/three.min.js')
       .then(() => console.log('[ModuleDiag] three.min.js OK'))
       .catch(e => console.error('[ModuleDiag] three.min.js FAIL: ' + e.message));
@@ -83,9 +86,6 @@
     import('./components/sphere-state.js')
       .then(() => console.log('[ModuleDiag] sphere-state.js OK'))
       .catch(e => console.error('[ModuleDiag] sphere-state.js FAIL: ' + e.message));
-    import('./renderer.js')
-      .then(() => console.log('[ModuleDiag] renderer.js OK'))
-      .catch(e => console.error('[ModuleDiag] renderer.js FAIL: ' + e.message));
   </script>
 </body>
 </html>

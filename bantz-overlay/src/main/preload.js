@@ -29,9 +29,11 @@ contextBridge.exposeInMainWorld('overlayAPI', {
   // ─── IPC Bridge (daemon messages) ──────────────────────────────
   /**
    * Register a callback for IPC messages from the daemon.
+   * Removes any previously registered listener to prevent memory leaks.
    * @param {(message: object) => void} callback
    */
   onDaemonMessage: (callback) => {
+    ipcRenderer.removeAllListeners('daemon:message');
     ipcRenderer.on('daemon:message', (_event, message) => callback(message));
   },
 
@@ -47,6 +49,7 @@ contextBridge.exposeInMainWorld('overlayAPI', {
    * @param {(state: string) => void} callback
    */
   onDaemonConnectionState: (callback) => {
+    ipcRenderer.removeAllListeners('daemon:connection-state');
     ipcRenderer.on('daemon:connection-state', (_event, state) => callback(state));
   },
 
@@ -56,6 +59,7 @@ contextBridge.exposeInMainWorld('overlayAPI', {
    * @param {(visible: boolean) => void} callback
    */
   onVisibilityChange: (callback) => {
+    ipcRenderer.removeAllListeners('overlay:visibility');
     ipcRenderer.on('overlay:visibility', (_event, visible) => callback(visible));
   },
 
@@ -65,6 +69,7 @@ contextBridge.exposeInMainWorld('overlayAPI', {
    * @param {(level: string) => void} callback
    */
   onEffectIntensity: (callback) => {
+    ipcRenderer.removeAllListeners('tray:effect-intensity');
     ipcRenderer.on('tray:effect-intensity', (_event, level) => callback(level));
   },
 
@@ -73,6 +78,7 @@ contextBridge.exposeInMainWorld('overlayAPI', {
    * @param {(speed: number) => void} callback
    */
   onAnimationSpeed: (callback) => {
+    ipcRenderer.removeAllListeners('tray:animation-speed');
     ipcRenderer.on('tray:animation-speed', (_event, speed) => callback(speed));
   },
 
@@ -81,6 +87,7 @@ contextBridge.exposeInMainWorld('overlayAPI', {
    * @param {(data: {panelId: string, visible: boolean}) => void} callback
    */
   onTogglePanel: (callback) => {
+    ipcRenderer.removeAllListeners('tray:toggle-panel');
     ipcRenderer.on('tray:toggle-panel', (_event, data) => callback(data));
   },
 

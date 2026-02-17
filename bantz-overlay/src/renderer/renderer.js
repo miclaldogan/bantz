@@ -247,7 +247,8 @@ document.addEventListener('mousemove', (e) => {
     el.closest('.terminal-panel') ||
     el.closest('.news-tooltip') ||
     el.closest('.phone-call-overlay') ||
-    el.closest('.news-popup')
+    el.closest('.news-popup') ||
+    el.closest('.text-input-container')
   );
 
   if (isInteractive && !_mouseEnabled) {
@@ -347,6 +348,10 @@ function checkFirstBootOrAbsence() {
 
   return 'normal';
 }
+
+// ─── Phone Call Overlay (early declaration) ──────────────────
+// Declared here so handleDaemonEvent can reference it; initialized later.
+let phoneCallOverlay = null;
 
 // ─── Daemon Connection State ──────────────────────────────────
 // Listen for connection state changes from the IPC client.
@@ -483,8 +488,36 @@ function handleStateMessage(msg) {
 }
 
 function handleActionMessage(msg) {
-  // Will be implemented in #1401+ (panel actions)
-  console.log('[Overlay] Action:', msg.action_type);
+  const action = msg.action || msg.action_type;
+
+  switch (action) {
+    case 'preview':
+      // Show short text preview under main state (e.g. tool name being called)
+      if (typewriter) {
+        typewriter.showPreview(msg.text || '', msg.duration_ms || 1200);
+      }
+      break;
+
+    case 'cursor_dot':
+      // Show a dot/ring at the given screen coordinate
+      if (glitchEffects && msg.x != null && msg.y != null) {
+        glitchEffects.showCursorDot(msg.x, msg.y, msg.duration_ms || 800);
+      }
+      break;
+
+    case 'highlight':
+      // Highlight a rectangular screen region
+      if (glitchEffects && msg.rect_x != null) {
+        glitchEffects.showHighlight(
+          msg.rect_x, msg.rect_y, msg.rect_w, msg.rect_h,
+          msg.duration_ms || 1200
+        );
+      }
+      break;
+
+    default:
+      console.log('[Overlay] Unknown action:', action);
+  }
 }
 
 // ─── Voice State Handler (Issue #1440) ────────────────────────
@@ -504,7 +537,7 @@ function handleVoiceStateMessage(msg) {
       glitchEffects.triggerChromatic('normal');
     } else if (voiceState === 'thinking') {
       glitchEffects.triggerChromatic('intense');
-    } else if (voiceState === 'listening') {
+    } else if (voiceState === 'listening' || voiceState === 'speaking') {
       glitchEffects.triggerChromatic('normal');
     }
   }
@@ -618,6 +651,10 @@ function handleBriefingMessage(msg) {
     case 'briefing_start':
       console.log('[Overlay] Briefing started');
       briefingInProgress = true;
+
+      // Cancel demo mode auto-start — real data is arriving
+      if (demoMode) demoMode.cancelAutoStart();
+
       // Play boot sequence animation
       if (panelTransitions) {
         panelTransitions.playBootSequence(
@@ -690,7 +727,6 @@ checkFirstBootOrAbsence();
 initReasoningChain();
 
 // ─── Initialize Phone Call Overlay ──────────────────────────
-let phoneCallOverlay = null;
 
 function initPhoneCallOverlay() {
   if (!window.PhoneCallOverlay) {
@@ -722,6 +758,53 @@ console.log('[Overlay]   phoneCallOverlay:', !!phoneCallOverlay);
 console.log('[Overlay]   hudPanel:', !!hudPanel);
 console.log('[Overlay]   sphereContainer:', !!sphereContainer);
 console.log('[Overlay] ═══════════════════');
+
+// ─── Fallback Data Loader ───────────────────────────────────
+// If no briefing arrives within 5s, fetch data directly via Electron IPC
+// (weather, system metrics, news). This ensures panels aren't empty
+// when the daemon briefing flow doesn't fire.
+const FALLBACK_DATA_TIMEOUT = 5000;
+
+setTimeout(async () => {
+  if (briefingInProgress) return; // briefing is active, no need
+
+  const api = window.overlayAPI;
+  if (!api) return;
+
+  console.log('[Overlay] No briefing received — loading fallback data...');
+
+  // Weather
+  if (systemStatus && api.getWeather) {
+    try {
+      const weather = await api.getWeather();
+      if (weather) systemStatus.setWeather(weather);
+    } catch (e) {
+      console.warn('[Overlay] Fallback weather fetch failed:', e);
+    }
+  }
+
+  // System metrics
+  if (systemStatus && api.getSystemMetrics) {
+    try {
+      const metrics = await api.getSystemMetrics();
+      if (metrics) systemStatus.setSystemMetrics(metrics);
+    } catch (e) {
+      console.warn('[Overlay] Fallback metrics fetch failed:', e);
+    }
+  }
+
+  // News feed
+  if (newsFeed && api.getNewsFeed) {
+    try {
+      const articles = await api.getNewsFeed();
+      if (articles && Array.isArray(articles)) {
+        articles.forEach(article => newsFeed.addArticle(article));
+      }
+    } catch (e) {
+      console.warn('[Overlay] Fallback news fetch failed:', e);
+    }
+  }
+}, FALLBACK_DATA_TIMEOUT);
 
 // ─── Tray Commands ──────────────────────────────────────────
 if (window.overlayAPI) {

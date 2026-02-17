@@ -21,7 +21,7 @@
 
 /**
  * Panel slot definitions.
- * Each slot has a CSS positioning strategy relative to the HUD panel.
+ * Each slot has a CSS positioning strategy relative to its region column.
  *
  * @enum {string}
  */
@@ -29,32 +29,28 @@ const PanelSlot = {
   LEFT: 'left',
   RIGHT: 'right',
   BOTTOM_LEFT: 'bottom-left',
+  BOTTOM_RIGHT: 'bottom-right',
   TOP_FLOAT: 'top-float',
 };
 
 /**
  * Slot → CSS style map.
- * Panels partially extend beyond the HUD boundary.
+ * Panels are now placed inside their region column containers (not overflowing HUD).
  */
 const SLOT_STYLES = {
   [PanelSlot.LEFT]: {
-    top: '10%',
-    left: '-120px',        // 40% of 300px overflows left
     animation: 'slide-in-left 0.3s ease-out',
   },
   [PanelSlot.RIGHT]: {
-    top: '10%',
-    right: '-120px',       // 40% of 300px overflows right
     animation: 'slide-in-right 0.3s ease-out',
   },
   [PanelSlot.BOTTOM_LEFT]: {
-    bottom: '-80px',       // 40% of 200px overflows bottom
-    left: '-100px',
+    animation: 'slide-in-bottom 0.3s ease-out',
+  },
+  [PanelSlot.BOTTOM_RIGHT]: {
     animation: 'slide-in-bottom 0.3s ease-out',
   },
   [PanelSlot.TOP_FLOAT]: {
-    top: '-30px',
-    right: '15%',
     animation: 'fade-in 0.4s ease-out',
   },
 };
@@ -250,14 +246,12 @@ class TerminalPanel {
     this._element.style.width = `${this.width}px`;
     this._element.style.height = `${this.height}px`;
     this._element.style.display = 'none'; // hidden by default
+    this._element.style.position = 'relative';  // flow in region column
+    this._element.style.flexShrink = '0';
 
-    // Apply slot positioning
+    // Slot animation only (positioning handled by region containers)
     const slotStyle = SLOT_STYLES[this.slot] || {};
-    Object.entries(slotStyle).forEach(([key, value]) => {
-      if (key !== 'animation') {
-        this._element.style[key] = value;
-      }
-    });
+    // No positional styles applied — those come from the grid region
 
     // Header
     const header = document.createElement('div');
