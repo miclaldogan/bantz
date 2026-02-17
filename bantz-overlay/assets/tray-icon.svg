@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
+  <!-- Bantz tray icon: orange terminal prompt -->
+  <rect width="22" height="22" rx="4" fill="#1a1a2e"/>
+  <text x="3" y="16" font-family="monospace" font-size="14" font-weight="bold" fill="#ff8c00">B&gt;</text>
+  <!-- Connection status dot (will be overlaid programmatically) -->
+</svg>

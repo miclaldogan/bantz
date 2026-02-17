@@ -562,3 +562,43 @@ checkFirstBootOrAbsence();
 
 // ─── Initialize Reasoning Chain ─────────────────────────────
 initReasoningChain();
+
+// ─── Tray Commands ──────────────────────────────────────────
+if (window.overlayAPI) {
+  // Effect intensity from tray
+  if (window.overlayAPI.onEffectIntensity) {
+    window.overlayAPI.onEffectIntensity((level) => {
+      if (glitchEffects) {
+        if (level === 'off') {
+          glitchEffects.setEnabled(false);
+        } else {
+          glitchEffects.setEnabled(true);
+          glitchEffects.setIntensity(level);
+        }
+      }
+      console.log('[Overlay] Effect intensity:', level);
+    });
+  }
+
+  // Animation speed from tray
+  if (window.overlayAPI.onAnimationSpeed) {
+    window.overlayAPI.onAnimationSpeed((speed) => {
+      if (panelTransitions) panelTransitions.setSpeed(speed);
+      console.log('[Overlay] Animation speed:', speed);
+    });
+  }
+
+  // Panel toggle from tray
+  if (window.overlayAPI.onTogglePanel) {
+    window.overlayAPI.onTogglePanel(({ panelId, visible }) => {
+      if (layoutEngine) {
+        if (visible) {
+          layoutEngine.show(panelId);
+        } else {
+          layoutEngine.hide(panelId);
+        }
+      }
+      console.log('[Overlay] Panel toggle:', panelId, visible);
+    });
+  }
+}
