@@ -1,9 +1,48 @@
 /*
- * Bantz Overlay HUD — Base Styles (scaffold)
+ * Bantz Overlay HUD — Styles
  *
- * Minimal styling to verify the transparent window works.
- * Full glass-morphism, CRT, and panel styles arrive in #1400.
+ * Transparent orange panel with glass morphism (backdrop-filter),
+ * CRT scanline overlay, and terminal-aesthetic sub-panels.
+ *
+ * Color Palette:
+ *   Base:     rgba(255, 140, 0, 0.08)  — orange transparent
+ *   Accent:   #00e5ff / rgba(0,229,255) — cyan
+ *   Text:     #e0e0e0 / rgba(255,180,60) — cream / amber
+ *   Muted:    rgba(74,153,153,0.4)  — reasoning chain
+ *   Border:   rgba(255,140,0,0.18)  — warm border
+ *   Panel BG: rgba(10,12,16,0.85)   — dark terminal
  */
+
+/* ── CSS Variables ──────────────────────────────────────────────── */
+:root {
+  --color-base: rgba(255, 140, 0, 0.08);
+  --color-base-border: rgba(255, 140, 0, 0.18);
+  --color-base-border-glow: rgba(255, 140, 0, 0.30);
+  --color-accent: #00e5ff;
+  --color-accent-dim: rgba(0, 229, 255, 0.5);
+  --color-text: #e0e0e0;
+  --color-text-amber: rgba(255, 180, 60, 0.9);
+  --color-text-muted: rgba(74, 153, 153, 0.4);
+  --color-panel-bg: rgba(10, 12, 16, 0.85);
+  --color-panel-border: rgba(0, 229, 255, 0.15);
+  --color-panel-header: rgba(0, 229, 255, 0.08);
+  --color-danger: #ff4444;
+  --color-success: #44ff44;
+  --color-warning: #ffaa00;
+
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono',
+               'Consolas', monospace;
+  --radius-panel: 6px;
+  --radius-hud: 10px;
+
+  /* Glass morphism */
+  --glass-blur: 18px;
+  --glass-saturate: 1.4;
+
+  /* CRT effect intensity (0 = off) */
+  --crt-opacity: 0.04;
+  --crt-flicker-opacity: 0.015;
+}
 
 /* ── Reset ──────────────────────────────────────────────────────── */
 *, *::before, *::after {
@@ -18,13 +57,10 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: transparent;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono',
-               'Consolas', monospace;
-  color: #e0e0e0;
+  font-family: var(--font-mono);
+  color: var(--color-text);
   -webkit-font-smoothing: antialiased;
   user-select: none;
-  /* Make the entire page click-through; interactive elements
-     will call overlayAPI.enableMouse() on hover. */
   pointer-events: none;
 }
 
@@ -46,16 +82,76 @@ html, body {
   min-width: 600px;
   min-height: 400px;
 
-  /* Transparent orange base — glass effect placeholder */
-  background: rgba(255, 140, 0, 0.06);
-  border: 1px solid rgba(255, 140, 0, 0.15);
-  border-radius: 8px;
+  /* Glass morphism: transparent orange base + blur */
+  background: var(--color-base);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+
+  border: 1px solid var(--color-base-border);
+  border-radius: var(--radius-hud);
+  box-shadow:
+    0 0 40px rgba(255, 140, 0, 0.05),
+    0 0 80px rgba(255, 140, 0, 0.02),
+    inset 0 0 60px rgba(255, 140, 0, 0.02);
 
   display: flex;
   flex-direction: column;
-
-  /* Panel itself is interactive */
+  overflow: visible; /* Allow sub-panels to overflow edges */
   pointer-events: auto;
+}
+
+/* ── CRT Scanline Overlay ───────────────────────────────────────── */
+.hud-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-hud);
+  pointer-events: none;
+  z-index: 1000;
+
+  /* Horizontal scanlines every 2px */
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 1px,
+    rgba(0, 0, 0, var(--crt-opacity)) 1px,
+    rgba(0, 0, 0, var(--crt-opacity)) 2px
+  );
+}
+
+/* ── CRT Flicker Effect ─────────────────────────────────────────── */
+.hud-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-hud);
+  pointer-events: none;
+  z-index: 999;
+  opacity: var(--crt-flicker-opacity);
+  animation: crt-flicker 8s ease-in-out infinite;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.03) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+
+@keyframes crt-flicker {
+  0%, 95%, 100% { opacity: var(--crt-flicker-opacity); }
+  96% { opacity: 0.04; }
+  97% { opacity: 0.01; }
+  98% { opacity: 0.05; }
+}
+
+/* ── Panel Border Glow Pulse ────────────────────────────────────── */
+@keyframes border-glow {
+  0%, 100% { border-color: var(--color-base-border); }
+  50% { border-color: var(--color-base-border-glow); }
+}
+
+.hud-panel.glow {
+  animation: border-glow 4s ease-in-out infinite;
 }
 
 /* ── Status Indicator ───────────────────────────────────────────── */
@@ -66,29 +162,34 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  opacity: 0.6;
+  font-size: 10px;
+  opacity: 0.5;
+  z-index: 10;
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: #ff4444;
+  background: var(--color-danger);
   transition: background 0.3s;
 }
 
 .status-dot.connected {
-  background: #44ff44;
+  background: var(--color-success);
+  box-shadow: 0 0 4px rgba(68, 255, 68, 0.4);
 }
 
 .status-dot.connecting {
-  background: #ffaa00;
+  background: var(--color-warning);
   animation: pulse-dot 1.5s ease-in-out infinite;
 }
 
 .status-text {
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 9px;
 }
 
 @keyframes pulse-dot {
@@ -103,44 +204,199 @@ html, body {
   align-items: center;
   justify-content: center;
   position: relative;
+  overflow: visible;
 }
 
-/* ── Sphere Container (placeholder) ─────────────────────────────── */
+/* ── Sphere Container ───────────────────────────────────────────── */
 .sphere-container {
-  width: 200px;
-  height: 200px;
+  width: 220px;
+  height: 220px;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.3;
+  position: relative;
 }
 
 /* ── Speech Area (bottom) ───────────────────────────────────────── */
 .speech-area {
-  padding: 12px 20px 16px;
+  padding: 10px 24px 18px;
+  position: relative;
+  z-index: 5;
 }
 
+/* ── Reasoning Chain (above speech) ─────────────────────────────── */
 .reasoning-chain {
   font-size: 11px;
-  color: rgba(74, 153, 153, 0.4);
-  min-height: 16px;
+  color: var(--color-text-muted);
+  min-height: 14px;
   margin-bottom: 4px;
+  line-height: 1.4;
+  max-height: 32px;
+  overflow: hidden;
+  transition: opacity 0.3s;
 }
 
+.reasoning-chain:empty {
+  display: none;
+}
+
+/* ── Typewriter Output ──────────────────────────────────────────── */
 .typewriter-output {
   font-size: 15px;
-  color: rgba(255, 180, 60, 0.9);
-  line-height: 1.5;
+  color: var(--color-text-amber);
+  line-height: 1.6;
   min-height: 24px;
+  max-height: calc(1.6em * 4); /* 4 visible lines */
+  overflow-y: auto;
+  scrollbar-width: none;
+  letter-spacing: 0.3px;
+}
+
+.typewriter-output::-webkit-scrollbar {
+  display: none;
 }
 
 /* ── Cursor blink ───────────────────────────────────────────────── */
 .cursor {
   animation: blink 1s step-start infinite;
-  color: rgba(255, 180, 60, 0.8);
+  color: var(--color-text-amber);
 }
 
 @keyframes blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
+}
+
+/* ── Terminal Sub-Panel Base ────────────────────────────────────── */
+.terminal-panel {
+  position: absolute;
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-panel-border);
+  border-radius: var(--radius-panel);
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.4),
+    0 0 1px rgba(0, 229, 255, 0.1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+/* Panel header bar (title with ●●● dots) */
+.terminal-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--color-panel-header);
+  border-bottom: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+  color: var(--color-accent-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: default;
+}
+
+.terminal-panel-header .dots {
+  display: flex;
+  gap: 3px;
+}
+
+.terminal-panel-header .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(0, 229, 255, 0.3);
+}
+
+.terminal-panel-header .dot:nth-child(1) { background: rgba(255, 95, 86, 0.6); }
+.terminal-panel-header .dot:nth-child(2) { background: rgba(255, 189, 46, 0.6); }
+.terminal-panel-header .dot:nth-child(3) { background: rgba(39, 201, 63, 0.6); }
+
+.terminal-panel-header .title {
+  flex: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Panel content area */
+.terminal-panel-content {
+  flex: 1;
+  padding: 8px 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(0, 229, 255, 0.7);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 229, 255, 0.2) transparent;
+}
+
+.terminal-panel-content::-webkit-scrollbar {
+  width: 3px;
+}
+
+.terminal-panel-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 229, 255, 0.2);
+  border-radius: 3px;
+}
+
+/* ── Chromatic Aberration (on state change) ─────────────────────── */
+@keyframes chromatic-aberration {
+  0% {
+    text-shadow: none;
+  }
+  25% {
+    text-shadow: -1px 0 rgba(255, 0, 0, 0.3), 1px 0 rgba(0, 100, 255, 0.3);
+  }
+  50% {
+    text-shadow: -2px 0 rgba(255, 0, 0, 0.2), 2px 0 rgba(0, 100, 255, 0.2);
+  }
+  75% {
+    text-shadow: -1px 0 rgba(255, 0, 0, 0.1), 1px 0 rgba(0, 100, 255, 0.1);
+  }
+  100% {
+    text-shadow: none;
+  }
+}
+
+.chromatic-flash {
+  animation: chromatic-aberration 0.5s ease-out;
+}
+
+/* ── Panel Slide-In Animations ──────────────────────────────────── */
+@keyframes slide-in-left {
+  from { transform: translateX(-40px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(40px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slide-in-bottom {
+  from { transform: translateY(30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* ── Reduced Motion ─────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .hud-panel::before,
+  .hud-panel::after {
+    display: none;
+  }
 }
