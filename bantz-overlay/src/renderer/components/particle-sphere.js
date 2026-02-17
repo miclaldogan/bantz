@@ -125,6 +125,9 @@ class ParticleSphere {
     this._rotationSpeed = CONFIG.rotationSpeed;
     this._running = false;
 
+    // Plugin system: objects with update() called each frame
+    this._plugins = [];
+
     this._init();
   }
 
@@ -194,10 +197,35 @@ class ParticleSphere {
   }
 
   /**
+   * Register a plugin (e.g., ParticleScatter) to be updated each frame.
+   * Plugin must have an update() method.
+   * @param {{ update: Function, dispose?: Function }} plugin
+   */
+  addPlugin(plugin) {
+    if (plugin && typeof plugin.update === 'function') {
+      this._plugins.push(plugin);
+    }
+  }
+
+  /**
+   * Remove a registered plugin.
+   * @param {{ update: Function }} plugin
+   */
+  removePlugin(plugin) {
+    const idx = this._plugins.indexOf(plugin);
+    if (idx !== -1) this._plugins.splice(idx, 1);
+  }
+
+  /**
    * Clean up Three.js resources.
    */
   dispose() {
     this.stop();
+    // Dispose plugins
+    for (const plugin of this._plugins) {
+      if (typeof plugin.dispose === 'function') plugin.dispose();
+    }
+    this._plugins = [];
     if (this._geometry) this._geometry.dispose();
     if (this._points && this._points.material) this._points.material.dispose();
     if (this._renderer) {
@@ -284,6 +312,11 @@ class ParticleSphere {
     // Rotate the sphere
     if (this._points) {
       this._points.rotation.y += this._rotationSpeed;
+    }
+
+    // Update plugins (scatter, state animations, etc.)
+    for (const plugin of this._plugins) {
+      plugin.update();
     }
 
     this._renderer.render(this._scene, this._camera);
