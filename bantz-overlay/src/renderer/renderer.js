@@ -118,6 +118,20 @@ function initTypewriter() {
   console.log('[Overlay] Typewriter initialized');
 }
 
+// ─── Reasoning Chain Display ─────────────────────────────────
+let reasoningChain = null;
+
+function initReasoningChain() {
+  const reasoningContainer = document.getElementById('reasoning-chain');
+  if (!reasoningContainer || !window.ReasoningChain) {
+    console.warn('[Overlay] ReasoningChain not available');
+    return;
+  }
+  reasoningChain = new window.ReasoningChain(reasoningContainer);
+  window.bantzReasoningChain = reasoningChain;
+  console.log('[Overlay] Reasoning chain initialized');
+}
+
 // ─── Mouse Interaction Zones ──────────────────────────────────
 // When the mouse enters the HUD panel, we enable mouse events
 // so the user can interact with panels/sphere. When it leaves,
@@ -212,10 +226,25 @@ function handleStateMessage(msg) {
       typewriter.addToken(msg.speech_token);
     }
     if (msg.speech_start) {
+      // End reasoning when speech begins
+      if (reasoningChain) reasoningChain.end();
       typewriter.beginSpeech();
     }
     if (msg.speech_end) {
       typewriter.endSpeech();
+    }
+  }
+
+  // Handle reasoning tokens
+  if (reasoningChain) {
+    if (msg.reasoning_token) {
+      reasoningChain.addToken(msg.reasoning_token);
+    }
+    if (msg.reasoning_start) {
+      reasoningChain.begin();
+    }
+    if (msg.reasoning_end) {
+      reasoningChain.end();
     }
   }
 
@@ -326,3 +355,6 @@ initSystemStatus();
 
 // ─── Initialize Typewriter ─────────────────────────────────
 initTypewriter();
+
+// ─── Initialize Reasoning Chain ─────────────────────────────
+initReasoningChain();
