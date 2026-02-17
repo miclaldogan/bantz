@@ -451,6 +451,7 @@ class OrchestratorLoop:
             # System routes
             ("system", "time"): ["time.now"],
             ("system", "status"): ["system.status"],
+            ("system", "volume"): ["system.volume"],
             ("system", "query"): ["time.now"],  # Default for system queries
         }
 

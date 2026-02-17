@@ -75,6 +75,7 @@ _FALLBACK_TOOL_REGISTRY: dict[str, ToolRisk] = {
     "weather.current": ToolRisk.SAFE,
     "weather.forecast": ToolRisk.SAFE,
     "system.status": ToolRisk.SAFE,
+    "system.volume": ToolRisk.SAFE,
     "system.screenshot": ToolRisk.SAFE,
     "calendar.find_free_slots": ToolRisk.SAFE,
     "file.read": ToolRisk.SAFE,

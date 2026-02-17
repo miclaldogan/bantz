@@ -519,12 +519,13 @@ def _register_system(registry: "ToolRegistry") -> int:
     try:
         from bantz.tools.system_tools import (system_notify_tool,
                                               system_screenshot_tool,
-                                              system_status)
+                                              system_status,
+                                              system_volume_tool)
     except ImportError:
         return 0
 
     n = 0
-    n += _reg(registry, "system.info", "Get system information (CPU, RAM, disk).",
+    n += _reg(registry, "system.status", "Get system information (CPU, RAM, disk).",
               _obj(), system_status)
     n += _reg(registry, "system.notify", "Show desktop notification.",
               _obj(("message", "string", "Notification message"), required=["message"]),
@@ -532,6 +533,11 @@ def _register_system(registry: "ToolRegistry") -> int:
     n += _reg(registry, "system.screenshot", "Take a screenshot.",
               _obj(("region", "string", "Screen region (optional)")),
               system_screenshot_tool, risk="low")
+    n += _reg(registry, "system.volume",
+              "Get or set system audio volume. action: get/set/up/down/mute/unmute.",
+              _obj(("level", "integer", "Volume level 0-100"),
+                   ("action", "string", "get|set|up|down|mute|unmute")),
+              system_volume_tool, risk="low")
     return n
 
 

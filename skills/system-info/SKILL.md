@@ -11,7 +11,7 @@ tags:
 
 triggers:
   - pattern: "(?i)(sistem|system|bilgisayar|pc).*(durumu|bilgi|info|sağlık|health|nasıl)"
-    intent: system.info
+    intent: system.status
     examples:
       - "sistem durumu"
       - "bilgisayarım nasıl"

@@ -384,7 +384,7 @@ class JarvisLLMOrchestrator:
         "google.contacts.search", "google.contacts.get", "google.contacts.create",
         "google.keep.list", "google.keep.create", "google.keep.search",
         "news.latest", "news.search",
-        "time.now", "system.status",
+        "time.now", "system.status", "system.volume",
     })
 
     # Issue #1275: Class-level registry reference for route-based schema injection
@@ -481,7 +481,7 @@ TIME: 1-6 without "morning" → PM (one→13, two→14, three→15, four→16, f
     # ── DETAIL BLOCK (~120 tokens) ─── stripped when budget tight ────────
     _SYSTEM_PROMPT_DETAIL = """
 GMAIL: gmail.list_messages query="from:X subject:Y after:YYYY/MM/DD". gmail.smart_search natural_query in plain language ("starred","social","promotions","important").
-SYSTEM: "what time"→time.now (system_intent="time"), "cpu/ram/status"→system.status (system_intent="status"), "battery"→system.status (system_intent="battery").
+SYSTEM: "what time"→time.now (system_intent="time"), "cpu/ram/status"→system.status (system_intent="status"), "battery"→system.status (system_intent="battery"), "volume/ses"→system.volume (system_intent="volume").
 CONTACTS: "list contacts"→google.contacts.search (contacts_intent="list"), "search contacts"→google.contacts.search (contacts_intent="search").
 KEEP: "create a note"→google.keep.create (keep_intent="create"), "show my notes"→google.keep.list (keep_intent="list"), "search notes"→google.keep.search (keep_intent="search").
 NEWS: "show latest news"→news.latest (news_intent="briefing"), "what's trending"→news.latest (news_intent="briefing"), "tech news"→news.latest (news_intent="briefing"), "search news"→news.search (news_intent="search").
@@ -2083,6 +2083,7 @@ ASSISTANT (JSON only):"""
         ("system", "status"): "system.status",
         ("system", "battery"): "system.status",
         ("system", "disk"): "system.status",
+        ("system", "volume"): "system.volume",
         # Issue #1360: contacts route tool resolution
         ("contacts", "list"): "google.contacts.search",
         ("contacts", "search"): "google.contacts.search",

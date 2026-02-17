@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 import time
 from typing import Any
 
@@ -181,3 +183,101 @@ def system_screenshot_tool(*, monitor: int = 0, **_: Any) -> dict[str, Any]:
     except Exception as e:
         logger.warning("system.screenshot failed: %s", e)
         return {"ok": False, "error": str(e)}
+
+
+# ── system_volume (Issue #1385) ─────────────────────────────────────
+
+def system_volume_tool(
+    *, level: int | str | None = None, action: str = "get", **_: Any
+) -> dict[str, Any]:
+    """Get or set system audio volume using pactl (PipeWire/PulseAudio).
+
+    Args:
+        level: Target volume 0-100 (for action="set"). Ignored for "get".
+        action: "get" | "set" | "up" | "down" | "mute" | "unmute"
+
+    Returns:
+        dict with ok, volume (0-100), muted (bool), and optional error.
+    """
+    if not shutil.which("pactl"):
+        return {"ok": False, "error": "pactl not installed (PulseAudio/PipeWire required)"}
+
+    def _get_volume() -> dict[str, Any]:
+        """Read current volume and mute state from default sink."""
+        try:
+            proc = subprocess.run(
+                ["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
+                capture_output=True, text=True, timeout=5,
+            )
+            vol_pct: int | None = None
+            if proc.returncode == 0:
+                # Output like: "Volume: front-left: 42000 /  64% / -11.74 dB, ..."
+                for part in proc.stdout.split("/"):
+                    part = part.strip()
+                    if part.endswith("%"):
+                        try:
+                            vol_pct = int(part[:-1].strip())
+                            break
+                        except ValueError:
+                            continue
+        except Exception:
+            vol_pct = None
+
+        muted: bool | None = None
+        try:
+            proc = subprocess.run(
+                ["pactl", "get-sink-mute", "@DEFAULT_SINK@"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if proc.returncode == 0:
+                muted = "yes" in proc.stdout.lower()
+        except Exception:
+            pass
+
+        return {"volume": vol_pct, "muted": muted}
+
+    action = str(action).lower().strip()
+
+    if action == "get":
+        info = _get_volume()
+        return {"ok": True, **info}
+
+    try:
+        if action == "set":
+            val = int(level) if level is not None else 50
+            val = max(0, min(150, val))  # clamp to 0-150%
+            subprocess.run(
+                ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{val}%"],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+        elif action == "up":
+            subprocess.run(
+                ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%"],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+        elif action == "down":
+            subprocess.run(
+                ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+        elif action == "mute":
+            subprocess.run(
+                ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1"],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+        elif action == "unmute":
+            subprocess.run(
+                ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+        else:
+            return {"ok": False, "error": f"Unknown action: {action}. Use get/set/up/down/mute/unmute."}
+    except subprocess.CalledProcessError as e:
+        return {"ok": False, "error": f"pactl failed: {e.stderr or str(e)}"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "pactl timeout"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    info = _get_volume()
+    return {"ok": True, "action": action, **info}
