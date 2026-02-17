@@ -2921,6 +2921,8 @@ class OrchestratorLoop:
                     "gmail_list_messages", "gmail_search", "gmail_get_message",
                     "list_events", "find_free_slots", "system_info",
                     "gmail_list_labels",
+                    "weather.get_current", "weather.get_forecast",
+                    "news.latest", "news.briefing", "news.category",
                 }
                 if (
                     tool_name in _CACHEABLE_TOOLS

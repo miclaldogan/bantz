@@ -113,6 +113,8 @@ class CrossAnalyzer:
         self.add_rule("high_email_volume", _rule_high_email_volume)
         self.add_rule("busy_calendar_day", _rule_busy_calendar_day)
         self.add_rule("weather_extreme", _rule_weather_extreme)
+        self.add_rule("weather_calendar_cross", _rule_weather_calendar_cross)
+        self.add_rule("news_calendar_cross", _rule_news_calendar_cross)
 
 
 # ── Built-in Rule Implementations ──────────────────────────────
@@ -215,6 +217,155 @@ def _rule_weather_extreme(tool_results: Dict[str, Any]) -> Tuple[List[Insight], 
                 message=f"🔥 Aşırı sıcak: {temp}°C! Bol su için ve güneşten korunun.",
                 severity=InsightSeverity.CRITICAL,
                 source_tools=["weather.get_current"],
+            ))
+
+    return insights, suggestions
+
+
+def _rule_weather_calendar_cross(tool_results: Dict[str, Any]) -> Tuple[List[Insight], List[Suggestion]]:
+    """Cross-analyze weather + calendar: warn about outdoor events in bad weather (Issue #838).
+
+    Checks if any calendar event has outdoor-related keywords in its title
+    or location while weather conditions are unfavorable (rain, storm, cold).
+    """
+    insights: List[Insight] = []
+    suggestions: List[Suggestion] = []
+
+    weather_data = tool_results.get("weather", {})
+    cal_data = tool_results.get("calendar", {})
+
+    if not isinstance(weather_data, dict) or not isinstance(cal_data, dict):
+        return insights, suggestions
+
+    # Navigate to actual data
+    if "data" in weather_data and isinstance(weather_data["data"], dict):
+        weather_data = weather_data["data"]
+
+    rain_prob = weather_data.get("rain_probability", 0)
+    condition = str(weather_data.get("condition", "")).lower()
+    temp = weather_data.get("temperature")
+
+    # Is weather unfavorable?
+    bad_conditions = {"rain", "storm", "thunder", "snow", "blizzard", "hail",
+                      "yağmur", "fırtına", "kar", "dolu"}
+    is_rainy = rain_prob > 0.5 or any(kw in condition for kw in bad_conditions)
+    is_cold = isinstance(temp, (int, float)) and temp <= 0
+    is_hot = isinstance(temp, (int, float)) and temp >= 38
+
+    if not (is_rainy or is_cold or is_hot):
+        return insights, suggestions
+
+    # Check calendar events for outdoor keywords
+    events = cal_data.get("events", cal_data.get("data", []))
+    if not isinstance(events, list):
+        return insights, suggestions
+
+    outdoor_keywords = {
+        "park", "yürüyüş", "piknik", "koşu", "bisiklet", "bahçe",
+        "açık hava", "outdoor", "walk", "run", "bike", "garden",
+        "swimming", "yüzme", "teras", "balkon", "stadyum", "stadium",
+        "camping", "kamp", "hiking", "trekking", "sahil", "beach",
+        "plaj", "göl", "lake", "orman", "forest",
+    }
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        title = str(event.get("title", event.get("summary", ""))).lower()
+        location = str(event.get("location", "")).lower()
+        combined = f"{title} {location}"
+
+        if any(kw in combined for kw in outdoor_keywords):
+            start = event.get("start", event.get("start_time", ""))
+            if isinstance(start, dict):
+                start = start.get("dateTime", start.get("date", ""))
+
+            reasons = []
+            if is_rainy:
+                reasons.append(f"rain probability {int(rain_prob * 100)}%")
+            if is_cold:
+                reasons.append(f"cold ({temp}°C)")
+            if is_hot:
+                reasons.append(f"extreme heat ({temp}°C)")
+
+            reason_str = ", ".join(reasons)
+            insights.append(Insight(
+                message=(
+                    f"⚠️ Outdoor event '{event.get('title', event.get('summary', '?'))}' "
+                    f"at {start} may be affected: {reason_str}."
+                ),
+                severity=InsightSeverity.WARNING,
+                source_tools=["weather.get_current", "calendar.list_events"],
+                data={"event": event.get("title", ""), "weather_reason": reason_str},
+            ))
+            suggestions.append(Suggestion(
+                text=f"I can reschedule '{event.get('title', event.get('summary', '?'))}' to a better day.",
+                action="calendar.list_events",
+                action_params={"window_hint": "tomorrow"},
+            ))
+
+    return insights, suggestions
+
+
+def _rule_news_calendar_cross(tool_results: Dict[str, Any]) -> Tuple[List[Insight], List[Suggestion]]:
+    """Suggest relevant news reading before meetings with topic overlap.
+
+    If a calendar event title contains keywords that match news article titles
+    or categories, suggest catching up on relevant news before the meeting.
+    """
+    insights: List[Insight] = []
+    suggestions: List[Suggestion] = []
+
+    calendar_data = tool_results.get("calendar", {})
+    news_data = tool_results.get("news", {})
+
+    events = []
+    if isinstance(calendar_data, dict):
+        events = calendar_data.get("events", calendar_data.get("items", []))
+    elif isinstance(calendar_data, list):
+        events = calendar_data
+
+    articles = []
+    if isinstance(news_data, dict):
+        articles = news_data.get("articles", news_data.get("headlines", []))
+    elif isinstance(news_data, list):
+        articles = news_data
+
+    if not events or not articles:
+        return insights, suggestions
+
+    # Build a keyword set from article titles
+    article_keywords: set[str] = set()
+    for article in articles[:20]:
+        if isinstance(article, dict):
+            title = (article.get("title") or "").lower()
+            for word in title.split():
+                if len(word) > 4:  # Skip short words
+                    article_keywords.add(word)
+
+    # Check each event for keyword overlap
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_title = (event.get("title") or event.get("summary") or "").lower()
+        event_words = {w for w in event_title.split() if len(w) > 4}
+        overlap = event_words & article_keywords
+
+        if len(overlap) >= 1:
+            matching = ", ".join(sorted(overlap)[:3])
+            insights.append(Insight(
+                message=(
+                    f"📰 Your event '{event.get('title', event.get('summary', '?'))}' "
+                    f"has related news (keywords: {matching})."
+                ),
+                severity=InsightSeverity.INFO,
+                source_tools=["news.latest", "calendar.list_events"],
+                data={"event": event.get("title", ""), "keywords": list(overlap)},
+            ))
+            suggestions.append(Suggestion(
+                text=f"Catch up on news related to '{event.get('title', event.get('summary', '?'))}' before your meeting.",
+                action="news.search",
+                action_params={"query": matching},
             ))
 
     return insights, suggestions
