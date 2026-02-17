@@ -10,6 +10,7 @@
 
 import { ParticleSphere } from './components/particle-sphere.js';
 import { ParticleScatter } from './components/particle-scatter.js';
+import { SphereStateAnimator } from './components/sphere-state.js';
 
 // ─── DOM References ───────────────────────────────────────────
 const hudPanel = document.getElementById('hud-panel');
@@ -20,6 +21,7 @@ const sphereContainer = document.getElementById('sphere-container');
 
 // ─── Particle Sphere ───────────────────────────────────────────
 let sphere = null;
+let stateAnimator = null;
 
 function initSphere() {
   if (!sphereContainer) {
@@ -32,11 +34,16 @@ function initSphere() {
   const scatter = new ParticleScatter(sphere, sphereContainer);
   sphere.addPlugin(scatter);
 
+  // Attach state animator plugin
+  stateAnimator = new SphereStateAnimator(sphere);
+  sphere.addPlugin(stateAnimator);
+
   sphere.start();
 
-  // Expose for debugging and external access (e.g., state animations)
+  // Expose for debugging and external access
   window.bantzSphere = sphere;
   window.bantzScatter = scatter;
+  window.bantzStateAnimator = stateAnimator;
 
   // Handle window resize
   window.addEventListener('resize', () => {
@@ -127,7 +134,10 @@ if (window.overlayAPI && window.overlayAPI.onDaemonMessage) {
 // ─── Message Handlers (stubs) ─────────────────────────────────
 
 function handleStateMessage(msg) {
-  // Will be implemented in #1404 (sphere state), #1409 (typewriter)
+  // Update sphere state animation based on assistant state
+  if (stateAnimator && msg.state) {
+    stateAnimator.setState(msg.state);
+  }
   console.log('[Overlay] State:', msg.state);
 }
 
