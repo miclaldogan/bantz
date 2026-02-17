@@ -1,36 +1,44 @@
 /**
- * Bantz Overlay — Particle Cube Component
+ * Bantz Overlay — Particle Sphere Component
  *
- * A rotating cube of cyan dot particles rendered with Three.js.
- * Particles are distributed along the edges and faces of the cube,
- * creating a wireframe-holographic look.
+ * A rotating sphere of cyan dot particles rendered with Three.js.
+ * Particles are distributed using Fibonacci sphere sampling for
+ * even, aesthetically pleasing coverage.
  *
  * Architecture:
  * - Uses Three.js Points with BufferGeometry
- * - Cube edge + face distribution for holographic wireframe
- * - Particles are small circular sprites (cyan #00e5ff)
+ * - Fibonacci spiral distribution for uniform sphere coverage
+ * - Larger, more prominent particles with size variation
+ * - Interactive: click/hover on sphere surface
+ * - State-responsive animation (idle/listening/thinking/speaking)
  *
- * @module particle-cube
+ * @module particle-sphere
  */
 
 import * as THREE from '../vendor/three.min.js';
 
 // ─── Configuration ──────────────────────────────────────────────
 const CONFIG = {
-  edgeParticles: 30,       // particles per edge (12 edges × 30 = 360)
-  faceParticles: 80,       // particles per face (6 faces × 80 = 480)
-  cubeSize: 80,            // half-size of cube
-  particleSize: 3.0,
+  sphereParticles: 700,    // total sphere surface particles
+  sphereRadius: 85,        // radius of the sphere
+  particleSize: 4.5,       // base particle size (larger = more prominent)
+  particleSizeVariation: 1.5, // random ± size variation
   color: 0x00e5ff,         // Cyan
-  colorDim: 0x00aacc,      // Dimmer cyan for faces
-  colorEdge: 0x66ffff,     // Bright cyan for edges
-  rotationSpeed: 0.003,    // radians per frame (idle) — dual axis
+  colorCore: 0x99ffff,     // Bright cyan for prominent dots
+  colorDim: 0x00aacc,      // Dimmer cyan for smaller dots
+  rotationSpeed: 0.002,    // radians per frame (idle) — dual axis
   cameraDistance: 240,
   glowColor: 0x00e5ff,
-  glowParticleCount: 100,
+  glowParticleCount: 120,
   glowRadius: 130,
   glowParticleSize: 5.0,
   glowOpacity: 0.12,
+  // Breathing/pulse animation
+  breatheSpeed: 0.008,     // radians per frame for pulse
+  breatheAmplitude: 0.08,  // scale oscillation ±8%
+  // Prominent dots (interactive highlights)
+  prominentCount: 30,      // number of larger "node" particles
+  prominentSize: 7.0,      // size of prominent particles
 };
 
 /**
@@ -87,79 +95,68 @@ function createGlowTexture() {
 }
 
 /**
- * Generate cube points — particles distributed along edges and faces.
+ * Generate sphere points using Fibonacci sphere distribution.
+ * Produces evenly-spaced particles on a sphere surface with
+ * prominent "node" particles interspersed.
  *
- * @returns {{ positions: Float32Array, colors: Float32Array, count: number }}
+ * @returns {{ positions: Float32Array, colors: Float32Array, sizes: Float32Array, count: number }}
  */
-function generateCubePoints() {
+function generateSpherePoints() {
   const positions = [];
   const colors = [];
-  const edgeColor = new THREE.Color(CONFIG.colorEdge);
-  const faceColor = new THREE.Color(CONFIG.colorDim);
-  const s = CONFIG.cubeSize;
+  const sizes = [];
+  const coreColor = new THREE.Color(CONFIG.colorCore);
+  const dimColor = new THREE.Color(CONFIG.colorDim);
+  const mainColor = new THREE.Color(CONFIG.color);
+  const n = CONFIG.sphereParticles;
+  const r = CONFIG.sphereRadius;
 
-  // Cube vertices
-  const verts = [
-    [-s, -s, -s], [s, -s, -s], [s, s, -s], [-s, s, -s],
-    [-s, -s, s],  [s, -s, s],  [s, s, s],  [-s, s, s],
-  ];
+  // Golden angle for Fibonacci sphere
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
 
-  // 12 edges (pairs of vertex indices)
-  const edges = [
-    [0,1],[1,2],[2,3],[3,0],  // back face
-    [4,5],[5,6],[6,7],[7,4],  // front face
-    [0,4],[1,5],[2,6],[3,7],  // connecting edges
-  ];
-
-  // Edge particles — bright, along wireframe
-  for (const [a, b] of edges) {
-    const va = verts[a], vb = verts[b];
-    for (let i = 0; i < CONFIG.edgeParticles; i++) {
-      const t = i / (CONFIG.edgeParticles - 1);
-      positions.push(
-        va[0] + (vb[0] - va[0]) * t,
-        va[1] + (vb[1] - va[1]) * t,
-        va[2] + (vb[2] - va[2]) * t
-      );
-      colors.push(edgeColor.r, edgeColor.g, edgeColor.b);
-    }
+  // Indices of prominent particles (evenly distributed)
+  const prominentStep = Math.floor(n / CONFIG.prominentCount);
+  const prominentSet = new Set();
+  for (let i = 0; i < CONFIG.prominentCount; i++) {
+    prominentSet.add(i * prominentStep);
   }
 
-  // Face particles — dimmer, scattered on each face
-  const faces = [
-    { normal: [0,0,-1], right: [1,0,0], up: [0,1,0] },  // back
-    { normal: [0,0,1],  right: [1,0,0], up: [0,1,0] },   // front
-    { normal: [-1,0,0], right: [0,0,1], up: [0,1,0] },   // left
-    { normal: [1,0,0],  right: [0,0,1], up: [0,1,0] },   // right
-    { normal: [0,1,0],  right: [1,0,0], up: [0,0,1] },   // top
-    { normal: [0,-1,0], right: [1,0,0], up: [0,0,1] },   // bottom
-  ];
+  for (let i = 0; i < n; i++) {
+    // Fibonacci sphere sampling
+    const y = 1 - (i / (n - 1)) * 2; // y goes from 1 to -1
+    const radiusAtY = Math.sqrt(1 - y * y);
+    const theta = goldenAngle * i;
 
-  for (const face of faces) {
-    const center = face.normal.map(n => n * s);
-    for (let i = 0; i < CONFIG.faceParticles; i++) {
-      const u = (Math.random() - 0.5) * 2 * s * 0.9; // slightly inset from edge
-      const v = (Math.random() - 0.5) * 2 * s * 0.9;
-      positions.push(
-        center[0] + face.right[0] * u + face.up[0] * v,
-        center[1] + face.right[1] * u + face.up[1] * v,
-        center[2] + face.right[2] * u + face.up[2] * v
+    const x = Math.cos(theta) * radiusAtY;
+    const z = Math.sin(theta) * radiusAtY;
+
+    positions.push(x * r, y * r, z * r);
+
+    if (prominentSet.has(i)) {
+      // Prominent node particles — bright, large
+      colors.push(coreColor.r, coreColor.g, coreColor.b);
+      sizes.push(CONFIG.prominentSize);
+    } else {
+      // Regular particles — subtle variation
+      const brightness = 0.6 + Math.random() * 0.4;
+      const c = i % 3 === 0 ? mainColor : dimColor;
+      colors.push(c.r * brightness, c.g * brightness, c.b * brightness);
+      sizes.push(
+        CONFIG.particleSize + (Math.random() - 0.5) * CONFIG.particleSizeVariation
       );
-      // Subtle random brightness variation
-      const dim = 0.5 + Math.random() * 0.3;
-      colors.push(faceColor.r * dim, faceColor.g * dim, faceColor.b * dim);
     }
   }
 
   return {
     positions: new Float32Array(positions),
     colors: new Float32Array(colors),
-    count: positions.length / 3,
+    sizes: new Float32Array(sizes),
+    count: n,
   };
 }
 
 /**
- * Particle Cube — main component class.
+ * Particle Sphere — main component class.
  */
 class ParticleSphere {
   /**
@@ -184,11 +181,19 @@ class ParticleSphere {
     this._animationId = null;
     this._rotationSpeed = CONFIG.rotationSpeed;
     this._running = false;
+    this._breathePhase = 0;
+    this._state = 'idle'; // 'idle' | 'listening' | 'thinking' | 'speaking'
 
     // Plugin system: objects with update() called each frame
     this._plugins = [];
 
+    // Raycaster for click/hover interaction
+    this._raycaster = new THREE.Raycaster();
+    this._raycaster.params.Points.threshold = 8;
+    this._mouse = new THREE.Vector2();
+
     this._init();
+    this._setupInteraction();
   }
 
   // ─── Public API ───────────────────────────────────────────────
@@ -326,17 +331,19 @@ class ParticleSphere {
     this._container.appendChild(this._renderer.domElement);
 
     // Generate particles
-    const { positions, colors, count } = generateCubePoints();
+    const { positions, colors, sizes, count } = generateSpherePoints();
 
     // Store original positions for scatter/reform
     this._originalPositions = new Float32Array(positions);
+    this._originalSizes = new Float32Array(sizes);
 
     // Geometry
     this._geometry = new THREE.BufferGeometry();
     this._geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     this._geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    this._geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
-    // Material
+    // Material — use per-particle size via custom shader or max size
     const texture = createParticleTexture();
     const material = new THREE.PointsMaterial({
       size: CONFIG.particleSize,
@@ -353,10 +360,10 @@ class ParticleSphere {
     this._points = new THREE.Points(this._geometry, material);
     this._scene.add(this._points);
 
-    // Ambient glow halo — larger transparent particles around the cube
+    // Ambient glow halo — larger transparent particles around the sphere
     this._initGlowHalo();
 
-    console.log(`[Cube] Initialized: ${count} particles + glow halo`);
+    console.log(`[Sphere] Initialized: ${count} particles + glow halo`);
   }
 
   /**
@@ -410,10 +417,32 @@ class ParticleSphere {
 
     this._animationId = requestAnimationFrame(() => this._animate());
 
-    // Rotate the cube on two axes for interesting motion
+    // Rotate the sphere on two axes for interesting motion
     if (this._points) {
       this._points.rotation.y += this._rotationSpeed;
       this._points.rotation.x += this._rotationSpeed * 0.4;
+    }
+
+    // Breathing/pulse animation — subtle scale oscillation
+    this._breathePhase += CONFIG.breatheSpeed;
+    if (this._points) {
+      const scale = 1 + Math.sin(this._breathePhase) * CONFIG.breatheAmplitude;
+      this._points.scale.setScalar(scale);
+    }
+
+    // State-responsive rotation speed
+    switch (this._state) {
+      case 'listening':
+        this._rotationSpeed += (0.006 - this._rotationSpeed) * 0.05;
+        break;
+      case 'thinking':
+        this._rotationSpeed += (0.012 - this._rotationSpeed) * 0.05;
+        break;
+      case 'speaking':
+        this._rotationSpeed += (0.004 - this._rotationSpeed) * 0.05;
+        break;
+      default: // idle
+        this._rotationSpeed += (CONFIG.rotationSpeed - this._rotationSpeed) * 0.05;
     }
 
     // Counter-rotate glow halo slowly for depth
@@ -428,6 +457,69 @@ class ParticleSphere {
     }
 
     this._renderer.render(this._scene, this._camera);
+  }
+
+  /**
+   * Set the sphere's animation state.
+   * @param {'idle'|'listening'|'thinking'|'speaking'} state
+   */
+  setState(state) {
+    this._state = state;
+    console.log(`[Sphere] State → ${state}`);
+  }
+
+  /**
+   * Set up mouse/touch interaction for the sphere.
+   * @private
+   */
+  _setupInteraction() {
+    const canvas = this._renderer.domElement;
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      this._mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      this._mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    });
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      this._mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      this._mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      this._raycaster.setFromCamera(this._mouse, this._camera);
+      const intersects = this._raycaster.intersectObject(this._points);
+
+      if (intersects.length > 0) {
+        // Flash the clicked particle region
+        const idx = intersects[0].index;
+        this._flashParticle(idx);
+      }
+    });
+  }
+
+  /**
+   * Flash a particle at the given index (temporary brightness boost).
+   * @param {number} index
+   * @private
+   */
+  _flashParticle(index) {
+    const colorAttr = this._geometry.getAttribute('color');
+    if (!colorAttr) return;
+
+    // Store original color
+    const origR = colorAttr.getX(index);
+    const origG = colorAttr.getY(index);
+    const origB = colorAttr.getZ(index);
+
+    // Set to white
+    colorAttr.setXYZ(index, 1, 1, 1);
+    colorAttr.needsUpdate = true;
+
+    // Restore after 300ms
+    setTimeout(() => {
+      colorAttr.setXYZ(index, origR, origG, origB);
+      colorAttr.needsUpdate = true;
+    }, 300);
   }
 }
 
