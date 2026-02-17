@@ -273,6 +273,24 @@ html, body {
   51%, 100% { opacity: 0; }
 }
 
+/* ── TTS Spoken Word Highlight ──────────────────────────────────── */
+.tts-spoken-word {
+  color: #ffffff;
+  text-shadow: 0 0 4px rgba(255, 180, 60, 0.5);
+  transition: color 0.1s ease-out, text-shadow 0.1s ease-out;
+}
+
+.tts-spoken-word-fade {
+  color: var(--color-text-amber);
+  text-shadow: none;
+}
+
+/* ── TTS Speaker Icon ───────────────────────────────────────────── */
+.tts-speaker-icon {
+  font-size: 14px;
+  filter: grayscale(0.3);
+}
+
 /* ── Terminal Sub-Panel Base ────────────────────────────────────── */
 .terminal-panel {
   position: absolute;
