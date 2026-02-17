@@ -79,6 +79,12 @@ _FALLBACK_TOOL_REGISTRY: dict[str, ToolRisk] = {
     "weather.get_current": ToolRisk.SAFE,
     "weather.get_forecast": ToolRisk.SAFE,
     "weather.check_outdoor": ToolRisk.SAFE,
+    "phone.call": ToolRisk.DESTRUCTIVE,
+    "phone.hangup": ToolRisk.MODERATE,
+    "phone.mute": ToolRisk.SAFE,
+    "phone.speaker": ToolRisk.SAFE,
+    "phone.status": ToolRisk.SAFE,
+    "phone.call_log": ToolRisk.SAFE,
     "news.latest": ToolRisk.SAFE,
     "news.search": ToolRisk.SAFE,
     "news.briefing": ToolRisk.SAFE,
@@ -175,6 +181,7 @@ _FALLBACK_ALWAYS_CONFIRM: set[str] = {
     "gmail.send_to_contact",
     "gmail.download_attachment",
     "gmail.generate_reply",
+    "phone.call",
 }
 
 

@@ -227,7 +227,14 @@
     "terminal_background":      "moderate",
     "terminal_background_kill": "destructive",
     "terminal_background_list": "safe",
-    "terminal_run":             "moderate"
+    "terminal_run":             "moderate",
+
+    "phone.call":               "destructive",
+    "phone.hangup":             "moderate",
+    "phone.mute":               "safe",
+    "phone.speaker":            "safe",
+    "phone.status":             "safe",
+    "phone.call_log":           "safe"
   },
 
   "always_confirm_tools": [
@@ -237,7 +244,8 @@
     "gmail.send_draft",
     "gmail.send_to_contact",
     "gmail.download_attachment",
-    "gmail.generate_reply"
+    "gmail.generate_reply",
+    "phone.call"
   ],
 
   "undefined_tool_policy": "deny"
