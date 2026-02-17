@@ -70,6 +70,28 @@ def force_tool_plan(
             if debug:
                 logger.debug("[FORCE_TOOL_PLAN] Gmail fallback, forcing: %s", mandatory_tools)
             return replace(output, tool_plan=mandatory_tools)
+        if output.route == "weather":
+            wi = (getattr(output, "weather_intent", None) or "").strip().lower()
+            if wi == "forecast":
+                mandatory_tools = ["weather.get_forecast"]
+            elif wi == "outdoor":
+                mandatory_tools = ["weather.check_outdoor"]
+            else:
+                mandatory_tools = ["weather.get_current"]
+            if debug:
+                logger.debug("[FORCE_TOOL_PLAN] Weather intent '%s', forcing: %s", wi, mandatory_tools)
+            return replace(output, tool_plan=mandatory_tools)
+        if output.route == "news":
+            ni = (getattr(output, "news_intent", None) or "").strip().lower()
+            if ni == "search":
+                mandatory_tools = ["news.search"]
+            elif ni == "briefing":
+                mandatory_tools = ["news.briefing"]
+            else:
+                mandatory_tools = ["news.latest"]
+            if debug:
+                logger.debug("[FORCE_TOOL_PLAN] News intent '%s', forcing: %s", ni, mandatory_tools)
+            return replace(output, tool_plan=mandatory_tools)
         return output
 
     if output.route == "gmail":
@@ -83,6 +105,22 @@ def force_tool_plan(
     if not mandatory_tools:
         if output.route == "system":
             mandatory_tools = ["time.now"]
+        elif output.route == "weather":
+            wi = (getattr(output, "weather_intent", None) or "").strip().lower()
+            if wi == "forecast":
+                mandatory_tools = ["weather.get_forecast"]
+            elif wi == "outdoor":
+                mandatory_tools = ["weather.check_outdoor"]
+            else:
+                mandatory_tools = ["weather.get_current"]
+        elif output.route == "news":
+            ni = (getattr(output, "news_intent", None) or "").strip().lower()
+            if ni == "search":
+                mandatory_tools = ["news.search"]
+            elif ni == "briefing":
+                mandatory_tools = ["news.briefing"]
+            else:
+                mandatory_tools = ["news.latest"]
         else:
             return output
 
