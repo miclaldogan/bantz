@@ -150,6 +150,24 @@ function initClockPanel() {
 
   console.log('[Overlay] Clock panel initialized');
 }
+// ─── GitHub Feed Panel ─────────────────────────────────────────
+let githubFeed = null;
+
+function initGitHubFeed() {
+  if (!window.GitHubFeedPanel) {
+    console.warn('[Overlay] GitHubFeedPanel not loaded');
+    return;
+  }
+  githubFeed = new window.GitHubFeedPanel(hudPanel);
+  githubFeed.mount();
+  githubFeed.show();
+  window.bantzGitHubFeed = githubFeed;
+
+  // Register with layout engine
+  if (layoutEngine) layoutEngine.register('github-feed', githubFeed, 'right');
+
+  console.log('[Overlay] GitHub feed initialized');
+}
 
 // ─── Typewriter Speech Output ─────────────────────────────────
 let typewriter = null;
@@ -707,6 +725,9 @@ initSystemStatus();
 // ─── Initialize Clock Panel ─────────────────────────────────
 initClockPanel();
 
+// ─── Initialize GitHub Feed ──────────────────────────────
+initGitHubFeed();
+
 // ─── Initialize Typewriter ─────────────────────────────────
 initTypewriter();
 
@@ -748,6 +769,7 @@ console.log('[Overlay]   newsFeed:', !!newsFeed);
 console.log('[Overlay]   dailyTasks:', !!dailyTasks);
 console.log('[Overlay]   systemStatus:', !!systemStatus);
 console.log('[Overlay]   clockPanel:', !!clockPanel);
+console.log('[Overlay]   githubFeed:', !!githubFeed);
 console.log('[Overlay]   typewriter:', !!typewriter);
 console.log('[Overlay]   glitchEffects:', !!glitchEffects);
 console.log('[Overlay]   panelTransitions:', !!panelTransitions);
