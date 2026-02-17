@@ -397,7 +397,11 @@ class DemoMode {
       if (!this._running) break;
       if (!article.link) continue;
       try {
-        const imageUrl = await window.overlayAPI.getArticleImage(article.link);
+        // 6s timeout per image (main process has 5s, add 1s buffer)
+        const imageUrl = await Promise.race([
+          window.overlayAPI.getArticleImage(article.link),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 6000)),
+        ]);
         if (imageUrl) {
           this._articleImages.push({
             image_url: imageUrl,
@@ -407,7 +411,9 @@ class DemoMode {
           });
           console.log(`[DemoMode] Got OG image for: ${article.title.slice(0, 40)}`);
         }
-      } catch {}
+      } catch {
+        console.warn(`[DemoMode] OG image fetch failed/timeout: ${article.title?.slice(0, 40)}`);
+      }
     }
     console.log(`[DemoMode] Fetched ${this._articleImages.length} article images`);
   }

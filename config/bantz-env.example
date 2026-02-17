@@ -171,6 +171,7 @@ BANTZ_BRIEFING_HOUR=08
 # BANTZ_MEMORY_PII_FILTER=true             # PII filtering in memory
 # BANTZ_PROFILE_PATH=~/.bantz/profile.json # User profile JSON
 # BANTZ_LOCATION=                          # User location for context prompts
+# BANTZ_WEATHER_LOCATION=                  # Weather-specific location (overrides BANTZ_LOCATION)
 # BANTZ_DEFAULT_LOCATION=                  # Fallback location
 
 

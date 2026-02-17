@@ -321,7 +321,7 @@ ipcMain.handle('system:get-weather', async () => {
             if (trimmed.startsWith('#') || !trimmed.includes('=')) continue;
             const [key, ...rest] = trimmed.split('=');
             const val = rest.join('=').trim();
-            if ((key.trim() === 'BANTZ_LOCATION' || key.trim() === 'BANTZ_DEFAULT_LOCATION') && val) {
+            if ((key.trim() === 'BANTZ_WEATHER_LOCATION' || key.trim() === 'BANTZ_LOCATION' || key.trim() === 'BANTZ_DEFAULT_LOCATION') && val) {
               location = val;
               break;
             }
