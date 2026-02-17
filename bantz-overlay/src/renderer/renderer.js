@@ -131,6 +131,24 @@ function initSystemStatus() {
 
   console.log('[Overlay] System status initialized');
 }
+// ─── Unified Inbox Panel ───────────────────────────────────────
+let inboxPanel = null;
+
+function initInboxPanel() {
+  if (!window.InboxPanel) {
+    console.warn('[Overlay] InboxPanel not loaded');
+    return;
+  }
+  inboxPanel = new window.InboxPanel(hudPanel);
+  inboxPanel.mount();
+  inboxPanel.show();
+  window.bantzInbox = inboxPanel;
+
+  // Register with layout engine
+  if (layoutEngine) layoutEngine.register('inbox', inboxPanel, 'left');
+
+  console.log('[Overlay] Inbox panel initialized');
+}
 
 // ─── Clock Panel ──────────────────────────────────────────────
 let clockPanel = null;
@@ -621,6 +639,16 @@ function handleBriefingMessage(msg) {
           id: msg.id,
         });
       }
+      // Also route calendar to inbox panel
+      if (msg.category === 'calendar' && inboxPanel) {
+        inboxPanel.setCalendarEvents([{
+          title: msg.title,
+          start: msg.start,
+          end: msg.end,
+          all_day: msg.all_day,
+          id: msg.id,
+        }]);
+      }
       // Route task cards
       if (msg.category === 'task' && dailyTasks) {
         dailyTasks.addTask({
@@ -646,6 +674,22 @@ function handleBriefingMessage(msg) {
           disk: msg.disk,
           uptime_seconds: msg.uptime_seconds,
         });
+        // Also route critical system alerts to inbox panel
+        if (inboxPanel) {
+          if (msg.cpu > 90) inboxPanel.addSystemNotification(`CPU usage critical: ${msg.cpu}%`);
+          if (msg.ram > 90) inboxPanel.addSystemNotification(`RAM usage critical: ${msg.ram}%`);
+          if (msg.disk > 90) inboxPanel.addSystemNotification(`Disk usage critical: ${msg.disk}%`);
+        }
+      }
+      // Route mail cards to inbox panel
+      if (msg.category === 'mail' && inboxPanel) {
+        inboxPanel.setMailMessages([{
+          from: msg.from || msg.sender,
+          subject: msg.subject || msg.title,
+          snippet: msg.snippet || msg.body || msg.summary,
+          ts: msg.ts,
+          id: msg.id,
+        }]);
       }
       break;
     case 'briefing_start':
@@ -705,6 +749,9 @@ initDailyTasks();
 // ─── Initialize System Status ───────────────────────────────
 initSystemStatus();
 
+// ─── Initialize Inbox Panel ─────────────────────────────────
+initInboxPanel();
+
 // ─── Initialize Clock Panel ─────────────────────────────────
 initClockPanel();
 
@@ -748,6 +795,7 @@ console.log('[Overlay]   layoutEngine:', !!layoutEngine);
 console.log('[Overlay]   newsFeed:', !!newsFeed);
 console.log('[Overlay]   dailyTasks:', !!dailyTasks);
 console.log('[Overlay]   systemStatus:', !!systemStatus);
+console.log('[Overlay]   inboxPanel:', !!inboxPanel);
 console.log('[Overlay]   clockPanel:', !!clockPanel);
 console.log('[Overlay]   typewriter:', !!typewriter);
 console.log('[Overlay]   glitchEffects:', !!glitchEffects);
