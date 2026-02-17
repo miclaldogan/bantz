@@ -117,13 +117,14 @@ def get_repair_tracker() -> RepairTracker:
 
 
 # Valid enums (single source of truth for this module)
-VALID_ROUTES = frozenset({"calendar", "gmail", "contacts", "keep", "news", "smalltalk", "system", "unknown"})
+VALID_ROUTES = frozenset({"calendar", "gmail", "contacts", "keep", "news", "weather", "smalltalk", "system", "unknown"})
 VALID_CALENDAR_INTENTS = frozenset({"create", "modify", "cancel", "query", "none"})
 VALID_NEWS_INTENTS = frozenset({"briefing", "search", "none"})
 VALID_GMAIL_INTENTS = frozenset({"list", "search", "read", "send", "none"})
 VALID_SYSTEM_INTENTS = frozenset({"time", "status", "battery", "disk", "volume", "open_app", "none"})
 VALID_CONTACTS_INTENTS = frozenset({"list", "search", "create", "delete", "none"})
 VALID_KEEP_INTENTS = frozenset({"create", "list", "search", "none"})
+VALID_WEATHER_INTENTS = frozenset({"current", "forecast", "outdoor", "none"})
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +276,8 @@ class OrchestratorOutput:
     keep_intent: str = "none"  # create | list | search | none
     # Issue #1365: News intent
     news_intent: str = "none"  # briefing | search | none
+    # Issue #838: Weather intent
+    weather_intent: str = "none"  # current | forecast | outdoor | none
     
     # Orchestrator extensions (Issue #134)
     ask_user: bool = False  # Need clarification?
@@ -327,6 +330,8 @@ class OrchestratorOutput:
             return self.keep_intent or "none"
         if route == "news":
             return self.news_intent or "none"
+        if route == "weather":
+            return self.weather_intent or "none"
         if route == "system":
             return self.system_intent or self.calendar_intent or "none"
         # calendar — use calendar_intent (backward compat)
@@ -384,6 +389,7 @@ class JarvisLLMOrchestrator:
         "google.contacts.search", "google.contacts.get", "google.contacts.create",
         "google.keep.list", "google.keep.create", "google.keep.search",
         "news.latest", "news.search", "news.briefing", "news.category",
+        "weather.get_current", "weather.get_forecast", "weather.check_outdoor",
         "time.now", "system.status", "system.volume", "pc.launch_app",
     })
 
@@ -451,7 +457,7 @@ class JarvisLLMOrchestrator:
     _SYSTEM_PROMPT_CORE = """You are BANTZ, an intelligent routing assistant. Analyze the user's message and respond ONLY with a single JSON object (no Markdown, no explanation).
 
 OUTPUT (single JSON, no Markdown/explanation):
-{"route":"<calendar|gmail|contacts|keep|news|system|smalltalk|unknown>","calendar_intent":"<create|modify|cancel|query|none>","gmail_intent":"<list|search|read|send|none>","system_intent":"<time|status|battery|disk|none>","contacts_intent":"<list|search|create|delete|none>","keep_intent":"<create|list|search|none>","news_intent":"<briefing|search|none>","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"minutes|null","title":"name|null","window_hint":"today/tomorrow/evening/morning/week|null"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["tool_name"],"status":"done","ask_user":false,"question":"","requires_confirmation":false}
+{"route":"<calendar|gmail|contacts|keep|news|weather|system|smalltalk|unknown>","calendar_intent":"<create|modify|cancel|query|none>","gmail_intent":"<list|search|read|send|none>","system_intent":"<time|status|battery|disk|none>","contacts_intent":"<list|search|create|delete|none>","keep_intent":"<create|list|search|none>","news_intent":"<briefing|search|none>","weather_intent":"<current|forecast|outdoor|none>","slots":{"date":"YYYY-MM-DD|null","time":"HH:MM|null","duration":"minutes|null","title":"name|null","window_hint":"today/tomorrow/evening/morning/week|null","location":"city_name|null"},"gmail":{"to":null,"subject":null,"body":null,"label":null,"category":null,"natural_query":null,"search_term":null},"confidence":0.85,"tool_plan":["tool_name"],"status":"done","ask_user":false,"question":"","requires_confirmation":false}
 
 status RULES:
 - "done" → single tool suffices, execute directly (default).
@@ -485,6 +491,7 @@ SYSTEM: "what time"→time.now (system_intent="time"), "cpu/ram/status"→system
 CONTACTS: "list contacts"→google.contacts.search (contacts_intent="list"), "search contacts"→google.contacts.search (contacts_intent="search").
 KEEP: "create a note"→google.keep.create (keep_intent="create"), "show my notes"→google.keep.list (keep_intent="list"), "search notes"→google.keep.search (keep_intent="search").
 NEWS: "show latest news"→news.latest (news_intent="briefing"), "what's trending"→news.latest (news_intent="briefing"), "tech news"→news.latest (news_intent="briefing"), "search news"→news.search (news_intent="search").
+WEATHER: "what's the weather"→weather.get_current (weather_intent="current"), "will it rain"→weather.get_current (weather_intent="current"), "weather forecast"→weather.get_forecast (weather_intent="forecast"), "is it safe to go outside"→weather.check_outdoor (weather_intent="outdoor"), "5 day forecast"→weather.get_forecast (weather_intent="forecast"). Fill slots.location with the city name if mentioned.
 UNKNOWN: code writing ("write a function"), translation ("translate X to Y"), general knowledge, math → route=unknown with assistant_reply.
 TIME: five o'clock→17:00, five in the morning→05:00, six in the evening→18:00, noon→12:00, eleven at night→23:00.
 

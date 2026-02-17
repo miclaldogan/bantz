@@ -49,6 +49,7 @@ def register_all_tools(registry: "ToolRegistry") -> int:
     count += _register_health(registry)
     count += _register_sync_search(registry)
     count += _register_news(registry)
+    count += _register_weather(registry)
     logger.info(f"[ToolGap] Total tools registered: {count}")
     return count
 
@@ -2752,6 +2753,57 @@ def _register_news(registry: "ToolRegistry") -> int:
             required=["category"],
         ),
         news_category_tool,
+    )
+
+    return n
+
+
+# ── Weather (3) ──────────────────────────────────────────────────────
+
+def _register_weather(registry: "ToolRegistry") -> int:
+    """Register weather tools (Issue #838)."""
+    try:
+        from bantz.tools.weather_tools import (
+            weather_get_current_tool,
+            weather_get_forecast_tool,
+            weather_check_outdoor_tool,
+        )
+    except ImportError as e:
+        logger.warning("[ToolGap] weather tools import: %s", e)
+        return 0
+
+    n = 0
+
+    n += _reg(
+        registry,
+        "weather.get_current",
+        "Get current weather for a city: temperature, condition, humidity, wind, rain probability.",
+        _obj(
+            ("location", "string", "City name (e.g. 'Istanbul', 'Ankara'). Defaults to user profile location."),
+        ),
+        weather_get_current_tool,
+    )
+
+    n += _reg(
+        registry,
+        "weather.get_forecast",
+        "Get multi-day weather forecast with daily min/max temp, condition, and rain probability.",
+        _obj(
+            ("location", "string", "City name"),
+            ("days", "integer", "Number of days 1-5 (default: 5)"),
+        ),
+        weather_get_forecast_tool,
+    )
+
+    n += _reg(
+        registry,
+        "weather.check_outdoor",
+        "Check if outdoor activities are safe: evaluates temperature, rain, wind, storms.",
+        _obj(
+            ("location", "string", "City name"),
+            ("date", "string", "Date to check (YYYY-MM-DD, default today)"),
+        ),
+        weather_check_outdoor_tool,
     )
 
     return n

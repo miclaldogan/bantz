@@ -101,7 +101,6 @@ class IntentCategory(Enum):
             IntentCategory.BRIGHTNESS,
             IntentCategory.APP_LAUNCH,
             IntentCategory.SCREENSHOT,
-            IntentCategory.WEATHER,
         }
     
     @property
@@ -127,7 +126,7 @@ class IntentCategory(Enum):
             IntentCategory.BRIGHTNESS: "system",
             IntentCategory.APP_LAUNCH: "system",
             IntentCategory.SCREENSHOT: "system",
-            IntentCategory.WEATHER: "local",
+            IntentCategory.WEATHER: "router",
             IntentCategory.UNKNOWN: "router",
             IntentCategory.COMPLEX: "router",
             IntentCategory.AMBIGUOUS: "router",
@@ -1031,11 +1030,9 @@ class LocalResponseGenerator:
 
     @staticmethod
     def weather() -> str:
-        """Generate weather not-supported response (Issue #1370)."""
+        """Generate weather fallback response (Issue #838)."""
         return (
-            "Henüz hava durumu servisim aktif değil efendim. "
-            "Bu özellik yakında eklenecek. "
-            "Tarayıcıdan kontrol edebilirsiniz."
+            "Hava durumunu kontrol ediyorum efendim, bir saniye..."
         )
     
     def generate(self, intent: IntentCategory) -> str:
