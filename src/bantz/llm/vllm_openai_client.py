@@ -235,6 +235,7 @@ class VLLMOpenAIClient(LLMClient):
         stop: Optional[List[str]] = None,
         tools: Optional[List[dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
+        extra_body: Optional[dict[str, Any]] = None,
     ) -> str:
         """Chat completion (simple string response)."""
         response = self.chat_detailed(
@@ -245,6 +246,7 @@ class VLLMOpenAIClient(LLMClient):
             stop=stop,
             tools=tools,
             tool_choice=tool_choice,
+            extra_body=extra_body,
         )
         return response.content
     
@@ -258,6 +260,7 @@ class VLLMOpenAIClient(LLMClient):
         response_format: Optional[dict[str, Any]] = None,
         stop: Optional[List[str]] = None,
         tools: Optional[List[dict[str, Any]]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
         tool_choice: Optional[str] = None,
     ) -> LLMResponse:
         """Chat completion with detailed metadata."""
@@ -283,6 +286,7 @@ class VLLMOpenAIClient(LLMClient):
                     temperature=temperature, max_tokens=max_tokens,
                     seed=seed, response_format=response_format, stop=stop,
                     tools=tools, tool_choice=tool_choice,
+                    extra_body=extra_body,
                 )
             except (LLMConnectionError, LLMTimeoutError) as e:
                 last_exc = e
@@ -312,8 +316,15 @@ class VLLMOpenAIClient(LLMClient):
         stop: Optional[List[str]],
         tools: Optional[List[dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
+        extra_body: Optional[dict[str, Any]] = None,
     ) -> LLMResponse:
-        """Execute a single chat request (extracted for retry logic)."""
+        """Execute a single chat request (extracted for retry logic).
+
+        Args:
+            extra_body: Ollama-native parameters passed via OpenAI SDK's
+                ``extra_body`` mechanism.  Useful for thinking model control
+                (``think``, ``format``) and runtime options (``options``).
+        """
         t0 = time.perf_counter()
         try:
             # Call OpenAI-compatible API
@@ -326,6 +337,10 @@ class VLLMOpenAIClient(LLMClient):
             if tools is not None:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = tool_choice or "auto"
+
+            # Ollama-native parameters (thinking model control, runtime options)
+            if extra_body:
+                kwargs["extra_body"] = extra_body
 
             completion = client.chat.completions.create(
                 model=self.model,
@@ -341,6 +356,30 @@ class VLLMOpenAIClient(LLMClient):
             # Extract response
             choice = completion.choices[0]
             content = choice.message.content or ""
+
+            # Thinking/reasoning model support — capture chain-of-thought
+            # Ollama OpenAI-compat exposes it as ``reasoning``; some backends
+            # use ``reasoning_content``.  We normalise to a single field.
+            _thinking_raw: Optional[str] = None
+            _msg = choice.message
+            for _tfield in ("reasoning", "reasoning_content", "thinking"):
+                _tv = getattr(_msg, _tfield, None)
+                if _tv is None and isinstance(getattr(_msg, "model_extra", None), dict):
+                    _tv = _msg.model_extra.get(_tfield)
+                if _tv:
+                    _thinking_raw = str(_tv)
+                    break
+
+            # If content is empty but thinking is present, the model used
+            # all tokens for reasoning and never produced an answer.  When
+            # finish_reason is "stop" we trust content; when it is "length"
+            # the model ran out of budget — we keep thinking for tracing
+            # but leave content empty so callers know.
+            if _thinking_raw:
+                logger.debug(
+                    "[vLLM] thinking model detected — reasoning=%d chars, content=%d chars",
+                    len(_thinking_raw), len(content),
+                )
 
             # Issue #1274: Parse tool_calls from structured response
             parsed_tool_calls: Optional[List[LLMToolCall]] = None
@@ -400,6 +439,7 @@ class VLLMOpenAIClient(LLMClient):
                 finish_reason=choice.finish_reason or "stop",
                 usage=usage_dict,
                 tool_calls=parsed_tool_calls,
+                thinking=_thinking_raw,
             )
 
             # Track TTFT (approximate for non-streaming)
@@ -687,7 +727,7 @@ class VLLMOpenAIClient(LLMClient):
                 except Exception:
                     pass
     
-    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None, system_prompt: Optional[str] = None) -> str:
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None, system_prompt: Optional[str] = None, extra_body: Optional[dict[str, Any]] = None) -> str:
         """Simple text completion (used by Router).
 
         Issue #1050: When system_prompt is provided it is sent as a proper
@@ -697,7 +737,23 @@ class VLLMOpenAIClient(LLMClient):
         if system_prompt:
             messages.append(LLMMessage(role="system", content=system_prompt))
         messages.append(LLMMessage(role="user", content=prompt))
-        return self.chat(messages, temperature=temperature, max_tokens=max_tokens, stop=stop)
+        return self.chat(messages, temperature=temperature, max_tokens=max_tokens, stop=stop, extra_body=extra_body)
+
+    def complete_text_detailed(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None, system_prompt: Optional[str] = None, extra_body: Optional[dict[str, Any]] = None) -> LLMResponse:
+        """Text completion returning full LLMResponse (including thinking).
+
+        Same interface as ``complete_text`` but returns the full ``LLMResponse``
+        so callers can access ``response.thinking`` for reasoning/thinking models.
+
+        Args:
+            extra_body: Ollama-native parameters (``think``, ``format``,
+                ``options: {num_gpu, num_predict, num_ctx}``, etc.).
+        """
+        messages: List[LLMMessage] = []
+        if system_prompt:
+            messages.append(LLMMessage(role="system", content=system_prompt))
+        messages.append(LLMMessage(role="user", content=prompt))
+        return self.chat_detailed(messages, temperature=temperature, max_tokens=max_tokens, stop=stop, extra_body=extra_body)
 
     def chat_with_tools(
         self,

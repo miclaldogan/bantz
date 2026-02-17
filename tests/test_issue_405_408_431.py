@@ -79,8 +79,8 @@ class TestIssue405PromptBudget:
 
         orch = cls.__new__(cls)
         compact = orch._maybe_compact_system_prompt(cls.SYSTEM_PROMPT, token_budget=budget)
-        assert "ÖRNEKLER:" not in compact
-        assert "KURALLAR:" in compact  # core rules preserved
+        assert "EXAMPLES:" not in compact
+        assert "RULES:" in compact  # core rules preserved
 
     def test_compact_removes_detail_when_tight(self):
         cls, est = self._import()
@@ -89,11 +89,11 @@ class TestIssue405PromptBudget:
 
         orch = cls.__new__(cls)
         compact = orch._maybe_compact_system_prompt(cls.SYSTEM_PROMPT, token_budget=budget)
-        assert "ÖRNEKLER:" not in compact
+        assert "EXAMPLES:" not in compact
         assert "GMAIL ARAMA" not in compact
         assert "SAAT FORMATLARI" not in compact
         # Core rules should still be present
-        assert "KURALLAR:" in compact
+        assert "RULES:" in compact
 
     def test_compact_zero_budget_returns_empty(self):
         cls, _ = self._import()
@@ -110,7 +110,7 @@ class TestIssue405PromptBudget:
         """Core prompt must have: identity, output spec, rules, routes, tools, time rules."""
         cls, _ = self._import()
         core = cls._SYSTEM_PROMPT_CORE
-        for keyword in ["BANTZ", "OUTPUT", "KURALLAR", "route", "TOOLS:", "SAAT:"]:
+        for keyword in ["BANTZ", "OUTPUT", "RULES", "route", "TOOLS:", "TIME:"]:
             assert keyword in core, f"Core prompt missing '{keyword}'"
 
     def test_core_has_all_tool_names(self):
@@ -142,7 +142,7 @@ class TestIssue405PromptBudget:
         compact = orch._maybe_compact_system_prompt(
             cls.SYSTEM_PROMPT, token_budget=int(prompt_avail * 0.6)
         )
-        user_input_tokens = est("USER: bugün beşe toplantı koy\nASSISTANT (sadece JSON):")
+        user_input_tokens = est("USER: bugün beşe toplantı koy\nASSISTANT (JSON only):")
 
         total = est(compact) + user_input_tokens
         assert total < prompt_avail, (

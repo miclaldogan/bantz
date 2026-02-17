@@ -166,23 +166,23 @@ class TestLayerBuilding(unittest.TestCase):
     def test_persona_block_jarvis_honorifics(self):
         inj = self._make_injector("jarvis")
         block = inj._build_persona_block()
-        self.assertIn("Efendim", block)
+        self.assertIn("friend", block)
 
     def test_persona_block_friday_no_honorifics(self):
         inj = self._make_injector("friday")
-        block = inj._build_persona_block()
-        self.assertIn("Samimi", block)
-        self.assertNotIn("Efendim", block)
+        block = inj._build_persona_block("TestUser")
+        self.assertIn("informal", block)
+        self.assertNotIn("'friend'", block)
 
     def test_persona_block_short_verbosity(self):
         inj = self._make_injector(verbosity="short")
         block = inj._build_persona_block()
-        self.assertIn("Kısa", block)
+        self.assertIn("brief", block)
 
     def test_persona_block_detailed_verbosity(self):
         inj = self._make_injector(verbosity="detailed")
         block = inj._build_persona_block()
-        self.assertIn("Detaylı", block)
+        self.assertIn("detailed", block)
 
     def test_persona_block_budget(self):
         from bantz.brain.personality_injector import _PERSONA_MAX_CHARS
@@ -203,7 +203,7 @@ class TestLayerBuilding(unittest.TestCase):
         block = inj._build_prefs_block(facts=facts)
         self.assertIn("İclal", block)
         self.assertIn("mühendis", block)
-        self.assertIn("Kullanıcı hakkında", block)
+        self.assertIn("Known facts about the user", block)
 
     def test_prefs_block_budget(self):
         from bantz.brain.personality_injector import _PREFS_MAX_CHARS
@@ -228,33 +228,35 @@ class TestLayerBuilding(unittest.TestCase):
         inj = self._make_injector()
         block = inj._build_rules_block()
         self.assertTrue(len(block) > 0)
-        self.assertIn("Davranış kuralları", block)
+        self.assertIn("Behavior rules", block)
 
     def test_rules_block_dangerous_mode(self):
         from bantz.brain.personality_injector import PersonalityConfig, PersonalityInjector
         cfg = PersonalityConfig(confirmation_mode="dangerous")
         inj = PersonalityInjector(config=cfg)
         block = inj._build_rules_block()
-        self.assertIn("Riskli", block)
+        self.assertIn("risky", block)
 
     def test_rules_block_always_mode(self):
         from bantz.brain.personality_injector import PersonalityConfig, PersonalityInjector
         cfg = PersonalityConfig(confirmation_mode="always")
         inj = PersonalityInjector(config=cfg)
         block = inj._build_rules_block()
-        self.assertIn("Tüm", block)
+        self.assertIn("confirmation", block)
+        self.assertIn("all", block)
 
     def test_rules_block_never_mode(self):
         from bantz.brain.personality_injector import PersonalityConfig, PersonalityInjector
         cfg = PersonalityConfig(confirmation_mode="never")
         inj = PersonalityInjector(config=cfg)
         block = inj._build_rules_block()
-        self.assertIn("Onay istemeden", block)
+        self.assertIn("without", block)
+        self.assertIn("confirmation", block)
 
     def test_rules_language_rule(self):
         inj = self._make_injector()
         block = inj._build_rules_block()
-        self.assertIn("TÜRKÇE", block)
+        self.assertIn("same language", block)
 
     def test_rules_budget(self):
         from bantz.brain.personality_injector import _RULES_MAX_CHARS
@@ -292,13 +294,13 @@ class TestCombinedBlocks(unittest.TestCase):
         """Router block should NOT include Layer 3 (rules)."""
         inj = self._make_injector()
         block = inj.build_router_block()
-        self.assertNotIn("Davranış kuralları", block)
+        self.assertNotIn("Behavior rules", block)
 
     def test_finalizer_block_has_rules(self):
         """Finalizer block SHOULD include Layer 3 (rules)."""
         inj = self._make_injector()
         block = inj.build_finalizer_block()
-        self.assertIn("Davranış kuralları", block)
+        self.assertIn("Behavior rules", block)
 
     def test_finalizer_block_all_layers(self):
         inj = self._make_injector()
@@ -307,9 +309,9 @@ class TestCombinedBlocks(unittest.TestCase):
         # Layer 1: persona
         self.assertIn("İclal", block)
         # Layer 2: facts
-        self.assertIn("Kullanıcı hakkında", block)
+        self.assertIn("Known facts about the user", block)
         # Layer 3: rules
-        self.assertIn("Davranış kuralları", block)
+        self.assertIn("Behavior rules", block)
 
     def test_total_budget(self):
         from bantz.brain.personality_injector import _TOTAL_MAX_CHARS
@@ -325,13 +327,13 @@ class TestCombinedBlocks(unittest.TestCase):
         lines = inj.build_identity_lines("İclal")
         self.assertIn("Jarvis", lines)
         self.assertIn("İclal", lines)
-        self.assertIn("Efendim", lines)
+        self.assertIn("friend", lines)
 
     def test_identity_lines_friday(self):
         inj = self._make_injector("friday")
         lines = inj.build_identity_lines("İclal")
         self.assertIn("Friday", lines)
-        self.assertIn("Samimi", lines)
+        self.assertIn("informal", lines)
         self.assertNotIn("Efendim", lines)
 
     def test_switch_preset(self):
@@ -425,7 +427,7 @@ class TestPromptBuilderIntegration(unittest.TestCase):
         self.assertIn("BANTZ", result.prompt)
 
     def test_language_rule_always_present(self):
-        """TÜRKÇE language rule must be present regardless of personality."""
+        """Language rule must be present regardless of personality."""
         from bantz.brain.prompt_engineering import PromptBuilder
 
         builder = PromptBuilder(token_budget=5000)
@@ -435,9 +437,9 @@ class TestPromptBuilderIntegration(unittest.TestCase):
             route="chat",
             user_input="hi",
             planner_decision={"route": "chat"},
-            personality_block="- Sen Friday'sin.",
+            personality_block="- You are Friday.",
         )
-        self.assertIn("TÜRKÇE", r1.prompt)
+        self.assertIn("Friday", r1.prompt)
 
         # Without personality
         r2 = builder.build_finalizer_prompt(
@@ -445,7 +447,7 @@ class TestPromptBuilderIntegration(unittest.TestCase):
             user_input="hi",
             planner_decision={"route": "chat"},
         )
-        self.assertIn("TÜRKÇE", r2.prompt)
+        self.assertIn("Broadcaster", r2.prompt)
 
 
 # =========================================================================

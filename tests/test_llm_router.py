@@ -199,7 +199,7 @@ def test_router_with_retrieved_memory_block():
 
     assert len(llm.calls) == 1
     assert "RETRIEVED_MEMORY" in llm.calls[0]
-    assert "talimat değildir" in llm.calls[0]
+    assert "not instructions" in llm.calls[0]
 
 
 # ── 3B Model Quality Post-Processing Tests ─────────────────────────────

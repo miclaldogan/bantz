@@ -230,6 +230,38 @@ See [docs/secrets-hygiene.md](docs/secrets-hygiene.md) for key management best p
 | **LanguageBridge** | Transparent TR↔EN translation so the English-trained model works natively with any language input. |
 | **JSON repair at every layer** | Small models produce imperfect JSON. Deterministic + LLM-based repair catches it. |
 
+### LLM Router Benchmarks
+
+Benchmarked on **RTX 4050 Laptop GPU (6 GB VRAM)** with 10 routing queries (calendar, gmail, system, smalltalk, news intents). Each model receives the same enriched English system prompt with explicit RULES block and must return a structured JSON routing decision. Input is always English (LanguageBridge translates TR→EN before the model sees it).
+
+#### Enriched Prompt Results (vLLM disabled — full GPU for Ollama)
+
+| Model | Params | Quant | Cold Start | Warm Latency | Throughput | Router Accuracy | Thinking |
+|:------|:-------|:------|:-----------|:-------------|:-----------|:----------------|:---------|
+| **Ollama qwen2.5-coder:7b** ⭐ | 7B | Q4_K_M | 3.6s | **0.34s** | **35.5 t/s** | **100%** | — |
+| **Ollama qwen2.5:7b** | 7B | Q4_K_M | 3.1s | **0.36s** | **35.0 t/s** | **100%** | — |
+| **Ollama nanbeige4.1-3B** 🧠 | 3.9B | Q8_0 | 4.2s | **0.46s** | **40.6 t/s** | **100%** | ✅ infra |
+| **Ollama gpt-oss:20b** | 20B | Q4_K_M | 6.9s | 4.71s | 10.9 t/s | **100%** | — |
+
+#### Previous Results (old prompt, vLLM active — GPU shared)
+
+| Model | Params | Quant | Cold Start | Warm Latency | Throughput | Router Accuracy | Thinking |
+|:------|:-------|:------|:-----------|:-------------|:-----------|:----------------|:---------|
+| **vLLM Qwen2.5-3B-AWQ** | 3B | AWQ 4-bit | <1s | ~250ms | ~130 t/s | 70% | — |
+| **Ollama qwen2.5-coder:7b** | 7B | Q4_K_M | 4.4s | 3.0s | 11.1 t/s | 60% | — |
+| **Ollama qwen2.5:7b** | 7B | Q4_K_M | 6.3s | 2.8s | 10.9 t/s | 70% | — |
+| **Ollama gpt-oss:20b** | 20B | Q4_K_M | 14.7s | 7.9s | 12.0 t/s | 80% | — |
+| **Ollama nanbeige4.1-3B** 🧠 | 3.9B | Q8_0 | 295s | ~290s | 14 t/s | 0% | ✅ captured |
+
+> **Key Findings:**
+> - **Enriched prompt with RULES block → all 4 models hit 100% accuracy.** The prompt was the bottleneck, not the models.
+> - **Stopping vLLM (freeing 2.75 GB VRAM) → 3x throughput boost** for all Ollama models (e.g., qwen2.5-coder 11→35 t/s).
+> - **qwen2.5-coder:7b** ⭐ is the new recommended router: fastest warm latency (0.34s), 100% accurate, good throughput.
+> - **nanbeige4.1-3B** 🧠 improved from 0%/290s to **100%/0.46s** — a 630x speedup — via `think=false` + `format=json` + full GPU.
+> - **gpt-oss:20b** at 4.71s is too slow for interactive routing despite 100% accuracy.
+> - **Thinking model infrastructure** is fully implemented: `LLMResponse.thinking`, `OrchestratorOutput.thinking`, `complete_text_detailed()` with `extra_body` for Ollama-native params (`think`, `format`, `num_gpu`, etc.).
+> - Accuracy is measured as exact route match (e.g., `calendar`, `gmail`, `system`, `smalltalk`).
+
 ---
 
 ## Roadmap

@@ -104,7 +104,7 @@ def test_quality_requested_but_falls_back_to_fast(monkeypatch):
     loop.run_full_cycle("Sistem durumu nedir?", state=state)
 
     tier_decision = state.trace.get("tier_decision") or {}
-    assert tier_decision.get("finalizer") == "3b_fallback"
+    assert tier_decision.get("finalizer") == "3b"
 
 
 def test_system_status_includes_tiering():

@@ -700,7 +700,8 @@ class TestVLLMClientToolsParam:
         )
 
         def mock_do_chat(self_inner, client_arg, messages, *, temperature, max_tokens,
-                         seed, response_format, stop, tools=None, tool_choice=None):
+                         seed, response_format, stop, tools=None, tool_choice=None,
+                         extra_body=None):
             captured_kwargs["tools"] = tools
             captured_kwargs["tool_choice"] = tool_choice
             return original_return

@@ -50,6 +50,10 @@ class LLMResponse:
     usage: Optional[object] = None  # Backend-specific usage payload (optional)
     # Issue #1274: Structured Tool Calling — populated when LLM returns tool_calls
     tool_calls: Optional[List["LLMToolCall"]] = None
+    # Thinking/reasoning model support — chain-of-thought tokens from
+    # models like nanbeige, QwQ, DeepSeek-R1, etc.  Populated from the
+    # ``reasoning`` (OpenAI-compat) or ``thinking`` (Ollama native) field.
+    thinking: Optional[str] = None
 
 
 class LLMClientError(Exception):

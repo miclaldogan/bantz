@@ -191,7 +191,7 @@ class CodingAgent:
             :class:`TestResult` with pass/fail counts.
         """
         v_flag = "-v" if verbose else ""
-        cmd = f"python -m pytest {path} {v_flag} --tb=short -q 2>&1"
+        cmd = f"python3 -m pytest {path} {v_flag} --tb=short -q 2>&1"
 
         result = await self._sandbox.execute(
             cmd,

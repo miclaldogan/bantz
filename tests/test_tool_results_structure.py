@@ -311,7 +311,7 @@ def test_dict_result_preserves_structure(mock_orchestrator):
         )
     )
     
-    config = OrchestratorConfig()
+    config = OrchestratorConfig(enable_safety_guard=False)
     loop = OrchestratorLoop(
         orchestrator=mock_orchestrator,
         tools=registry,
@@ -366,7 +366,7 @@ def test_failed_tool_preserves_error(mock_orchestrator):
         )
     )
     
-    config = OrchestratorConfig()
+    config = OrchestratorConfig(enable_safety_guard=False)
     loop = OrchestratorLoop(
         orchestrator=mock_orchestrator,
         tools=registry,

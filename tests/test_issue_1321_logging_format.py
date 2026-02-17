@@ -85,4 +85,4 @@ class TestLazyFormatStringsPresent:
 
     def test_firewall_confirmation_lazy(self):
         source = (_PROJECT_ROOT / "src" / "bantz" / "brain" / "orchestrator_loop.py").read_text()
-        assert '"[FIREWALL] Tool %s (%s) requires confirmation.", tool_name, risk.value' in source
+        assert '"[FIREWALL] Tool %s (%s) requires confirmation.", tool_name, risk_value' in source

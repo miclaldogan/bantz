@@ -294,7 +294,7 @@ def detect_language_issue(text: str) -> Optional[str]:
             or text.strip().startswith(("http://", "https://"))
             or (
                 "(" in text and ")" in text
-                and len(_CODE_KW_RE.findall(text)) >= 2
+                and len(_CODE_KW_RE.findall(text)) >= 1
             )
         )
         if _url_or_code:

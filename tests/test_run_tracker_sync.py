@@ -292,11 +292,16 @@ class TestProcessTurnObservability:
         tools = Mock()
         tools.names = Mock(return_value=[])
 
-        loop = OrchestratorLoop(
-            orchestrator=orch,
-            tools=tools,
-            run_tracker=tracker,
-        )
+        # Patch wire_subscribers to prevent double-recording: process_turn
+        # directly calls run_tracker.start_run/end_run AND emits events
+        # that ObservabilitySubscriber also catches. Disable the subscriber
+        # so only the direct calls are tested.
+        with patch("bantz.core.subscriber_registry.wire_subscribers", return_value={}):
+            loop = OrchestratorLoop(
+                orchestrator=orch,
+                tools=tools,
+                run_tracker=tracker,
+            )
         return loop
 
     def test_smalltalk_turn_records_run(self, loop_with_tracker, tracker):

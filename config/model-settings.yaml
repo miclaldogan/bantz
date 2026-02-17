@@ -84,6 +84,51 @@ router_7b:
   enabled: false   # Flip to true when using BANTZ_VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ
 
 # =============================================================================
+# Ollama Thinking Model — nanbeige4.1-3B (Issue #1500)
+# =============================================================================
+# Thinking/reasoning model running on Ollama. Optimized for full GPU offload.
+#
+# CRITICAL: vLLM must be STOPPED before using this model — both need full GPU.
+#   pkill -f vllm && pkill -f watchdog
+#
+# Benchmark results (RTX 4050, 6GB VRAM, full GPU):
+#   think=false + format=json + enriched prompt → 100% accuracy, 1.1s latency, 48.8 t/s
+#   Cold start: 0.4s (warm), 3.6s (first load)
+#
+# Config is NOT auto-activated.  Router reads this when
+# BANTZ_ROUTER_MODEL=tomng/nanbeige4.1 or provider=ollama-think.
+ollama_nanbeige:
+  name: "tomng/nanbeige4.1"
+  provider: "ollama"
+  context_window: 2048        # Keep small for speed (model supports 262K)
+  endpoint: "http://localhost:11434"
+  port: 11434
+  quantization: "Q8_0"
+  parameters: "3.9B"
+  vram_usage_gb: 4.2
+  role: "routing (thinking model, optimised no-think mode)"
+  enabled: false              # Set to true + stop vLLM to activate
+
+  # Ollama-native options passed via extra_body
+  ollama_options:
+    think: false              # Disable thinking for routing (100% vs 60% accuracy)
+    format: "json"            # Force valid JSON output
+    options:
+      num_gpu: 99             # All layers on GPU
+      num_predict: 256        # Enough for JSON routing response
+      num_ctx: 2048           # Compact context window
+
+  # Enriched routing prompt — this model needs explicit category rules
+  # and examples to achieve high accuracy without thinking.
+  routing_rules: |
+    RULES:
+    - Greetings, chitchat, weather, jokes, feelings → route=smalltalk
+    - Meetings, events, schedule, plans → route=calendar
+    - Emails, messages, inbox → route=gmail
+    - Time, battery, disk, status → route=system
+    - News, headlines, articles → route=news
+
+# =============================================================================
 # Router Configuration
 # =============================================================================
 router:

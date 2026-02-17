@@ -23,16 +23,16 @@ class TestLLMRouterPromptRules:
         
         # Check for PM default rule
         assert "PM" in prompt or "17:00" in prompt
-        assert "beşe" in prompt or "beşte" in prompt
+        assert "1-6" in prompt and "five" in prompt.lower()
     
     def test_prompt_contains_sabah_am_rule(self):
-        """Prompt should specify that 'sabah' means AM."""
+        """Prompt should specify that 'morning' means AM."""
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         
         prompt = JarvisLLMOrchestrator.SYSTEM_PROMPT
         
-        assert "sabah" in prompt.lower()
-        # Should mention that sabah = AM or morning times
+        assert "morning" in prompt.lower()
+        # Should mention that morning = AM
         assert "05:00" in prompt or "AM" in prompt
     
     def test_prompt_has_saat_bes_example(self):
@@ -45,13 +45,13 @@ class TestLLMRouterPromptRules:
         assert "17:00" in prompt
     
     def test_prompt_has_sabah_bes_example(self):
-        """Prompt should have an example with sabah beş → 05:00."""
+        """Prompt should have an example with 'morning' → 05:00."""
         from bantz.brain.llm_router import JarvisLLMOrchestrator
         
         prompt = JarvisLLMOrchestrator.SYSTEM_PROMPT
         
-        # Check for example showing sabah 5 → 05:00
-        assert "sabah" in prompt.lower()
+        # Check for example showing morning → 05:00
+        assert "morning" in prompt.lower()
 
 
 # ============================================================================

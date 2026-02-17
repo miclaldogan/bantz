@@ -833,7 +833,7 @@ class TestPersonaPageSummarizeResponses:
         
         assert response is not None
         assert len(response) > 0
-        assert "efendim" in response.lower() or "okuyorum" in response.lower()
+        assert "reading" in response.lower() or "manuscript" in response.lower() or "pages" in response.lower() or "friend" in response.lower()
     
     def test_summary_ready_response(self):
         """Test summary ready response."""
@@ -843,7 +843,7 @@ class TestPersonaPageSummarizeResponses:
         response = persona.get_response("summary_ready")
         
         assert response is not None
-        assert "efendim" in response.lower()
+        assert "synopsis" in response.lower() or "summary" in response.lower() or "friend" in response.lower() or "distilled" in response.lower() or "abridged" in response.lower()
     
     def test_answering_response(self):
         """Test answering response."""
@@ -872,7 +872,7 @@ class TestPersonaPageSummarizeResponses:
         response = persona.get_response("no_content")
         
         assert response is not None
-        assert "efendim" in response.lower()
+        assert "blank" in response.lower() or "no extractable" in response.lower() or "nothing" in response.lower()
 
 
 # =============================================================================

@@ -124,38 +124,38 @@ class PersonalityInjector:
 
     def _build_persona_block(self, user_name: str = "") -> str:
         """Build Layer 1: Persona identity block."""
-        name = user_name or self.config.user_name or "kullanıcı"
+        name = user_name or self.config.user_name or "friend"
         p = self._personality
 
         if p is None:
-            return f"Sen Bantz'sın, {name}'nın kişisel asistanısın."
+            return f"You are Bantz, The Broadcaster — {name}'s personal AI assistant. Address the user as 'friend'. Be polished, theatrical, with mid-Atlantic radio-host charm."
 
         parts: list[str] = [
-            f"Sen {p.name}'sin, {name}'nın kişisel asistanısın.",
+            f"You are {p.name}, {name}'s personal AI assistant.",
         ]
 
         # Speaking style
-        style_desc = getattr(p.speaking_style, "description_tr", "Samimi iletişim")
-        parts.append(f"İletişim tarzın: {style_desc}.")
+        style_desc = getattr(p.speaking_style, "description_en", getattr(p.speaking_style, "description_tr", "Warm communication"))
+        parts.append(f"Communication style: {style_desc}.")
 
         # Honorifics
         if p.use_honorifics:
-            parts.append("'Efendim' hitabını kullan (yanıt başına en fazla 1 kez).")
+            parts.append("Address the user as 'friend' (at most once per reply).")
         else:
-            parts.append("Samimi bir dil kullan, resmi hitaplardan kaçın.")
+            parts.append("Use a warm, informal tone. Avoid stiff formalities.")
 
         # Humor
         if p.witty_remarks and p.sarcasm_level > 0:
-            level = "hafif" if p.sarcasm_level < 0.3 else "orta"
-            parts.append(f"Zaman zaman {level} espri yapabilirsin.")
+            level = "light" if p.sarcasm_level < 0.3 else "moderate"
+            parts.append(f"Occasional {level} wit is encouraged.")
 
         # Verbosity from config
         if self.config.verbosity == "short":
-            parts.append("Kısa ve öz yanıtlar ver (1-3 cümle).")
+            parts.append("Keep replies brief (1-3 sentences).")
         elif self.config.verbosity == "detailed":
-            parts.append("Detaylı açıklamalar yap, adım adım anlat.")
+            parts.append("Give detailed explanations, step by step.")
         else:
-            parts.append("Normal uzunlukta yanıtlar ver.")
+            parts.append("Normal-length replies.")
 
         block = "\n".join(parts)
         return block[:self.config.persona_max_chars]
@@ -175,7 +175,7 @@ class PersonalityInjector:
         if facts:
             fact_lines = [f"- {k}: {v}" for k, v in list(facts.items())[:8]]
             if fact_lines:
-                parts.append("Kullanıcı hakkında bildiklerin:")
+                parts.append("Known facts about the user:")
                 parts.extend(fact_lines)
 
         if preferences:
@@ -188,7 +188,7 @@ class PersonalityInjector:
             if pref_lines:
                 if parts:
                     parts.append("")
-                parts.append("Tercihleri:")
+                parts.append("Preferences:")
                 parts.extend(pref_lines)
 
         block = "\n".join(parts)
@@ -200,25 +200,25 @@ class PersonalityInjector:
 
     def _build_rules_block(self) -> str:
         """Build Layer 3: Behavior rules block."""
-        rules: list[str] = ["Davranış kuralları:"]
+        rules: list[str] = ["Behavior rules:"]
 
         # Confirmation mode
         mode = self.config.confirmation_mode
         if mode == "always":
-            rules.append("- Tüm işlemlerde onay iste.")
+            rules.append("- Ask for confirmation on all operations.")
         elif mode == "never":
-            rules.append("- Onay istemeden doğrudan yap.")
+            rules.append("- Execute directly without asking for confirmation.")
         else:  # dangerous
-            rules.append("- Riskli işlemlerde (silme, güncelleme) onay iste.")
+            rules.append("- Ask for confirmation on risky operations (delete, update).")
 
         # Language
-        rules.append("- SADECE TÜRKÇE konuş. Çince, Korece, İngilizce YASAK.")
+        rules.append("- Respond in the same language as the user.")
 
         # Output format
-        rules.append("- Sadece kullanıcıya söyleyeceğin düz metin üret. JSON/Markdown yok.")
+        rules.append("- Output plain text for the user only. No JSON/Markdown.")
 
         # Honesty
-        rules.append("- Bilmediğin konularda dürüst ol.")
+        rules.append("- Be honest about things you don't know.")
 
         block = "\n".join(rules)
         return block[:self.config.rules_max_chars]
@@ -307,14 +307,14 @@ class PersonalityInjector:
         persona_name = p.name if p is not None else "Bantz"
 
         lines = [
-            f"- Sen {persona_name}'sin. Kullanıcı {name}'dır.",
-            "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
+            f"- You are {persona_name}, The Broadcaster. The user is {name}.",
+            "- Be polished, theatrical, with mid-Atlantic radio-host charm.",
         ]
 
         if self.uses_honorifics:
-            lines.append("- 'Efendim' hitabını kullan.")
+            lines.append("- Address the user as 'friend'.")
         else:
-            lines.append("- Samimi bir dil kullan.")
+            lines.append("- Use a warm, informal tone.")
 
         return "\n".join(lines)
 

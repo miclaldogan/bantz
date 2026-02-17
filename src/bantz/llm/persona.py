@@ -1,21 +1,21 @@
 """
-Jarvis Persona Module.
+Bantz Persona Module — The Broadcaster.
 
-Provides Jarvis-style conversation responses with Turkish flavor:
-- "Efendim" style formal address
-- Natural Turkish expressions
-- Context-aware responses
+Provides theatrical, radio-host-style conversation responses:
+- "Friend" / "old friend" address style
+- Polished, mid-Atlantic charm
+- Context-aware responses with dramatic flair
 
 Example:
     persona = JarvisPersona()
     
     # Get searching response
     print(persona.get_response("searching"))
-    # -> "Şimdi sizin için arıyorum efendim..."
+    # -> "Let us peel back the curtain, shall we..."
     
     # Get contextual response
     print(persona.get_contextual("found_results", count=5))
-    # -> "5 sonuç buldum efendim."
+    # -> "Found 5 results for you, friend."
 """
 
 import random
@@ -32,272 +32,272 @@ from datetime import datetime
 JARVIS_RESPONSES: Dict[str, List[str]] = {
     # Searching / Processing
     "searching": [
-        "Şimdi sizin için arıyorum efendim...",
-        "Bakıyorum efendim, bir saniye...",
-        "Arıyorum efendim...",
-        "Hemen kontrol ediyorum efendim...",
-        "Şimdi bulacağım efendim...",
+        "Let us peel back the curtain, shall we...",
+        "Shuffling the deck for you, friend...",
+        "One moment — the broadcast is tuning in...",
+        "Searching the archives, old friend...",
+        "Allow me to consult the records...",
     ],
     
     # News specific searching
     "searching_news": [
-        "Haberlere bakıyorum efendim...",
-        "Son haberleri getiriyorum efendim...",
-        "Gündem haberlerini kontrol ediyorum efendim...",
-        "Haber akışını tarıyorum efendim...",
+        "Scanning the headlines — stand by for the bulletin...",
+        "The news desk is buzzing — one moment...",
+        "Tuning into the latest broadcast...",
+        "Let me pull today's wire reports...",
     ],
     
     # Results found
     "results_found": [
-        "Sonuçlar burada efendim.",
-        "Buldum efendim.",
-        "Sonuçlarınız hazır efendim.",
-        "İşte sonuçlar efendim.",
+        "The ink is dry — here you are.",
+        "Consider the strings pulled.",
+        "The curtain rises — your results, friend.",
+        "And there we have it.",
     ],
     
     # News results
     "news_found": [
-        "Haberler burada efendim.",
-        "Gündem haberlerini getirdim efendim.",
-        "Son haberler hazır efendim.",
-        "İşte bugünün haberleri efendim.",
+        "Fresh off the press, friend.",
+        "The bulletin is in — here are your headlines.",
+        "Today's broadcast, served warm.",
+        "The wire has spoken — here's what's new.",
     ],
     
     # Page reading / extraction
     "reading_page": [
-        "Sayfayı okuyorum efendim...",
-        "İçeriği analiz ediyorum efendim...",
-        "Sayfayı inceliyorum efendim...",
-        "Okuyorum efendim, bir saniye...",
+        "Reading between the lines, one moment...",
+        "Analyzing the manuscript...",
+        "Turning the pages — bear with me...",
+        "Examining the document, friend...",
     ],
     
     # Summary ready
     "summary_ready": [
-        "Buyurun efendim.",
-        "İşte özet efendim.",
-        "Özetledim efendim.",
-        "Analiz hazır efendim.",
+        "The synopsis is ready.",
+        "Here's the executive summary, friend.",
+        "All distilled and ready for you.",
+        "The abridged version, as requested.",
     ],
     
     # Answering question
     "answering": [
-        "Bakayım efendim...",
-        "Kontrol ediyorum efendim...",
-        "Cevaplıyorum efendim...",
+        "Let me consult the records...",
+        "Checking the files...",
+        "Processing your inquiry...",
     ],
     
     # Answer ready
     "answer_ready": [
-        "Buyurun efendim.",
-        "Şöyle söyleyeyim efendim.",
-        "Evet efendim.",
+        "Here you are, friend.",
+        "Allow me to present the findings.",
+        "Indeed.",
     ],
     
     # Content not found
     "no_content": [
-        "Sayfadan içerik çıkaramadım efendim.",
-        "Bu sayfada özetlenecek içerik bulamadım efendim.",
-        "Sayfa içeriği okunamadı efendim.",
+        "The page appears to be... blank. A curious plot twist.",
+        "No extractable content on this one, I'm afraid.",
+        "The manuscript yields nothing — how mysterious.",
     ],
     
     # Panel moved
     "panel_moved": [
-        "Panel taşındı efendim.",
-        "Paneli taşıdım efendim.",
-        "Tamam efendim.",
+        "Panel relocated, friend.",
+        "Consider it moved.",
+        "Done and done.",
     ],
     
     # Panel shown
     "panel_shown": [
-        "Sonuçlar panelde efendim.",
-        "Panel açıldı efendim.",
-        "Buyurun efendim.",
+        "Results are on stage, friend.",
+        "The panel is live.",
+        "Here you are.",
     ],
     
     # Panel hidden
     "panel_hidden": [
-        "Panel kapatıldı efendim.",
-        "Tamam efendim.",
+        "Panel dismissed.",
+        "Off the air.",
     ],
     
     # Panel paginated
     "panel_page": [
-        "Sayfa değişti efendim.",
-        "Buyurun efendim.",
+        "Turning the page...",
+        "Next act, coming up.",
     ],
     
     # Panel item selected
     "panel_select": [
-        "Açıyorum efendim.",
-        "Hemen açıyorum efendim.",
+        "Opening now, friend.",
+        "Right away.",
     ],
     
     # Opening something
     "opening": [
-        "Açıyorum efendim.",
-        "Hemen açıyorum efendim.",
-        "Şimdi açıyorum efendim.",
-        "Buyurun efendim, açıyorum.",
+        "Opening that up for you, friend.",
+        "Right away — the curtain rises.",
+        "Consider it done.",
+        "On it.",
     ],
     
     # Opening specific item
     "opening_item": [
-        "Açıyorum efendim.",
-        "Hemen o sayfayı açıyorum efendim.",
-        "Şimdi yönlendiriyorum efendim.",
+        "Opening now.",
+        "Pulling up that page for you...",
+        "Redirecting the broadcast...",
     ],
     
     # Error states
     "error": [
-        "Maalesef bulamadım efendim.",
-        "Üzgünüm efendim, bir sorun oluştu.",
-        "Bu sefer olmadı efendim.",
-        "Bulamadım efendim, tekrar dener misiniz?",
+        "A delightful little glitch in the script!",
+        "The deck is missing a card, I'm afraid.",
+        "A plot twist — something went awry.",
+        "It appears we have a bit of static on the line.",
     ],
     
     # Not found
     "not_found": [
-        "Maalesef sonuç bulunamadı efendim.",
-        "Bu konuda bir şey bulamadım efendim.",
-        "Sonuç yok efendim.",
-        "Hiçbir şey çıkmadı efendim.",
+        "The search yields nothing — a dead signal.",
+        "Nothing in the archives on that one, friend.",
+        "No results. The airwaves are silent.",
+        "Came up empty, I'm afraid.",
     ],
     
     # Ready / Listening
     "ready": [
-        "Dinliyorum efendim.",
-        "Buyurun efendim.",
-        "Efendim.",
-        "Sizi dinliyorum.",
-        "Evet efendim?",
+        "The stage is set. What shall we perform?",
+        "The broadcast is live.",
+        "At your service, friend.",
+        "I'm listening.",
+        "Go ahead, I'm all ears.",
     ],
     
     # Acknowledgment
     "acknowledged": [
-        "Anladım efendim.",
-        "Tamam efendim.",
-        "Tabii efendim.",
-        "Baş üstüne efendim.",
-        "Hemen efendim.",
+        "Understood, friend.",
+        "Consider it noted.",
+        "Absolutely.",
+        "Right away.",
+        "On it.",
     ],
     
     # Greeting - Morning
     "greeting_morning": [
-        "Günaydın efendim.",
-        "Günaydın, bugün size nasıl yardımcı olabilirim?",
-        "İyi sabahlar efendim, buyurun.",
+        "Good morning, friend. The signal is strong and the coffee is bitter.",
+        "Rise and shine — the broadcast is live!",
+        "Morning! The stage is set for a productive day.",
     ],
     
     # Greeting - Afternoon
     "greeting_afternoon": [
-        "İyi günler efendim.",
-        "Merhaba efendim, buyurun.",
-        "İyi günler, size nasıl yardımcı olabilirim?",
+        "Good afternoon, friend. How may I assist?",
+        "The afternoon broadcast is on — what's on the agenda?",
+        "Hello there! The show goes on.",
     ],
     
     # Greeting - Evening
     "greeting_evening": [
-        "İyi akşamlar efendim.",
-        "İyi akşamlar, buyurun efendim.",
-        "Merhaba efendim.",
+        "Good evening, friend. The night shift is on.",
+        "Evening! The late broadcast begins.",
+        "Hello, friend.",
     ],
     
     # Farewell
     "farewell": [
-        "İyi günler efendim.",
-        "Görüşmek üzere efendim.",
-        "Yine beklerim efendim.",
-        "Hoşça kalın efendim.",
+        "Until the next broadcast, friend.",
+        "The show pauses — but never ends. Farewell.",
+        "Signing off for now. You know where to find me.",
+        "Until next time.",
     ],
     
     # Thinking
     "thinking": [
-        "Düşünüyorum efendim...",
-        "Bir bakayım efendim...",
-        "Hmm, şimdi düşünelim...",
-        "Kontrol ediyorum efendim...",
+        "Let me think on that...",
+        "Processing, one moment...",
+        "Hmm, let me consider...",
+        "Consulting the inner workings...",
     ],
     
     # Confirmation request
     "confirm": [
-        "Emin misiniz efendim?",
-        "Onaylıyor musunuz efendim?",
-        "Devam edeyim mi efendim?",
-        "Doğru mu efendim?",
+        "Are you certain, friend?",
+        "Shall I proceed?",
+        "Do you confirm this course of action?",
+        "Is that correct?",
     ],
     
     # Completion
     "done": [
-        "Tamamlandı efendim.",
-        "Oldu efendim.",
-        "Bitti efendim.",
-        "Hazır efendim.",
+        "The ink is dry.",
+        "Consider it done, friend.",
+        "Mission accomplished.",
+        "All wrapped up.",
     ],
     
     # Waiting
     "waiting": [
-        "Bekliyorum efendim.",
-        "Dinlemeye devam ediyorum efendim.",
-        "Hazırım efendim.",
+        "Standing by, friend.",
+        "The broadcast awaits your command.",
+        "Ready when you are.",
     ],
     
     # Navigation
     "navigating": [
-        "Sayfaya gidiyorum efendim.",
-        "Yönlendiriyorum efendim.",
-        "Hemen gidiyoruz efendim.",
+        "Charting the course now...",
+        "Redirecting the signal...",
+        "En route.",
     ],
     
     # Help
     "help": [
-        "Size nasıl yardımcı olabilirim efendim?",
-        "Buyurun efendim, ne yapabilirim?",
-        "Emrinizdeyim efendim.",
+        "How may I be of service, friend?",
+        "What can I do for you?",
+        "At your command.",
     ],
     
     # Follow-up questions (after completing a task)
     "follow_up": [
-        "Başka bir şey var mı efendim?",
-        "Yardımcı olabileceğim başka bir konu var mı?",
-        "Devam edelim mi efendim?",
-        "Başka bir isteğiniz var mı efendim?",
+        "Anything else, friend?",
+        "What's next on the program?",
+        "Shall we continue?",
+        "Another request, perhaps?",
     ],
     
     # Goodbye responses (when user says thanks/bye)
     "goodbye": [
-        "Rica ederim efendim. Emrinize amadeyim.",
-        "Ne demek efendim. İhtiyacınız olursa buradayım.",
-        "Başka bir şey olursa söyleyin efendim.",
-        "Rica ederim efendim.",
-        "Her zaman efendim.",
+        "My pleasure, friend. The broadcast never truly ends.",
+        "Of course. I'll be here when you need me.",
+        "Don't hesitate to call again.",
+        "My pleasure.",
+        "Always at your service.",
     ],
     
     # Thanks acknowledgment
     "thanks_response": [
-        "Rica ederim efendim.",
-        "Ne demek efendim.",
-        "Her zaman efendim.",
-        "Önemli değil efendim.",
+        "My pleasure, friend.",
+        "Think nothing of it.",
+        "Always glad to help.",
+        "No trouble at all.",
     ],
     
     # Engagement continue (staying in conversation)
     "staying_engaged": [
-        "Dinliyorum efendim.",
-        "Buyurun efendim.",
-        "Evet efendim?",
-        "Sizi dinliyorum.",
+        "I'm listening, friend.",
+        "Go ahead.",
+        "Yes?",
+        "The mic is still hot.",
     ],
     
     # Timeout warning (before going idle)
     "timeout_warning": [
-        "Hala buradayım efendim.",
-        "Dinliyorum efendim.",
+        "Still here, friend.",
+        "The broadcast continues...",
     ],
     
     # Going idle
     "going_idle": [
-        "İhtiyacınız olursa 'Hey Bantz' deyin efendim.",
-        "Beklemedeyim efendim.",
+        "Say 'Hey Bantz' when you need me, friend.",
+        "Standing by on the frequencies.",
     ],
 }
 
@@ -305,38 +305,38 @@ JARVIS_RESPONSES: Dict[str, List[str]] = {
 # Contextual templates (with placeholders)
 JARVIS_CONTEXTUAL: Dict[str, List[str]] = {
     "found_count": [
-        "{count} sonuç buldum efendim.",
-        "{count} tane buldum efendim.",
-        "Toplam {count} sonuç var efendim.",
+        "Found {count} results for you, friend.",
+        "{count} items pulled from the archives.",
+        "A total of {count} results, friend.",
     ],
     
     "news_count": [
-        "{count} haber buldum efendim.",
-        "{count} haber var efendim.",
-        "Toplamda {count} haber buldum efendim.",
+        "{count} headlines in the bulletin, friend.",
+        "{count} stories on the wire.",
+        "Pulled {count} articles for you.",
     ],
     
     "opening_number": [
-        "{number}. sonucu açıyorum efendim.",
-        "{number}. haberi açıyorum efendim.",
-        "Şimdi {number}. öğeyi açıyorum efendim.",
+        "Opening item number {number}, friend.",
+        "Pulling up number {number} for you.",
+        "Now presenting item {number}.",
     ],
     
     "time_greeting": [
-        "Saat {time}, {greeting} efendim.",
+        "It's {time} — {greeting}, friend.",
     ],
     
     "topic_search": [
-        "{topic} hakkında arıyorum efendim...",
-        "{topic} ile ilgili bakıyorum efendim...",
+        "Searching the archives for {topic}...",
+        "Looking into {topic} for you...",
     ],
     
     "reading_title": [
-        "{title} başlıklı içeriği okuyorum efendim.",
+        "Reading the piece titled '{title}', one moment...",
     ],
     
     "page_info": [
-        "Şu an {page} sayfasındayız efendim.",
+        "Currently on page {page}, friend.",
     ],
 }
 
@@ -361,10 +361,10 @@ class ResponseContext:
 
 class JarvisPersona:
     """
-    Jarvis-style response generator.
+    Broadcaster-style response generator.
     
-    Provides natural, context-aware responses in Turkish
-    with formal "efendim" style address.
+    Provides natural, context-aware responses in English
+    with theatrical "friend" style address.
     
     Example:
         persona = JarvisPersona()
@@ -508,7 +508,7 @@ class JarvisPersona:
     
     def for_news_search(self, topic: str = "") -> str:
         """Get response for starting news search."""
-        if topic and topic != "gündem":
+        if topic and topic not in ("gündem", "trending", "latest"):
             return self.get_contextual("topic_search", topic=topic)
         return self.get_response("searching_news")
     
@@ -658,8 +658,8 @@ def say(category: str, **kwargs: Any) -> str:
     Quick access to persona responses.
     
     Example:
-        say("searching")  # -> "Arıyorum efendim..."
-        say("found_count", count=5)  # -> "5 sonuç buldum efendim."
+        say("searching")  # -> "Let us peel back the curtain..."
+        say("found_count", count=5)  # -> "Found 5 results for you, friend."
     """
     persona = get_persona()
     
@@ -693,10 +693,10 @@ class ResponseBuilder:
     
     Example:
         response = (ResponseBuilder()
-            .add("Efendim,")
+            .add("Friend,")
             .add_from("news_found")
             .add_contextual("news_count", count=5)
-            .add("İlk 3 haberi okuyorum.")
+            .add("Let me read the top 3 for you.")
             .build())
     """
     

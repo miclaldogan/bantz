@@ -824,7 +824,7 @@ def apply_orchestrator_defaults(
     # Normalize route
     if "route" in result:
         route = str(result["route"]).lower().strip()
-        if route not in {"calendar", "gmail", "smalltalk", "system", "wiki", "chat", "contacts", "keep", "unknown"}:
+        if route not in {"calendar", "gmail", "news", "smalltalk", "system", "wiki", "chat", "contacts", "keep", "unknown"}:
             route = "unknown"
         result["route"] = route
     

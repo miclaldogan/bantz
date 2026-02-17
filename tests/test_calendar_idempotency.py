@@ -478,12 +478,13 @@ class TestTTLExpiration:
     
     def test_cleanup_expired(self, temp_store_path):
         """Test cleanup of expired records."""
-        store = IdempotencyStore(store_path=temp_store_path, ttl_seconds=0)
+        store = IdempotencyStore(store_path=temp_store_path, ttl_seconds=1)
         
         store.put("key1", event_id="evt_1", event_summary="M", event_start="", event_end="")
         store.put("key2", event_id="evt_2", event_summary="M", event_start="", event_end="")
         
-        time.sleep(0.1)
+        # Wait long enough for both records to expire (ttl=1s, generous margin)
+        time.sleep(2.5)
         removed = store.cleanup_expired()
         
         assert removed == 2
