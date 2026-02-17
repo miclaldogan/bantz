@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Bantz Overlay
+Comment=Bantz AI assistant desktop overlay HUD
+Exec=/usr/bin/electron /opt/bantz/overlay/main.js
+Icon=bantz
+Terminal=false
+Categories=Utility;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after-phase=2

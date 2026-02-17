@@ -1,0 +1,23 @@
+[Unit]
+Description=BANTZ Desktop Overlay HUD
+Documentation=https://github.com/miclaldogan/bantz
+After=bantz-core.service graphical-session.target
+PartOf=bantz-core.service
+BindsTo=bantz-core.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/electron %h/Desktop/Bantz/bantz-overlay/src/main/main.js
+WorkingDirectory=%h/Desktop/Bantz/bantz-overlay
+EnvironmentFile=-%h/.config/bantz/env
+Environment=DISPLAY=:0
+Environment=ELECTRON_ENABLE_LOGGING=1
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+Environment=NODE_ENV=production
+Restart=on-failure
+RestartSec=3
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=default.target

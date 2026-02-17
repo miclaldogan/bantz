@@ -33,7 +33,7 @@ fi
 # ── Install service files (replace %h placeholders) ──────────────
 for f in bantz-core.service bantz-voice.service bantz.target \
          bantz-voice-watchdog.service bantz-vllm-watchdog.service \
-         bantz-resume.service; do
+         bantz-resume.service bantz-overlay.service; do
     src="$SERVICE_SRC/$f"
     dst="$SERVICE_DST/$f"
     if [[ -f "$src" ]]; then
