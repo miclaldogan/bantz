@@ -9,8 +9,8 @@
 
 // ─── Configuration ──────────────────────────────────────────────
 const AGENDA_CONFIG = {
-  panelWidth: 280,
-  panelHeight: 350,
+  panelWidth: 310,
+  panelHeight: 380,
   refreshInterval: 5 * 60 * 1000, // 5 minutes
   emptyMessage: 'Bugün takvimde etkinlik yok, efendim.',
 };
@@ -40,6 +40,9 @@ class DailyTasksPanel {
     });
   }
 
+  /** @returns {HTMLElement|null} The underlying DOM element */
+  get element() { return this._panel ? this._panel.element : null; }
+
   // ─── Public API ───────────────────────────────────────────────
 
   /**
@@ -49,9 +52,9 @@ class DailyTasksPanel {
     this._panel.mount(this._parent);
 
     const panelEl = this._parent.querySelector('#terminal-daily-tasks');
-    if (!panelEl) return;
+    if (!panelEl) { console.error('[DailyTasks] Panel element not found'); return; }
 
-    const content = panelEl.querySelector('.terminal-content');
+    const content = panelEl.querySelector('.terminal-content, .terminal-panel-content');
     if (!content) return;
 
     this._contentEl = content;

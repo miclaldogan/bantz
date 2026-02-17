@@ -8,9 +8,13 @@
  * - Particle sphere initialization
  */
 
+console.log('[Overlay] renderer.js: module loading...');
+
 import { ParticleSphere } from './components/particle-sphere.js';
 import { ParticleScatter } from './components/particle-scatter.js';
 import { SphereStateAnimator } from './components/sphere-state.js';
+
+console.log('[Overlay] renderer.js: imports complete');
 
 // ─── DOM References ───────────────────────────────────────────
 const hudPanel = document.getElementById('hud-panel');
@@ -128,6 +132,25 @@ function initSystemStatus() {
   console.log('[Overlay] System status initialized');
 }
 
+// ─── Clock Panel ──────────────────────────────────────────────
+let clockPanel = null;
+
+function initClockPanel() {
+  if (!window.ClockPanel) {
+    console.warn('[Overlay] ClockPanel not loaded');
+    return;
+  }
+  clockPanel = new window.ClockPanel(hudPanel);
+  clockPanel.mount();
+  clockPanel.show();
+  window.bantzClock = clockPanel;
+
+  // Register with layout engine
+  if (layoutEngine) layoutEngine.register('clock', clockPanel, 'bottom-right');
+
+  console.log('[Overlay] Clock panel initialized');
+}
+
 // ─── Typewriter Speech Output ─────────────────────────────────
 let typewriter = null;
 
@@ -197,16 +220,43 @@ function initReasoningChain() {
 }
 
 // ─── Mouse Interaction Zones ──────────────────────────────────
-// When the mouse enters the HUD panel, we enable mouse events
-// so the user can interact with panels/sphere. When it leaves,
-// we disable them so clicks pass through to desktop windows.
+// Electron's setIgnoreMouseEvents(true, { forward: true }) makes the
+// window click-through but still forwards mousemove to the renderer.
+// We track mousemove on document to detect when cursor is over
+// interactive content, then toggle click-through accordingly.
+//
+// mouseenter/mouseleave are unreliable with setIgnoreMouseEvents
+// on X11, so we use mousemove + elementFromPoint instead.
 
-hudPanel.addEventListener('mouseenter', () => {
-  window.overlayAPI.enableMouse();
-});
+let _mouseEnabled = false;
 
-hudPanel.addEventListener('mouseleave', () => {
-  window.overlayAPI.disableMouse();
+document.addEventListener('mousemove', (e) => {
+  // Check what's under the cursor
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  if (!el) {
+    if (_mouseEnabled) {
+      window.overlayAPI.disableMouse();
+      _mouseEnabled = false;
+    }
+    return;
+  }
+
+  // Check if cursor is over any interactive element
+  const isInteractive = !!(
+    el.closest('.hud-panel') ||
+    el.closest('.terminal-panel') ||
+    el.closest('.news-tooltip') ||
+    el.closest('.phone-call-overlay') ||
+    el.closest('.news-popup')
+  );
+
+  if (isInteractive && !_mouseEnabled) {
+    window.overlayAPI.enableMouse();
+    _mouseEnabled = true;
+  } else if (!isInteractive && _mouseEnabled) {
+    window.overlayAPI.disableMouse();
+    _mouseEnabled = false;
+  }
 });
 
 // ─── Connection Status ────────────────────────────────────────
@@ -348,6 +398,10 @@ if (window.overlayAPI && window.overlayAPI.onDaemonMessage) {
         // Respond with pong via main process
         window.overlayAPI.sendDaemonEvent({ type: 'pong', ts: Date.now() });
         break;
+      case 'event':
+        // Handle daemon events (phone calls, etc.)
+        handleDaemonEvent(message);
+        break;
       default:
         console.log('[Overlay] Unknown message type:', message.type);
     }
@@ -427,6 +481,30 @@ function handleStateMessage(msg) {
 function handleActionMessage(msg) {
   // Will be implemented in #1401+ (panel actions)
   console.log('[Overlay] Action:', msg.action_type);
+}
+
+function handleDaemonEvent(msg) {
+  const event = msg.event;
+  const data = msg.data || {};
+
+  switch (event) {
+    case 'phone:incoming':
+      if (phoneCallOverlay) {
+        phoneCallOverlay.showIncoming({
+          caller_name: data.caller_name || 'Bilinmeyen',
+          caller_number: data.caller_number || '',
+          caller_photo: data.caller_photo || null,
+        });
+      }
+      break;
+    case 'phone:ended':
+      if (phoneCallOverlay) {
+        phoneCallOverlay.callEnded(data.duration_seconds || 0);
+      }
+      break;
+    default:
+      console.log('[Overlay] Daemon event:', event, data);
+  }
 }
 
 function handleBriefingMessage(msg) {
@@ -545,6 +623,9 @@ initDailyTasks();
 // ─── Initialize System Status ───────────────────────────────
 initSystemStatus();
 
+// ─── Initialize Clock Panel ─────────────────────────────────
+initClockPanel();
+
 // ─── Initialize Typewriter ─────────────────────────────────
 initTypewriter();
 
@@ -562,6 +643,40 @@ checkFirstBootOrAbsence();
 
 // ─── Initialize Reasoning Chain ─────────────────────────────
 initReasoningChain();
+
+// ─── Initialize Phone Call Overlay ──────────────────────────
+let phoneCallOverlay = null;
+
+function initPhoneCallOverlay() {
+  if (!window.PhoneCallOverlay) {
+    console.warn('[Overlay] PhoneCallOverlay not loaded');
+    return;
+  }
+  phoneCallOverlay = new window.PhoneCallOverlay();
+  phoneCallOverlay.mount(document.body);
+  window.bantzPhoneCall = phoneCallOverlay;
+  console.log('[Overlay] Phone call overlay initialized');
+}
+
+initPhoneCallOverlay();
+
+// ─── Diagnostic Summary ─────────────────────────────────────
+console.log('[Overlay] ═══ INIT SUMMARY ═══');
+console.log('[Overlay]   sphere:', !!sphere);
+console.log('[Overlay]   layoutEngine:', !!layoutEngine);
+console.log('[Overlay]   newsFeed:', !!newsFeed);
+console.log('[Overlay]   dailyTasks:', !!dailyTasks);
+console.log('[Overlay]   systemStatus:', !!systemStatus);
+console.log('[Overlay]   clockPanel:', !!clockPanel);
+console.log('[Overlay]   typewriter:', !!typewriter);
+console.log('[Overlay]   glitchEffects:', !!glitchEffects);
+console.log('[Overlay]   panelTransitions:', !!panelTransitions);
+console.log('[Overlay]   ttsSync:', !!ttsSync);
+console.log('[Overlay]   reasoningChain:', !!reasoningChain);
+console.log('[Overlay]   phoneCallOverlay:', !!phoneCallOverlay);
+console.log('[Overlay]   hudPanel:', !!hudPanel);
+console.log('[Overlay]   sphereContainer:', !!sphereContainer);
+console.log('[Overlay] ═══════════════════');
 
 // ─── Tray Commands ──────────────────────────────────────────
 if (window.overlayAPI) {
@@ -602,3 +717,27 @@ if (window.overlayAPI) {
     });
   }
 }
+
+// ─── Demo Mode ──────────────────────────────────────────────
+// Auto-starts with mock data if no briefing data within 3s
+let demoMode = null;
+
+function initDemoMode() {
+  if (!window.BantzDemoMode) {
+    console.warn('[Overlay] DemoMode not loaded');
+    return;
+  }
+  demoMode = new window.BantzDemoMode();
+  window.bantzDemo = demoMode;
+
+  // Schedule auto-start if no briefing data arrives within 3s
+  // (works regardless of daemon connection state)
+  demoMode.scheduleAutoStart(3000);
+
+  // Cancel demo auto-start only when real briefing data arrives
+  // The briefing_start handler above will cancel if needed
+
+  console.log('[Overlay] Demo mode ready (auto-start in 3s if no briefing data)');
+}
+
+initDemoMode();

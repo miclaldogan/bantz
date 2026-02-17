@@ -88,4 +88,37 @@ contextBridge.exposeInMainWorld('overlayAPI', {
    * Request IPC reconnection.
    */
   reconnect: () => ipcRenderer.send('daemon:reconnect'),
+
+  // ─── System Data ─────────────────────────────────────────────
+  /**
+   * Get real system metrics (CPU, RAM, Disk, Uptime).
+   * @returns {Promise<{cpu: number, ram: number, disk: number, uptime_seconds: number}>}
+   */
+  getSystemMetrics: () => ipcRenderer.invoke('system:get-metrics'),
+
+  /**
+   * Get weather data from wttr.in (IP-based location).
+   * @returns {Promise<{temperature: number, condition: string, humidity: number, wind_speed: number, location: string}|null>}
+   */
+  getWeather: () => ipcRenderer.invoke('system:get-weather'),
+
+  /**
+   * Get news articles from RSS feeds.
+   * @returns {Promise<Array<{title: string, source: string, summary: string, link: string, pubDate: string}>|null>}
+   */
+  getNewsFeed: () => ipcRenderer.invoke('news:get-feed'),
+
+  /**
+   * Fetch OG image URL from a news article page.
+   * @param {string} url - Article URL
+   * @returns {Promise<string|null>} Image URL or null
+   */
+  getArticleImage: (url) => ipcRenderer.invoke('news:get-article-image', url),
+
+  /**
+   * Open a URL in the user's default browser.
+   * @param {string} url - URL to open
+   * @returns {Promise<boolean>}
+   */
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
 });

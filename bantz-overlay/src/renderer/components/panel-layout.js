@@ -40,24 +40,31 @@ const REPOSITION_DEBOUNCE = 150;  // ms
 const SLOT_DEFINITIONS = {
   left: {
     anchor: 'left',
-    overflowPct: 0.40,       // 40% of panel width overflows left
+    overflowPct: 0.65,       // 65% of panel width overflows left
     baseZIndex: 20,
     slideAnim: 'slide-in-left',
-    verticalAlign: 0.10,     // 10% from top
+    verticalAlign: 0.06,     // 6% from top
   },
   right: {
     anchor: 'right',
-    overflowPct: 0.40,       // 40% of panel width overflows right
+    overflowPct: 0.65,       // 65% of panel width overflows right
     baseZIndex: 20,
     slideAnim: 'slide-in-right',
-    verticalAlign: 0.10,
+    verticalAlign: 0.06,
   },
   'bottom-left': {
     anchor: 'bottom-left',
-    overflowPct: 0.40,       // 40% overflow on both bottom and left
+    overflowPct: 0.55,       // 55% overflow on both bottom and left
     baseZIndex: 15,
     slideAnim: 'slide-in-bottom',
     verticalAlign: null,     // computed from bottom
+  },
+  'bottom-right': {
+    anchor: 'bottom-right',
+    overflowPct: 0.55,       // 55% overflow on both bottom and right
+    baseZIndex: 15,
+    slideAnim: 'slide-in-bottom',
+    verticalAlign: null,
   },
   'top-float': {
     anchor: 'top',
@@ -297,6 +304,17 @@ class PanelLayoutEngine {
         const overflowY = Math.round(ph * overflow);
         el.style.left = `${-overflowX}px`;
         el.style.right = '';
+        el.style.top = '';
+        el.style.bottom = `${-overflowY}px`;
+        break;
+      }
+
+      case 'bottom-right': {
+        // Panel at bottom-right corner, overflowing both
+        const overflowX = Math.round(pw * overflow);
+        const overflowY = Math.round(ph * overflow);
+        el.style.right = `${-overflowX}px`;
+        el.style.left = '';
         el.style.top = '';
         el.style.bottom = `${-overflowY}px`;
         break;

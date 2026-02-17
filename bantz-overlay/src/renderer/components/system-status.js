@@ -9,8 +9,8 @@
 
 // ─── Configuration ──────────────────────────────────────────────
 const SYSTEM_CONFIG = {
-  panelWidth: 250,
-  panelHeight: 200,
+  panelWidth: 280,
+  panelHeight: 210,
   systemRefreshMs: 10000,    // 10s for system metrics
   barWidth: 10,              // characters in progress bar
   thresholds: {
@@ -28,6 +28,7 @@ const WEATHER_ICONS = {
   cloudy: '☁',
   clouds: '☁',
   overcast: '☁',
+  partly: '⛅',
   rain: '🌧',
   rainy: '🌧',
   drizzle: '🌧',
@@ -35,8 +36,11 @@ const WEATHER_ICONS = {
   snowy: '❄',
   storm: '⛈',
   thunder: '⛈',
+  funnel: '🌪',
+  tornado: '🌪',
   fog: '🌫',
   mist: '🌫',
+  haze: '🌫',
   wind: '💨',
   windy: '💨',
   default: '🌡',
@@ -66,6 +70,9 @@ class SystemStatusPanel {
     });
   }
 
+  /** @returns {HTMLElement|null} The underlying DOM element */
+  get element() { return this._panel ? this._panel.element : null; }
+
   // ─── Public API ───────────────────────────────────────────────
 
   /**
@@ -75,9 +82,9 @@ class SystemStatusPanel {
     this._panel.mount(this._parent);
 
     const panelEl = this._parent.querySelector('#terminal-system-status');
-    if (!panelEl) return;
+    if (!panelEl) { console.error('[SystemStatus] Panel element not found'); return; }
 
-    const content = panelEl.querySelector('.terminal-content');
+    const content = panelEl.querySelector('.terminal-content, .terminal-panel-content');
     if (!content) return;
 
     this._contentEl = content;
