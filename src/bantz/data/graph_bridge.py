@@ -160,6 +160,12 @@ class GraphBridge:
 
         # Normalise result into linkable dicts
         items = self._extract_items(result)
+
+        # Issue #1472: deduplicate senders for gmail results to avoid
+        # creating duplicate Person nodes from the same batch
+        if source == "gmail":
+            items = self._extract_senders(items)
+
         total_edges = 0
 
         for item in items:
@@ -223,3 +229,39 @@ class GraphBridge:
         elif isinstance(result, list):
             return [item for item in result if isinstance(item, dict)]
         return []
+
+    @staticmethod
+    def _extract_senders(items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        """Deduplicate senders from a batch of email items.
+
+        Returns a list of minimal ``{"from": ..., "subject": ..., ...}``
+        dicts with one entry per unique sender email address.  This is
+        used by the orchestrator to surface "who sent this" queries without
+        creating duplicate Person nodes.
+
+        Parameters
+        ----------
+        items:
+            List of email dicts, each expected to contain at least a
+            ``"from"`` field in ``"Name <email>"`` or plain ``"email"`` format.
+
+        Returns
+        -------
+        list[Dict[str, Any]]
+            Deduplicated list ordered by first occurrence.
+        """
+        import re
+        _email_re = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
+        seen: set[str] = set()
+        senders: list[Dict[str, Any]] = []
+        for item in items:
+            from_field = item.get("from") or ""
+            if not from_field:
+                continue
+            m = _email_re.search(from_field)
+            addr = m.group(0).lower() if m else from_field.strip().lower()
+            if addr in seen:
+                continue
+            seen.add(addr)
+            senders.append(item)
+        return senders
