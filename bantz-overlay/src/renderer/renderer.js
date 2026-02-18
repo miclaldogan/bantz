@@ -946,7 +946,7 @@ function initClassroomDialog() {
     return;
   }
   classroomDialog = new window.ClassroomDialog();
-  classroomDialog.mount(document.body);
+  classroomDialog.mount(hudPanel);
   window.bantzClassroomDialog = classroomDialog;
   console.log('[Overlay] Classroom dialog initialized');
 }

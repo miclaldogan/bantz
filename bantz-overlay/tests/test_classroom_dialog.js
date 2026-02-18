@@ -25,7 +25,6 @@ const fs     = require('fs');
 class MockElement {
   constructor(tag) {
     this.tagName     = (tag || 'div').toUpperCase();
-    this.className   = '';
     this.textContent = '';
     this.innerHTML   = '';
     this.children    = [];
@@ -42,18 +41,24 @@ class MockElement {
     const self = this;
     this.style    = {};
     this.classList = {
-      add:      (...cs) => cs.forEach(c => { self._classes.add(c);    self.className = [...self._classes].join(' '); }),
-      remove:   (...cs) => cs.forEach(c => { self._classes.delete(c); self.className = [...self._classes].join(' '); }),
+      add:      (...cs) => cs.forEach(c => { self._classes.add(c);    /* className synced via getter */ }),
+      remove:   (...cs) => cs.forEach(c => { self._classes.delete(c); }),
       contains: (c) => self._classes.has(c),
       toggle:   (c) => {
         if (self._classes.has(c)) self._classes.delete(c); else self._classes.add(c);
-        self.className = [...self._classes].join(' ');
       },
       replace: (a, b) => {
         self._classes.delete(a); self._classes.add(b);
-        self.className = [...self._classes].join(' ');
       },
     };
+  }
+
+  // className getter/setter keeps _classes Set in sync
+  get className() {
+    return [...this._classes].join(' ');
+  }
+  set className(val) {
+    this._classes = new Set((val || '').split(' ').filter(Boolean));
   }
 
   appendChild(child) {
@@ -95,9 +100,8 @@ global.window = {
   GoogleAuthScopeIndicator: null,
 };
 
-// Silence console noise
+// Silence console noise — restored after tests
 const _origWarn = console.warn;
-// (keep for debugging, but suppress during normal run)
 console.warn = () => {};
 
 // ─── Load module under test ────────────────────────────────────────────────
@@ -117,6 +121,7 @@ assert.ok(GoogleAuthScopeIndicator,'GoogleAuthScopeIndicator exported');
 
 let passCount = 0;
 let failCount = 0;
+const _asyncTests = [];
 function test(name, fn) {
   try {
     fn();
@@ -128,16 +133,20 @@ function test(name, fn) {
     failCount++;
   }
 }
-async function testAsync(name, fn) {
-  try {
-    await fn();
-    console.log(`  ✓  ${name}`);
-    passCount++;
-  } catch (err) {
-    console.error(`  ✗  ${name}`);
-    console.error(`     ${err.message}`);
-    failCount++;
-  }
+function testAsync(name, fn) {
+  const promise = (async () => {
+    try {
+      await fn();
+      console.log(`  ✓  ${name}`);
+      passCount++;
+    } catch (err) {
+      console.error(`  ✗  ${name}`);
+      console.error(`     ${err.message}`);
+      failCount++;
+    }
+  })();
+  _asyncTests.push(promise);
+  return promise;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -598,5 +607,8 @@ test('_scopeLabel: returns Turkish labels', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 console.log(`\n${'─'.repeat(50)}`);
-console.log(`Tests: ${passCount + failCount}  ✓ ${passCount}  ✗ ${failCount}`);
-if (failCount > 0) process.exit(1);
+Promise.all(_asyncTests).then(() => {
+  console.warn = _origWarn; // restore
+  console.log(`Tests: ${passCount + failCount}  ✓ ${passCount}  ✗ ${failCount}`);
+  if (failCount > 0) process.exit(1);
+});

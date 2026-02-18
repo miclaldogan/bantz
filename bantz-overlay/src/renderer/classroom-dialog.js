@@ -42,6 +42,7 @@ class ClassroomDialog {
     this._input   = null;
     this._status  = null;
     this._pending = false;
+    this._onDocumentKeydown = null;
   }
 
   /**
@@ -120,9 +121,10 @@ class ClassroomDialog {
     btnCancel.addEventListener('click', () => this.hide());
 
     // Close on Escape
-    document.addEventListener('keydown', (e) => {
+    this._onDocumentKeydown = (e) => {
       if (e.key === 'Escape' && this._visible) this.hide();
-    });
+    };
+    document.addEventListener('keydown', this._onDocumentKeydown);
 
     // Close on backdrop click (click outside the box)
     overlay.addEventListener('click', (e) => {
@@ -152,6 +154,20 @@ class ClassroomDialog {
     this._visible = false;
   }
 
+  /**
+   * Tear down the dialog — removes global event listeners and DOM.
+   */
+  dispose() {
+    if (this._onDocumentKeydown) {
+      document.removeEventListener('keydown', this._onDocumentKeydown);
+      this._onDocumentKeydown = null;
+    }
+    if (this._root && this._root.parentNode) {
+      this._root.parentNode.removeChild(this._root);
+    }
+    this._root = null;
+  }
+
   /** Whether the dialog is currently visible. */
   get visible() {
     return this._visible;
@@ -172,7 +188,7 @@ class ClassroomDialog {
       return;
     }
     // Enforce same rule as the IPC handler: alphanumeric, 1-32 chars
-    const clean = raw.replace(/[^a-zA-Z0-9]/g, '');
+    const clean = raw.replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
     if (!clean) {
       this._setStatus('Geçersiz kod — yalnızca harf ve rakam kabul edilir.', 'error');
       return;
@@ -214,7 +230,14 @@ class ClassroomDialog {
   _setStatus(text, type) {
     if (!this._status) return;
     this._status.textContent = text;
-    this._status.className   = 'classroom-dialog-status';
+    // Use only classList to avoid desync with classList.add/remove elsewhere
+    this._status.classList.add('classroom-dialog-status');
+    this._status.classList.remove(
+      'hidden',
+      'classroom-dialog-status--error',
+      'classroom-dialog-status--success',
+      'classroom-dialog-status--info'
+    );
     if (!type) {
       this._status.classList.add('hidden');
     } else {
@@ -241,10 +264,11 @@ class GoogleAuthScopeIndicator {
    * @param {string[]} [scopes] - Which scopes to display. Defaults to all three.
    */
   constructor(scopes = ['calendar', 'gmail', 'classroom']) {
-    this._scopes  = scopes;
-    this._root    = null;
-    this._badges  = {}; // scope → badge element
-    this._status  = { calendar: false, gmail: false, classroom: false };
+    this._scopes       = scopes;
+    this._root         = null;
+    this._badges       = {}; // scope → badge element
+    this._status       = { calendar: false, gmail: false, classroom: false };
+    this._pendingScope = null;
   }
 
   /**
@@ -264,7 +288,7 @@ class GoogleAuthScopeIndicator {
 
     for (const scope of this._scopes) {
       const badge = document.createElement('button');
-      badge.className = `google-auth-scope-badge google-auth-scope-badge--${scope} google-auth-scope-badge--inactive`;
+      badge.classList.add('google-auth-scope-badge', `google-auth-scope-badge--${scope}`, 'google-auth-scope-badge--inactive');
       badge.textContent = this._scopeLabel(scope);
       badge.setAttribute('type', 'button');
       badge.setAttribute('title', `${this._scopeLabel(scope)} yetkisi — tıkla ve etkinleştir`);
@@ -325,10 +349,12 @@ class GoogleAuthScopeIndicator {
    */
   async _onBadgeClick(scope) {
     if (this._status[scope]) return; // already authorized, nothing to do
+    if (this._pendingScope !== null) return; // another scope request in progress
 
     const api = (typeof window !== 'undefined') ? window.overlayAPI : null;
     if (!api || typeof api.requestGoogleOAuth !== 'function') return;
 
+    this._pendingScope = scope;
     const badge = this._badges[scope];
     if (badge) {
       badge.classList.add('google-auth-scope-badge--pending');
@@ -360,6 +386,8 @@ class GoogleAuthScopeIndicator {
         badge.textContent = this._scopeLabel(scope);
       }
       console.warn('[AuthScopeIndicator] OAuth error:', err);
+    } finally {
+      this._pendingScope = null;
     }
   }
 
