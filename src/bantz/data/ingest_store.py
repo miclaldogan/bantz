@@ -74,6 +74,7 @@ class IngestRecord:
     accessed_at: float = 0.0
     access_count: int = 0
     meta: Optional[Dict[str, Any]] = None
+    tags: List[str] = field(default_factory=list)
 
     # ── helpers ───────────────────────────────────────────────
     @property
@@ -99,6 +100,7 @@ class IngestRecord:
             "accessed_at": self.accessed_at,
             "access_count": self.access_count,
             "meta": self.meta,
+            "tags": self.tags,
         }
 
 
@@ -131,13 +133,17 @@ CREATE TABLE IF NOT EXISTS ingest_store (
     expires_at      REAL,
     accessed_at     REAL,
     access_count    INTEGER NOT NULL DEFAULT 0,
-    meta            TEXT
+    meta            TEXT,
+    tags            TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE INDEX IF NOT EXISTS idx_ingest_class   ON ingest_store(data_class);
 CREATE INDEX IF NOT EXISTS idx_ingest_source  ON ingest_store(source);
 CREATE INDEX IF NOT EXISTS idx_ingest_expires ON ingest_store(expires_at);
 CREATE INDEX IF NOT EXISTS idx_ingest_fp      ON ingest_store(fingerprint);
+
+-- v2: add tags column to existing databases (no-op if already present)
+ALTER TABLE ingest_store ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
 """
 
 
@@ -191,7 +197,23 @@ class IngestStore:
 
     def _ensure_schema(self) -> None:
         with self._lock:
-            self._conn.executescript(_SCHEMA_SQL)
+            # Run CREATE TABLE / CREATE INDEX statements.
+            # The final ALTER TABLE ADD COLUMN is idempotent for new databases
+            # but must be swallowed on existing ones where the column already
+            # exists (SQLite raises OperationalError in that case).
+            ddl_statements = _SCHEMA_SQL.split(";")  
+            for stmt in ddl_statements:
+                stmt = stmt.strip()
+                if not stmt:
+                    continue
+                try:
+                    self._conn.execute(stmt)
+                except Exception as exc:
+                    # Tolerate "duplicate column name" from ALTER TABLE on existing DBs
+                    if "duplicate column" in str(exc).lower():
+                        pass
+                    else:
+                        raise
             self._conn.commit()
 
     @contextmanager
@@ -218,6 +240,7 @@ class IngestStore:
         summary: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
         custom_ttl: Optional[float] = None,
+        tags: Optional[List[str]] = None,
     ) -> str:
         """Store a data payload.  Returns the record id.
 
@@ -239,6 +262,10 @@ class IngestStore:
             Arbitrary metadata blob.
         custom_ttl : float, optional
             Override the default TTL for this record (seconds).
+        tags : list[str], optional
+            Arbitrary string labels for this record (e.g. ``["unread",
+            "important"]``).  Stored as a JSON array.  Used by
+            :meth:`query` for AND-filtered retrieval.
         """
         # Auto-sweep stale records
         if self._auto_sweep:
@@ -261,14 +288,15 @@ class IngestStore:
 
         content_json = json.dumps(content, ensure_ascii=False, default=str)
         meta_json = json.dumps(meta, ensure_ascii=False) if meta else None
+        tags_json = json.dumps(sorted(set(tags or [])), ensure_ascii=False)
 
         with self._cursor() as cur:
             cur.execute(
                 """INSERT INTO ingest_store
                    (id, fingerprint, data_class, source, content,
                     summary, created_at, expires_at, accessed_at,
-                    access_count, meta)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
+                    access_count, meta, tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
                 (
                     record_id,
                     fp,
@@ -280,6 +308,7 @@ class IngestStore:
                     expires_at,
                     now,
                     meta_json,
+                    tags_json,
                 ),
             )
 
@@ -320,14 +349,40 @@ class IngestStore:
         *,
         source: Optional[str] = None,
         data_class: Optional[DataClass] = None,
+        tags: Optional[List[str]] = None,
         limit: int = 50,
+        order_by: str = "accessed_at",
         include_expired: bool = False,
     ) -> List[IngestRecord]:
         """Query records with optional filters.
 
-        Results are ordered by ``accessed_at`` descending (most-recently-used
-        first).
+        Results are ordered by *order_by* descending (default:
+        ``accessed_at``, i.e. most-recently-used first).  Use
+        ``order_by='created_at'`` to get chronological ingestion order.
+
+        Parameters
+        ----------
+        source : str, optional
+            Filter to records from a specific source (exact match).
+        data_class : DataClass, optional
+            Filter to records of a specific lifecycle class.
+        tags : list[str], optional
+            AND filter — only records that contain **all** of the given tags
+            are returned.  An empty list matches everything.
+        limit : int
+            Maximum number of records to return (default 50).
+        order_by : str
+            Column to sort by descending.  Valid values: ``'accessed_at'``
+            (default), ``'created_at'``, ``'expires_at'``.
+        include_expired : bool
+            If *True*, expired records are included in results.
         """
+        _ALLOWED_ORDER = {"accessed_at", "created_at", "expires_at"}
+        if order_by not in _ALLOWED_ORDER:
+            raise ValueError(
+                f"order_by must be one of {_ALLOWED_ORDER}, got {order_by!r}"
+            )
+
         clauses: list[str] = []
         params: list[Any] = []
 
@@ -342,13 +397,22 @@ class IngestStore:
             params.append(time.time())
 
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        sql = f"SELECT * FROM ingest_store{where} ORDER BY accessed_at DESC LIMIT ?"
+        sql = f"SELECT * FROM ingest_store{where} ORDER BY {order_by} DESC LIMIT ?"
         params.append(limit)
 
         with self._cursor() as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
-        return [self._row_to_record(r) for r in rows]
+
+        records = [self._row_to_record(r) for r in rows]
+
+        # Apply tags AND-filter in Python — SQLite JSON functions are not
+        # guaranteed across all versions, and the tag sets are small.
+        if tags:
+            required = set(tags)
+            records = [r for r in records if required.issubset(set(r.tags))]
+
+        return records
 
     def search(
         self,
@@ -541,6 +605,15 @@ class IngestStore:
         except (json.JSONDecodeError, TypeError):
             meta = None
 
+        # tags column may be absent on very old DBs (pre-v2 migration)
+        try:
+            tags_raw = row["tags"]
+            tags: List[str] = json.loads(tags_raw) if tags_raw else []
+            if not isinstance(tags, list):
+                tags = []
+        except (IndexError, KeyError, json.JSONDecodeError, TypeError):
+            tags = []
+
         return IngestRecord(
             id=row["id"],
             fingerprint=row["fingerprint"],
@@ -553,6 +626,7 @@ class IngestStore:
             accessed_at=row["accessed_at"],
             access_count=row["access_count"],
             meta=meta,
+            tags=tags,
         )
 
 

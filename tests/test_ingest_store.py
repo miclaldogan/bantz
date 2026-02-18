@@ -6,17 +6,14 @@ Issue #1288: Ingest Store + TTL Cache + Fingerprint
 
 from __future__ import annotations
 
-import json
 import time
 import asyncio
 import threading
-from unittest.mock import patch
 
 import pytest
 
 from bantz.data.ingest_store import (
     IngestStore,
-    IngestRecord,
     DataClass,
     fingerprint,
     classify_tool_result,
@@ -340,6 +337,117 @@ class TestIngestStoreQuery:
         store.ingest({"msg": "hello"}, source="calendar")
         results = store.search("hello", source="gmail")
         assert len(results) == 1
+
+    def test_query_order_by_created_at(self, store):
+        store.ingest({"a": 1}, source="test")
+        store.ingest({"b": 2}, source="test")
+        results = store.query(order_by="created_at")
+        assert len(results) == 2
+
+    def test_query_order_by_invalid_raises(self, store):
+        with pytest.raises(ValueError, match="order_by"):
+            store.query(order_by="injected_column; DROP TABLE")
+
+
+# ── IngestStore: Tags ─────────────────────────────────────────────
+
+class TestIngestStoreQueryTags:
+    """Issue #1471 — query() tags AND filtering."""
+
+    def test_ingest_stores_tags(self, store):
+        rid = store.ingest({"x": 1}, source="gmail", tags=["unread", "important"])
+        record = store.get(rid)
+        assert set(record.tags) == {"unread", "important"}
+
+    def test_ingest_no_tags_defaults_empty(self, store):
+        rid = store.ingest({"x": 1}, source="test")
+        record = store.get(rid)
+        assert record.tags == []
+
+    def test_query_by_single_tag(self, store):
+        store.ingest({"a": 1}, source="gmail", tags=["unread"])
+        store.ingest({"b": 2}, source="gmail", tags=["read"])
+        store.ingest({"c": 3}, source="gmail")
+        results = store.query(tags=["unread"])
+        assert len(results) == 1
+        assert "unread" in results[0].tags
+
+    def test_query_tags_and_logic(self, store):
+        """Both tags must be present — AND, not OR."""
+        store.ingest({"a": 1}, source="gmail", tags=["unread", "important"])
+        store.ingest({"b": 2}, source="gmail", tags=["unread"])
+        store.ingest({"c": 3}, source="gmail", tags=["important"])
+        results = store.query(tags=["unread", "important"])
+        assert len(results) == 1
+        assert set(results[0].tags) == {"unread", "important"}
+
+    def test_query_empty_tags_matches_all(self, store):
+        store.ingest({"a": 1}, source="gmail", tags=["unread"])
+        store.ingest({"b": 2}, source="gmail")
+        results = store.query(tags=[])
+        assert len(results) == 2
+
+    def test_query_tags_no_match_returns_empty(self, store):
+        store.ingest({"a": 1}, source="gmail", tags=["unread"])
+        results = store.query(tags=["nonexistent"])
+        assert results == []
+
+    def test_query_tags_combined_with_source(self, store):
+        store.ingest({"a": 1}, source="gmail", tags=["unread"])
+        store.ingest({"b": 2}, source="calendar", tags=["unread"])
+        results = store.query(source="gmail", tags=["unread"])
+        assert len(results) == 1
+        assert results[0].source == "gmail"
+
+    def test_query_tags_combined_with_data_class(self, store):
+        store.ingest({"a": 1}, source="test", data_class=DataClass.PERSISTENT,
+                     tags=["important"])
+        store.ingest({"b": 2}, source="test", data_class=DataClass.EPHEMERAL,
+                     tags=["important"])
+        results = store.query(data_class=DataClass.PERSISTENT, tags=["important"])
+        assert len(results) == 1
+        assert results[0].data_class == DataClass.PERSISTENT
+
+    def test_tags_stored_deduplicated(self, store):
+        rid = store.ingest({"x": 1}, source="test", tags=["unread", "unread", "important"])
+        record = store.get(rid)
+        assert record.tags.count("unread") == 1
+
+    def test_to_dict_includes_tags(self, store):
+        rid = store.ingest({"x": 1}, source="test", tags=["alpha", "beta"])
+        record = store.get(rid)
+        d = record.to_dict()
+        assert "tags" in d
+        assert set(d["tags"]) == {"alpha", "beta"}
+
+    def test_thread_safe_tag_query(self, store):
+        """Concurrent tag queries under threading.Lock must not corrupt order."""
+        import threading
+
+        for i in range(20):
+            store.ingest({f"item_{i}": i}, source="test",
+                         tags=["bulk"] if i % 2 == 0 else [])
+
+        results_per_thread: list = []
+        errors: list = []
+
+        def worker():
+            try:
+                r = store.query(tags=["bulk"])
+                results_per_thread.append(len(r))
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        # Each thread should see 10 records tagged "bulk"
+        for count in results_per_thread:
+            assert count == 10
 
 
 # ── IngestStore: Promote ──────────────────────────────────────────
