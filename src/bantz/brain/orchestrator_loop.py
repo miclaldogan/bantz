@@ -920,13 +920,45 @@ class OrchestratorLoop:
             
             # Emit turn end event
             elapsed = time.time() - start_time
-            self.event_bus.publish("turn.end", {
+
+            # Issue #1463: Collect per-turn ingest/graph observability metrics
+            _ingest_stats: dict = {"ingested": 0, "cache_hits": 0}
+            if getattr(self, "_ingest_bridge", None) is not None:
+                try:
+                    _ingest_stats = self._ingest_bridge.reset_turn_stats()
+                except Exception:
+                    pass
+
+            _graph_links: int = 0
+            if getattr(self, "_graph_bridge", None) is not None:
+                try:
+                    _graph_links = self._graph_bridge.total_edges_created
+                except Exception:
+                    pass
+
+            _observability_payload = {
                 "elapsed_ms": int(elapsed * 1000),
                 "route": final_output.route,
                 "intent": final_output.calendar_intent,
                 "confidence": final_output.confidence,
                 "trace_id": _trace_id,
-            })
+                # Issue #1463: Ingest/Graph metrics per turn
+                "ingest_count": _ingest_stats.get("ingested", 0),
+                "cache_hits": _ingest_stats.get("cache_hits", 0),
+                "graph_links_total": _graph_links,
+            }
+
+            if _ingest_stats.get("ingested", 0) > 0 or _ingest_stats.get("cache_hits", 0) > 0:
+                logger.debug(
+                    "[OBSERVABILITY] turn=%d ingest=%d cache_hits=%d graph_links=%d elapsed_ms=%d",
+                    state.turn_count,
+                    _ingest_stats.get("ingested", 0),
+                    _ingest_stats.get("cache_hits", 0),
+                    _graph_links,
+                    int(elapsed * 1000),
+                )
+
+            self.event_bus.publish("turn.end", _observability_payload)
 
             # Issue #664: Structured trace export (per turn)
             try:
