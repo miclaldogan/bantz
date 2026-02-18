@@ -88,7 +88,7 @@ class DailyTasksPanel {
 
   /**
    * Add a calendar event from a briefing_card message.
-   * @param {{ title: string, start?: string, end?: string, all_day?: boolean, id?: string }} event
+   * @param {{ title: string, start?: string, end?: string, all_day?: boolean, is_imminent?: boolean, id?: string }} event
    */
   addEvent(event) {
     const existing = this._events.find(e => e.id === event.id);
@@ -101,6 +101,7 @@ class DailyTasksPanel {
         start: event.start ? new Date(event.start) : null,
         end: event.end ? new Date(event.end) : null,
         allDay: event.all_day || false,
+        imminent: event.is_imminent || false,
       });
     }
     // Sort by time
@@ -141,6 +142,7 @@ class DailyTasksPanel {
       start: e.start ? new Date(e.start) : null,
       end: e.end ? new Date(e.end) : null,
       allDay: e.all_day || false,
+      imminent: e.is_imminent || false,
     }));
     this._events.sort((a, b) => {
       if (a.allDay && !b.allDay) return -1;
@@ -202,12 +204,14 @@ class DailyTasksPanel {
           line.classList.add('agenda-past');
         } else if (isCurrent) {
           line.classList.add('agenda-current');
+        } else if (event.imminent) {
+          line.classList.add('agenda-imminent');
         }
 
         // Format time
         let timeStr;
         if (event.allDay) {
-          timeStr = '[GÜN BOYU]';
+          timeStr = '[TÜM GÜN]';
         } else if (event.start && event.end) {
           timeStr = `[${this._formatTime(event.start)}-${this._formatTime(event.end)}]`;
         } else if (event.start) {
@@ -229,6 +233,14 @@ class DailyTasksPanel {
         const titleSpan = document.createElement('span');
         titleSpan.className = 'agenda-title';
         titleSpan.textContent = event.title;
+
+        // Imminent badge
+        if (event.imminent && !isCurrent && !isPast) {
+          const badge = document.createElement('span');
+          badge.className = 'agenda-imminent-badge';
+          badge.textContent = ' ⏰';
+          titleSpan.appendChild(badge);
+        }
 
         line.appendChild(timeSpan);
         line.appendChild(titleSpan);
@@ -309,6 +321,26 @@ class DailyTasksPanel {
 
     .agenda-current .agenda-title {
       color: #00e5ff;
+    }
+
+    /* Imminent event — starts within 30 min */
+    .agenda-imminent {
+      background: rgba(255, 200, 0, 0.07);
+      border-left: 2px solid rgba(255, 200, 0, 0.7);
+      padding-left: 4px;
+    }
+
+    .agenda-imminent .agenda-time {
+      color: rgba(255, 200, 0, 0.85);
+      font-weight: bold;
+    }
+
+    .agenda-imminent .agenda-title {
+      color: rgba(255, 200, 0, 0.95);
+    }
+
+    .agenda-imminent-badge {
+      font-size: 0.9em;
     }
 
     /* Past event */

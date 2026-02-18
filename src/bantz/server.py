@@ -1046,9 +1046,16 @@ class BantzServer:
             from bantz.data.ingest_store import IngestStore
 
             store = IngestStore()
-            cached_cal = store.query(source="calendar_sync", limit=20)
+            # CalendarSyncer uses source="calendar" (not "calendar_sync")
+            cached_cal = store.query(source="calendar", limit=50)
             if cached_cal:
                 import json
+                from datetime import datetime as _dt, timezone as _tz
+
+                _today_start = _dt.now(_tz.utc).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                _today_end = _today_start.replace(hour=23, minute=59, second=59)
 
                 for rec in cached_cal:
                     try:
@@ -1057,12 +1064,34 @@ class BantzServer:
                             if isinstance(rec.content, str)
                             else rec.content
                         )
-                        if isinstance(data, dict):
-                            calendar_events.append(data)
+                        if not isinstance(data, dict):
+                            continue
+                        # Filter: only today's events
+                        raw_start = data.get("start", "")
+                        if raw_start:
+                            try:
+                                # All-day events have no 'T' in start string
+                                if "T" not in str(raw_start):
+                                    # all-day — include if date matches today
+                                    evt_date = _dt.fromisoformat(
+                                        str(raw_start)
+                                    ).date()
+                                    if evt_date == _today_start.date():
+                                        calendar_events.append(data)
+                                else:
+                                    evt_dt = _dt.fromisoformat(
+                                        str(raw_start).replace("Z", "+00:00")
+                                    )
+                                    if _today_start <= evt_dt <= _today_end:
+                                        calendar_events.append(data)
+                            except Exception:
+                                calendar_events.append(data)  # include on parse error
                     except Exception:
                         pass
+                # Sort by start time
+                calendar_events.sort(key=lambda e: str(e.get("start", "")))
                 _log.info(
-                    "[BRIEFING] %d calendar events from IngestStore",
+                    "[BRIEFING] %d today's calendar events from IngestStore",
                     len(calendar_events),
                 )
         except Exception as e:
@@ -1160,15 +1189,35 @@ class BantzServer:
             await asyncio.sleep(3.0)
 
         # ── 5. Send calendar cards ──
+        _now_utc = __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        )
         for i, evt in enumerate(cal_events):
+            raw_start = evt.get("start", evt.get("start_time", ""))
+            # all_day: no 'T' in start string
+            is_all_day = evt.get("all_day", False) or (
+                isinstance(raw_start, str) and "T" not in raw_start
+            )
+            # imminent: starts within the next 30 minutes
+            is_imminent = False
+            if not is_all_day and raw_start:
+                try:
+                    _start_dt = __import__("datetime").datetime.fromisoformat(
+                        str(raw_start).replace("Z", "+00:00")
+                    )
+                    _diff = (_start_dt - _now_utc).total_seconds()
+                    is_imminent = 0 <= _diff <= 1800  # within 30 min
+                except Exception:
+                    pass
             cal_card = {
                 "type": "briefing_card",
                 "category": "calendar",
                 "title": evt.get("title", evt.get("summary", "")),
-                "start": evt.get("start", evt.get("start_time", "")),
+                "start": raw_start,
                 "end": evt.get("end", evt.get("end_time", "")),
-                "all_day": evt.get("all_day", False),
-                "id": evt.get("id", f"cal-{i}"),
+                "all_day": is_all_day,
+                "is_imminent": is_imminent,
+                "id": evt.get("id", evt.get("event_id", f"cal-{i}")),
             }
             _send_msg(cal_card)
             cards_shown += 1

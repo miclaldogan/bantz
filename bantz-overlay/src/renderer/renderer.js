@@ -419,6 +419,7 @@ updateConnectionStatus('connecting');
 let reconnectTimer = null;
 let briefingInProgress = false;
 let briefingMailCards = [];
+let briefingCalCards = [];
 const RECONNECT_INTERVAL = 2000; // retry every 2s
 
 function startReconnect() {
@@ -788,18 +789,20 @@ async function handleBriefingMessage(msg) {
           start: msg.start,
           end: msg.end,
           all_day: msg.all_day,
+          is_imminent: !!msg.is_imminent,
           id: msg.id,
         });
       }
-      // Also route calendar to inbox panel
+      // Also route calendar to inbox panel — accumulate cards
       if (msg.category === 'calendar' && inboxPanel) {
-        inboxPanel.setCalendarEvents([{
+        briefingCalCards.push({
           title: msg.title,
           start: msg.start,
           end: msg.end,
           all_day: msg.all_day,
           id: msg.id,
-        }]);
+        });
+        inboxPanel.setCalendarEvents(briefingCalCards);
       }
       // Route task cards
       if (msg.category === 'task' && dailyTasks) {
@@ -861,8 +864,9 @@ async function handleBriefingMessage(msg) {
     case 'briefing_start':
       console.log('[Overlay] Briefing started');
       briefingInProgress = true;
-      // Reset mail card accumulator for fresh briefing
+      // Reset card accumulators for fresh briefing
       briefingMailCards = [];
+      briefingCalCards = [];
 
       // Cancel demo mode auto-start — real data is arriving
       if (demoMode) demoMode.cancelAutoStart();
