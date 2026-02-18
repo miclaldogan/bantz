@@ -1129,7 +1129,7 @@ class BantzServer:
             if sec.get("type") == "calendar":
                 cal_events = sec.get("items", [])
 
-        total_cards = len(news_cards) + len(cal_events) + 1  # +1 for weather
+        total_cards = len(news_cards) + len(cal_events) + 1  # +1 for weather; mail cards added later
 
         start_msg = BriefingStartMessage(
             greeting=briefing_dict.get("greeting", ""),
@@ -1223,9 +1223,46 @@ class BantzServer:
         except Exception as e:
             _log.debug("[BRIEFING] system metrics failed: %s", e)
 
+        # ── 8. Send mail cards (last 5 from IngestStore) ──
+        mail_messages: list[dict] = []
+        try:
+            from bantz.data.ingest_store import IngestStore
+
+            _mail_store = IngestStore()
+            recent_mail = _mail_store.query(source="gmail_sync", limit=5)
+            for record in recent_mail:
+                c = record.content or {}
+                mail_messages.append({
+                    "message_id": c.get("message_id", record.id),
+                    "from": c.get("sender_name") or c.get("sender_email") or c.get("from", ""),
+                    "subject": c.get("subject") or "(Konu yok)",
+                    "snippet": c.get("snippet", ""),
+                    "date": c.get("date", ""),
+                    "is_unread": bool(c.get("is_unread", True)),
+                })
+        except Exception as e:
+            _log.debug("[BRIEFING] mail fetch failed: %s", e)
+
+        for i, mail in enumerate(mail_messages):
+            mail_card = {
+                "type": "briefing_card",
+                "category": "mail",
+                "index": i,
+                "total": len(mail_messages),
+                "id": mail["message_id"],
+                "from": mail["from"],
+                "subject": mail["subject"],
+                "snippet": mail["snippet"],
+                "ts": mail["date"],
+                "is_unread": mail["is_unread"],
+            }
+            _send_msg(mail_card)
+            cards_shown += 1
+            await asyncio.sleep(0.3)
+
         await asyncio.sleep(1.0)
 
-        # ── 8. Send briefing_end ──
+        # ── 9. Send briefing_end ──
         end_msg = BriefingEndMessage(
             total_shown=cards_shown,
             summary=briefing_dict.get("spoken_text", ""),
@@ -1233,10 +1270,11 @@ class BantzServer:
         _send_msg(end_msg.to_dict())
 
         _log.info(
-            "[STARTUP_BRIEFING] complete: %d cards sent (news=%d, cal=%d)",
+            "[STARTUP_BRIEFING] complete: %d cards sent (news=%d, cal=%d, mail=%d)",
             cards_shown,
             len(news_cards),
             len(cal_events),
+            len(mail_messages),
         )
 
     def run_socket_only(self) -> None:

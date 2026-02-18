@@ -843,18 +843,26 @@ async function handleBriefingMessage(msg) {
       }
       // Route mail cards to inbox panel
       if (msg.category === 'mail' && inboxPanel) {
-        inboxPanel.setMailMessages([{
+        // Accumulate mail cards; setMailMessages replaces all mail items so we
+        // collect them in briefingMailCards and flush once (or per card for live feel).
+        if (!window._briefingMailCards) window._briefingMailCards = [];
+        window._briefingMailCards.push({
           from: msg.from || msg.sender,
           subject: msg.subject || msg.title,
           snippet: msg.snippet || msg.body || msg.summary,
           ts: msg.ts,
+          date: msg.ts,
           id: msg.id,
-        }]);
+          unread: !!msg.is_unread,
+        });
+        inboxPanel.setMailMessages(window._briefingMailCards);
       }
       break;
     case 'briefing_start':
       console.log('[Overlay] Briefing started');
       briefingInProgress = true;
+      // Reset mail card accumulator for fresh briefing
+      window._briefingMailCards = [];
 
       // Cancel demo mode auto-start — real data is arriving
       if (demoMode) demoMode.cancelAutoStart();
