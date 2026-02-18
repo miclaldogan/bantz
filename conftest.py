@@ -12,6 +12,7 @@ collect_ignore = [
     "tests/test_animations.py",         # requires bantz.ui.panel_animator (optional UI package)
     "tests/test_bench_vllm.py",         # requires scripts/bench_vllm.py (not in repo)
     "tests/test_declarative_skills.py", # requires valid YAML frontmatter in SKILL.md files
+    "tests/test_calendar_update_partial.py", # requires Google client_secret.json (not in CI)
 ]
 
 # Tests that require optional UI modules not installed in CI.
