@@ -17,13 +17,16 @@
     "electron-builder": "^24.9.0"
   },
   "overrides": {
-    "tar": "^7.5.7"
+    "tar": "^7.5.8"
   },
   "build": {
     "appId": "com.bantz.browser",
     "productName": "Bantz Browser",
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Network;WebBrowser"
     },
     "directories": {
