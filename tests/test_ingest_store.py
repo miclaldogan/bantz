@@ -339,10 +339,13 @@ class TestIngestStoreQuery:
         assert len(results) == 1
 
     def test_query_order_by_created_at(self, store):
-        store.ingest({"a": 1}, source="test")
-        store.ingest({"b": 2}, source="test")
+        r1 = store.ingest({"a": 1}, source="test")
+        r2 = store.ingest({"b": 2}, source="test")
         results = store.query(order_by="created_at")
         assert len(results) == 2
+        # Most recently created record should come first (DESC order)
+        assert results[0].id == r2
+        assert results[1].id == r1
 
     def test_query_order_by_invalid_raises(self, store):
         with pytest.raises(ValueError, match="order_by"):
@@ -422,8 +425,6 @@ class TestIngestStoreQueryTags:
 
     def test_thread_safe_tag_query(self, store):
         """Concurrent tag queries under threading.Lock must not corrupt order."""
-        import threading
-
         for i in range(20):
             store.ingest({f"item_{i}": i}, source="test",
                          tags=["bulk"] if i % 2 == 0 else [])
@@ -448,6 +449,24 @@ class TestIngestStoreQueryTags:
         # Each thread should see 10 records tagged "bulk"
         for count in results_per_thread:
             assert count == 10
+
+    def test_query_tags_limit_not_truncated_before_filter(self, store):
+        """Critical: limit must be applied AFTER Python-side tag filtering.
+
+        Ingests 10 untagged records first, then 5 tagged records.
+        If LIMIT were applied in SQL before the Python tag filter, a
+        limit=5 query would fetch only the first 5 (untagged) rows and
+        return an empty list — incorrect behaviour.
+        """
+        for i in range(10):
+            store.ingest({f"untagged_{i}": i}, source="test")
+        for i in range(5):
+            store.ingest({f"tagged_{i}": i}, source="test", tags=["needle"])
+
+        results = store.query(tags=["needle"], limit=5)
+        assert len(results) == 5, (
+            "limit should apply after tag filter, not truncate before it"
+        )
 
 
 # ── IngestStore: Promote ──────────────────────────────────────────

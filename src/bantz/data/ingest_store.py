@@ -57,6 +57,9 @@ _TTL_MAP: Dict[DataClass, Optional[float]] = {
     DataClass.PERSISTENT: None,              # never expires
 }
 
+# Allowed values for the order_by parameter in query()
+_ALLOWED_ORDER_BY: frozenset = frozenset({"accessed_at", "created_at", "expires_at"})
+
 
 # ── IngestRecord data-class ──────────────────────────────────────
 
@@ -208,7 +211,7 @@ class IngestStore:
                     continue
                 try:
                     self._conn.execute(stmt)
-                except Exception as exc:
+                except sqlite3.OperationalError as exc:
                     # Tolerate "duplicate column name" from ALTER TABLE on existing DBs
                     if "duplicate column" in str(exc).lower():
                         pass
@@ -377,10 +380,9 @@ class IngestStore:
         include_expired : bool
             If *True*, expired records are included in results.
         """
-        _ALLOWED_ORDER = {"accessed_at", "created_at", "expires_at"}
-        if order_by not in _ALLOWED_ORDER:
+        if order_by not in _ALLOWED_ORDER_BY:
             raise ValueError(
-                f"order_by must be one of {_ALLOWED_ORDER}, got {order_by!r}"
+                f"order_by must be one of {_ALLOWED_ORDER_BY}, got {order_by!r}"
             )
 
         clauses: list[str] = []
@@ -397,8 +399,14 @@ class IngestStore:
             params.append(time.time())
 
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        # When tags filtering is active we cannot push LIMIT into SQL because
+        # the Python-side tag filter runs *after* SQL fetch — applying LIMIT
+        # in SQL would silently truncate records before the tag check.
+        # We use a larger SQL LIMIT when tags are present and re-apply the
+        # caller's limit after Python filtering.
+        sql_limit = limit * 20 if tags else limit
         sql = f"SELECT * FROM ingest_store{where} ORDER BY {order_by} DESC LIMIT ?"
-        params.append(limit)
+        params.append(sql_limit)
 
         with self._cursor() as cur:
             cur.execute(sql, params)
@@ -411,6 +419,7 @@ class IngestStore:
         if tags:
             required = set(tags)
             records = [r for r in records if required.issubset(set(r.tags))]
+            records = records[:limit]
 
         return records
 
