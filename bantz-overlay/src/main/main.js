@@ -685,7 +685,7 @@ async function checkFirstRunAuth() {
         // Use execFile (not exec) to avoid shell injection — args passed as list, not interpolated string.
         // Fixed scope list; no user input used here.
         const pyScript = [
-          'from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager',
+          'from bantz.google.auth_manager import get_auth_manager, setup_auth_manager',
           'setup_auth_manager()',
           'mgr = get_auth_manager()',
           "mgr.ensure_scope('calendar')",
@@ -801,7 +801,7 @@ ipcMain.handle('auth:request-google-oauth', async (_event, scopes) => {
   // Build scope calls from whitelist-validated list — no user string interpolated into shell.
   const scopeLines = scopeList.map(s => `mgr.ensure_scope('${s}')`).join('\n');
   const pyScript = [
-    'from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager',
+    'from bantz.google.auth_manager import get_auth_manager, setup_auth_manager',
     'setup_auth_manager()',
     'mgr = get_auth_manager()',
     scopeLines,

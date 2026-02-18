@@ -570,7 +570,7 @@ def _register_google_connectors(registry: "ToolRegistry") -> int:
     or dependencies are not available.
     """
     try:
-        from bantz.connectors.google.auth_manager import (get_auth_manager,
+        from bantz.google.auth_manager import (get_auth_manager,
                                                           setup_auth_manager)
     except ImportError as e:
         logger.warning("[ToolGap] google connectors import: %s", e)
@@ -589,7 +589,7 @@ def _register_google_connectors(registry: "ToolRegistry") -> int:
 
     # ── Contacts ────────────────────────────────────────────────
     try:
-        from bantz.connectors.google.contacts import ContactsConnector
+        from bantz.google.contacts_connector import ContactsConnector
 
         connector = ContactsConnector(auth)
         for tool_schema in connector.get_tools():
@@ -607,7 +607,7 @@ def _register_google_connectors(registry: "ToolRegistry") -> int:
 
     # ── Tasks ───────────────────────────────────────────────────
     try:
-        from bantz.connectors.google.tasks import TasksConnector
+        from bantz.google.tasks import TasksConnector
 
         connector = TasksConnector(auth)
         for tool_schema in connector.get_tools():
@@ -625,7 +625,7 @@ def _register_google_connectors(registry: "ToolRegistry") -> int:
 
     # ── Keep ────────────────────────────────────────────────────
     try:
-        from bantz.connectors.google.keep import KeepConnector
+        from bantz.google.keep import KeepConnector
 
         connector = KeepConnector(auth)
         for tool_schema in connector.get_tools():
@@ -643,7 +643,7 @@ def _register_google_connectors(registry: "ToolRegistry") -> int:
 
     # ── Classroom ───────────────────────────────────────────────
     try:
-        from bantz.connectors.google.classroom import ClassroomConnector
+        from bantz.google.classroom import ClassroomConnector
 
         connector = ClassroomConnector(auth)
         for tool_schema in connector.get_tools():

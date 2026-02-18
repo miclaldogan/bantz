@@ -65,7 +65,7 @@ def get_credentials(
     # ── Unified auth manager bridge (Issue #1292) ───────────────
     if client_secret_path is None and token_path is None:
         try:
-            from bantz.connectors.google.auth_manager import get_auth_manager
+            from bantz.google.auth_manager import get_auth_manager
 
             mgr = get_auth_manager()
             if mgr is not None:

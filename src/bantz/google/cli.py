@@ -132,7 +132,7 @@ def cmd_auth_gmail(args: argparse.Namespace) -> int:
 
 
 def cmd_auth_classroom(args: argparse.Namespace) -> int:
-    from bantz.connectors.google.auth_manager import GoogleAuthManager
+    from bantz.google.auth_manager import GoogleAuthManager
 
     auth = GoogleAuthManager(
         client_secret_path=args.client_secret,
