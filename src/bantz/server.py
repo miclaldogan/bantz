@@ -1019,6 +1019,11 @@ class BantzServer:
 
         _log = logging.getLogger(__name__)
 
+        # datetime aliases and threshold — used in both the calendar-parse
+        # block (section 1) and the calendar-card block (section 5)
+        from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
+        _IMMINENT_THRESHOLD_S = 1800  # 30 minutes
+
         # ── Helper: send a dict to the overlay ──
         def _send_msg(msg_dict: dict) -> None:
             if overlay_hook._client and overlay_hook._client.connected:
@@ -1050,7 +1055,6 @@ class BantzServer:
             cached_cal = store.query(source="calendar", limit=50)
             if cached_cal:
                 import json
-                from datetime import datetime as _dt, timezone as _tz
 
                 _today_start = _dt.now(_tz.utc).replace(
                     hour=0, minute=0, second=0, microsecond=0
@@ -1189,10 +1193,6 @@ class BantzServer:
             await asyncio.sleep(3.0)
 
         # ── 5. Send calendar cards ──
-        from datetime import datetime as _dt, timezone as _tz
-
-        _IMMINENT_THRESHOLD_S = 1800  # 30 minutes
-
         _now_utc = _dt.now(_tz.utc)
         for i, evt in enumerate(cal_events):
             raw_start = evt.get("start", evt.get("start_time", ""))
