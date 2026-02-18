@@ -6,22 +6,15 @@ Issue #1288: Ingest Store + TTL Cache + Fingerprint
 
 from __future__ import annotations
 
-import time
 import asyncio
 import threading
+import time
 
 import pytest
 
-from bantz.data.ingest_store import (
-    IngestStore,
-    DataClass,
-    fingerprint,
-    classify_tool_result,
-    ttl_sweep_once,
-    start_ttl_sweeper,
-    _TTL_MAP,
-)
-
+from bantz.data.ingest_store import (_TTL_MAP, DataClass, IngestStore,
+                                     classify_tool_result, fingerprint,
+                                     start_ttl_sweeper, ttl_sweep_once)
 
 # ── Fixtures ──────────────────────────────────────────────────────
 
