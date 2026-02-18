@@ -27,8 +27,6 @@ Sync schedule (recommended):
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import time
 from datetime import datetime, timezone, timedelta
@@ -282,6 +280,13 @@ class ClassroomSyncer:
         for record in data:
             try:
                 tags = record.pop("_tags", ["classroom"])
+                # Persist record type in content so query filters can distinguish
+                # courses from assignments without relying on the popped _tags.
+                if "record_type" not in record:
+                    if "assignment" in tags:
+                        record["record_type"] = "assignment"
+                    elif "course" in tags:
+                        record["record_type"] = "course"
                 name = record.get("name") or record.get("title") or ""
                 rid = self._store.ingest(
                     content=record,
@@ -489,7 +494,7 @@ class GoogleSyncManager:
                 data_class=DataClass.EPHEMERAL,
                 limit=limit,
             )
-            payloads = [r.payload if hasattr(r, "payload") else (r.get("payload") if isinstance(r, dict) else r) for r in records]
+            payloads = [r.content if hasattr(r, "content") else (r.get("content") if isinstance(r, dict) else r) for r in records]
             if unread_only:
                 payloads = [p for p in payloads if "UNREAD" in (p.get("labelIds") or [])]
             return payloads
@@ -517,7 +522,7 @@ class GoogleSyncManager:
                 data_class=DataClass.EPHEMERAL,
                 limit=limit,
             )
-            payloads = [r.payload if hasattr(r, "payload") else (r.get("payload") if isinstance(r, dict) else r) for r in records]
+            payloads = [r.content if hasattr(r, "content") else (r.get("content") if isinstance(r, dict) else r) for r in records]
             # Filter imminent (within 24h)
             if imminent_only:
                 now = datetime.now(timezone.utc)
@@ -558,9 +563,9 @@ class GoogleSyncManager:
                 data_class=DataClass.SESSION,
                 limit=limit,
             )
-            payloads = [r.payload if hasattr(r, "payload") else (r.get("payload") if isinstance(r, dict) else r) for r in records]
+            payloads = [r.content if hasattr(r, "content") else (r.get("content") if isinstance(r, dict) else r) for r in records]
             if assignments_only:
-                payloads = [p for p in payloads if "assignment" in (p.get("_tags") or [])]
+                payloads = [p for p in payloads if p.get("record_type") == "assignment"]
             return payloads
         except Exception as exc:
             logger.warning("[GoogleSync] query_classroom failed: %s", exc)
