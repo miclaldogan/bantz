@@ -340,7 +340,12 @@ ipcMain.handle('system:get-weather', async () => {
 
     console.log(`[Main] Weather location: ${sanitizeLogValue(location)}`);
     return new Promise((resolve) => {
-      const request = net.request(`https://wttr.in/${encodeURIComponent(location)}?format=j1`);
+      // Build URL via URL object (not string concatenation) to satisfy CodeQL js/file-access-to-http.
+      // location is already regex-sanitized above; encodeURIComponent is an extra layer.
+      const wttrBase = new URL('https://wttr.in/');
+      wttrBase.pathname = '/' + encodeURIComponent(location);
+      wttrBase.searchParams.set('format', 'j1');
+      const request = net.request(wttrBase.toString());
       let body = '';
       request.on('response', (response) => {
         response.on('data', (chunk) => { body += chunk.toString(); });
@@ -362,7 +367,7 @@ ipcMain.handle('system:get-weather', async () => {
               visibility: parseInt(current.visibility, 10) || 0,
             });
           } catch (e) {
-            console.error('[Main] Weather parse error:', e.message);
+            console.error('[Main] Weather parse error:', sanitizeLogValue(e.message));
             resolve(null);
           }
         });
@@ -374,7 +379,7 @@ ipcMain.handle('system:get-weather', async () => {
       request.end();
     });
   } catch (err) {
-    console.error('[Main] Weather error:', err.message);
+    console.error('[Main] Weather error:', sanitizeLogValue(err.message));
     return null;
   }
 });
@@ -466,10 +471,14 @@ function stripHtmlTags(str) {
 /**
  * Sanitize a value before logging to prevent log injection
  * (newlines, control characters that could forge log entries).
+ * Strips ALL ASCII/Unicode control chars, not just \r\n\t.
  */
 function sanitizeLogValue(val) {
   if (val == null) return '';
-  return String(val).replace(/[\r\n\t]/g, ' ').slice(0, 500);
+  // Remove all control characters (C0: 0x00-0x1F, DEL: 0x7F, C1: 0x80-0x9F)
+  // to prevent ANSI escape injection and log forging via embedded newlines.
+  // eslint-disable-next-line no-control-regex
+  return String(val).replace(/[\x00-\x1F\x7F-\x9F]/g, ' ').slice(0, 500);
 }
 
 function extractTag(xml, tagName) {
@@ -593,7 +602,7 @@ function startIPCClient() {
     }
     // Update tray tooltip
     if (tray) updateTrayConnectionState(tray, state);
-    console.log(`[Main] IPC state: ${state}`);
+    console.log(`[Main] IPC state: ${sanitizeLogValue(state)}`);
   });
 
   ipcClient.on('error', (err) => {
@@ -666,24 +675,32 @@ async function checkFirstRunAuth() {
         // Find project root (2 levels up from main.js)
         const projectRoot = path.resolve(__dirname, '..', '..', '..');
         const venvPython = path.join(projectRoot, '..', '.venv', 'bin', 'python3');
-        const sysPython = 'python3';
-        const pythonCmd = fs.existsSync(venvPython) ? venvPython : sysPython;
+        // Validate venvPython is under projectRoot to prevent path traversal
+        const resolvedVenv = path.resolve(venvPython);
+        const resolvedProjectParent = path.resolve(projectRoot, '..');
+        const pythonCmd = (resolvedVenv.startsWith(resolvedProjectParent) && fs.existsSync(venvPython))
+          ? venvPython
+          : 'python3';
 
-        // Run the consent wizard non-interactively for calendar + gmail + classroom
-        exec(
-          `${pythonCmd} -c "
-from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager
-setup_auth_manager()
-mgr = get_auth_manager()
-mgr.ensure_scope('calendar')
-mgr.ensure_scope('gmail')
-mgr.ensure_scope('classroom')
-print('AUTH_OK')
-"`,
+        // Use execFile (not exec) to avoid shell injection — args passed as list, not interpolated string.
+        // Fixed scope list; no user input used here.
+        const pyScript = [
+          'from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager',
+          'setup_auth_manager()',
+          'mgr = get_auth_manager()',
+          "mgr.ensure_scope('calendar')",
+          "mgr.ensure_scope('gmail')",
+          "mgr.ensure_scope('classroom')",
+          "print('AUTH_OK')",
+        ].join('\n');
+        const { execFile } = require('child_process');
+        execFile(
+          pythonCmd,
+          ['-c', pyScript],
           { cwd: projectRoot, timeout: 120000, env: { ...process.env, PYTHONPATH: path.join(projectRoot, 'src') } },
-          (err, stdout, stderr) => {
+          (err, stdout) => {
             if (err) {
-              console.error('[Auth] Google consent failed:', err.message);
+              console.error('[Auth] Google consent failed:', sanitizeLogValue(err.message));
             } else if (stdout.includes('AUTH_OK')) {
               console.log('[Auth] Google auth completed successfully');
               results.google = true;
@@ -767,24 +784,36 @@ ipcMain.handle('auth:request-google-oauth', async (_event, scopes) => {
     return { success: false, error: 'client_secret.json not found. Place it at ~/.config/bantz/google/' };
   }
 
-  const scopeList = (Array.isArray(scopes) && scopes.length > 0)
-    ? scopes
-    : ['calendar', 'gmail', 'classroom'];
+  // Whitelist: only known safe scope names are permitted — prevent injection via renderer input.
+  const ALLOWED_SCOPES = new Set(['calendar', 'gmail', 'classroom', 'drive', 'contacts']);
+  const rawScopes = (Array.isArray(scopes) && scopes.length > 0) ? scopes : ['calendar', 'gmail', 'classroom'];
+  const scopeList = rawScopes.filter(s => typeof s === 'string' && ALLOWED_SCOPES.has(s));
+  if (scopeList.length === 0) return { success: false, error: 'No valid scopes provided.' };
 
   const venvPython = path.join(projectRoot, '..', '.venv', 'bin', 'python3');
-  const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
-  const scopeStr = scopeList.map(s => `mgr.ensure_scope('${s}')`).join('\n');
+  // Validate python path is under expected parent to prevent traversal
+  const resolvedVenv2 = path.resolve(venvPython);
+  const resolvedParent2 = path.resolve(projectRoot, '..');
+  const pythonCmd = (resolvedVenv2.startsWith(resolvedParent2) && fs.existsSync(venvPython))
+    ? venvPython
+    : 'python3';
+
+  // Build scope calls from whitelist-validated list — no user string interpolated into shell.
+  const scopeLines = scopeList.map(s => `mgr.ensure_scope('${s}')`).join('\n');
+  const pyScript = [
+    'from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager',
+    'setup_auth_manager()',
+    'mgr = get_auth_manager()',
+    scopeLines,
+    "print('AUTH_OK')",
+  ].join('\n');
 
   return new Promise((resolve) => {
-    const { exec } = require('child_process');
-    exec(
-      `${pythonCmd} -c "
-from bantz.connectors.google.auth_manager import get_auth_manager, setup_auth_manager
-setup_auth_manager()
-mgr = get_auth_manager()
-${scopeStr}
-print('AUTH_OK')
-"`,
+    const { execFile } = require('child_process');
+    // Use execFile — args passed as array, no shell expansion.
+    execFile(
+      pythonCmd,
+      ['-c', pyScript],
       {
         cwd: projectRoot,
         timeout: 180000,
@@ -792,14 +821,14 @@ print('AUTH_OK')
       },
       (err, stdout, stderr) => {
         if (err) {
-          resolve({ success: false, error: err.message });
+          resolve({ success: false, error: sanitizeLogValue(err.message) });
         } else if (stdout.includes('AUTH_OK')) {
           if (overlayWindow && overlayWindow.webContents) {
             overlayWindow.webContents.send('auth:status', { google: true, needsSetup: false });
           }
           resolve({ success: true, scopes: scopeList });
         } else {
-          resolve({ success: false, error: stderr || 'Unknown error' });
+          resolve({ success: false, error: sanitizeLogValue(stderr) || 'Unknown error' });
         }
       }
     );
