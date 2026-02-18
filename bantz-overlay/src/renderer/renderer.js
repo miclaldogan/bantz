@@ -936,6 +936,32 @@ checkFirstBootOrAbsence();
 // ─── Initialize Reasoning Chain ─────────────────────────────
 initReasoningChain();
 
+// ─── Classroom Dialog (Issue #1467) ────────────────────────
+let classroomDialog = null;
+let googleAuthScopeIndicator = null;
+
+function initClassroomDialog() {
+  if (!window.ClassroomDialog) {
+    console.warn('[Overlay] ClassroomDialog not loaded');
+    return;
+  }
+  classroomDialog = new window.ClassroomDialog();
+  classroomDialog.mount(hudPanel);
+  window.bantzClassroomDialog = classroomDialog;
+  console.log('[Overlay] Classroom dialog initialized');
+}
+
+function initGoogleAuthScopeIndicator() {
+  if (!window.GoogleAuthScopeIndicator) {
+    console.warn('[Overlay] GoogleAuthScopeIndicator not loaded');
+    return;
+  }
+  googleAuthScopeIndicator = new window.GoogleAuthScopeIndicator();
+  googleAuthScopeIndicator.mount(hudPanel);
+  window.bantzAuthScopeIndicator = googleAuthScopeIndicator;
+  console.log('[Overlay] Google auth scope indicator initialized');
+}
+
 // ─── Initialize Phone Call Overlay ──────────────────────────
 
 function initPhoneCallOverlay() {
@@ -950,6 +976,12 @@ function initPhoneCallOverlay() {
 }
 
 initPhoneCallOverlay();
+
+// ─── Initialize Classroom Dialog ───────────────────────────
+initClassroomDialog();
+
+// ─── Initialize Google Auth Scope Indicator ─────────────────
+initGoogleAuthScopeIndicator();
 
 // ─── Initialize Floating Text Input ─────────────────────────
 let textInput = null;
@@ -1006,6 +1038,8 @@ console.log('[Overlay]   ttsSync:', !!ttsSync);
 console.log('[Overlay]   reasoningChain:', !!reasoningChain);
 console.log('[Overlay]   phoneCallOverlay:', !!phoneCallOverlay);
 console.log('[Overlay]   textInput:', !!textInput);
+console.log('[Overlay]   classroomDialog:', !!classroomDialog);
+console.log('[Overlay]   googleAuthScopeIndicator:', !!googleAuthScopeIndicator);
 console.log('[Overlay]   hudPanel:', !!hudPanel);
 console.log('[Overlay]   sphereContainer:', !!sphereContainer);
 console.log('[Overlay] ═══════════════════');
