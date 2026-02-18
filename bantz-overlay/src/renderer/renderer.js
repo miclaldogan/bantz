@@ -418,6 +418,7 @@ updateConnectionStatus('connecting');
 // ─── IPC Reconnection Logic ──────────────────────────────────
 let reconnectTimer = null;
 let briefingInProgress = false;
+let briefingMailCards = [];
 const RECONNECT_INTERVAL = 2000; // retry every 2s
 
 function startReconnect() {
@@ -845,8 +846,7 @@ async function handleBriefingMessage(msg) {
       if (msg.category === 'mail' && inboxPanel) {
         // Accumulate mail cards; setMailMessages replaces all mail items so we
         // collect them in briefingMailCards and flush once (or per card for live feel).
-        if (!window._briefingMailCards) window._briefingMailCards = [];
-        window._briefingMailCards.push({
+        briefingMailCards.push({
           from: msg.from || msg.sender,
           subject: msg.subject || msg.title,
           snippet: msg.snippet || msg.body || msg.summary,
@@ -855,14 +855,14 @@ async function handleBriefingMessage(msg) {
           id: msg.id,
           unread: !!msg.is_unread,
         });
-        inboxPanel.setMailMessages(window._briefingMailCards);
+        inboxPanel.setMailMessages(briefingMailCards);
       }
       break;
     case 'briefing_start':
       console.log('[Overlay] Briefing started');
       briefingInProgress = true;
       // Reset mail card accumulator for fresh briefing
-      window._briefingMailCards = [];
+      briefingMailCards = [];
 
       // Cancel demo mode auto-start — real data is arriving
       if (demoMode) demoMode.cancelAutoStart();

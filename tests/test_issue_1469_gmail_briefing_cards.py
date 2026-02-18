@@ -9,11 +9,10 @@ Acceptance Criteria:
 
 from __future__ import annotations
 
-import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any, Dict, Optional
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -418,14 +417,19 @@ class TestRendererMailAccumulation:
         assert calls[0][0]["subject"] == "Mail"
 
     def test_reset_at_briefing_start_clears_accumulator(self):
-        """_briefingMailCards should be reset at briefing_start."""
-        # Simulate first briefing
-        acc1: list = []
-        acc1.append({"from": "a@x.com", "subject": "S1", "unread": True})
+        """_briefingMailCards should be reset at briefing_start, starting fresh."""
+        # Simulate first briefing accumulating mail cards
+        acc: list = []
+        acc.append({"from": "a@x.com", "subject": "S1", "unread": True})
+        acc.append({"from": "b@x.com", "subject": "S2", "unread": False})
+        assert len(acc) == 2
 
-        # Simulate briefing_start reset
-        acc1 = []  # reset
-        acc1.append({"from": "b@x.com", "subject": "S2", "unread": False})
+        # Simulate briefing_start event: reset the accumulator
+        acc = []  # mirrors: briefingMailCards = [] in renderer.js
 
-        assert len(acc1) == 1
-        assert acc1[0]["subject"] == "S2"
+        # New briefing adds a single card
+        acc.append({"from": "c@x.com", "subject": "S3", "unread": True})
+
+        # After reset only the new card should be present
+        assert len(acc) == 1
+        assert acc[0]["subject"] == "S3"

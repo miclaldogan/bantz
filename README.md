@@ -154,6 +154,7 @@ cd bantz-overlay && npm install && npm start
 
 1. Place your Google Cloud OAuth client secret at `~/.config/bantz/google/client_secret.json`
 2. Authenticate:
+
    ```bash
    bantz google auth calendar --write
    bantz google auth gmail --scope readonly
@@ -324,8 +325,6 @@ On daemon start, the overlay boots a sequenced briefing:
 ### Google Auth HUD Badge
 
 A persistent badge in the overlay corner shows Google service connection state — connected (green), disconnected (grey), or pending (amber). Clicking the badge triggers re-authentication for any disconnected scope.
-
----
 
 ---
 

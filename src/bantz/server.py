@@ -11,7 +11,6 @@ import logging
 import os
 import socket
 import struct
-import sys
 import threading
 import atexit
 import time
@@ -413,7 +412,7 @@ class IPCOverlayHook(OverlayStateHook):
     async def _handle_overlay_command(self, text: str) -> None:
         """Handle text command from overlay UI — runs handle_command in thread."""
         if not self._server_ref:
-            logger.warning("[IPCOverlayHook] No server reference, cannot process command")
+            logging.getLogger(__name__).warning("[IPCOverlayHook] No server reference, cannot process command")
             return
         
         # Show thinking state
@@ -448,7 +447,7 @@ class IPCOverlayHook(OverlayStateHook):
             await self.idle()
             
         except Exception as e:
-            logger.error(f"[IPCOverlayHook] Command processing error: {e}")
+            logging.getLogger(__name__).error("[IPCOverlayHook] Command processing error: %s", e)
             await self.speaking(f"Hata: {e}")
             await _asyncio.sleep(3)
             await self.idle()
@@ -724,7 +723,7 @@ class BantzServer:
                     self._brain_state is not None
                     and self._brain_state.has_pending_confirmation()
                 ):
-                    from bantz.brain.orchestrator_state import OrchestratorState
+                    from bantz.brain.orchestrator_state import OrchestratorState as _OrchestratorState  # noqa: F401
 
                     pending = self._brain_state.peek_pending_confirmation() or {}
                     pending_tool = str(pending.get("tool") or "")
@@ -811,7 +810,7 @@ class BantzServer:
                 if confirmation_pending:
                     pending = self._brain_state.peek_pending_confirmation() or {}
                     conf_prompt = str(pending.get("prompt") or "").strip()
-                    conf_tool = str(pending.get("tool") or "")
+                    _conf_tool = str(pending.get("tool") or "")
                     # Use the confirmation prompt as the reply text
                     if conf_prompt:
                         reply = conf_prompt
@@ -1087,11 +1086,12 @@ class BantzServer:
                 _log.debug("[BRIEFING] Google Calendar fetch failed: %s", e)
 
         # Try to get Gmail summary from IngestStore
+        _ingest_store = None
         try:
             from bantz.data.ingest_store import IngestStore
 
-            store = IngestStore()
-            cached_mail = store.query(source="gmail_sync", limit=50)
+            _ingest_store = IngestStore()
+            cached_mail = _ingest_store.query(source="gmail_sync", limit=50)
             if cached_mail:
                 unread_emails = len(cached_mail)
                 # Rough heuristic: emails from classified "important" sources
@@ -1129,7 +1129,8 @@ class BantzServer:
             if sec.get("type") == "calendar":
                 cal_events = sec.get("items", [])
 
-        total_cards = len(news_cards) + len(cal_events) + 1  # +1 for weather; mail cards added later
+        mail_count = unread_emails if unread_emails > 0 else 0
+        total_cards = len(news_cards) + len(cal_events) + 1 + mail_count  # +1 for weather
 
         start_msg = BriefingStartMessage(
             greeting=briefing_dict.get("greeting", ""),
@@ -1226,12 +1227,16 @@ class BantzServer:
         # ── 8. Send mail cards (last 5 from IngestStore) ──
         mail_messages: list[dict] = []
         try:
-            from bantz.data.ingest_store import IngestStore
+            import json as _json_mod
 
-            _mail_store = IngestStore()
-            recent_mail = _mail_store.query(source="gmail_sync", limit=5)
+            _store_for_mail = _ingest_store
+            if _store_for_mail is None:
+                from bantz.data.ingest_store import IngestStore
+                _store_for_mail = IngestStore()
+            recent_mail = _store_for_mail.query(source="gmail_sync", limit=5)
             for record in recent_mail:
-                c = record.content or {}
+                raw = record.content or {}
+                c = _json_mod.loads(raw) if isinstance(raw, str) else raw
                 mail_messages.append({
                     "message_id": c.get("message_id", record.id),
                     "from": c.get("sender_name") or c.get("sender_email") or c.get("from", ""),
