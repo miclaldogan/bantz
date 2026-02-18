@@ -144,6 +144,21 @@ html, body {
   filter: drop-shadow(0 0 60px rgba(0,229,255,0.45));
 }
 
+/* Issue #1464: Text-based fallback lockup — shown when logo PNG fails to load */
+.boot-text {
+  display: block;
+  font-family: 'Courier New', 'Lucida Console', monospace;
+  font-size: clamp(3rem, 12vw, 9rem);
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  color: #00e5ff;
+  text-shadow:
+    0 0 40px rgba(0, 229, 255, 0.7),
+    0 0 80px rgba(0, 229, 255, 0.4),
+    0 0 4px #fff;
+  user-select: none;
+}
+
 body.phase-boot .boot-logo {
   opacity: 1;
   animation: boot-logo-in 900ms ease forwards, boot-jitter 250ms steps(2, end) infinite;

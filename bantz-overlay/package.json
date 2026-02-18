@@ -4,8 +4,12 @@
   "description": "Bantz Desktop Overlay HUD — transparent terminal-style assistant UI",
   "main": "src/main/main.js",
   "scripts": {
+    "copy-assets": "node scripts/copy-assets.js",
+    "prestart": "node scripts/copy-assets.js",
     "start": "electron .",
+    "predev": "node scripts/copy-assets.js",
     "dev": "NODE_ENV=development electron .",
+    "prebuild": "node scripts/copy-assets.js",
     "build": "electron-builder",
     "build:linux": "electron-builder --linux"
   },
@@ -26,7 +30,20 @@
     },
     "directories": {
       "output": "dist"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "src/renderer/assets",
+        "to": "renderer/assets",
+        "filter": ["**/*.png", "**/*.webp", "**/*.svg"]
+      }
+    ],
+    "files": [
+      "src/**/*",
+      "!src/renderer/assets/bantz_no_bg_KEEP_SMILE_CLEAN.png",
+      "!src/renderer/assets/bantz_no_bg_KEEP_SMILE_CLEAN@2x.png",
+      "!src/renderer/assets/bantz.png"
+    ]
   },
   "dependencies": {
     "three": "^0.182.0"

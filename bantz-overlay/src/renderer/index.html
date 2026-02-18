@@ -12,8 +12,26 @@
       <pre id="boot-log" class="boot-log"></pre>
       <div class="boot-scanlines"></div>
     </div>
-    <div class="boot-logo">
-      <img src="assets/bantz_no_bg_KEEP_SMILE_CLEAN.png" alt="BANTZ" onerror="this.style.display='none';this.parentNode.innerHTML='<span class=boot-text>BANTZ</span>'" />
+    <div class="boot-logo" id="boot-logo">
+      <!--
+        Issue #1464: HiDPI + fallback boot logo pipeline
+        - @2x variant served on high-DPI displays via srcset
+        - onerror: file missing → text-based BANTZ lockup (no hard-fail)
+        - Assets managed by scripts/copy-assets.js (prebuild/prestart/predev)
+      -->
+      <picture>
+        <source
+          srcset="assets/bantz_no_bg_KEEP_SMILE_CLEAN@2x.png 2x,
+                  assets/bantz_no_bg_KEEP_SMILE_CLEAN.png 1x"
+          type="image/png"
+        />
+        <img
+          src="assets/bantz_no_bg_KEEP_SMILE_CLEAN.png"
+          alt="BANTZ"
+          id="boot-logo-img"
+          onerror="(function(img){img.onerror=null;img.style.display='none';var fb=document.createElement('span');fb.className='boot-text';fb.setAttribute('aria-label','BANTZ');fb.textContent='BANTZ';img.parentNode.parentNode.appendChild(fb);})(this)"
+        />
+      </picture>
     </div>
   </div>
 
