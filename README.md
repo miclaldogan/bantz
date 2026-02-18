@@ -35,15 +35,20 @@ Unlike cloud-only assistants, Bantz keeps your data local. Unlike chatbots, Bant
 
 ### Key Capabilities
 
-| Area | What it does | Tools |
-|:-----|:-------------|:------|
+| Area | What it does | Backend |
+|:-----|:-------------|:--------|
 | **Calendar** | Create, update, cancel events; find free slots; natural date parsing | Google Calendar API |
 | **Email** | List inbox, read, draft, reply, send with confirmation | Gmail API |
+| **Classroom** | List courses, assignments, enrollment via link | Google Classroom API |
+| **Contacts** | Lookup, manage Google Contacts | Google People API |
+| **Web Search** | Real-time search, page extraction | Chromium extension |
+| **Weather** | Current weather & forecast for any city | wttr.in |
 | **Browser** | Open URLs, extract page content, tab management | Chromium extension + WebSocket |
 | **System** | Screenshot, clipboard, notifications, app launch, disk info | D-Bus + native |
 | **Terminal** | Execute commands in a sandboxed environment | Subprocess with guardrails |
-| **Code** | Code generation, file operations, project scaffolding | Local filesystem |
-| **Contacts** | Lookup, manage Google Contacts | Google People API |
+| **Phone Calls** | Manage call actions (Linux audio/phone integrations) | system tools |
+| **HUD Overlay** | Always-on-top transparent desktop UI with news, calendar, inbox | Electron |
+| **Data Store** | Gmail/Calendar/Classroom → local SQLite TTL cache | IngestStore |
 
 ### How it works (30-second version)
 
@@ -122,14 +127,14 @@ BANTZ_GEMINI_MODEL=gemini-2.0-flash
 ### 4. Run
 
 ```bash
-# Health check
-bantz doctor
+# System health check
+python3 -m bantz doctor
 
-# Interactive mode
-bantz --serve
+# Interactive assistant
+python3 -m bantz --serve
 
 # Single command
-bantz --once "what meetings do I have today?"
+python3 -m bantz --once "what meetings do I have today?"
 ```
 
 <details>
@@ -166,44 +171,51 @@ See [docs/secrets-hygiene.md](docs/secrets-hygiene.md) for key management best p
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         BANTZ                               │
-│                                                             │
-│  ┌─────────┐   ┌─────────┐   ┌──────────┐                 │
-│  │  CLI    │   │ Browser │   │  Voice   │                  │
-│  │ Client  │   │Extension│   │  (opt.)  │                  │
-│  └────┬────┘   └────┬────┘   └────┬─────┘                  │
-│       └──────────────┼────────────┘                         │
-│                      ▼                                      │
-│             ┌────────────────┐                              │
-│             │  BantzServer   │  Unix socket daemon           │
-│             └───────┬────────┘                              │
-│                     ▼                                       │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │              Brain Pipeline                        │     │
-│  │                                                    │     │
-│  │  PreRouter ──► LLM Router ──► Tool Executor        │     │
-│  │  (keyword     (Ollama,        (75 tools,            │     │
-│  │   bypass)      ~50ms)          risk-gated)          │     │
-│  │                    │                  │              │     │
-│  │                    ▼                  ▼              │     │
-│  │              Quality Gate ──► Tiered Finalizer       │     │
-│  │              (complexity ×    Fast: local LLM        │     │
-│  │               writing ×      Quality: Gemini         │     │
-│  │               risk score)    Draft: template          │     │
-│  └────────────────────────────────────────────────────┘     │
-│                                                             │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐         │
-│  │Calendar │ │ Gmail   │ │  Web    │ │ System  │         │
-│  │ Tools   │ │ Tools   │ │ Tools   │ │ Tools   │         │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘         │
-└─────────────────────────────────────────────────────────────┘
-        │                                      │
-        ▼                                      ▼
-  ┌───────────┐                         ┌───────────┐
-  │  Ollama   │  qwen2.5-coder:7b      │  Gemini   │  2.0 Flash
-  │  (local)  │  router + fast-tier     │  (cloud)  │  quality-tier
-  └───────────┘                         └───────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                            BANTZ                                   │
+│                                                                    │
+│  ┌─────────────┐   ┌───────────────┐   ┌──────────────────────┐  │
+│  │  Electron   │   │   CLI /        │   │  Chromium Extension  │  │
+│  │  HUD Overlay│   │ python3 -m bantz│   │  (bantz-extension)   │  │
+│  └──────┬──────┘   └───────┬────────┘   └──────────┬───────────┘  │
+│         │   Unix IPC       │                        │              │
+│         └──────────────────┼────────────────────────┘              │
+│                            ▼                                       │
+│                  ┌─────────────────┐                               │
+│                  │   BantzServer   │  Unix socket + FastAPI :8088   │
+│                  └────────┬────────┘                               │
+│                           ▼                                        │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                    Brain Pipeline                            │  │
+│  │                                                              │  │
+│  │  PreRouter ──► LLM Router ──► Tool Executor                 │  │
+│  │  (fast bypass)  (Ollama,       (75+ tools,                  │  │
+│  │                  ~50ms)         confirmation firewall)        │  │
+│  │                      │                   │                   │  │
+│  │                      ▼                   ▼                   │  │
+│  │               Quality Gate ──► Tiered Finalizer              │  │
+│  │               (complexity ×    Fast: local Ollama            │  │
+│  │                writing ×       Quality: Gemini Flash          │  │
+│  │                risk score)     Draft: template               │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐  │
+│  │ Calendar │ │  Gmail   │ │ Classroom│ │  Browser │ │System  │  │
+│  │  Tools   │ │  Tools   │ │  OAuth   │ │  Tools   │ │ Tools  │  │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └────────┘  │
+│                                                                    │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │       Data Layer — SQLite (IngestStore TTL cache)            │  │
+│  │  Gmail ──► EPHEMERAL (24h)  │  Calendar ──► EPHEMERAL (24h) │  │
+│  │  Classroom ──► SESSION (7d) │  Contacts ──► PERSISTENT       │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────┘
+        │                                         │
+        ▼                                         ▼
+  ┌───────────┐                           ┌───────────┐
+  │  Ollama   │  qwen2.5-coder:7b         │  Gemini   │  2.0 Flash
+  │  (local)  │  router + fast-tier        │  (cloud)  │  quality-tier
+  └───────────┘                           └───────────┘
 ```
 
 ### Pipeline Flow
@@ -232,35 +244,36 @@ See [docs/secrets-hygiene.md](docs/secrets-hygiene.md) for key management best p
 
 ### LLM Router Benchmarks
 
-Benchmarked on **RTX 4050 Laptop GPU (6 GB VRAM)** with 10 routing queries (calendar, gmail, system, smalltalk, news intents). Each model receives the same enriched English system prompt with explicit RULES block and must return a structured JSON routing decision. Input is always English (LanguageBridge translates TR→EN before the model sees it).
+Benchmarked on **RTX 4050 Laptop GPU (6 GB VRAM)**. Each model receives the same enriched English system prompt with explicit RULES block and must return a structured JSON routing decision across 10 test queries (calendar, gmail, system, smalltalk, news intents). Input is always English — LanguageBridge translates TR→EN before the model sees it.
 
-#### Enriched Prompt Results (vLLM disabled — full GPU for Ollama)
+> ⚠️ **Note on accuracy figures:** Results are from a 10-query micro-benchmark on the specific prompt/intent set used, not a broad held-out evaluation. Real-world accuracy varies with prompt diversity. "10/10 on this set" is more precise than "100%."
 
-| Model | Params | Quant | Cold Start | Warm Latency | Throughput | Router Accuracy | Thinking |
-|:------|:-------|:------|:-----------|:-------------|:-----------|:----------------|:---------|
-| **Ollama qwen2.5-coder:7b** ⭐ | 7B | Q4_K_M | 3.6s | **0.34s** | **35.5 t/s** | **100%** | — |
-| **Ollama qwen2.5:7b** | 7B | Q4_K_M | 3.1s | **0.36s** | **35.0 t/s** | **100%** | — |
-| **Ollama nanbeige4.1-3B** 🧠 | 3.9B | Q8_0 | 4.2s | **0.46s** | **40.6 t/s** | **100%** | ✅ infra |
-| **Ollama gpt-oss:20b** | 20B | Q4_K_M | 6.9s | 4.71s | 10.9 t/s | **100%** | — |
+#### Current Setup — Enriched Prompt, Ollama Only (full GPU)
 
-#### Previous Results (old prompt, vLLM active — GPU shared)
+| Model | Params | Quant | Cold Start | Warm Latency | Throughput | Routing (10 q) | Thinking |
+|:------|:-------|:------|:-----------|:-------------|:-----------|:---------------|:---------|
+| **qwen2.5-coder:7b** ⭐ | 7B | Q4_K_M | 3.6s | **0.34s** | **35.5 t/s** | 10/10 | — |
+| **qwen2.5:7b** | 7B | Q4_K_M | 3.1s | **0.36s** | **35.0 t/s** | 10/10 | — |
+| **nanbeige4.1-3B** 🧠 | 3.9B | Q8_0 | 4.2s | **0.46s** | **40.6 t/s** | 10/10 | ✅ |
+| **gpt-oss:20b** | 20B | Q4_K_M | 6.9s | 4.71s | 10.9 t/s | 10/10 | — |
 
-| Model | Params | Quant | Cold Start | Warm Latency | Throughput | Router Accuracy | Thinking |
-|:------|:-------|:------|:-----------|:-------------|:-----------|:----------------|:---------|
-| **vLLM Qwen2.5-3B-AWQ** | 3B | AWQ 4-bit | <1s | ~250ms | ~130 t/s | 70% | — |
-| **Ollama qwen2.5-coder:7b** | 7B | Q4_K_M | 4.4s | 3.0s | 11.1 t/s | 60% | — |
-| **Ollama qwen2.5:7b** | 7B | Q4_K_M | 6.3s | 2.8s | 10.9 t/s | 70% | — |
-| **Ollama gpt-oss:20b** | 20B | Q4_K_M | 14.7s | 7.9s | 12.0 t/s | 80% | — |
-| **Ollama nanbeige4.1-3B** 🧠 | 3.9B | Q8_0 | 295s | ~290s | 14 t/s | 0% | ✅ captured |
+#### Previous Baseline — Old Prompt, Ollama + vLLM (GPU shared)
+
+| Model | Params | Quant | Cold Start | Warm Latency | Throughput | Routing (10 q) |
+|:------|:-------|:------|:-----------|:-------------|:-----------|:---------------|
+| **vLLM Qwen2.5-3B-AWQ** | 3B | AWQ 4-bit | <1s | ~250ms | ~130 t/s | 7/10 |
+| **qwen2.5-coder:7b** | 7B | Q4_K_M | 4.4s | 3.0s | 11.1 t/s | 6/10 |
+| **qwen2.5:7b** | 7B | Q4_K_M | 6.3s | 2.8s | 10.9 t/s | 7/10 |
+| **gpt-oss:20b** | 20B | Q4_K_M | 14.7s | 7.9s | 12.0 t/s | 8/10 |
+| **nanbeige4.1-3B** 🧠 | 3.9B | Q8_0 | 295s | ~290s | 14 t/s | 0/10 |
 
 > **Key Findings:**
-> - **Enriched prompt with RULES block → all 4 models hit 100% accuracy.** The prompt was the bottleneck, not the models.
-> - **Stopping vLLM (freeing 2.75 GB VRAM) → 3x throughput boost** for all Ollama models (e.g., qwen2.5-coder 11→35 t/s).
-> - **qwen2.5-coder:7b** ⭐ is the new recommended router: fastest warm latency (0.34s), 100% accurate, good throughput.
-> - **nanbeige4.1-3B** 🧠 improved from 0%/290s to **100%/0.46s** — a 630x speedup — via `think=false` + `format=json` + full GPU.
-> - **gpt-oss:20b** at 4.71s is too slow for interactive routing despite 100% accuracy.
-> - **Thinking model infrastructure** is fully implemented: `LLMResponse.thinking`, `OrchestratorOutput.thinking`, `complete_text_detailed()` with `extra_body` for Ollama-native params (`think`, `format`, `num_gpu`, etc.).
-> - Accuracy is measured as exact route match (e.g., `calendar`, `gmail`, `system`, `smalltalk`).
+> - **Enriched RULES prompt** was the main differentiator — models went from 6-8/10 to 10/10 on this test set.
+> - **Freeing vLLM's 2.75 GB VRAM → 3× throughput boost** for all Ollama models (e.g., qwen2.5-coder: 11 → 35 t/s).
+> - **qwen2.5-coder:7b** ⭐ chosen as production router: best warm latency (0.34s) + good throughput.
+> - **nanbeige4.1-3B** 🧠 went from failing (290s cold start) to fast (0.46s) via `think=false` + `format=json` + full GPU access.
+> - **gpt-oss:20b** is too slow (4.71s/query) for responsive interactive routing.
+> - Accuracy = exact route-label match on the 10-query test set (calendar, gmail, system, smalltalk, news).
 
 ---
 
@@ -303,29 +316,56 @@ Bantz is evolving toward a **GAIA-inspired intelligent platform** — not just a
 
 ```
 bantz/
-├── src/bantz/                 # Main package
-│   ├── brain/                 # Orchestrator, router, finalizer, quality gating
-│   ├── llm/                   # LLM clients (Ollama, Gemini), tiered scoring
-│   ├── router/                # Intent router: schemas, prompts, handlers
-│   ├── tools/                 # 75 tools across 13 categories
-│   ├── data/                  # Data platform (Ingest Store, evolving)
-│   ├── google/                # Calendar, Gmail, OAuth
-│   ├── memory/                # Session + persistent memory (SQLite)
-│   ├── policy/                # Permission engine, confirmation firewall
-│   ├── voice/                 # ASR, TTS, wake word (optional)
-│   ├── browser/               # Browser automation bridge
-│   ├── i18n/                  # LanguageBridge translation layer
-│   ├── privacy/               # PII redaction
-│   ├── server.py              # Unix socket daemon
-│   └── ...                    # 40+ subsystem modules
-├── tests/                     # ~10,000 tests across 370+ test files
-├── scripts/                   # CLI tools, benchmarks, demos
-├── config/                    # Environment templates, model settings, policies
-├── bantz-extension/           # Chromium browser extension
-├── skills/                    # Declarative skill definitions
-├── docs/                      # Architecture docs, setup guides
-├── .github/                   # CI workflows, PR review config
-└── pyproject.toml             # Package config (hatchling)
+├── src/bantz/               # Main Python package (python3 -m bantz)
+│   ├── __main__.py          # Entry point → cli.py
+│   ├── cli.py               # Interactive & single-shot CLI
+│   ├── server.py            # Unix socket daemon (BantzServer)
+│   ├── daemon.py            # Systemd-friendly daemon wrapper
+│   ├── api/                 # FastAPI REST server (port 8088)
+│   │
+│   ├── brain/               # Orchestrator, router, finalizer, quality gating
+│   ├── llm/                 # LLM clients: Ollama + Gemini, tiered scoring
+│   ├── router/              # Intent router: schemas, prompts, handlers
+│   ├── tools/               # 75+ tools (calendar, gmail, browser, system…)
+│   ├── data/                # Data platform: IngestStore (SQLite TTL cache)
+│   │
+│   ├── google/              # Google APIs: Calendar, Gmail, OAuth, Contacts
+│   ├── connectors/google/   # Unified Google auth manager + Classroom
+│   │
+│   ├── memory/              # Session + persistent memory (SQLite)
+│   ├── policy/              # Permission engine, confirmation firewall
+│   ├── voice/               # ASR, TTS, wake word (optional)
+│   ├── browser/             # Browser automation bridge
+│   ├── i18n/                # LanguageBridge: transparent TR↔EN translation
+│   └── privacy/             # PII redaction
+│
+├── bantz-overlay/           # Electron HUD overlay (always-on-top transparent UI)
+├── bantz-extension/         # Chromium browser extension
+├── bantz-browser/           # Browser companion app
+│
+├── skills/                  # Declarative skill definitions
+├── tests/                   # Test suite (pytest + pytest-asyncio)
+├── scripts/                 # Utility scripts: smoke tests, e2e, install helpers
+├── config/                  # Env templates, model settings, policies
+├── docs/                    # Architecture docs, setup guides
+│
+├── _legacy/                 # Archived: vLLM backend, old demo/bench scripts
+│                            # (kept for reference, not part of active runtime)
+│
+└── pyproject.toml           # Package config (hatchling)
+```
+
+### How to Start
+
+```bash
+# Start the daemon (Unix socket + FastAPI on :8088)
+python3 -m bantz --serve
+
+# Single command
+python3 -m bantz --once "bugün hangi toplantılarım var?"
+
+# System check
+python3 -m bantz doctor
 ```
 
 ---
