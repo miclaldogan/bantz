@@ -36,11 +36,11 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# ── IngestStore DataClass shortcuts ──────────────────────────────
 
-_EPHEMERAL = "EPHEMERAL"   # 24h — mail listings, calendar snapshots
-_SESSION   = "SESSION"     # 7d  — selected emails, active events
-_PERSISTENT = "PERSISTENT" # ∞   — contacts, patterns, classifications
+def _get_data_class(name: str) -> Any:
+    """Lazy-import DataClass enum to avoid hard dependency at import time."""
+    from bantz.data.ingest_store import DataClass
+    return DataClass[name]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -74,10 +74,10 @@ class GmailSyncer:
         for msg in messages:
             try:
                 record_id = self._store.ingest(
-                    payload=msg,
+                    content=msg,
                     source=self.SOURCE,
-                    data_class=_EPHEMERAL,
-                    tags=self._build_tags(msg),
+                    data_class=_get_data_class("EPHEMERAL"),
+                    summary=msg.get("subject") or msg.get("title") or "",
                 )
                 if record_id:
                     ingested += 1
@@ -148,10 +148,10 @@ class GmailSyncer:
                 else:
                     payload["email"] = sender_raw
                 self._store.ingest(
-                    payload=payload,
+                    content=payload,
                     source="gmail_contact",
-                    data_class=_PERSISTENT,
-                    tags=["contact", "gmail_sender"],
+                    data_class=_get_data_class("PERSISTENT"),
+                    summary=payload.get("name") or payload.get("email", ""),
                 )
             except Exception:
                 pass
@@ -189,10 +189,10 @@ class CalendarSyncer:
             try:
                 # Calendar events are ephemeral (they change frequently)
                 record_id = self._store.ingest(
-                    payload=event,
+                    content=event,
                     source=self.SOURCE,
-                    data_class=_EPHEMERAL,
-                    tags=self._build_tags(event),
+                    data_class=_get_data_class("EPHEMERAL"),
+                    summary=event.get("summary") or event.get("title") or "",
                 )
                 if record_id:
                     ingested += 1
@@ -281,11 +281,13 @@ class ClassroomSyncer:
         ingested = 0
         for record in data:
             try:
+                tags = record.pop("_tags", ["classroom"])
+                name = record.get("name") or record.get("title") or ""
                 rid = self._store.ingest(
-                    payload=record,
+                    content=record,
                     source=self.SOURCE,
-                    data_class=_SESSION,
-                    tags=record.get("_tags", ["classroom"]),
+                    data_class=_get_data_class("SESSION"),
+                    summary=name,
                 )
                 if rid:
                     ingested += 1
@@ -470,7 +472,6 @@ class GoogleSyncManager:
         self,
         *,
         limit: int = 10,
-        tags: Optional[List[str]] = None,
         unread_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """Query recently synced Gmail messages from SQLite.
@@ -482,14 +483,16 @@ class GoogleSyncManager:
         if store is None:
             return []
         try:
-            tag_filter = list(tags or []) + (["unread"] if unread_only else [])
+            from bantz.data.ingest_store import DataClass
             records = store.query(
                 source="gmail",
-                data_class=_EPHEMERAL,
-                tags=tag_filter or None,
+                data_class=DataClass.EPHEMERAL,
                 limit=limit,
             )
-            return [r.payload if hasattr(r, "payload") else r for r in records]
+            payloads = [r.payload if hasattr(r, "payload") else (r.get("payload") if isinstance(r, dict) else r) for r in records]
+            if unread_only:
+                payloads = [p for p in payloads if "UNREAD" in (p.get("labelIds") or [])]
+            return payloads
         except Exception as exc:
             logger.warning("[GoogleSync] query_recent_emails failed: %s", exc)
             return []
@@ -508,14 +511,27 @@ class GoogleSyncManager:
         if store is None:
             return []
         try:
-            tag_filter = ["imminent"] if imminent_only else None
+            from bantz.data.ingest_store import DataClass
             records = store.query(
                 source="google_calendar",
-                data_class=_EPHEMERAL,
-                tags=tag_filter,
+                data_class=DataClass.EPHEMERAL,
                 limit=limit,
             )
-            payloads = [r.payload if hasattr(r, "payload") else r for r in records]
+            payloads = [r.payload if hasattr(r, "payload") else (r.get("payload") if isinstance(r, dict) else r) for r in records]
+            # Filter imminent (within 24h)
+            if imminent_only:
+                now = datetime.now(timezone.utc)
+                def _is_imminent(ev: Dict[str, Any]) -> bool:
+                    try:
+                        s = ev.get("start", {})
+                        dt_raw = s.get("dateTime") or s.get("date")
+                        if not dt_raw:
+                            return False
+                        dt = datetime.fromisoformat(dt_raw.replace("Z", "+00:00"))
+                        return dt - now <= timedelta(hours=24) and dt > now
+                    except Exception:
+                        return False
+                payloads = [p for p in payloads if _is_imminent(p)]
             # Sort by start time
             def _start_key(ev: Dict[str, Any]) -> str:
                 s = ev.get("start", {})
@@ -536,14 +552,16 @@ class GoogleSyncManager:
         if store is None:
             return []
         try:
-            tags = ["assignment"] if assignments_only else None
+            from bantz.data.ingest_store import DataClass
             records = store.query(
                 source="google_classroom",
-                data_class=_SESSION,
-                tags=tags,
+                data_class=DataClass.SESSION,
                 limit=limit,
             )
-            return [r.payload if hasattr(r, "payload") else r for r in records]
+            payloads = [r.payload if hasattr(r, "payload") else (r.get("payload") if isinstance(r, dict) else r) for r in records]
+            if assignments_only:
+                payloads = [p for p in payloads if "assignment" in (p.get("_tags") or [])]
+            return payloads
         except Exception as exc:
             logger.warning("[GoogleSync] query_classroom failed: %s", exc)
             return []
