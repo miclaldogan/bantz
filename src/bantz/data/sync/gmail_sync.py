@@ -40,6 +40,20 @@ from typing import Any, Dict, List, Optional
 from bantz.data.ingest_store import DataClass, IngestStore
 from bantz.data.sync.classifier import SenderClassifier
 
+# GraphBridge is optional — imported lazily to avoid circular deps at module level
+_GraphBridgeClass: Any = None
+
+
+def _get_graph_bridge_class() -> Any:
+    global _GraphBridgeClass
+    if _GraphBridgeClass is None:
+        try:
+            from bantz.data.graph_bridge import GraphBridge  # noqa: PLC0415
+            _GraphBridgeClass = GraphBridge
+        except Exception:
+            pass
+    return _GraphBridgeClass
+
 logger = logging.getLogger(__name__)
 
 # Sync config defaults
@@ -107,6 +121,7 @@ class GmailSyncer:
         classifier: Optional[SenderClassifier] = None,
         sync_interval: int = _DEFAULT_SYNC_INTERVAL,
         max_messages: int = _DEFAULT_MAX_MESSAGES,
+        graph_bridge: Optional[Any] = None,
     ) -> None:
         self._store = store
         self._classifier = classifier or SenderClassifier()
@@ -115,10 +130,12 @@ class GmailSyncer:
         self._last_sync: float = 0.0
         self._running = False
         self._task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
+        self._graph_bridge: Optional[Any] = graph_bridge
 
         # Sync stats
         self._total_synced = 0
         self._total_classified: Dict[str, int] = {}
+        self._total_graph_edges = 0
 
     # ── Public API ────────────────────────────────────────────
 
@@ -143,22 +160,27 @@ class GmailSyncer:
                     cat = msg.get("_category", "uncategorized")
                     categories[cat] = categories.get(cat, 0) + 1
 
+            # Issue #1472: link senders into the knowledge graph
+            graph_edges = await self._index_senders(messages)
+
             elapsed_ms = int((time.time() - start) * 1000)
             self._last_sync = time.time()
             self._total_synced += ingested
+            self._total_graph_edges += graph_edges
 
             for cat, count in categories.items():
                 self._total_classified[cat] = self._total_classified.get(cat, 0) + count
 
             logger.info(
-                "[GmailSync] Synced %d messages in %dms — categories: %s",
-                ingested, elapsed_ms, categories,
+                "[GmailSync] Synced %d messages in %dms — categories: %s — graph_edges: %d",
+                ingested, elapsed_ms, categories, graph_edges,
             )
             return {
                 "ok": True,
                 "synced": ingested,
                 "categories": categories,
                 "elapsed_ms": elapsed_ms,
+                "graph_edges": graph_edges,
             }
 
         except Exception as e:
@@ -196,7 +218,82 @@ class GmailSyncer:
             "categories": dict(self._total_classified),
             "last_sync": self._last_sync,
             "is_running": self._running,
+            "total_graph_edges": self._total_graph_edges,
         }
+
+    async def _index_senders(self, messages: List[Dict[str, Any]]) -> int:
+        """Link Gmail senders to Person contact nodes in the knowledge graph.
+
+        For each fetched message a ``Person`` node is upserted (merge-by-email)
+        via ``GraphBridge.on_tool_result`` so the orchestrator can resolve
+        natural-language references like "Ahmet'in maili" to a concrete sender.
+
+        Duplicate senders within the same batch are deduplicated by the
+        underlying GraphStore's ``upsert_node(unique_key='email')``.
+
+        Uses ``self._graph_bridge`` if injected; otherwise attempts lazy
+        initialisation with the default SQLite graph store.  If the graph
+        is unavailable this method silently returns 0.
+
+        Parameters
+        ----------
+        messages:
+            Enriched message dicts produced by ``_fetch_messages``.
+
+        Returns
+        -------
+        int
+            Number of graph edges created/updated in this batch.
+        """
+        if not messages:
+            return 0
+
+        bridge = self._graph_bridge
+        if bridge is None:
+            BridgeCls = _get_graph_bridge_class()
+            if BridgeCls is None:
+                return 0
+            try:
+                bridge = await BridgeCls.create_default()
+                self._graph_bridge = bridge
+            except Exception as exc:
+                logger.warning("[GmailSync] GraphBridge lazy init failed: %s", exc)
+                return 0
+
+        if not bridge.enabled:
+            return 0
+
+        total_edges = 0
+        for msg in messages:
+            sender_email = msg.get("_sender_email") or ""
+            if not sender_email:
+                continue
+            try:
+                edges = await bridge.on_tool_result(
+                    "gmail.list_messages",
+                    {},
+                    {
+                        "message_id": msg.get("id", ""),
+                        "from": msg.get("from", ""),
+                        "to": msg.get("to", []),
+                        "subject": msg.get("subject", ""),
+                        "date": msg.get("date", ""),
+                        "snippet": msg.get("snippet", ""),
+                    },
+                )
+                total_edges += edges
+            except Exception as exc:
+                logger.warning(
+                    "[GmailSync] Graph indexing failed for sender %s: %s",
+                    sender_email, exc,
+                )
+
+        if total_edges > 0:
+            logger.debug(
+                "[GmailSync] Indexed %d senders into graph (%d edges)",
+                len(messages), total_edges,
+            )
+        return total_edges
 
     # ── Private helpers ───────────────────────────────────────
 
