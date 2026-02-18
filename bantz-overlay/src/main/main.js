@@ -119,7 +119,7 @@ function createOverlayWindow() {
     const msg = event.message || '';
     const lvl = event.level ?? 1;
     const prefix = ['V', 'I', 'W', 'E'][lvl] || 'I';
-    console.log(`[R:${prefix}] ${msg}`);
+    console.log(`[R:${prefix}] ${sanitizeLogValue(msg)}`);
   });
 
   // Debug: check renderer state after load
@@ -138,7 +138,7 @@ function createOverlayWindow() {
         panelCount: document.querySelectorAll('.terminal-panel').length,
         canvasCount: document.querySelectorAll('canvas').length,
       })
-    `).then(r => console.log('[Main] Renderer state:', r)).catch(e => console.error('[Main] JS exec failed:', e));
+    `).then(r => console.log('[Main] Renderer state:', sanitizeLogValue(r))).catch(e => console.error('[Main] JS exec failed:', sanitizeLogValue(e.message)));
   });
 
   overlayWindow.once('ready-to-show', () => {
@@ -270,7 +270,7 @@ ipcMain.handle('system:get-metrics', async () => {
 
     return { cpu: cpuPercent, ram: ramPercent, disk: diskPercent, uptime_seconds: uptimeSeconds };
   } catch (err) {
-    console.error('[Main] System metrics error:', err.message);
+    console.error('[Main] System metrics error:', sanitizeLogValue(err.message));
     return { cpu: 0, ram: 0, disk: 0, uptime_seconds: 0 };
   }
 });
@@ -290,7 +290,7 @@ ipcMain.handle('shell:open-external', async (_event, url) => {
     console.log(`[Main] Opened external: ${sanitizeLogValue(url).slice(0, 80)}`);
     return true;
   } catch (err) {
-    console.error('[Main] Failed to open URL:', err.message);
+    console.error('[Main] Failed to open URL:', sanitizeLogValue(err.message));
     return false;
   }
 });
@@ -523,7 +523,7 @@ ipcMain.handle('news:get-feed', async () => {
     console.log(`[Main] Fetched ${top.length} news articles from ${results.filter(r => r.length > 0).length} feeds`);
     return top;
   } catch (err) {
-    console.error('[Main] News fetch error:', err.message);
+    console.error('[Main] News fetch error:', sanitizeLogValue(err.message));
     return null;
   }
 });
@@ -608,7 +608,7 @@ function startIPCClient() {
   ipcClient.on('error', (err) => {
     // Only log non-routine errors (suppress flood)
     if (err.code !== 'ENOENT' && err.code !== 'ECONNREFUSED' && err.code !== 'ECONNRESET') {
-      console.error('[Main] IPC error:', err.message);
+      console.error('[Main] IPC error:', sanitizeLogValue(err.message));
     }
   });
 
@@ -711,7 +711,7 @@ async function checkFirstRunAuth() {
           }
         );
       } catch (e) {
-        console.error('[Auth] Google auth launch error:', e.message);
+        console.error('[Auth] Google auth launch error:', sanitizeLogValue(e.message));
       }
     }
 
@@ -721,7 +721,7 @@ async function checkFirstRunAuth() {
       try {
         exec('gh auth login --web -p ssh', { timeout: 120000 }, (err, stdout) => {
           if (err) {
-            console.error('[Auth] GitHub auth failed:', err.message);
+            console.error('[Auth] GitHub auth failed:', sanitizeLogValue(err.message));
           } else {
             console.log('[Auth] GitHub auth completed');
             results.github = true;
@@ -731,7 +731,7 @@ async function checkFirstRunAuth() {
           }
         });
       } catch (e) {
-        console.error('[Auth] GitHub auth launch error:', e.message);
+        console.error('[Auth] GitHub auth launch error:', sanitizeLogValue(e.message));
       }
     }
   } else {
@@ -889,7 +889,7 @@ function loadEnvFile() {
     }
     console.log(`[Env] Loaded ${loaded} vars from config/.env`);
   } catch (e) {
-    console.warn('[Env] Failed to load .env:', e.message);
+    console.warn('[Env] Failed to load .env:', sanitizeLogValue(e.message));
   }
 }
 
@@ -951,7 +951,7 @@ app.whenReady().then(async () => {
   startIPCClient();
 
   // Check first-run auth (non-blocking — runs in background)
-  checkFirstRunAuth().catch(e => console.warn('[Auth] Check failed:', e.message));
+  checkFirstRunAuth().catch(e => console.warn('[Auth] Check failed:', sanitizeLogValue(e.message)));
 
   // Create system tray
   tray = createTray({
@@ -1138,7 +1138,7 @@ ipcMain.handle('github:get-feed', async () => {
     console.log('[Main] GitHub feed: ' + sanitizeLogValue(results.events.length) + ' events, ' + sanitizeLogValue(results.unreadCount) + ' unread');
     return results;
   } catch (err) {
-    console.error('[Main] GitHub feed error:', err.message);
+    console.error('[Main] GitHub feed error:', sanitizeLogValue(err.message));
     return { events: [], unreadCount: 0 };
   }
 });
