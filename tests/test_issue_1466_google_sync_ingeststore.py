@@ -14,7 +14,7 @@ import asyncio
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -93,9 +93,6 @@ class TestStartupSync:
 
     @pytest.mark.asyncio
     async def test_sync_all_calls_gmail_and_calendar(self, manager):
-        msgs = _make_gmail_messages(2)
-        evts = _make_calendar_events(2)
-
         with (
             patch.object(manager._get_store().__class__, "__init__", return_value=None),
             patch("bantz.data.google_sync.GmailSyncer.sync", new_callable=AsyncMock, return_value=2) as mock_gmail,
