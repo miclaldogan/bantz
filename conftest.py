@@ -24,7 +24,13 @@ collect_ignore = [
     "tests/test_bench_vllm.py",            # requires scripts/bench_vllm.py (not in repo)
     "tests/test_declarative_skills.py",    # requires valid YAML frontmatter in SKILL.md files
     "tests/test_calendar_update_partial.py", # requires Google client_secret.json (not in CI)
-    "tests/test_issue_1016_vllm_thread_safety.py",  # tests old VLLMOpenAIClient structure (replaced by stub in #1463)
+    "tests/test_issue_1016_vllm_thread_safety.py",   # tests old VLLMOpenAIClient structure (replaced by stub in #1463)
+    "tests/test_issue_1020_vllm_configurable.py",    # tests old VLLMOpenAIClient structure (replaced by stub in #1463)
+    "tests/test_issue_1311_streaming_connection_leak.py",  # tests old VLLMOpenAIClient streaming API (replaced by stub in #1463)
+    "tests/test_issue_996_vllm_health.py",           # tests old VLLMOpenAIClient health URL logic (replaced by stub in #1463)
+    "tests/test_llm_clients.py",                     # tests old VLLMOpenAIClient interface (replaced by stub in #1463)
+    "tests/test_router_budget_issue_214.py",         # tests old VLLMOpenAIClient model parsing (replaced by stub in #1463)
+    "tests/test_structured_tool_calling.py",         # tests old VLLMOpenAIClient tools param (replaced by stub in #1463)
 ]
 
 # Tests inside mixed files that require optional UI modules.
