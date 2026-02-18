@@ -1,6 +1,11 @@
 """
 Tests for Issue #1470 — Daily Tasks panel shows real Google Calendar events.
 
+Spec-mirror note: helper functions _is_today(), _is_all_day(), _is_imminent(),
+and _build_cal_card() intentionally mirror the corresponding logic in
+src/bantz/server.py (section 5).  Any change to the server logic must be
+reflected here and vice-versa.
+
 Acceptance Criteria:
   AC1: Startup shows today's meetings in DailyTasksPanel.
   AC2: all_day events are marked as 'TÜM GÜN'.
@@ -12,10 +17,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -34,19 +37,25 @@ class _IngestRecord:
     created_at: float = field(default_factory=time.time)
 
 
+# Frozen timestamp for flakiness-free imminent/today calculations.
+# All tests that compare against "now" use _NOW instead of a live datetime.now().
+_NOW: datetime = datetime.now(_UTC)
+
+
 def _now() -> datetime:
-    return datetime.now(_UTC)
+    """Return the frozen module-level timestamp (prevents test flakiness)."""
+    return _NOW
 
 
 def _today_iso(hour: int = 10, minute: int = 0) -> str:
     """Return an ISO string for today at the given time (UTC)."""
-    dt = _now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+    dt = _NOW.replace(hour=hour, minute=minute, second=0, microsecond=0)
     return dt.isoformat()
 
 
 def _allday_iso() -> str:
     """Return a date-only string (all-day event, no 'T')."""
-    return _now().date().isoformat()  # e.g. "2026-02-18"
+    return _NOW.date().isoformat()  # e.g. "2026-02-18"
 
 
 def _make_cal_record(
@@ -430,12 +439,29 @@ class TestRendererCalendarAccumulation:
         assert len(set_calls[2]) == 3
 
     def test_reset_on_briefing_start(self):
-        """Simulates that _briefingCalCards is reset on briefing_start."""
-        acc = [{"title": "Old", "id": "old1"}]
-        acc = []  # briefing_start reset
-        acc.append({"title": "New", "id": "new1"})
+        """_briefingCalCards accumulator is cleared on briefing_start.
+
+        Simulates a full two-briefing sequence:
+          1. First briefing populates the accumulator with 2 events.
+          2. briefing_start fires — accumulator is reset to [].
+          3. Second briefing adds 1 new event.
+        After the reset only the single new event should be present.
+        """
+        # ─ First briefing ────────────────────────────────────────
+        acc: list = []
+        acc.append({"title": "Old Event 1", "id": "old1"})
+        acc.append({"title": "Old Event 2", "id": "old2"})
+        assert len(acc) == 2
+
+        # ─ briefing_start: reset accumulator ─────────────────────
+        acc = []  # mirrors: briefingCalCards = [] in renderer.js
+
+        # ─ Second briefing ───────────────────────────────────────
+        acc.append({"title": "New Event", "id": "new1"})
+
+        # Only the new event should be present after reset
         assert len(acc) == 1
-        assert acc[0]["title"] == "New"
+        assert acc[0]["title"] == "New Event"
 
     def test_non_calendar_cards_not_routed(self):
         cards = [

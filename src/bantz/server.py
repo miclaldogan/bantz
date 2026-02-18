@@ -1189,9 +1189,11 @@ class BantzServer:
             await asyncio.sleep(3.0)
 
         # ── 5. Send calendar cards ──
-        _now_utc = __import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        )
+        from datetime import datetime as _dt, timezone as _tz
+
+        _IMMINENT_THRESHOLD_S = 1800  # 30 minutes
+
+        _now_utc = _dt.now(_tz.utc)
         for i, evt in enumerate(cal_events):
             raw_start = evt.get("start", evt.get("start_time", ""))
             # all_day: no 'T' in start string
@@ -1202,11 +1204,11 @@ class BantzServer:
             is_imminent = False
             if not is_all_day and raw_start:
                 try:
-                    _start_dt = __import__("datetime").datetime.fromisoformat(
+                    _start_dt = _dt.fromisoformat(
                         str(raw_start).replace("Z", "+00:00")
                     )
                     _diff = (_start_dt - _now_utc).total_seconds()
-                    is_imminent = 0 <= _diff <= 1800  # within 30 min
+                    is_imminent = 0 <= _diff <= _IMMINENT_THRESHOLD_S
                 except Exception:
                     pass
             cal_card = {
