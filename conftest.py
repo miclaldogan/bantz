@@ -31,6 +31,8 @@ collect_ignore = [
     "tests/test_llm_clients.py",                     # tests old VLLMOpenAIClient interface (replaced by stub in #1463)
     "tests/test_router_budget_issue_214.py",         # tests old VLLMOpenAIClient model parsing (replaced by stub in #1463)
     "tests/test_structured_tool_calling.py",         # tests old VLLMOpenAIClient tools param (replaced by stub in #1463)
+    "tests/test_issue_1292_google_suite.py",         # requires bantz.google.base (module not yet implemented)
+    "tests/test_issue_302_latency_metrics.py",       # requires scripts/latency_report.py (not in repo)
 ]
 
 # Tests inside mixed files that require optional UI modules.
