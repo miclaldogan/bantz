@@ -84,6 +84,15 @@ def _get_default_skill_dirs() -> list[Path]:
     if extra_dir:
         dirs.insert(0, Path(extra_dir))
 
+    # Built-in skill definitions shipped with the package
+    # (src/bantz/skills/definitions/ — declarative SKILL.md files)
+    try:
+        _pkg_definitions = Path(__file__).parent.parent / "definitions"
+        if _pkg_definitions.is_dir():
+            dirs.append(_pkg_definitions)
+    except Exception:
+        pass
+
     return dirs
 
 
