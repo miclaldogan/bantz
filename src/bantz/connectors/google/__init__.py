@@ -1,14 +1,9 @@
-"""Google Suite Super-Connector — Unified OAuth + service connectors.
+"""Backward-compatibility shim — Google connectors moved to bantz.google.
 
-Issue #1292: Single OAuth2 token manager with incremental scope expansion,
-base connector interface, and service-specific connectors for
-Contacts, Tasks, Keep, and Classroom.
+All classes are now in bantz.google.*
+This module re-exports them so existing imports keep working.
 """
+from bantz.google.auth_manager import GoogleAuthManager
+from bantz.google.connector_base import GoogleConnector
 
-from bantz.connectors.google.auth_manager import GoogleAuthManager
-from bantz.connectors.google.base import GoogleConnector
-
-__all__ = [
-    "GoogleAuthManager",
-    "GoogleConnector",
-]
+__all__ = ["GoogleAuthManager", "GoogleConnector"]

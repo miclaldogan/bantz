@@ -298,7 +298,7 @@ class ClassroomSyncer:
 
     def _fetch_courses(self) -> List[Dict[str, Any]]:
         try:
-            from bantz.connectors.google.classroom import ClassroomConnector
+            from bantz.google.classroom import ClassroomConnector
         except ImportError:
             return []
 

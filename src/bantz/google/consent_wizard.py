@@ -149,7 +149,7 @@ _SERVICE_REGISTRY: list[ServiceDefinition] = [
         ],
         token_path_key="BANTZ_GOOGLE_UNIFIED_TOKEN_PATH",
         default_token_path="~/.config/bantz/google/google_unified_token.json",
-        auth_module="bantz.connectors.google.auth_manager",
+        auth_module="bantz.google.auth_manager",
     ),
     ServiceDefinition(
         id="classroom",
@@ -167,7 +167,7 @@ _SERVICE_REGISTRY: list[ServiceDefinition] = [
         ],
         token_path_key="BANTZ_GOOGLE_UNIFIED_TOKEN_PATH",
         default_token_path="~/.config/bantz/google/google_unified_token.json",
-        auth_module="bantz.connectors.google.auth_manager",
+        auth_module="bantz.google.auth_manager",
         optional=True,
     ),
 ]

@@ -11,7 +11,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
-from bantz.connectors.google.auth_manager import GoogleAuthManager
+from bantz.google.auth_manager import GoogleAuthManager
 
 logger = logging.getLogger(__name__)
 

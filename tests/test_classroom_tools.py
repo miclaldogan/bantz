@@ -27,7 +27,7 @@ def mock_auth():
 
 @pytest.fixture
 def connector(mock_auth):
-    from bantz.connectors.google.classroom import ClassroomConnector
+    from bantz.google.classroom import ClassroomConnector
     return ClassroomConnector(mock_auth)
 
 

@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from bantz.connectors.google.base import GoogleConnector, ToolSchema
+from bantz.google.connector_base import GoogleConnector, ToolSchema
 
 logger = logging.getLogger(__name__)
 

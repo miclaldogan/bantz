@@ -59,7 +59,7 @@ def mock_google_deps(mock_credentials):
     mock_build = MagicMock()
 
     with patch(
-        "bantz.connectors.google.auth_manager._import_google_deps",
+        "bantz.google.auth_manager._import_google_deps",
         return_value=(mock_request, mock_creds_cls, mock_flow, mock_build),
     ):
         yield {
@@ -73,7 +73,7 @@ def mock_google_deps(mock_credentials):
 @pytest.fixture
 def auth_manager(tmp_token_dir, mock_google_deps, mock_credentials):
     """Create a GoogleAuthManager with temp paths and mocked deps."""
-    from bantz.connectors.google.auth_manager import GoogleAuthManager
+    from bantz.google.auth_manager import GoogleAuthManager
 
     token_path = str(tmp_token_dir / "google_unified_token.json")
     secret_path = str(tmp_token_dir / "client_secret.json")
@@ -104,13 +104,13 @@ class TestGoogleAuthManager:
     """Tests for the unified GoogleAuthManager."""
 
     def test_scope_registry_contains_all_services(self):
-        from bantz.connectors.google.auth_manager import SCOPE_REGISTRY
+        from bantz.google.auth_manager import SCOPE_REGISTRY
 
         expected_services = {"gmail", "calendar", "contacts", "tasks", "keep", "classroom"}
         assert set(SCOPE_REGISTRY.keys()) == expected_services
 
     def test_service_map_matches_scope_registry(self):
-        from bantz.connectors.google.auth_manager import (SCOPE_REGISTRY,
+        from bantz.google.auth_manager import (SCOPE_REGISTRY,
                                                           SERVICE_MAP)
 
         assert set(SERVICE_MAP.keys()) == set(SCOPE_REGISTRY.keys())
@@ -202,8 +202,8 @@ class TestSingleton:
     """Tests for the auth manager singleton pattern."""
 
     def test_setup_and_get(self, tmp_token_dir, mock_google_deps):
-        import bantz.connectors.google.auth_manager as mod
-        from bantz.connectors.google.auth_manager import (get_auth_manager,
+        import bantz.google.auth_manager as mod
+        from bantz.google.auth_manager import (get_auth_manager,
                                                           setup_auth_manager)
 
         # Save and restore singleton
@@ -231,7 +231,7 @@ class TestGoogleConnectorBase:
     """Tests for the GoogleConnector abstract base class."""
 
     def test_service_name_required(self, auth_manager):
-        from bantz.connectors.google.base import GoogleConnector
+        from bantz.google.base import GoogleConnector
 
         class BadConnector(GoogleConnector):
             def get_tools(self):
@@ -241,14 +241,14 @@ class TestGoogleConnectorBase:
             BadConnector(auth_manager)
 
     def test_ok_helper(self, auth_manager):
-        from bantz.connectors.google.contacts import ContactsConnector
+        from bantz.google.contacts import ContactsConnector
 
         c = ContactsConnector(auth_manager)
         result = c._ok(foo="bar")
         assert result == {"ok": True, "foo": "bar"}
 
     def test_err_helper(self, auth_manager):
-        from bantz.connectors.google.contacts import ContactsConnector
+        from bantz.google.contacts import ContactsConnector
 
         c = ContactsConnector(auth_manager)
         result = c._err("something failed")
@@ -264,7 +264,7 @@ class TestContactsConnector:
     """Tests for the Google Contacts connector."""
 
     def test_parse_person(self):
-        from bantz.connectors.google.contacts import _parse_person
+        from bantz.google.contacts import _parse_person
 
         person = {
             "resourceName": "people/c123",
@@ -281,7 +281,7 @@ class TestContactsConnector:
         assert contact.organization == "Bantz Inc"
 
     def test_parse_person_empty(self):
-        from bantz.connectors.google.contacts import _parse_person
+        from bantz.google.contacts import _parse_person
 
         contact = _parse_person({})
         assert contact.display_name == ""
@@ -289,7 +289,7 @@ class TestContactsConnector:
         assert contact.resource_name == ""
 
     def test_contact_to_dict(self):
-        from bantz.connectors.google.contacts import Contact
+        from bantz.google.contacts import Contact
 
         c = Contact(display_name="Test", emails=["test@test.com"])
         d = c.to_dict()
@@ -297,7 +297,7 @@ class TestContactsConnector:
         assert d["emails"] == ["test@test.com"]
 
     def test_get_tools_returns_three(self, auth_manager):
-        from bantz.connectors.google.contacts import ContactsConnector
+        from bantz.google.contacts import ContactsConnector
 
         c = ContactsConnector(auth_manager)
         tools = c.get_tools()
@@ -308,17 +308,17 @@ class TestContactsConnector:
         assert "google.contacts.create" in names
 
     def test_format_birthday_full(self):
-        from bantz.connectors.google.contacts import _format_birthday
+        from bantz.google.contacts import _format_birthday
 
         assert _format_birthday({"year": 1990, "month": 5, "day": 15}) == "1990-05-15"
 
     def test_format_birthday_month_day(self):
-        from bantz.connectors.google.contacts import _format_birthday
+        from bantz.google.contacts import _format_birthday
 
         assert _format_birthday({"month": 12, "day": 25}) == "12-25"
 
     def test_format_birthday_empty(self):
-        from bantz.connectors.google.contacts import _format_birthday
+        from bantz.google.contacts import _format_birthday
 
         assert _format_birthday({}) == ""
 
@@ -332,7 +332,7 @@ class TestTasksConnector:
     """Tests for the Google Tasks connector."""
 
     def test_parse_task(self):
-        from bantz.connectors.google.tasks import _parse_task
+        from bantz.google.tasks import _parse_task
 
         t = _parse_task({
             "id": "task123",
@@ -346,13 +346,13 @@ class TestTasksConnector:
         assert not t.is_completed
 
     def test_task_completed(self):
-        from bantz.connectors.google.tasks import Task
+        from bantz.google.tasks import Task
 
         t = Task(status="completed")
         assert t.is_completed
 
     def test_task_to_dict(self):
-        from bantz.connectors.google.tasks import Task
+        from bantz.google.tasks import Task
 
         t = Task(id="t1", title="Test", status="needsAction")
         d = t.to_dict()
@@ -360,7 +360,7 @@ class TestTasksConnector:
         assert d["is_completed"] is False
 
     def test_task_list_to_dict(self):
-        from bantz.connectors.google.tasks import TaskList
+        from bantz.google.tasks import TaskList
 
         tl = TaskList(id="list1", title="My Tasks")
         d = tl.to_dict()
@@ -368,7 +368,7 @@ class TestTasksConnector:
         assert d["title"] == "My Tasks"
 
     def test_get_tools_returns_four(self, auth_manager):
-        from bantz.connectors.google.tasks import TasksConnector
+        from bantz.google.tasks import TasksConnector
 
         c = TasksConnector(auth_manager)
         tools = c.get_tools()
@@ -389,7 +389,7 @@ class TestKeepConnector:
     """Tests for the Google Keep connector."""
 
     def test_parse_note_text(self):
-        from bantz.connectors.google.keep import _parse_note
+        from bantz.google.keep import _parse_note
 
         note = _parse_note({
             "name": "notes/abc123",
@@ -401,7 +401,7 @@ class TestKeepConnector:
         assert note.body == "Süt, yumurta, ekmek"
 
     def test_parse_note_list(self):
-        from bantz.connectors.google.keep import _parse_note
+        from bantz.google.keep import _parse_note
 
         note = _parse_note({
             "name": "notes/list1",
@@ -419,14 +419,14 @@ class TestKeepConnector:
         assert "☑ Yumurta al" in note.body
 
     def test_parse_note_empty(self):
-        from bantz.connectors.google.keep import _parse_note
+        from bantz.google.keep import _parse_note
 
         note = _parse_note({})
         assert note.name == ""
         assert note.body == ""
 
     def test_note_to_dict(self):
-        from bantz.connectors.google.keep import Note
+        from bantz.google.keep import Note
 
         n = Note(name="notes/1", title="Test", body="Content")
         d = n.to_dict()
@@ -434,7 +434,7 @@ class TestKeepConnector:
         assert d["title"] == "Test"
 
     def test_get_tools_returns_three(self, auth_manager):
-        from bantz.connectors.google.keep import KeepConnector
+        from bantz.google.keep import KeepConnector
 
         c = KeepConnector(auth_manager)
         tools = c.get_tools()
@@ -445,8 +445,8 @@ class TestKeepConnector:
         assert "google.keep.search" in names
 
     def test_check_availability_when_unavailable(self, auth_manager):
-        import bantz.connectors.google.keep as keep_mod
-        from bantz.connectors.google.keep import KeepConnector
+        import bantz.google.keep as keep_mod
+        from bantz.google.keep import KeepConnector
 
         c = KeepConnector(auth_manager)
         # Simulate API unavailable
@@ -469,7 +469,7 @@ class TestClassroomConnector:
     """Tests for the Google Classroom connector."""
 
     def test_parse_due_full(self):
-        from bantz.connectors.google.classroom import _parse_due
+        from bantz.google.classroom import _parse_due
 
         date_str, time_str = _parse_due(
             {"year": 2025, "month": 3, "day": 15},
@@ -479,7 +479,7 @@ class TestClassroomConnector:
         assert time_str == "23:59"
 
     def test_parse_due_no_time(self):
-        from bantz.connectors.google.classroom import _parse_due
+        from bantz.google.classroom import _parse_due
 
         date_str, time_str = _parse_due(
             {"year": 2025, "month": 1, "day": 1},
@@ -489,14 +489,14 @@ class TestClassroomConnector:
         assert time_str == ""
 
     def test_parse_due_empty(self):
-        from bantz.connectors.google.classroom import _parse_due
+        from bantz.google.classroom import _parse_due
 
         date_str, time_str = _parse_due(None, None)
         assert date_str == ""
         assert time_str == ""
 
     def test_course_to_dict(self):
-        from bantz.connectors.google.classroom import Course
+        from bantz.google.classroom import Course
 
         c = Course(id="c1", name="Matematik", state="ACTIVE")
         d = c.to_dict()
@@ -504,7 +504,7 @@ class TestClassroomConnector:
         assert d["name"] == "Matematik"
 
     def test_assignment_due_display(self):
-        from bantz.connectors.google.classroom import Assignment
+        from bantz.google.classroom import Assignment
 
         a = Assignment(due_date="2025-03-15", due_time="23:59")
         assert a.due_display == "2025-03-15 23:59"
@@ -516,7 +516,7 @@ class TestClassroomConnector:
         assert a3.due_display == "Tarih yok"
 
     def test_submission_is_submitted(self):
-        from bantz.connectors.google.classroom import Submission
+        from bantz.google.classroom import Submission
 
         s = Submission(state="TURNED_IN")
         assert s.is_submitted
@@ -525,7 +525,7 @@ class TestClassroomConnector:
         assert not s2.is_submitted
 
     def test_get_tools_returns_three(self, auth_manager):
-        from bantz.connectors.google.classroom import ClassroomConnector
+        from bantz.google.classroom import ClassroomConnector
 
         c = ClassroomConnector(auth_manager)
         tools = c.get_tools()
@@ -545,15 +545,15 @@ class TestGoogleEntityLinker:
     """Tests for cross-service entity linking."""
 
     def test_link_no_connectors(self):
-        from bantz.connectors.google.entity_linker import GoogleEntityLinker
+        from bantz.google.entity_linker import GoogleEntityLinker
 
         linker = GoogleEntityLinker()
         assert linker.links == []
 
     @pytest.mark.asyncio
     async def test_link_attendee_to_contact(self):
-        from bantz.connectors.google.contacts import Contact
-        from bantz.connectors.google.entity_linker import GoogleEntityLinker
+        from bantz.google.contacts import Contact
+        from bantz.google.entity_linker import GoogleEntityLinker
 
         mock_contacts = MagicMock()
         mock_contacts.search_contacts = AsyncMock(return_value=[
@@ -575,7 +575,7 @@ class TestGoogleEntityLinker:
 
     @pytest.mark.asyncio
     async def test_link_attendee_not_found(self):
-        from bantz.connectors.google.entity_linker import GoogleEntityLinker
+        from bantz.google.entity_linker import GoogleEntityLinker
 
         mock_contacts = MagicMock()
         mock_contacts.search_contacts = AsyncMock(return_value=[])
@@ -588,7 +588,7 @@ class TestGoogleEntityLinker:
 
     @pytest.mark.asyncio
     async def test_link_attendee_no_connector(self):
-        from bantz.connectors.google.entity_linker import GoogleEntityLinker
+        from bantz.google.entity_linker import GoogleEntityLinker
 
         linker = GoogleEntityLinker()
         result = await linker.link_attendee_to_contact("test@example.com")
@@ -596,7 +596,7 @@ class TestGoogleEntityLinker:
 
     @pytest.mark.asyncio
     async def test_link_task_to_event(self):
-        from bantz.connectors.google.entity_linker import GoogleEntityLinker
+        from bantz.google.entity_linker import GoogleEntityLinker
 
         async def mock_list_events(date: str):
             return [
@@ -616,7 +616,7 @@ class TestGoogleEntityLinker:
 
     @pytest.mark.asyncio
     async def test_link_task_no_match(self):
-        from bantz.connectors.google.entity_linker import GoogleEntityLinker
+        from bantz.google.entity_linker import GoogleEntityLinker
 
         async def mock_list_events(date: str):
             return [{"id": "evt1", "summary": "Tamamen farklı bir konu"}]
@@ -629,8 +629,8 @@ class TestGoogleEntityLinker:
 
     @pytest.mark.asyncio
     async def test_batch_link_attendees(self):
-        from bantz.connectors.google.contacts import Contact
-        from bantz.connectors.google.entity_linker import GoogleEntityLinker
+        from bantz.google.contacts import Contact
+        from bantz.google.entity_linker import GoogleEntityLinker
 
         mock_contacts = MagicMock()
 
@@ -651,8 +651,8 @@ class TestGoogleEntityLinker:
 
     @pytest.mark.asyncio
     async def test_resolve_event_attendees(self):
-        from bantz.connectors.google.contacts import Contact
-        from bantz.connectors.google.entity_linker import GoogleEntityLinker
+        from bantz.google.contacts import Contact
+        from bantz.google.entity_linker import GoogleEntityLinker
 
         mock_contacts = MagicMock()
         mock_contacts.search_contacts = AsyncMock(return_value=[
@@ -673,7 +673,7 @@ class TestGoogleEntityLinker:
         assert len(enriched["attendee_contacts"]) == 2
 
     def test_links_summary(self):
-        from bantz.connectors.google.entity_linker import (EntityLink,
+        from bantz.google.entity_linker import (EntityLink,
                                                            GoogleEntityLinker)
 
         linker = GoogleEntityLinker()
@@ -686,7 +686,7 @@ class TestGoogleEntityLinker:
         assert "A→B" in summary["by_type"]
 
     def test_clear_links(self):
-        from bantz.connectors.google.entity_linker import (EntityLink,
+        from bantz.google.entity_linker import (EntityLink,
                                                            GoogleEntityLinker)
 
         linker = GoogleEntityLinker()
@@ -704,7 +704,7 @@ class TestToolSchema:
     """Tests for the ToolSchema descriptor."""
 
     def test_tool_schema_fields(self):
-        from bantz.connectors.google.base import ToolSchema
+        from bantz.google.base import ToolSchema
 
         ts = ToolSchema(
             name="test.tool",
@@ -719,7 +719,7 @@ class TestToolSchema:
         assert ts.confirm is False
 
     def test_tool_schema_defaults(self):
-        from bantz.connectors.google.base import ToolSchema
+        from bantz.google.base import ToolSchema
 
         ts = ToolSchema(
             name="t", description="d", parameters={}, handler=lambda: None,
@@ -738,7 +738,7 @@ class TestAuthBridge:
 
     def test_google_auth_bridge(self, auth_manager, mock_google_deps):
         """When unified manager is available, get_credentials delegates."""
-        import bantz.connectors.google.auth_manager as mod
+        import bantz.google.auth_manager as mod
 
         prev = mod._auth_manager
         try:
@@ -756,7 +756,7 @@ class TestAuthBridge:
 
     def test_gmail_auth_bridge(self, auth_manager, mock_google_deps):
         """When unified manager is available, get_gmail_credentials delegates."""
-        import bantz.connectors.google.auth_manager as mod
+        import bantz.google.auth_manager as mod
 
         prev = mod._auth_manager
         try:
@@ -781,7 +781,7 @@ class TestEntityLink:
     """Tests for the EntityLink dataclass."""
 
     def test_to_dict(self):
-        from bantz.connectors.google.entity_linker import EntityLink
+        from bantz.google.entity_linker import EntityLink
 
         link = EntityLink(
             source_type="Task",
@@ -806,14 +806,14 @@ class TestUnifiedAuthConfig:
     """Tests for UnifiedAuthConfig and path resolution."""
 
     def test_default_config(self):
-        from bantz.connectors.google.auth_manager import _get_unified_config
+        from bantz.google.auth_manager import _get_unified_config
 
         cfg = _get_unified_config()
         assert str(cfg.token_path).endswith("google_unified_token.json")
         assert str(cfg.client_secret_path).endswith("client_secret.json")
 
     def test_custom_config(self, tmp_path):
-        from bantz.connectors.google.auth_manager import _get_unified_config
+        from bantz.google.auth_manager import _get_unified_config
 
         cfg = _get_unified_config(
             token_path=str(tmp_path / "my_token.json"),
@@ -822,7 +822,7 @@ class TestUnifiedAuthConfig:
         assert cfg.token_path == (tmp_path / "my_token.json").resolve()
 
     def test_env_var_override(self, tmp_path, monkeypatch):
-        from bantz.connectors.google.auth_manager import _get_unified_config
+        from bantz.google.auth_manager import _get_unified_config
 
         monkeypatch.setenv("BANTZ_GOOGLE_UNIFIED_TOKEN_PATH", str(tmp_path / "env_token.json"))
         cfg = _get_unified_config()
