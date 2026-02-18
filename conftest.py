@@ -24,6 +24,7 @@ collect_ignore = [
     "tests/test_bench_vllm.py",            # requires scripts/bench_vllm.py (not in repo)
     "tests/test_declarative_skills.py",    # requires valid YAML frontmatter in SKILL.md files
     "tests/test_calendar_update_partial.py", # requires Google client_secret.json (not in CI)
+    "tests/test_issue_1016_vllm_thread_safety.py",  # tests old VLLMOpenAIClient structure (replaced by stub in #1463)
 ]
 
 # Tests inside mixed files that require optional UI modules.
