@@ -9,13 +9,24 @@ collect_ignore = [
     "tests/test_confirmation_natural_language.py",
     "tests/test_elongated_confirmation.py",
     "tests/test_ttft_monitoring.py",
-    "tests/test_animations.py",         # requires bantz.ui.panel_animator (optional UI package)
-    "tests/test_bench_vllm.py",         # requires scripts/bench_vllm.py (not in repo)
-    "tests/test_declarative_skills.py", # requires valid YAML frontmatter in SKILL.md files
+    # Optional bantz.ui.* package not installed in CI:
+    "tests/test_animations.py",
+    "tests/test_event_binding.py",
+    "tests/test_image_slot.py",
+    "tests/test_jarvis_overlay.py",
+    "tests/test_jarvis_panel.py",
+    "tests/test_jarvis_panel_v2.py",
+    "tests/test_popup.py",
+    "tests/test_source_card.py",
+    "tests/test_streaming.py",
+    "tests/test_ticker.py",
+    # Other deps missing in CI:
+    "tests/test_bench_vllm.py",            # requires scripts/bench_vllm.py (not in repo)
+    "tests/test_declarative_skills.py",    # requires valid YAML frontmatter in SKILL.md files
     "tests/test_calendar_update_partial.py", # requires Google client_secret.json (not in CI)
 ]
 
-# Tests that require optional UI modules not installed in CI.
+# Tests inside mixed files that require optional UI modules.
 _SKIP_TEST_IDS = frozenset([
     "tests/test_agent_controller.py::TestAgentControllerInit::test_controller_with_custom_panel",
     "tests/test_agent_controller.py::TestJarvisPanelPlanDisplay::test_mock_controller_show_plan",
@@ -27,8 +38,9 @@ _SKIP_TEST_IDS = frozenset([
 
 def pytest_collection_modifyitems(items, config):
     """Deselect tests that require optional modules absent in CI."""
-    skip_mark = pytest.mark.skip(reason="requires bantz.ui.jarvis_panel (optional UI package)")
+    skip_mark = pytest.mark.skip(reason="requires optional bantz.ui package (not installed in CI)")
     for item in items:
         if item.nodeid in _SKIP_TEST_IDS:
             item.add_marker(skip_mark)
+
 
