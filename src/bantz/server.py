@@ -6,13 +6,13 @@ Receives CLI commands via socket, returns results.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import logging
 import os
 import socket
 import struct
 import threading
-import atexit
 import time
 import traceback
 from collections import deque
@@ -20,13 +20,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from bantz.router.engine import Router, OverlayStateHook, set_overlay_hook
-from bantz.router.policy import Policy
-from bantz.router.context import ConversationContext
+from bantz.core.events import Event, get_event_bus
 from bantz.logs.logger import JsonlLogger
+from bantz.router.context import ConversationContext
+from bantz.router.engine import OverlayStateHook, Router, set_overlay_hook
+from bantz.router.policy import Policy
 from bantz.scheduler.reminder import get_reminder_manager
-from bantz.core.events import get_event_bus, Event
-
 
 # Default socket path
 DEFAULT_SOCKET_DIR = Path("/tmp/bantz_sessions")
@@ -488,8 +487,8 @@ class BantzServer:
         self._brain = None
         self._brain_state = None
         try:
-            from bantz.brain.runtime_factory import create_runtime
             from bantz.brain.orchestrator_state import OrchestratorState
+            from bantz.brain.runtime_factory import create_runtime
 
             self._brain = create_runtime()
             self._brain_state = OrchestratorState()
@@ -521,6 +520,7 @@ class BantzServer:
         try:
             import asyncio as _aio
             import threading
+
             from bantz.data import IngestStore, SyncScheduler
             from bantz.tools.sync_search_tools import init_sync_tools
 
@@ -647,7 +647,8 @@ class BantzServer:
         # Self-Evolving Agent — skill approval / rejection (Issue #837)
         # ─────────────────────────────────────────────────────────────
         try:
-            from bantz.skills.declarative.generator import get_self_evolving_manager
+            from bantz.skills.declarative.generator import \
+                get_self_evolving_manager
             mgr = get_self_evolving_manager()
             if mgr is not None and mgr.has_pending:
                 lower = command.strip().lower()
@@ -664,7 +665,8 @@ class BantzServer:
         # Overnight mode — "gece şunu yap" intent (Issue #836)
         # ─────────────────────────────────────────────────────────────
         try:
-            from bantz.automation.overnight import is_overnight_request, parse_overnight_tasks
+            from bantz.automation.overnight import (is_overnight_request,
+                                                    parse_overnight_tasks)
 
             if is_overnight_request(command):
                 tasks = parse_overnight_tasks(command)
@@ -723,7 +725,8 @@ class BantzServer:
                     self._brain_state is not None
                     and self._brain_state.has_pending_confirmation()
                 ):
-                    from bantz.brain.orchestrator_state import OrchestratorState as _OrchestratorState  # noqa: F401
+                    from bantz.brain.orchestrator_state import \
+                        OrchestratorState as _OrchestratorState  # noqa: F401
 
                     pending = self._brain_state.peek_pending_confirmation() or {}
                     pending_tool = str(pending.get("tool") or "")
@@ -1011,17 +1014,16 @@ class BantzServer:
         self, overlay_hook: "IPCOverlayHook"
     ) -> None:
         """Async startup briefing — fetches live data and sends to overlay."""
-        from bantz.services.briefing_overlay import (
-            BriefingStartMessage,
-            BriefingCardMessage,
-            BriefingEndMessage,
-        )
+        from bantz.services.briefing_overlay import (BriefingCardMessage,
+                                                     BriefingEndMessage,
+                                                     BriefingStartMessage)
 
         _log = logging.getLogger(__name__)
 
         # datetime aliases and threshold — used in both the calendar-parse
         # block (section 1) and the calendar-card block (section 5)
-        from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
+        from datetime import datetime as _dt  # noqa: PLC0415
+        from datetime import timezone as _tz
         _IMMINENT_THRESHOLD_S = 1800  # 30 minutes
 
         # ── Helper: send a dict to the overlay ──
@@ -1227,8 +1229,8 @@ class BantzServer:
 
         # ── 6. Send weather card ──
         try:
-            import urllib.request
             import json as _json
+            import urllib.request
 
             location = os.environ.get(
                 "BANTZ_WEATHER_LOCATION",
@@ -1392,7 +1394,8 @@ class BantzServer:
             print("   Overlay: devre dışı (başlatılamadı)")
 
         # Start extension bridge WebSocket server
-        from bantz.browser.extension_bridge import start_extension_bridge, stop_extension_bridge
+        from bantz.browser.extension_bridge import (start_extension_bridge,
+                                                    stop_extension_bridge)
         ws_started = start_extension_bridge(command_handler=self.handle_command)
         if ws_started:
             print("   Extension Bridge: ws://localhost:9876 ✓")
