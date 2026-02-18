@@ -25,8 +25,12 @@ def mock_planner_llm():
 @pytest.fixture
 def mock_finalizer_llm():
     """Mock finalizer LLM (Gemini)."""
-    llm = Mock()
+    llm = Mock(spec=[])  # spec=[] prevents auto-attributes
     llm.complete_text = Mock(return_value="Gemini ile finalize edildi efendim.")
+    llm.model_name = "gemini-2.0-flash"
+    llm.backend_name = "gemini"
+    llm.get_model_context_length = Mock(return_value=32000)
+    llm.context_window = 32000
     return llm
 
 
@@ -51,10 +55,9 @@ def mock_orchestrator(mock_planner_llm):
 
 @pytest.fixture
 def mock_tools():
-    """Mock ToolRegistry."""
-    tools = Mock()
-    tools.execute = Mock(return_value={"success": True, "result": "Tool executed"})
-    return tools
+    """Empty ToolRegistry for testing."""
+    from bantz.agent.tools import ToolRegistry
+    return ToolRegistry()
 
 
 @pytest.fixture
@@ -408,7 +411,7 @@ class TestNoFinalizerMode:
         
         orchestrator_output = OrchestratorOutput(
             route="smalltalk",
-            assistant_reply="3B direct response",
+            assistant_reply="Merhaba efendim, 3B yanıtı.",
             tool_plan=[],
             requires_confirmation=False,
             calendar_intent=None,
@@ -428,7 +431,7 @@ class TestNoFinalizerMode:
         )
         
         # Should return original output unchanged
-        assert result.assistant_reply == "3B direct response"
+        assert result.assistant_reply == "Merhaba efendim, 3B yanıtı."
         
 
 class TestToolFailureHandling:

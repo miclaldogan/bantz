@@ -149,8 +149,8 @@ class TestGoogleContactsClient:
 
 class TestContactSyncer:
 
-    @patch("bantz.google.contacts.contacts_resolve")
-    @patch("bantz.google.contacts.contacts_upsert")
+    @patch("bantz.contacts.store.contacts_resolve")
+    @patch("bantz.contacts.store.contacts_upsert")
     def test_sync_from_google_adds(self, mock_upsert, mock_resolve):
         mock_resolve.return_value = {"ok": False}
         mock_upsert.return_value = {"ok": True}
@@ -165,8 +165,8 @@ class TestContactSyncer:
         assert result.added == 1
         assert result.updated == 0
 
-    @patch("bantz.google.contacts.contacts_resolve")
-    @patch("bantz.google.contacts.contacts_upsert")
+    @patch("bantz.contacts.store.contacts_resolve")
+    @patch("bantz.contacts.store.contacts_upsert")
     def test_sync_from_google_updates(self, mock_upsert, mock_resolve):
         mock_resolve.return_value = {"ok": True, "email": "old@b.com"}
         mock_upsert.return_value = {"ok": True}
@@ -180,7 +180,7 @@ class TestContactSyncer:
         result = syncer.sync_from_google()
         assert result.updated == 1
 
-    @patch("bantz.google.contacts.contacts_resolve")
+    @patch("bantz.contacts.store.contacts_resolve")
     def test_sync_from_google_skip_no_email(self, mock_resolve):
         mock_client = MagicMock()
         mock_client.get_all.return_value = [
@@ -204,13 +204,13 @@ class TestContactSyncer:
 
 class TestResolveContactEmail:
 
-    @patch("bantz.google.contacts.contacts_resolve")
+    @patch("bantz.contacts.store.contacts_resolve")
     def test_local_hit(self, mock_resolve):
         mock_resolve.return_value = {"ok": True, "email": "ali@x.com"}
         assert resolve_contact_email("Ali") == "ali@x.com"
 
     @patch("bantz.google.contacts.GoogleContactsClient")
-    @patch("bantz.google.contacts.contacts_resolve")
+    @patch("bantz.contacts.store.contacts_resolve")
     def test_google_fallback(self, mock_resolve, MockClient):
         mock_resolve.return_value = {"ok": False}
 
@@ -219,12 +219,12 @@ class TestResolveContactEmail:
             GoogleContact(resource_name="p/1", display_name="Ali", emails=["ali@g.com"]),
         ]
 
-        with patch("bantz.google.contacts.contacts_upsert"):
+        with patch("bantz.contacts.store.contacts_upsert"):
             result = resolve_contact_email("Ali")
         assert result == "ali@g.com"
 
     @patch("bantz.google.contacts.GoogleContactsClient")
-    @patch("bantz.google.contacts.contacts_resolve")
+    @patch("bantz.contacts.store.contacts_resolve")
     def test_not_found(self, mock_resolve, MockClient):
         mock_resolve.return_value = {"ok": False}
         MockClient.return_value.search.return_value = []

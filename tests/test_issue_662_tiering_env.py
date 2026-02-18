@@ -56,7 +56,12 @@ def test_trace_includes_tier_decision(monkeypatch):
     llm = _SimpleLLM()
 
     orch = Mock()
+    orch._llm = llm  # prevent Mock auto-attribute leaking into pipeline
     orch.route.return_value = _make_output()
+    # Prevent Mock auto-attributes from leaking into route recovery logic
+    orch._detect_route_from_input.return_value = "smalltalk"
+    orch._resolve_tool_from_intent.return_value = None
+    orch._is_anaphoric_followup.return_value = False
     tools = ToolRegistry()
 
     loop = OrchestratorLoop(
@@ -99,7 +104,7 @@ def test_quality_requested_but_falls_back_to_fast(monkeypatch):
     loop.run_full_cycle("Sistem durumu nedir?", state=state)
 
     tier_decision = state.trace.get("tier_decision") or {}
-    assert tier_decision.get("finalizer") == "3b_fallback"
+    assert tier_decision.get("finalizer") == "3b"
 
 
 def test_system_status_includes_tiering():

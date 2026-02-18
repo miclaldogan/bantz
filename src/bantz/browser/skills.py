@@ -101,86 +101,86 @@ def browser_scan() -> Tuple[bool, str, Optional[dict]]:
     """
     bridge = _get_bridge()
     if not bridge or not bridge.has_client():
-        return False, "Extension bağlı değil. Firefox'ta Bantz extension yüklü mü?", None
+        return False, "Extension not connected. Is Bantz extension installed in Firefox?", None
     
     try:
         result = bridge.request_scan()
         if result:
-            return True, f"Sayfa tarandı: {len(result.get('elements', []))} öğe bulundu", result
-        return False, "Tarama sonucu alınamadı", None
+            return True, f"Page scanned: {len(result.get('elements', []))} elements found", result
+        return False, "Could not retrieve scan results", None
     except Exception as e:
-        return False, f"Tarama hatası: {e}", None
+        return False, f"Scan error: {e}", None
 
 
 def browser_click_index(index: int) -> Tuple[bool, str]:
     """Click element by index from last scan (via extension)."""
     bridge = _get_bridge()
     if not bridge or not bridge.has_client():
-        return False, "Extension bağlı değil"
+        return False, "Extension not connected"
     
     try:
         ok = bridge.request_click(index=index)
         if ok:
-            return True, f"[{index}] öğesine tıkladım"
-        return False, f"[{index}] tıklanamadı"
+            return True, f"Clicked element [{index}]"
+        return False, f"Could not click [{index}]"
     except Exception as e:
-        return False, f"Tıklama hatası: {e}"
+        return False, f"Click error: {e}"
 
 
 def browser_click_text(text: str) -> Tuple[bool, str]:
     """Click element by text match (via extension)."""
     bridge = _get_bridge()
     if not bridge or not bridge.has_client():
-        return False, "Extension bağlı değil"
+        return False, "Extension not connected"
     
     try:
         ok = bridge.request_click(text=text)
         if ok:
-            return True, f"'{text}' öğesine tıkladım"
-        return False, f"'{text}' tıklanamadı"
+            return True, f"Clicked '{text}'"
+        return False, f"Could not click '{text}'"
     except Exception as e:
-        return False, f"Tıklama hatası: {e}"
+        return False, f"Click error: {e}"
 
 
 def browser_type_text(text: str, element_index: Optional[int] = None) -> Tuple[bool, str]:
     """Type text into element (via extension)."""
     bridge = _get_bridge()
     if not bridge or not bridge.has_client():
-        return False, "Extension bağlı değil"
+        return False, "Extension not connected"
     
     try:
         ok = bridge.request_type(text, element_index=element_index)
         if ok:
-            return True, f"Yazdım: {text[:30]}..."
-        return False, "Yazılamadı"
+            return True, f"Typed: {text[:30]}..."
+        return False, "Could not type"
     except Exception as e:
-        return False, f"Yazma hatası: {e}"
+        return False, f"Type error: {e}"
 
 
 def browser_scroll_down() -> Tuple[bool, str]:
     """Scroll page down (via extension)."""
     bridge = _get_bridge()
     if not bridge or not bridge.has_client():
-        return False, "Extension bağlı değil"
+        return False, "Extension not connected"
     
     try:
         ok = bridge.request_scroll("down")
-        return (True, "Aşağı kaydırdım") if ok else (False, "Kaydırılamadı")
+        return (True, "Scrolled down") if ok else (False, "Could not scroll")
     except Exception as e:
-        return False, f"Kaydırma hatası: {e}"
+        return False, f"Scroll error: {e}"
 
 
 def browser_scroll_up() -> Tuple[bool, str]:
     """Scroll page up (via extension)."""
     bridge = _get_bridge()
     if not bridge or not bridge.has_client():
-        return False, "Extension bağlı değil"
+        return False, "Extension not connected"
     
     try:
         ok = bridge.request_scroll("up")
-        return (True, "Yukarı kaydırdım") if ok else (False, "Kaydırılamadı")
+        return (True, "Scrolled up") if ok else (False, "Could not scroll")
     except Exception as e:
-        return False, f"Kaydırma hatası: {e}"
+        return False, f"Scroll error: {e}"
 
 
 def browser_go_back() -> Tuple[bool, str]:
@@ -188,28 +188,28 @@ def browser_go_back() -> Tuple[bool, str]:
     bridge = _get_bridge()
     if not bridge or not bridge.has_client():
         # Fallback: just say we can't
-        return False, "Extension bağlı değil"
+        return False, "Extension not connected"
 
     try:
         ok = bridge.request_go_back()
-        return (True, "Geri gittim") if ok else (False, "Geri gitme komutu gönderilemedi")
+        return (True, "Went back") if ok else (False, "Could not send go-back command")
     except Exception as e:
-        return False, f"Geri gitme hatası: {e}"
+        return False, f"Go-back error: {e}"
 
 
 def browser_current_info() -> Tuple[bool, str]:
     """Get current page info (via extension)."""
     bridge = _get_bridge()
     if not bridge or not bridge.has_client():
-        return False, "Extension bağlı değil"
+        return False, "Extension not connected"
     
     try:
         result = bridge.request_scan()  # scan includes URL and title
         if result:
-            return True, f"Sayfa: {result.get('title', '?')}\nURL: {result.get('url', '?')}"
-        return False, "Bilgi alınamadı"
+            return True, f"Page: {result.get('title', '?')}\nURL: {result.get('url', '?')}"
+        return False, "Could not retrieve info"
     except Exception as e:
-        return False, f"Hata: {e}"
+        return False, f"Error: {e}"
 
 
 def browser_wait(seconds: int) -> Tuple[bool, str]:

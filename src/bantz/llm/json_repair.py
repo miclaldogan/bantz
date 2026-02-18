@@ -94,6 +94,11 @@ ROUTE_MAPPINGS = {
     "other": "unknown",
     "unclear": "unknown",
     "unsure": "unknown",
+    "news": "news",
+    "haber": "news",
+    "haberler": "news",
+    "gündem": "news",
+    "news_briefing": "news",
 }
 
 INTENT_MAPPINGS = {
@@ -133,7 +138,7 @@ def repair_route_enum(route: str) -> str:
     route_lower = route.lower().strip()
     
     # Already valid? (Issue #421: expanded valid set to match llm_router)
-    if route_lower in {"calendar", "gmail", "smalltalk", "system", "unknown"}:
+    if route_lower in {"calendar", "gmail", "news", "smalltalk", "system", "unknown"}:
         return route_lower
     
     # Try mapping

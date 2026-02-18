@@ -111,17 +111,17 @@ class TestRouteCheck:
         defaults.update(kwargs)
         return OrchestratorOutput(**defaults)
 
-    def test_calendar_route_corrected(self):
-        """Issue #1006: calendar misroute should be corrected to gmail."""
+    def test_calendar_route_not_hijacked(self):
+        """Issue #1057: calendar route must NOT be hijacked by email keywords."""
         output = self._make_output("calendar")
         result = post_route_correction_email_send("Ali'ye mail gönder", output)
-        assert result.route == "gmail"
+        assert result.route == "calendar"
 
-    def test_system_route_corrected(self):
+    def test_system_route_not_hijacked(self):
+        """Issue #1057: system route must NOT be hijacked by email keywords."""
         output = self._make_output("system")
         result = post_route_correction_email_send("sisteme mail gönder", output)
-        # 'sisteme mail gönder' matches email intent
-        assert result.route == "gmail"
+        assert result.route == "system"
 
     def test_gmail_send_not_overridden(self):
         """Existing gmail/send should not be overridden."""

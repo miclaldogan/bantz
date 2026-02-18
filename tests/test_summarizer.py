@@ -695,20 +695,20 @@ class TestNLUPageQuestionPatterns:
         assert "CEO kim" in result.slots.get("question", "")
     
     def test_question_fiyati_ne(self):
-        """Test 'Fiyatı ne?' pattern."""
+        """Test 'Fiyatı ne?' — no longer matches page_question (pattern narrowed)."""
         from bantz.router.nlu import parse_intent
         
         result = parse_intent("Fiyatı ne?")
         
-        assert result.intent == "page_question"
+        assert result.intent == "unknown"
     
     def test_question_ne_zaman(self):
-        """Test 'Ne zaman çıkacak?' pattern."""
+        """Test 'Ne zaman çıkacak?' — no longer matches page_question (pattern narrowed)."""
         from bantz.router.nlu import parse_intent
         
         result = parse_intent("Ne zaman çıkacak?")
         
-        assert result.intent == "page_question"
+        assert result.intent == "unknown"
     
     def test_question_neden(self):
         """Test 'Bu neden oldu?' pattern."""
@@ -727,12 +727,12 @@ class TestNLUPageQuestionPatterns:
         assert result.intent == "page_question"
     
     def test_question_nerede(self):
-        """Test 'Nerede olacak?' pattern."""
+        """Test 'Nerede olacak?' — no longer matches page_question (pattern narrowed)."""
         from bantz.router.nlu import parse_intent
         
         result = parse_intent("Nerede olacak?")
         
-        assert result.intent == "page_question"
+        assert result.intent == "unknown"
 
 
 # =============================================================================
@@ -833,7 +833,7 @@ class TestPersonaPageSummarizeResponses:
         
         assert response is not None
         assert len(response) > 0
-        assert "efendim" in response.lower() or "okuyorum" in response.lower()
+        assert "reading" in response.lower() or "manuscript" in response.lower() or "pages" in response.lower() or "friend" in response.lower()
     
     def test_summary_ready_response(self):
         """Test summary ready response."""
@@ -843,7 +843,7 @@ class TestPersonaPageSummarizeResponses:
         response = persona.get_response("summary_ready")
         
         assert response is not None
-        assert "efendim" in response.lower()
+        assert "synopsis" in response.lower() or "summary" in response.lower() or "friend" in response.lower() or "distilled" in response.lower() or "abridged" in response.lower()
     
     def test_answering_response(self):
         """Test answering response."""
@@ -872,7 +872,7 @@ class TestPersonaPageSummarizeResponses:
         response = persona.get_response("no_content")
         
         assert response is not None
-        assert "efendim" in response.lower()
+        assert "blank" in response.lower() or "no extractable" in response.lower() or "nothing" in response.lower()
 
 
 # =============================================================================

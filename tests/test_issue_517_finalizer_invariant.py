@@ -107,15 +107,16 @@ class TestPipelineFinalizerModel:
         )
         from bantz.brain.orchestrator_state import OrchestratorState
 
-        gemini = _FakeLLM(model_name="gemini-2.0-flash", reply="İşte takvim sonuçları efendim")
+        gemini = _FakeLLM(model_name="gemini-2.0-flash", reply="İşte mail sonuçları efendim")
         guard = NoNewFactsGuard(finalizer_llm=gemini)
         quality = QualityFinalizer(finalizer_llm=gemini, guard=guard)
 
-        output = _make_output()
+        output = _make_output(route="gmail", calendar_intent="none",
+                              tool_plan=["gmail.list_messages"])
         ctx = FinalizationContext(
-            user_input="bugün planım ne",
+            user_input="son mailleri göster",
             orchestrator_output=output,
-            tool_results=[{"tool": "calendar.list_events", "success": True, "result": "Toplantı"}],
+            tool_results=[{"tool": "gmail.list_messages", "success": True, "result": "3 mail"}],
             state=OrchestratorState(),
             planner_decision={},
             use_quality=True,
@@ -141,9 +142,9 @@ class TestPipelineFinalizerModel:
 
         pipeline = FinalizationPipeline()
         result = pipeline.run(ctx)
-        # Issue #628: tool-first guard now fires for calendar/gmail routes
-        # with empty tool_results, providing better anti-hallucination tracing.
-        assert result.finalizer_model == "none(tool_first_guard/no_tools_run)"
+        # no_hallucination_gate fires for calendar route with empty tool_results
+        # and non-empty assistant_reply (prevents unsupported answers)
+        assert result.finalizer_model == "none(no_hallucination_gate)"
 
 
 # ---------------------------------------------------------------------------

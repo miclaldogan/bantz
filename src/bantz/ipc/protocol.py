@@ -9,12 +9,15 @@ Spec:
 """
 
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Any, Union
+
+logger = logging.getLogger(__name__)
 
 # Protocol version - increment on breaking changes
 IPC_VERSION = 1
@@ -28,6 +31,10 @@ class MessageType(str, Enum):
     PING = "ping"
     PONG = "pong"
     ACK = "ack"
+    BRIEFING_START = "briefing_start"
+    BRIEFING_CARD = "briefing_card"
+    BRIEFING_END = "briefing_end"
+    VOICE_STATE = "voice_state"
 
 
 class ActionType(str, Enum):
@@ -170,8 +177,64 @@ class PongMessage(BaseMessage):
     type: str = MessageType.PONG.value
 
 
+@dataclass
+class BriefingStartMessage(BaseMessage):
+    """Daemon → Overlay: Start of a briefing sequence."""
+    type: str = MessageType.BRIEFING_START.value
+
+
+@dataclass
+class BriefingCardMessage(BaseMessage):
+    """Daemon → Overlay: A single briefing card (news, calendar, weather, etc.)."""
+    type: str = MessageType.BRIEFING_CARD.value
+    category: str = ""          # news, calendar, task, weather, system
+    title: Optional[str] = None
+    headline: Optional[str] = None
+    source: Optional[str] = None
+    summary: Optional[str] = None
+    body: Optional[str] = None
+    image_url: Optional[str] = None
+    url: Optional[str] = None
+    active: bool = False
+    # Calendar fields
+    start: Optional[str] = None
+    end: Optional[str] = None
+    all_day: bool = False
+    completed: bool = False
+    # Weather fields
+    temperature: Optional[float] = None
+    condition: Optional[str] = None
+    humidity: Optional[float] = None
+    wind_speed: Optional[float] = None
+    # System fields
+    cpu: Optional[float] = None
+    ram: Optional[float] = None
+    disk: Optional[float] = None
+    uptime_seconds: Optional[int] = None
+
+
+@dataclass
+class BriefingEndMessage(BaseMessage):
+    """Daemon → Overlay: End of a briefing sequence."""
+    type: str = MessageType.BRIEFING_END.value
+
+
+@dataclass
+class VoiceStateMessage(BaseMessage):
+    """Daemon → Overlay: Voice pipeline state change."""
+    type: str = MessageType.VOICE_STATE.value
+    state: str = OverlayState.IDLE.value
+    trigger: Optional[str] = None
+    data: Optional[dict] = None
+
+
 # Type alias for all message types
-IPCMessage = Union[StateMessage, ActionMessage, EventMessage, AckMessage, PingMessage, PongMessage]
+IPCMessage = Union[
+    StateMessage, ActionMessage, EventMessage,
+    AckMessage, PingMessage, PongMessage,
+    BriefingStartMessage, BriefingCardMessage, BriefingEndMessage,
+    VoiceStateMessage,
+]
 
 
 def encode_message(msg: BaseMessage) -> bytes:
@@ -197,7 +260,7 @@ def decode_message(data: bytes) -> Optional[dict]:
             return None
         return json.loads(line)
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        print(f"[IPC] Decode error: {e}")
+        logger.warning("[IPC] Decode error: %s", e)
         return None
 
 
@@ -267,8 +330,56 @@ def parse_message(data: dict) -> Optional[IPCMessage]:
                 id=data.get('id', _generate_id()),
                 ts=data.get('ts', _now_ms()),
             )
+        elif msg_type == MessageType.BRIEFING_START.value:
+            return BriefingStartMessage(
+                v=data.get('v', IPC_VERSION),
+                id=data.get('id', _generate_id()),
+                ts=data.get('ts', _now_ms()),
+            )
+        elif msg_type == MessageType.BRIEFING_CARD.value:
+            return BriefingCardMessage(
+                v=data.get('v', IPC_VERSION),
+                id=data.get('id', _generate_id()),
+                ts=data.get('ts', _now_ms()),
+                category=data.get('category', ''),
+                title=data.get('title'),
+                headline=data.get('headline'),
+                source=data.get('source'),
+                summary=data.get('summary'),
+                body=data.get('body'),
+                image_url=data.get('image_url'),
+                url=data.get('url'),
+                active=data.get('active', False),
+                start=data.get('start'),
+                end=data.get('end'),
+                all_day=data.get('all_day', False),
+                completed=data.get('completed', False),
+                temperature=data.get('temperature'),
+                condition=data.get('condition'),
+                humidity=data.get('humidity'),
+                wind_speed=data.get('wind_speed'),
+                cpu=data.get('cpu'),
+                ram=data.get('ram'),
+                disk=data.get('disk'),
+                uptime_seconds=data.get('uptime_seconds'),
+            )
+        elif msg_type == MessageType.BRIEFING_END.value:
+            return BriefingEndMessage(
+                v=data.get('v', IPC_VERSION),
+                id=data.get('id', _generate_id()),
+                ts=data.get('ts', _now_ms()),
+            )
+        elif msg_type == MessageType.VOICE_STATE.value:
+            return VoiceStateMessage(
+                v=data.get('v', IPC_VERSION),
+                id=data.get('id', _generate_id()),
+                ts=data.get('ts', _now_ms()),
+                state=data.get('state', OverlayState.IDLE.value),
+                trigger=data.get('trigger'),
+                data=data.get('data'),
+            )
     except Exception as e:
-        print(f"[IPC] Parse error: {e}")
+        logger.warning("[IPC] Parse error: %s", e)
     
     return None
 
@@ -378,3 +489,25 @@ def action_highlight_rect(x: int, y: int, w: int, h: int, duration_ms: int = 120
         rect_h=h,
         duration_ms=duration_ms,
     )
+
+
+# ─── Briefing convenience factories ─────────────────────────────
+
+def briefing_start() -> BriefingStartMessage:
+    """Create a briefing_start message."""
+    return BriefingStartMessage()
+
+
+def briefing_card(category: str, **kwargs) -> BriefingCardMessage:
+    """Create a briefing_card message with the given category and fields."""
+    return BriefingCardMessage(category=category, **kwargs)
+
+
+def briefing_end() -> BriefingEndMessage:
+    """Create a briefing_end message."""
+    return BriefingEndMessage()
+
+
+def voice_state(state: str, trigger: Optional[str] = None, data: Optional[dict] = None) -> VoiceStateMessage:
+    """Create a voice_state message."""
+    return VoiceStateMessage(state=state, trigger=trigger, data=data)

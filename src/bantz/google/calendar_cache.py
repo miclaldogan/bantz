@@ -1,17 +1,17 @@
 """Calendar event cache for immediate visibility of new events.
 
-Issue #315: Yeni eklenen etkinlik list_events'te görünmüyor
+Issue #315: Newly added event not visible in list_events
 
 Problem:
-- Google Calendar API'de create sonrası list'te görünme gecikmesi olabiliyor
-- Kullanıcı "toplantı koy" dedikten hemen sonra "bugün için planım var mı" dediğinde
-  yeni etkinlik görünmeyebiliyor
+- Google Calendar API may have a delay showing list results after create
+- When user says "add meeting" then immediately asks "what's my plan for today"
+  the new event may not appear
 
-Çözüm:
-- Yeni oluşturulan event'leri in-memory cache'de tutuyoruz
-- list_events sonuçlarına cache'deki event'leri merge ediyoruz
-- Cache TTL: 5 dakika (API sync edilince gereksiz hale gelir)
-- Session-scoped: Terminal kapanınca cache temizlenir
+Solution:
+- Keep newly created events in an in-memory cache
+- Merge cached events into list_events results
+- Cache TTL: 5 minutes (becomes unnecessary once API syncs)
+- Session-scoped: cache clears when terminal closes
 """
 
 from __future__ import annotations
@@ -48,23 +48,14 @@ class CachedEvent:
     def to_event_dict(self) -> dict[str, Any]:
         """Convert to standard event dict format for merging.
 
-        Matches the Google Calendar API format where ``start`` and ``end``
-        are dicts with either ``dateTime`` (timed events) or ``date``
-        (all-day events) keys.
+        Returns flat ISO strings for ``start`` and ``end`` to match
+        the format used by ``list_events`` in ``calendar.py``.
         """
-        def _wrap_dt(value: str) -> dict[str, str]:
-            """Wrap an ISO string in the Google-API style dict."""
-            v = (value or "").strip()
-            # All-day dates are exactly YYYY-MM-DD (10 chars)
-            if len(v) == 10 and v[4] == "-" and v[7] == "-":
-                return {"date": v}
-            return {"dateTime": v}
-
         return {
             "id": self.event_id,
             "summary": self.summary,
-            "start": _wrap_dt(self.start),
-            "end": _wrap_dt(self.end),
+            "start": self.start,
+            "end": self.end,
             "location": self.location,
             "status": self.status,
             "htmlLink": None,  # Won't have link until API sync

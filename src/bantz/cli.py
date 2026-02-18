@@ -78,10 +78,10 @@ def paged_print(text: str, force_pager: bool = False) -> None:
         remaining = len(lines) - (i + page_size)
         if remaining > 0:
             try:
-                prompt = f"{Colors.DIM}--- {remaining} satır daha. Devam için Enter, atla için 'q' ---{Colors.RESET}"
+                prompt = f"{Colors.DIM}--- {remaining} more lines. Enter to continue, 'q' to skip ---{Colors.RESET}"
                 user_input = input(prompt).strip().lower()
                 if user_input in {'q', 'quit', 'skip', 'atla'}:
-                    print(f"{Colors.DIM}(atlandı){Colors.RESET}")
+                    print(f"{Colors.DIM}(skipped){Colors.RESET}")
                     break
             except (EOFError, KeyboardInterrupt):
                 print()
@@ -92,9 +92,9 @@ def print_hud(status: dict) -> None:
     """Print sticky HUD with current state."""
     c = Colors
     mode = status.get("mode", "normal")
-    browser = status.get("browser", "kapalı")
-    queue = "aktif" if status.get("queue_active") else "-"
-    pending = "⚠️ ONAY BEKLİYOR" if status.get("pending") else "-"
+    browser = status.get("browser", "off")
+    queue = "active" if status.get("queue_active") else "-"
+    pending = "⚠️ PENDING CONFIRM" if status.get("pending") else "-"
 
     # Truncate long URLs
     if len(browser) > 50:
@@ -115,20 +115,20 @@ def print_welcome() -> None:
 ║            Local Voice Assistant for Linux                ║
 ╚══════════════════════════════════════════════════════════╝{c.RESET}
 
-{c.DIM}Komutlar:{c.RESET}
-  • {c.GREEN}instagram aç{c.RESET} → Browser'da aç
-  • {c.GREEN}sayfayı tara{c.RESET} → Tıklanabilir öğeleri listele
-  • {c.GREEN}12'ye tıkla{c.RESET}  → Index ile tıkla
-  • {c.GREEN}geri dön{c.RESET}     → Önceki sayfa
-  • {c.GREEN}daha fazla{c.RESET}   → Sonraki 10 öğe
-    • {c.GREEN}agent: ...{c.RESET}    → Çok-adımlı agent planla ve çalıştır (örn: agent: YouTube'a git, Coldplay ara)
-    • {c.GREEN}agent durum{c.RESET}   → Agent progress göster
-    • {c.GREEN}agent geçmişi{c.RESET} → Son agent planı + adım durumları
-    • {c.GREEN}son 3 agent{c.RESET}   → Son N agent task listesi
-  • {c.GREEN}clear{c.RESET}        → Ekranı temizle
-  • {c.GREEN}exit{c.RESET}         → Çık
+{c.DIM}Commands:{c.RESET}
+  • {c.GREEN}instagram aç{c.RESET} → Open in browser
+  • {c.GREEN}sayfayı tara{c.RESET} → List clickable elements
+  • {c.GREEN}12'ye tıkla{c.RESET}  → Click by index
+  • {c.GREEN}geri dön{c.RESET}     → Previous page
+  • {c.GREEN}daha fazla{c.RESET}   → Next 10 elements
+    • {c.GREEN}agent: ...{c.RESET}    → Plan and run multi-step agent (e.g. agent: go to YouTube, search Coldplay)
+    • {c.GREEN}agent durum{c.RESET}   → Show agent progress
+    • {c.GREEN}agent geçmişi{c.RESET} → Last agent plan + step statuses
+    • {c.GREEN}son 3 agent{c.RESET}   → Last N agent task list
+  • {c.GREEN}clear{c.RESET}        → Clear screen
+  • {c.GREEN}exit{c.RESET}         → Quit
 
-{c.DIM}Çıkmak için: exit | quit | Ctrl+C{c.RESET}
+{c.DIM}To exit: exit | quit | Ctrl+C{c.RESET}
 """)
 
 
@@ -199,6 +199,19 @@ def run_interactive_with_server(
     # Initial HUD
     print_hud({"mode": "normal", "browser": "kapalı", "queue_active": False, "pending": False})
 
+    # Daemon-only mode: if stdin is not an interactive TTY, skip the REPL and
+    # just keep the server running until SIGTERM/KeyboardInterrupt (Issue #1465)
+    import sys as _sys
+    if not _sys.stdin or not _sys.stdin.isatty():
+        import time as _svc_time
+        print(f"\n{Colors.DIM}[Daemon] Arka plan modu — stdin mevcut değil. Durdurmak için SIGTERM gönderin.{Colors.RESET}", flush=True)
+        try:
+            while True:
+                _svc_time.sleep(30)
+        except (KeyboardInterrupt, SystemExit):
+            pass
+        return 0
+
     while True:
         # Check for proactive messages before blocking on input
         while not proactive_queue.empty():
@@ -226,6 +239,17 @@ def run_interactive_with_server(
             text = input(f"{Colors.GREEN}>{Colors.RESET} ").strip()
         except (EOFError, KeyboardInterrupt):
             print(f"\n{Colors.DIM}👋 Hoşça kal!{Colors.RESET}")
+            break
+        except OSError:
+            # stdin is not a real tty (e.g. running as background daemon)
+            # Park in daemon-only mode: service keeps running, no interactive prompt
+            import time as _time
+            print(f"\n{Colors.DIM}[Daemon] stdin mevcut değil — arka plan modu aktif. Durdurmak için SIGTERM gönderin.{Colors.RESET}", flush=True)
+            try:
+                while True:
+                    _time.sleep(60)
+            except (KeyboardInterrupt, SystemExit):
+                break
             break
 
         if not text:
@@ -334,13 +358,46 @@ def run_interactive_with_server(
 
 
 def run_stateless_once(command: str, policy_path: str, log_path: str) -> int:
-    """Run single command without persistent browser (original behavior)."""
+    """Run single command without persistent browser (original behavior).
+
+    Issue #1357: When NLU returns 'unknown', fall back to Brain/LLM
+    orchestrator for full tool-calling pipeline.
+    """
     policy = Policy.from_json_file(policy_path)
     logger = JsonlLogger(path=log_path)
     router = Router(policy=policy, logger=logger)
     ctx = ConversationContext(timeout_seconds=120)
 
     result = router.handle(text=command, ctx=ctx)
+
+    # Issue #1357: If NLU couldn't parse the command, try LLM brain
+    if not result.ok and result.intent == "unknown":
+        try:
+            from bantz.brain.runtime_factory import create_runtime
+            from bantz.brain.orchestrator_state import OrchestratorState
+
+            brain = create_runtime()
+            state = OrchestratorState()
+            output, state = brain.process_turn(command, state)
+
+            reply = str(getattr(output, "assistant_reply", "") or "").strip()
+            if not reply and getattr(output, "ask_user", False):
+                reply = str(getattr(output, "question", "") or "").strip()
+
+            # Check for pending confirmation
+            if state.has_pending_confirmation():
+                pending = state.peek_pending_confirmation() or {}
+                conf_prompt = str(pending.get("prompt") or "").strip()
+                if conf_prompt:
+                    reply = conf_prompt
+
+            if reply:
+                print(reply)
+                return 0
+        except Exception as e:
+            import logging as _log
+            _log.getLogger(__name__).debug("Brain fallback failed: %s", e)
+
     print(result.user_text)
 
     # Note about stateless mode
@@ -531,6 +588,39 @@ def main(argv: list[str] | None = None) -> int:
         proactive_args = proactive_p.parse_args(argv)
         return handle_proactive_command(proactive_args)
 
+    # Metrics — observability reports (Issue #1290)
+    if argv and argv[0] == "metrics":
+        from bantz.data.metrics_reporter import main as metrics_main
+        metrics_main(argv[1:])
+        return 0
+
+    # Policy — risk tiers, presets, audit (Issue #1291)
+    if argv and argv[0] == "policy":
+        from bantz.policy.cli import main as policy_main
+        return policy_main(argv[1:])
+
+    # Doctor — system health diagnostics (Issue #1223)
+    if argv and argv[0] == "doctor":
+        from bantz.doctor import run_doctor
+        verbose = "--verbose" in argv or "-v" in argv
+        return run_doctor(verbose=verbose)
+
+    # Health — live service health checks (Issue #1298)
+    if argv and argv[0] == "health":
+        from bantz.core.health_cli import main as health_main
+        return health_main(argv[1:])
+
+    # Graph — knowledge graph inspection (Issue #1289)
+    if argv and argv[0] == "graph":
+        from bantz.data.graph_cli import main as graph_main
+        return graph_main(argv[1:])
+
+    # Onboard — guided first-time setup wizard (Issue #1223)
+    if argv and argv[0] == "onboard":
+        from bantz.onboard import run_onboard
+        non_interactive = "--non-interactive" in argv or "--yes" in argv
+        return run_onboard(non_interactive=non_interactive)
+
     # Declarative skill CLI (Issue #833)
     if argv and argv[0] == "skill":
         from bantz.skills.declarative.cli import handle_skill_command, add_skill_subparser
@@ -565,6 +655,16 @@ Kullanım örnekleri:
   bantz --serve --http --port 9000  # Farklı portta HTTP
   bantz --http-only               # Sadece HTTP API (CLI yok)
   bantz --once "google aç"       # Tek seferlik (tarayıcı kalıcı değil)
+  bantz metrics --period 24h     # Observability metrics report
+  bantz metrics --period 7d      # Last 7 days metrics
+  bantz policy info              # Policy engine status
+  bantz policy preset balanced   # Show/switch policy preset
+  bantz policy risk gmail.send   # Check tool risk tier
+  bantz health                   # Service health checks (CB + fallback)
+  bantz health --json            # Health report as JSON
+  bantz health --service ollama  # Check a single service
+  bantz graph stats              # Knowledge graph statistics
+  bantz graph search "Ali"       # Search graph nodes
 """,
     )
     parser.add_argument("--policy", default="config/policy.json", help="Policy dosyası yolu")

@@ -16,14 +16,46 @@ logger = logging.getLogger(__name__)
 
 
 def looks_like_email_send_intent(text: str) -> bool:
-    """Heuristic check for email-send intent in Turkish text."""
+    """Heuristic check for email-send intent in Turkish text.
+
+    Issue #1205: Expanded to match suffixed 'mail' forms (mailine, maile),
+    standalone 'mesaj' + action verb, 'adresine' + email address, and
+    'diyelim/söyleyelim' with email context.
+    """
     t = (text or "").strip().lower()
     if not t:
         return False
-    return bool(
-        re.search(r"\b(mail|e-?posta)\b\s*(gönder|at|yaz|yolla|ilet)\b", t)
-        or re.search(r"\b(mail|e-?posta)\b.*\b(gönder|at|yaz|yolla|ilet)\b", t)
-    )
+
+    _verbs = r"gönder|at|yaz|yolla|ilet"
+    _verbs_conj = r"gönder\w*|at\w{0,6}|yaz\w*|yolla\w*|ilet\w*"
+
+    # Pattern 1 (original): bare mail/e-posta + action verb
+    if re.search(r"\b(mail|e-?posta)\b\s*(" + _verbs + r")\b", t):
+        return True
+    if re.search(r"\b(mail|e-?posta)\b.*\b(" + _verbs + r")\b", t):
+        return True
+
+    # Pattern 2: Suffixed mail (mailine, maile, mailime) + action verb or mesaj
+    if re.search(r"\bmail\w+", t) and re.search(
+        r"\b(" + _verbs_conj + r"|mesaj\w*)\b", t
+    ):
+        return True
+
+    # Pattern 3: mesaj + action verb (mesaj at, mesaj gönder, mesaj atmanı)
+    if re.search(r"\bmesaj\b", t) and re.search(r"\b(" + _verbs_conj + r")\b", t):
+        return True
+
+    # Pattern 4: adresine + email address (implicit email send)
+    if re.search(r"\badresine\b", t) and re.search(r"[^\s@]+@[^\s@]+\.\w+", t):
+        return True
+
+    # Pattern 5: diyelim/söyleyelim with email address context
+    if re.search(r"\b(diyelim|söyleyelim)\b", t) and re.search(
+        r"[^\s@]+@[^\s@]+\.\w+", t
+    ):
+        return True
+
+    return False
 
 
 def extract_first_email(text: str) -> str | None:
@@ -66,6 +98,19 @@ def extract_recipient_name(text: str) -> str | None:
     if m:
         return m.group(1).strip() or None
 
+    # Pattern 2b: Name (consonant-ending, ≥3 chars) + bare dative (e/a) + mail
+    # Issue #1180: "Ahmete mail gönder", "Mehmete bir mail at"
+    # Consonant-ending names take bare -e/-a without buffer-y.
+    # Require ≥3 chars before the suffix to reduce false positives.
+    _CONSONANTS = "bcçdfgğhjklmnprsştvyzBCÇDFGĞHJKLMNPRSŞTVYZ"
+    m = re.search(
+        rf"\b([A-Za-zÇĞİÖŞÜçğıöşü][\wÇĞİÖŞÜçğıöşü]{{2,}}[{_CONSONANTS}])[eEaA]\s+{_MAIL}",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip() or None
+
     # Pattern 3: mail keyword + name ("mail gönder Ahmet'e")
     m = re.search(
         rf"\b(?:mail|e-?posta)\b.*?\b({_NAME})\s*'?\s*[yY]?[eEaA]\b",
@@ -82,11 +127,15 @@ def extract_subject_hint(text: str) -> str | None:
     """Extract potential subject from user input.
 
     Issue #1006: Looks for 'hakkında', 'konulu', 'ile ilgili' patterns.
+    Issue #1205: Added 'konu X olsun' and 'konu X' (end-of-input) patterns.
     """
     t = (text or "").strip()
     # "toplantı hakkında mail gönder" → subject = "toplantı"
+    # Issue #1177: Use lazy match (.{2,60}?) so the pattern captures the
+    # shortest possible subject, avoiding eating the recipient name.
+    # Also anchor with \b to avoid mid-word matches.
     m = re.search(
-        r"\b(.{2,60})\s+(?:hakkında|konulu|ile\s+ilgili|konusunda)\s+(?:bir\s+)?(?:mail|e-?posta)\b",
+        r"\b(.{2,60}?)\s+(?:hakkında|konulu|ile\s+ilgili|konusunda)\s+(?:bir\s+)?(?:mail|e-?posta)\b",
         t,
         flags=re.IGNORECASE,
     )
@@ -101,6 +150,24 @@ def extract_subject_hint(text: str) -> str | None:
     )
     if m2:
         return str(m2.group(1)).strip()
+
+    # Issue #1205: "konu test olsun" / "konusu proje güncellemesi olsun"
+    m3 = re.search(
+        r"\bkonu(?:su)?\s+(.{2,80}?)\s+olsun\b",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m3:
+        return str(m3.group(1)).strip()
+
+    # Issue #1205: "konu test" at end of input (no colon, no olsun)
+    m4 = re.search(
+        r"\bkonu(?:su)?\s+([^,;.]{2,60}?)\s*$",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m4:
+        return str(m4.group(1)).strip()
 
     return None
 
@@ -159,8 +226,10 @@ def post_route_correction_email_send(
     slots = dict(getattr(output, "slots", None) or {})
 
     # Issue #1006: Extract subject from user input instead of empty default
+    # Issue #1209: Use explicit check — setdefault doesn't override None values
     subject_hint = extract_subject_hint(user_input)
-    gmail_obj.setdefault("subject", subject_hint or "")
+    if not gmail_obj.get("subject"):
+        gmail_obj["subject"] = subject_hint or ""
 
     if not gmail_obj.get("to"):
         email = extract_first_email(user_input)

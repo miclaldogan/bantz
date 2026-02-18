@@ -19,12 +19,36 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Capture pristine _VALID_TOOLS at import time (collection phase),
+# before any test can call sync_valid_tools() and narrow the set.
+from bantz.brain.llm_router import JarvisLLMOrchestrator as _Orch
+_PRISTINE_VALID_TOOLS = frozenset(_Orch._VALID_TOOLS)
+
 # ---------------------------------------------------------------------------
 # Issue #405 tests — Router prompt tiered compaction
 # ---------------------------------------------------------------------------
 
 class TestIssue405PromptBudget:
     """Verify the restructured system prompt fits in small context windows."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_system_prompt(self):
+        """Restore SYSTEM_PROMPT and _VALID_TOOLS to pristine state.
+
+        Other tests may call ``sync_valid_tools`` (e.g. via OrchestratorLoop)
+        which rebuilds ``SYSTEM_PROMPT`` with resolved tool names and shrinks
+        ``_VALID_TOOLS`` to the intersection with the registry, polluting
+        class attributes for subsequent tests.
+        """
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+        original = JarvisLLMOrchestrator._SYSTEM_PROMPT_CORE + \
+                   JarvisLLMOrchestrator._SYSTEM_PROMPT_DETAIL + \
+                   JarvisLLMOrchestrator._SYSTEM_PROMPT_EXAMPLES
+        JarvisLLMOrchestrator.SYSTEM_PROMPT = original
+        JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+        yield
+        JarvisLLMOrchestrator.SYSTEM_PROMPT = original
+        JarvisLLMOrchestrator._VALID_TOOLS = _PRISTINE_VALID_TOOLS
 
     def _import(self):
         from bantz.brain.llm_router import (
@@ -38,10 +62,12 @@ class TestIssue405PromptBudget:
         core_tokens = est(cls._SYSTEM_PROMPT_CORE)
         assert core_tokens <= 800, f"CORE prompt {core_tokens} tokens > 800"
 
-    def test_full_prompt_under_1600_tokens(self):
+    def test_full_prompt_under_1800_tokens(self):
         cls, est = self._import()
         full_tokens = est(cls.SYSTEM_PROMPT)
-        assert full_tokens <= 1600, f"Full prompt {full_tokens} tokens > 1600"
+        # Issue #1391: budget raised from 1600 to 1800 to accommodate
+        # routing examples for code, translate, volume, app launch.
+        assert full_tokens <= 1800, f"Full prompt {full_tokens} tokens > 1800"
 
     def test_full_prompt_equals_core_plus_detail_plus_examples(self):
         cls, _ = self._import()
@@ -55,8 +81,8 @@ class TestIssue405PromptBudget:
 
         orch = cls.__new__(cls)
         compact = orch._maybe_compact_system_prompt(cls.SYSTEM_PROMPT, token_budget=budget)
-        assert "ÖRNEKLER:" not in compact
-        assert "KURALLAR:" in compact  # core rules preserved
+        assert "EXAMPLES:" not in compact
+        assert "RULES:" in compact  # core rules preserved
 
     def test_compact_removes_detail_when_tight(self):
         cls, est = self._import()
@@ -65,11 +91,11 @@ class TestIssue405PromptBudget:
 
         orch = cls.__new__(cls)
         compact = orch._maybe_compact_system_prompt(cls.SYSTEM_PROMPT, token_budget=budget)
-        assert "ÖRNEKLER:" not in compact
+        assert "EXAMPLES:" not in compact
         assert "GMAIL ARAMA" not in compact
         assert "SAAT FORMATLARI" not in compact
         # Core rules should still be present
-        assert "KURALLAR:" in compact
+        assert "RULES:" in compact
 
     def test_compact_zero_budget_returns_empty(self):
         cls, _ = self._import()
@@ -83,16 +109,15 @@ class TestIssue405PromptBudget:
         assert result == cls.SYSTEM_PROMPT
 
     def test_core_contains_critical_sections(self):
-        """Core prompt must have: identity, schema, rules, routes, tools, time rules."""
+        """Core prompt must have: identity, output spec, rules, routes, tools, time rules."""
         cls, _ = self._import()
         core = cls._SYSTEM_PROMPT_CORE
-        for keyword in ["BANTZ", "OUTPUT SCHEMA", "KURALLAR", "ROUTE:", "TOOLS:", "SAAT:"]:
+        for keyword in ["BANTZ", "OUTPUT", "RULES", "route", "TOOLS:", "TIME:"]:
             assert keyword in core, f"Core prompt missing '{keyword}'"
 
     def test_core_has_all_tool_names(self):
-        """Core prompt must list all tool names (without descriptions)."""
+        """Core prompt must list all critical tools in _VALID_TOOLS."""
         cls, _ = self._import()
-        core = cls._SYSTEM_PROMPT_CORE
         critical_tools = [
             "calendar.list_events", "calendar.create_event",
             "gmail.list_messages", "gmail.send",
@@ -100,7 +125,11 @@ class TestIssue405PromptBudget:
             "time.now", "system.status",
         ]
         for tool in critical_tools:
-            assert tool in core, f"Core prompt missing tool '{tool}'"
+            assert tool in cls._VALID_TOOLS, f"_VALID_TOOLS missing '{tool}'"
+        # The resolved SYSTEM_PROMPT must contain each tool name
+        resolved = cls._build_system_prompt(cls._VALID_TOOLS)
+        for tool in critical_tools:
+            assert tool in resolved, f"Resolved prompt missing tool '{tool}'"
 
     def test_prompt_fits_2048_context(self):
         """After compaction, system prompt + user input must fit in 2048-ctx."""
@@ -115,7 +144,7 @@ class TestIssue405PromptBudget:
         compact = orch._maybe_compact_system_prompt(
             cls.SYSTEM_PROMPT, token_budget=int(prompt_avail * 0.6)
         )
-        user_input_tokens = est("USER: bugün beşe toplantı koy\nASSISTANT (sadece JSON):")
+        user_input_tokens = est("USER: bugün beşe toplantı koy\nASSISTANT (JSON only):")
 
         total = est(compact) + user_input_tokens
         assert total < prompt_avail, (
@@ -174,7 +203,7 @@ class TestIssue431ToolTimeout:
         ))
 
         router_json = json.dumps({
-            "route": "calendar", "calendar_intent": "query",
+            "route": "unknown", "calendar_intent": "none",
             "slots": {}, "confidence": 0.9,
             "tool_plan": ["slow_tool"],
             "assistant_reply": "",
@@ -186,25 +215,32 @@ class TestIssue431ToolTimeout:
         config.tool_timeout_seconds = 0.5  # 500ms timeout
         config.enable_safety_guard = False
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            loop = OrchestratorLoop(
-                orchestrator=JarvisLLMOrchestrator(llm=mock_llm),
-                tools=tools,
-                event_bus=EventBus(),
-                config=config,
-            )
+        # Add slow_tool to _VALID_TOOLS so router parser and plan verifier accept it
+        saved_valid = JarvisLLMOrchestrator._VALID_TOOLS
+        JarvisLLMOrchestrator._VALID_TOOLS = saved_valid | frozenset(["slow_tool"])
 
-        # Run a full cycle
-        trace = loop.run_full_cycle("test")
-        
-        # Tool should have failed with timeout
-        assert trace["tools_executed"] == 0
-        assert trace["tools_attempted"] == 1
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                loop = OrchestratorLoop(
+                    orchestrator=JarvisLLMOrchestrator(llm=mock_llm),
+                    tools=tools,
+                    event_bus=EventBus(),
+                    config=config,
+                )
 
-        # Cleanup
-        from bantz.tools.metadata import TOOL_REGISTRY
-        TOOL_REGISTRY.pop("slow_tool", None)
+            with patch("bantz.brain.orchestrator_loop.verify_plan", return_value=(True, [])):
+                trace = loop.run_full_cycle("test")
+
+            # Tool should have failed with timeout
+            assert trace["tools_executed"] == 0
+            assert trace["tools_attempted"] == 1
+        finally:
+            JarvisLLMOrchestrator._VALID_TOOLS = saved_valid
+
+            # Cleanup
+            from bantz.tools.metadata import TOOL_REGISTRY
+            TOOL_REGISTRY.pop("slow_tool", None)
 
     def test_fast_tool_succeeds_within_timeout(self):
         """A tool that returns quickly should succeed normally."""
@@ -229,7 +265,7 @@ class TestIssue431ToolTimeout:
         ))
 
         router_json = json.dumps({
-            "route": "calendar", "calendar_intent": "query",
+            "route": "unknown", "calendar_intent": "none",
             "slots": {}, "confidence": 0.9,
             "tool_plan": ["fast_tool"],
             "assistant_reply": "Tamamdır.",
@@ -241,21 +277,28 @@ class TestIssue431ToolTimeout:
         config.tool_timeout_seconds = 5.0
         config.enable_safety_guard = False
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            loop = OrchestratorLoop(
-                orchestrator=JarvisLLMOrchestrator(llm=mock_llm),
-                tools=tools,
-                event_bus=EventBus(),
-                config=config,
-            )
+        saved_valid = JarvisLLMOrchestrator._VALID_TOOLS
+        JarvisLLMOrchestrator._VALID_TOOLS = saved_valid | frozenset(["fast_tool"])
 
-        trace = loop.run_full_cycle("test")
-        assert trace["tools_executed"] == 1
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                loop = OrchestratorLoop(
+                    orchestrator=JarvisLLMOrchestrator(llm=mock_llm),
+                    tools=tools,
+                    event_bus=EventBus(),
+                    config=config,
+                )
 
-        # Cleanup
-        from bantz.tools.metadata import TOOL_REGISTRY
-        TOOL_REGISTRY.pop("fast_tool", None)
+            with patch("bantz.brain.orchestrator_loop.verify_plan", return_value=(True, [])):
+                trace = loop.run_full_cycle("test")
+            assert trace["tools_executed"] == 1
+        finally:
+            JarvisLLMOrchestrator._VALID_TOOLS = saved_valid
+
+            # Cleanup
+            from bantz.tools.metadata import TOOL_REGISTRY
+            TOOL_REGISTRY.pop("fast_tool", None)
 
     def test_timeout_event_published(self):
         """Verify tool.timeout event is published on timeout."""
@@ -281,7 +324,7 @@ class TestIssue431ToolTimeout:
         ))
 
         router_json = json.dumps({
-            "route": "calendar", "calendar_intent": "query",
+            "route": "unknown", "calendar_intent": "none",
             "slots": {}, "confidence": 0.9,
             "tool_plan": ["slow_tool"],
             "assistant_reply": "",
@@ -306,7 +349,14 @@ class TestIssue431ToolTimeout:
                 config=config,
             )
 
-        loop.run_full_cycle("test")
+        saved_valid = JarvisLLMOrchestrator._VALID_TOOLS
+        JarvisLLMOrchestrator._VALID_TOOLS = saved_valid | frozenset(["slow_tool"])
+        try:
+            with patch("bantz.brain.orchestrator_loop.verify_plan", return_value=(True, [])):
+                loop.run_full_cycle("test")
+        finally:
+            JarvisLLMOrchestrator._VALID_TOOLS = saved_valid
+
         assert len(events_captured) == 1
         assert events_captured[0]["tool"] == "slow_tool"
         assert events_captured[0]["timeout_seconds"] == 0.5

@@ -11,6 +11,7 @@ Tests verify that update_event now supports partial updates:
 
 from __future__ import annotations
 
+from datetime import datetime
 from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock
@@ -188,7 +189,8 @@ def test_update_event_time_only(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "location" not in body
     
     assert result["ok"] is True
-    assert result["start"] == "2026-02-08T15:00:00+03:00"
+    # Compare as absolute time (CI may use UTC, local may use +03:00)
+    assert datetime.fromisoformat(result["start"]) == datetime.fromisoformat("2026-02-08T15:00:00+03:00")
 
 
 def test_update_event_multiple_fields(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -366,8 +368,9 @@ def test_update_event_preserves_unchanged_fields(monkeypatch: pytest.MonkeyPatch
     assert result["summary"] == "Original Title"
     assert result["location"] == "New Office 404"
     assert result["description"] == "Original description"
-    assert result["start"] == "2026-02-11T09:00:00+03:00"
-    assert result["end"] == "2026-02-11T10:00:00+03:00"
+    # Compare as absolute time (CI may use UTC, local may use +03:00)
+    assert datetime.fromisoformat(result["start"]) == datetime.fromisoformat("2026-02-11T09:00:00+03:00")
+    assert datetime.fromisoformat(result["end"]) == datetime.fromisoformat("2026-02-11T10:00:00+03:00")
 
 
 def test_update_event_tool_registered() -> None:

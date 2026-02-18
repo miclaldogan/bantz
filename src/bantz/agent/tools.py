@@ -147,6 +147,62 @@ class ToolRegistry:
         """Return all registered tools sorted by name."""
         return [self._tools[n] for n in self.names()]
 
+    # ------------------------------------------------------------------
+    # Issue #1275: Route-based compact tool schema for LLM prompt injection
+    # ------------------------------------------------------------------
+    def get_schemas_for_route(
+        self,
+        route: str,
+        *,
+        valid_tools: frozenset[str] | set[str] | None = None,
+    ) -> str:
+        """Return compact one-liner schemas for tools matching *route*.
+
+        The route is matched against the tool name prefix (e.g. ``"gmail"``
+        matches ``gmail.send``, ``gmail.list_messages``, etc.).  Only tools
+        that are also in *valid_tools* (if provided) are included so that
+        phantom / unregistered tools never leak into the prompt.
+
+        Returns a newline-separated block like::
+
+            - gmail.send(to*, subject*, body*) — E-posta gönderir [HIGH,confirm]
+            - gmail.list_messages(query, max_results, label) — Mailleri listeler [LOW]
+        """
+        prefix = f"{route}."
+        lines: list[str] = []
+
+        for name in self.names():
+            if not name.startswith(prefix):
+                continue
+            if valid_tools is not None and name not in valid_tools:
+                continue
+
+            tool = self._tools[name]
+            schema = tool.parameters or {}
+            props = schema.get("properties") or {}
+            required = set(schema.get("required") or [])
+
+            # Build compact param list: param* means required
+            params: list[str] = []
+            for pname in sorted(props.keys()):
+                if pname in required:
+                    params.append(f"{pname}*")
+                else:
+                    params.append(pname)
+
+            param_str = ", ".join(params)
+            desc = (tool.description or "").split(".")[0].strip()  # first sentence
+
+            risk = tool.risk_level or "LOW"
+            tag = f"[{risk}"
+            if tool.requires_confirmation:
+                tag += ",confirm"
+            tag += "]"
+
+            lines.append(f"- {name}({param_str}) — {desc} {tag}")
+
+        return "\n".join(lines)
+
     def get_schema(self, name: str) -> dict[str, Any] | None:
         """Return the JSON Schema for a single tool, or None if not found."""
         tool = self.get(name)
@@ -160,10 +216,103 @@ class ToolRegistry:
             "risk_level": tool.risk_level,
         }
 
+    # ------------------------------------------------------------------
+    # Issue #1274: OpenAI-format tool schemas for structured tool calling
+    # ------------------------------------------------------------------
+    def as_openai_tools(
+        self,
+        *,
+        tool_names: set[str] | frozenset[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return all tools in OpenAI ``tools`` format for chat completions.
+
+        Each entry is::
+
+            {
+              "type": "function",
+              "function": {
+                "name": "gmail.send",
+                "description": "E-posta gönderir",
+                "parameters": { ... JSON Schema ... }
+              }
+            }
+
+        Args:
+            tool_names: If provided, only include tools whose name is
+                in this set.  Pass ``_VALID_TOOLS`` from the router to
+                keep prompt and registry in sync.
+
+        Returns:
+            List of OpenAI-compatible tool definitions.
+        """
+        result: list[dict[str, Any]] = []
+        for name in self.names():
+            if tool_names is not None and name not in tool_names:
+                continue
+            tool = self._tools[name]
+            # Ensure parameters is a valid object schema
+            params = tool.parameters or {"type": "object", "properties": {}}
+            if "type" not in params:
+                params = {**params, "type": "object"}
+            result.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "parameters": params,
+                },
+            })
+        return result
+
+    def as_openai_tools_for_route(
+        self,
+        route: str,
+        *,
+        valid_tools: frozenset[str] | set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return OpenAI-format tool schemas filtered by route prefix.
+
+        Issue #1274: Used by the router to send only the relevant tools
+        for the detected route, keeping the ``tools`` array small (4-19
+        entries instead of 76+).
+
+        Args:
+            route: Route prefix (e.g. ``"gmail"``, ``"calendar"``).
+            valid_tools: Optional set of valid tool names to further
+                filter.
+
+        Returns:
+            List of OpenAI-compatible tool definitions for the route.
+        """
+        prefix = f"{route}."
+        result: list[dict[str, Any]] = []
+        for name in self.names():
+            if not name.startswith(prefix):
+                continue
+            if valid_tools is not None and name not in valid_tools:
+                continue
+            tool = self._tools[name]
+            params = tool.parameters or {"type": "object", "properties": {}}
+            if "type" not in params:
+                params = {**params, "type": "object"}
+            result.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "parameters": params,
+                },
+            })
+        return result
+
     def validate_call(self, name: str, params: dict[str, Any]) -> tuple[bool, str]:
         tool = self.get(name)
         if not tool:
             return False, f"unknown_tool:{name}"
+
+        # Issue #1174: Work on a shallow copy so empty-string → None
+        # coercion doesn't mutate the caller's original dict.
+        params = dict(params)
 
         schema = tool.parameters or {}
         required = schema.get("required") or []
@@ -189,7 +338,14 @@ class ToolRegistry:
                 if not isinstance(value, bool):
                     return False, f"bad_type:{key}:expected_boolean"
             elif expected == "integer":
-                if isinstance(value, bool) or not isinstance(value, int):
+                if isinstance(value, bool):
+                    return False, f"bad_type:{key}:expected_int"
+                if isinstance(value, str):
+                    try:
+                        params[key] = int(value)
+                    except (ValueError, TypeError):
+                        return False, f"bad_type:{key}:expected_int"
+                elif not isinstance(value, int):
                     return False, f"bad_type:{key}:expected_int"
             elif expected == "number":
                 if isinstance(value, bool) or not isinstance(value, (int, float)):

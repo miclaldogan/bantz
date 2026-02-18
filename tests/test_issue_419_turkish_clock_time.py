@@ -54,7 +54,7 @@ class TestApplyPMDefault:
         assert _apply_pm_default(hour, text) == expected
 
     @pytest.mark.parametrize("hour,text,expected", [
-        # Hours 7-12: no default shift
+        # Hours 7-12: no default shift when current time is morning (now_hour=6)
         (7, "yedide gel", 7),
         (8, "sekizde başla", 8),
         (9, "dokuzda toplantı", 9),
@@ -63,7 +63,18 @@ class TestApplyPMDefault:
         (12, "onikide öğle", 12),
     ])
     def test_no_shift_hours_7_12(self, hour, text, expected):
-        assert _apply_pm_default(hour, text) == expected
+        # Simulate morning (6AM) — no PM shift should happen
+        assert _apply_pm_default(hour, text, now_hour=6) == expected
+
+    @pytest.mark.parametrize("hour,text,expected", [
+        # Issue #1212: Hours 7-12 after that hour has passed → PM shift
+        (7, "yedide gel", 19),
+        (8, "sekize ekle", 20),
+        (9, "dokuzda buluş", 21),
+    ])
+    def test_pm_shift_hours_7_12_when_past(self, hour, text, expected):
+        # Simulate afternoon (16:00) — PM shift should apply
+        assert _apply_pm_default(hour, text, now_hour=16) == expected
 
     @pytest.mark.parametrize("hour,text,expected", [
         # Already 24h → no shift
@@ -215,7 +226,7 @@ class TestParseHhmmTurkish:
         ("saat 12", "12:00"),
     ])
     def test_hours_7_12_as_is(self, text, expected):
-        assert parse_hhmm_turkish(text) == expected
+        assert parse_hhmm_turkish(text, now_hour=6) == expected
 
     # ── Half past (buçuk) ─────────────────────────────────────────────
 
@@ -229,7 +240,7 @@ class TestParseHhmmTurkish:
         ("saat 5 buçuk", "17:30"),
     ])
     def test_half_past(self, text, expected):
-        assert parse_hhmm_turkish(text) == expected
+        assert parse_hhmm_turkish(text, now_hour=6) == expected
 
     # ── Quarter past/to (çeyrek) ──────────────────────────────────────
 
@@ -271,8 +282,8 @@ class TestParseHhmmTurkish:
         assert parse_hhmm_turkish("nasılsın dostum") is None
 
     def test_on_bir(self):
-        assert parse_hhmm_turkish("on birde gel") == "11:00"
-        assert parse_hhmm_turkish("on ikide öğle") == "12:00"
+        assert parse_hhmm_turkish("on birde gel", now_hour=6) == "11:00"
+        assert parse_hhmm_turkish("on ikide öğle", now_hour=6) == "12:00"
 
     def test_ascii_fallbacks(self):
         """Test ASCII-only variants (no İ/ı/ü/ö/ç/ş)."""

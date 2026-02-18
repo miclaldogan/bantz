@@ -19,10 +19,10 @@ Factory helpers:
 
 from __future__ import annotations
 
+import atexit
 import concurrent.futures
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, replace
 from typing import Any, Optional, Protocol
@@ -39,19 +39,70 @@ logger = logging.getLogger(__name__)
 
 _LANG_FALLBACK = "Efendim, isteğiniz işlendi."
 
+# Issue #1232: Route-aware fallback templates for language guard rejects.
+_ROUTE_FALLBACK_TEMPLATES: dict[str, str] = {
+    "calendar": "Takvim bilgileriniz güncellendi efendim.",
+    "gmail": "E-posta işleminiz tamamlandı efendim.",
+    "system": "Sistem bilgisi alındı efendim.",
+    "smalltalk": "Buyurun efendim, size nasıl yardımcı olabilirim?",
+}
 
-def _validate_reply_language(text: str) -> str:
-    """Return *text* if it looks Turkish, otherwise a deterministic fallback.
+
+def _route_aware_fallback(
+    route: str | None = None,
+    tool_results: list[dict[str, Any]] | None = None,
+) -> str:
+    """Generate a route-aware Turkish fallback when language guard rejects.
+
+    Issue #1232: Instead of the generic 'isteğiniz işlendi', produce a
+    meaningful message based on the route and tool results.
+    """
+    # 1) Try tool-result summary (most informative)
+    if tool_results:
+        successes = [r for r in tool_results if r.get("success", False)]
+        if successes:
+            try:
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
+                summary = _build_tool_success_summary(tool_results)
+                if summary and summary != "Tamamlandı efendim.":
+                    return summary
+            except Exception:
+                pass
+
+    # 2) Route-based template
+    r = (route or "").strip().lower()
+    if r in _ROUTE_FALLBACK_TEMPLATES:
+        return _ROUTE_FALLBACK_TEMPLATES[r]
+
+    # 3) Ultimate fallback
+    return _LANG_FALLBACK
+
+
+def _validate_reply_language(
+    text: str,
+    *,
+    route: str | None = None,
+    tool_results: list[dict[str, Any]] | None = None,
+) -> str:
+    """Return *text* if it looks Turkish, otherwise a route-aware fallback.
 
     Uses :func:`bantz.brain.language_guard.validate_turkish` to detect
     CJK, Cyrillic, or other non-Turkish output from the 3B model.
+
+    Issue #1232: When rejected, generates a route-aware Turkish response
+    using tool results or route templates instead of the generic fallback.
     """
     from bantz.brain.language_guard import validate_turkish
 
-    validated, ok = validate_turkish(text, fallback=_LANG_FALLBACK)
-    if not ok:
-        logger.warning("language_guard rejected LLM output (non-Turkish): %.60s…", text)
-    return validated
+    # First pass: check with generic fallback
+    _placeholder = "__LANG_GUARD_REJECTED__"
+    validated, ok = validate_turkish(text, fallback=_placeholder)
+    if ok:
+        return validated
+
+    logger.warning("language_guard rejected LLM output (non-Turkish): %.60s…", text)
+    return _route_aware_fallback(route=route, tool_results=tool_results)
 
 
 def _reply_needs_refinalization(reply: str | None) -> bool:
@@ -232,7 +283,8 @@ class QualityFinalizer:
 
     def _build_prompt(self, ctx: FinalizationContext) -> str:
         """Try ``PromptBuilder`` first, fall back to inline template."""
-        from bantz.brain.orchestrator_loop import _prepare_tool_results_for_finalizer
+        from bantz.brain.tool_result_summarizer import \
+            _prepare_tool_results_for_finalizer
 
         finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
             ctx.tool_results or [],
@@ -259,8 +311,28 @@ class QualityFinalizer:
             else "default"
         )
 
+        # Issue #1219: Increase token budget for detail-content tools
+        _DETAIL_TOOLS = {"gmail.get_message", "gmail.get_thread"}
+        _has_detail = any(
+            r.get("tool") in _DETAIL_TOOLS
+            for r in (ctx.tool_results or [])
+            if r.get("success", False)
+        )
+        _base_budget = 5000 if _has_detail else 3500
+
+        # Issue #1253: Cap prompt budget so prompt + max_tokens fits in
+        # the model's context window.  QualityFinalizer uses max_tokens=512.
+        _ctx_window = _get_context_window(self._llm)
+        _max_prompt = _ctx_window - 512 - _CONTEXT_SAFETY_MARGIN
+        _prompt_budget = min(_base_budget, max(1500, _max_prompt))
+        if _prompt_budget < _base_budget:
+            logger.info(
+                "[QUALITY_FINALIZER] Prompt budget capped %d→%d (ctx=%d)",
+                _base_budget, _prompt_budget, _ctx_window,
+            )
+
         builder = PromptBuilder(
-            token_budget=3500,
+            token_budget=_prompt_budget,
             experiment="issue191_orchestrator_finalizer",
         )
         built = builder.build_finalizer_prompt(
@@ -314,6 +386,7 @@ class QualityFinalizer:
                 "- Yeni sayı, saat, tarih, miktar, fiyat UYDURMA. Verilerde yoksa söyleme.",
                 "- Yeni isim, e-posta, telefon UYDURMA.",
                 "- Emin olmadığın bilgiyi söyleme; belirsizse 'bilgi yok' de.",
+                "- TOOL_RESULTS boşsa veya tüm tool'lar başarısızsa: saat, başlık, mail konusu gibi fakt iddiası YASAK. Sadece 'erişemedim' veya 'bilgi yok' de.",
                 "",
                 "- Kısa ve öz cevap ver (1-3 cümle).",
                 "",
@@ -358,7 +431,8 @@ class FastFinalizer:
             return None
 
     def _build_prompt(self, ctx: FinalizationContext) -> str:
-        from bantz.brain.orchestrator_loop import _prepare_tool_results_for_finalizer
+        from bantz.brain.tool_result_summarizer import \
+            _prepare_tool_results_for_finalizer
 
         prompt_lines = [
             "Kimlik / Roller:",
@@ -376,16 +450,21 @@ class FastFinalizer:
             "- Sadece kullanıcıya söyleyeceğin düz metni üret.",
             "- JSON üretme ({...} YASAK). Markdown üretme (**, #, ``` YASAK).",
             "- Yeni sayı/saat/tarih/isim uydurma; SADECE verilerdeki bilgileri kullan.",
+            "- TOOL_RESULTS boşsa veya başarısızsa: saat, başlık, mail konusu gibi fakt iddiası YASAK.",
             "- Kısa ve öz cevap ver (1-3 cümle).",
             "",
             "PLANNER_DECISION (JSON):",
             json.dumps(ctx.planner_decision, ensure_ascii=False),
-        ]
+        ])
 
         if ctx.tool_results:
+            # Issue #1253: Cap tool result budget based on context window.
+            # FastFinalizer uses max_tokens=256 for completion.
+            _ctx_window = _get_context_window(self._llm)
+            _tool_budget = min(1500, max(500, _ctx_window - 256 - _CONTEXT_SAFETY_MARGIN - 1500))
             finalizer_results, was_truncated = _prepare_tool_results_for_finalizer(
                 ctx.tool_results,
-                max_tokens=1500,
+                max_tokens=_tool_budget,
             )
             if was_truncated:
                 logger.info("[FAST_FINALIZER] Tool results truncated to fit budget")
@@ -457,7 +536,7 @@ def decide_finalization_tier(
         return False, "fast", "no_finalizer"
 
     # Issue #517: env override for forcing finalizer tier
-    from bantz.llm.tier_env import get_tier_force_finalizer, get_tier_debug
+    from bantz.llm.tier_env import get_tier_debug, get_tier_force_finalizer
 
     forced = get_tier_force_finalizer()
     if forced in ("quality", "gemini"):
@@ -570,7 +649,16 @@ class FinalizationPipeline:
             )
 
         # --- Early exit: ask_user with no reply -----------------------------
-        if output.ask_user and output.question and not output.assistant_reply:
+        # Only exit early when no tools have been executed successfully.
+        # If tools ran and succeeded, continue to the deterministic/quality
+        # path so the user sees actual tool results instead of the LLM's
+        # politeness question (3B model often sets ask_user=True even when
+        # it already routed to the correct tool).
+        _has_successful_tools = bool(
+            ctx.tool_results
+            and any(r.get("success", False) for r in ctx.tool_results)
+        )
+        if output.ask_user and output.question and not output.assistant_reply and not _has_successful_tools:
             return replace(output, assistant_reply=output.question, finalizer_model="none(ask_user)")
 
         # --- Early exit: hard tool failures ---------------------------------
@@ -606,6 +694,75 @@ class FinalizationPipeline:
             msg = _empty_data_message(route=route, calendar_intent=cal_intent)
             return replace(output, assistant_reply=msg, finalizer_model="none(empty_data_guard)")
 
+        # --- Issue #1212: Deterministic reply for calendar write ops --------
+        # Calendar create/update/delete results are fully predictable — using
+        # Gemini here causes hallucinated times/titles.  Use deterministic
+        # summary instead.
+        if route == "calendar" and ctx.tool_results:
+            write_tools = {"calendar.create_event", "calendar.update_event", "calendar.delete_event"}
+            has_write = any(
+                r.get("tool") in write_tools and r.get("success", False)
+                for r in ctx.tool_results
+            )
+            # Issue #1215: Also use deterministic path for calendar.list_events
+            # so event details (title + time) are shown and not hallucinated.
+            read_tools = {"calendar.list_events", "calendar.find_free_slots", "calendar.find_event"}
+            has_read = any(
+                r.get("tool") in read_tools and r.get("success", False)
+                for r in ctx.tool_results
+            )
+            if has_write or has_read:
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
+                det_reply = _build_tool_success_summary(ctx.tool_results)
+                ctx.state.update_trace(
+                    finalizer_used=False,
+                    finalizer_strategy="deterministic_calendar",
+                )
+                return replace(output, assistant_reply=det_reply, finalizer_model="none(deterministic_calendar)")
+
+        # --- Deterministic reply for system tools (time.now etc.) -----------
+        # System tools like time.now have fully deterministic outputs.
+        # Sending them to Gemini causes wrong times (LLM-generated vs actual).
+        if route in ("system", "pc") and ctx.tool_results:
+            _system_det_tools = {"time.now", "system.status"}
+            has_system = any(
+                r.get("tool") in _system_det_tools and r.get("success", False)
+                for r in ctx.tool_results
+            )
+            if has_system:
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
+                det_reply = _build_tool_success_summary(ctx.tool_results)
+                ctx.state.update_trace(
+                    finalizer_used=False,
+                    finalizer_strategy="deterministic_system",
+                )
+                return replace(output, assistant_reply=det_reply, finalizer_model="none(deterministic_system)")
+
+        # --- Issue #1228: No-Hallucination Gate ----------------------------
+        # If route is tool-dependent (calendar/gmail) but NO tool succeeded,
+        # skip the LLM finalizer entirely.  Sending to Gemini/3B with zero
+        # real data causes hallucinated times, titles, and "kesin ama yanlış"
+        # assertions.  Return a deterministic "erişemedim" message instead.
+        _TOOL_DEPENDENT_ROUTES = {"calendar", "gmail"}
+        if (
+            route in _TOOL_DEPENDENT_ROUTES
+            and not _has_pending_confirmation
+            and _no_tool_success(ctx.tool_results)
+        ):
+            ctx.state.update_trace(
+                finalizer_guard="no_hallucination",
+                finalizer_guard_triggered=True,
+                finalizer_guard_route=route,
+            )
+            nh_msg = _no_tool_success_message(route)
+            return replace(
+                output,
+                assistant_reply=nh_msg,
+                finalizer_model="none(no_hallucination_gate)",
+            )
+
         # --- Quality finalizer path -----------------------------------------
         _quality_llm = getattr(self._quality, "_llm", None) if self._quality else None
         _fast_llm = None
@@ -623,16 +780,16 @@ class FinalizationPipeline:
         if ctx.use_quality and self._quality is not None and not quality_is_fast_fallback:
             text = self._try_quality(ctx)
             if text:
-                # Issue #653: language post-validation
-                text = _validate_reply_language(text)
+                # Issue #653 + #1232: language post-validation with route context
+                text = _validate_reply_language(text, route=route, tool_results=ctx.tool_results)
                 return replace(output, assistant_reply=text, finalizer_model=_quality_model or "quality")
 
             # Quality failed / guard rejected → fall back to fast
             if self._fast is not None:
                 text = self._fast.finalize(ctx)
                 if text:
-                    # Issue #653: language post-validation
-                    text = _validate_reply_language(text)
+                    # Issue #653 + #1232: language post-validation with route context
+                    text = _validate_reply_language(text, route=route, tool_results=ctx.tool_results)
                     self._emit_quality_degraded(
                         ctx,
                         reason="quality_failed_fallback",
@@ -654,8 +811,8 @@ class FinalizationPipeline:
             if self._fast is not None:
                 text = self._fast.finalize(ctx)
                 if text:
-                    # Issue #653: language post-validation
-                    text = _validate_reply_language(text)
+                    # Issue #653 + #1232: language post-validation with route context
+                    text = _validate_reply_language(text, route=route, tool_results=ctx.tool_results)
                     self._emit_quality_degraded(
                         ctx,
                         reason="quality_unavailable_fallback",
@@ -681,7 +838,7 @@ class FinalizationPipeline:
                 finalizer_used=False,
             )
             should_fast_finalize = (
-                (not output.ask_user)
+                (not output.ask_user or _has_successful_tools)
                 and (
                     bool(ctx.tool_results)
                     or not (output.assistant_reply or "").strip()
@@ -693,8 +850,8 @@ class FinalizationPipeline:
             if should_fast_finalize:
                 text = self._fast.finalize(ctx)
                 if text:
-                    # Issue #653: language post-validation
-                    text = _validate_reply_language(text)
+                    # Issue #653 + #1232: language post-validation with route context
+                    text = _validate_reply_language(text, route=route, tool_results=ctx.tool_results)
                     return replace(output, assistant_reply=text, finalizer_model=_fast_model or "fast")
 
         # --- Default fallback -----------------------------------------------
@@ -741,6 +898,12 @@ class FinalizationPipeline:
                         getattr(finalizer_llm, "backend_name", "") or ""
                     ),
                 )
+                # Issue #1216: Log rate limit / timeout errors prominently
+                if "429" in str(code) or "rate" in str(e).lower():
+                    logger.warning(
+                        "[Issue #1216] Gemini rate limit (429) hit — "
+                        "falling back to tool summary. Error: %s", e,
+                    )
         except Exception:
             pass
 
@@ -791,7 +954,8 @@ class FinalizationPipeline:
                 return guarded
             # Validate language — original reply may be from 3B model (CJK/mixed)
             if output.assistant_reply:
-                validated = _validate_reply_language(output.assistant_reply)
+                _route = (output.route or "").strip().lower()
+                validated = _validate_reply_language(output.assistant_reply, route=_route)
                 return replace(output, assistant_reply=validated, finalizer_model="none(no_tools)")
             return replace(output, finalizer_model="none(no_tools)")
 
@@ -800,17 +964,42 @@ class FinalizationPipeline:
         if failed:
             error_msg = "Üzgünüm efendim, bazı işlemler başarısız oldu:\n"
             for r in failed:
+                # Issue #1315: Sanitize tool errors — don't leak raw exceptions
                 error_msg += (
-                    f"- {r.get('tool', '?')}: {r.get('error', 'Unknown error')}\n"
+                    f"- {r.get('tool', '?')}: {_sanitize_tool_error(r.get('error', 'Unknown error'))}\n"
                 )
             return replace(output, assistant_reply=error_msg.strip(), finalizer_model="none(error)")
 
         # Tools succeeded — use existing reply or generate summary
-        if output.assistant_reply:
-            validated = _validate_reply_language(output.assistant_reply)
+        # Issue #1216: When Gemini 429/timeout degrades to fallback, prefer
+        # the tool-aware summary over the router's generic reply (which is
+        # often something useless like "İsteğiniz işlendi efendim").
+        if output.assistant_reply and ctx.tool_results:
+            # Check if the existing reply is generic/unhelpful
+            _generic_phrases = {
+                "isteğiniz işlendi", "tamamlandı", "işlem yapıldı",
+                "efendim, isteğiniz", "anlayamadım",
+            }
+            _reply_lower = (output.assistant_reply or "").strip().lower()
+            _is_generic = any(g in _reply_lower for g in _generic_phrases)
+            if _is_generic:
+                from bantz.brain.tool_result_summarizer import \
+                    _build_tool_success_summary
+                summary = _build_tool_success_summary(ctx.tool_results)
+                if summary and summary != "Tamamlandı efendim.":
+                    return replace(output, assistant_reply=summary, finalizer_model="none(tool_summary_over_generic)")
+            # Non-generic existing reply is fine
+            _route = (output.route or "").strip().lower()
+            validated = _validate_reply_language(output.assistant_reply, route=_route, tool_results=ctx.tool_results)
             return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
 
-        from bantz.brain.orchestrator_loop import _build_tool_success_summary
+        if output.assistant_reply:
+            _route = (output.route or "").strip().lower()
+            validated = _validate_reply_language(output.assistant_reply, route=_route, tool_results=ctx.tool_results)
+            return replace(output, assistant_reply=validated, finalizer_model="none(existing_reply)")
+
+        from bantz.brain.tool_result_summarizer import \
+            _build_tool_success_summary
 
         return replace(
             output,
@@ -870,7 +1059,7 @@ def _tool_data_is_empty(tool_results: list[dict[str, Any]]) -> bool:
             for k, v in raw.items():
                 if k in _META_KEYS:
                     continue
-                if v is not None and v != "" and v != [] and v != {}:
+                if v is not None and v != "" and v != [] and v != {} and v != 0 and v is not False:
                     return False
     return True
 
@@ -961,6 +1150,79 @@ def _tool_first_guard_message(*, route: str) -> str:
 # Module-level helpers
 # ---------------------------------------------------------------------------
 
+# Issue #1315: User-safe error mappings — prevent raw exception leaks
+_ERROR_SAFE_MAP: dict[str, str] = {
+    "timeout": "İşlem zaman aşımına uğradı",
+    "connection": "Bağlantı hatası oluştu",
+    "auth": "Kimlik doğrulama hatası",
+    "permission": "Yetki hatası",
+    "not_found": "İstenen kaynak bulunamadı",
+    "rate_limit": "Çok fazla istek, lütfen biraz bekleyin",
+}
+
+# Max length for sanitized error messages shown to user
+_MAX_ERROR_MSG_LENGTH = 150
+
+
+def _sanitize_tool_error(error: str) -> str:
+    """Sanitize tool error for user-facing display.
+
+    Issue #1315: Maps known error patterns to safe Turkish messages
+    and truncates unknown errors to prevent leaking internal details
+    (stack traces, file paths, API keys).
+    """
+    if not isinstance(error, str):
+        return "Bilinmeyen hata"
+    lower = error.lower()
+    for pattern, safe_msg in _ERROR_SAFE_MAP.items():
+        if pattern in lower:
+            return safe_msg
+    # Truncate and strip anything that looks like a path or traceback
+    sanitized = error.split("\n")[0]  # First line only
+    if len(sanitized) > _MAX_ERROR_MSG_LENGTH:
+        sanitized = sanitized[:_MAX_ERROR_MSG_LENGTH] + "…"
+    return sanitized
+
+# Issue #1183: Reusable thread pool for _safe_complete — avoids creating
+# and destroying a ThreadPoolExecutor on every finalization call.
+_FINALIZER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="finalizer",
+)
+# Issue #1314: Clean shutdown — prevent thread leak on interpreter exit
+atexit.register(_FINALIZER_EXECUTOR.shutdown, wait=False)
+
+# Issue #1253: Default context window used when model does not expose its own.
+_DEFAULT_CONTEXT_WINDOW = 4096
+# Minimum completion tokens — below this the model cannot produce useful output.
+_MIN_COMPLETION_TOKENS = 64
+# Safety margin to avoid off-by-one / estimation errors.
+_CONTEXT_SAFETY_MARGIN = 64
+
+
+def _get_context_window(llm: Any) -> int:
+    """Best-effort extraction of the model's context window size.
+
+    Checks (in order):
+    1. ``llm.get_model_context_length()`` (vLLM client)
+    2. ``llm.context_window`` attribute
+    3. Falls back to ``_DEFAULT_CONTEXT_WINDOW``
+    """
+    try:
+        if hasattr(llm, "get_model_context_length"):
+            ctx = llm.get_model_context_length()
+            if ctx and int(ctx) > 0:
+                return int(ctx)
+    except Exception:
+        pass
+    try:
+        ctx = getattr(llm, "context_window", None)
+        if ctx and int(ctx) > 0:
+            return int(ctx)
+    except Exception:
+        pass
+    return _DEFAULT_CONTEXT_WINDOW
+
+
 def _safe_complete(
     llm: LLMCompletionProtocol, prompt: str, *, timeout: float = 0, **kwargs: Any
 ) -> Optional[str]:
@@ -972,11 +1234,56 @@ def _safe_complete(
 
     Issue #947: When *timeout* > 0, the call is wrapped in a ThreadPoolExecutor
     so a hung Gemini API does not block the entire turn indefinitely.
+
+    Issue #1253: Context-window guard — dynamically reduces ``max_tokens``
+    or truncates the prompt so that ``prompt_tokens + max_tokens`` never
+    exceeds the model's context window.
     """
+    # --- Issue #1253: Context-window guard ---
+    from bantz.brain.prompt_engineering import estimate_tokens
+
+    context_window = _get_context_window(llm)
+    max_tokens = int(kwargs.get("max_tokens", 256))
+    prompt_tokens = estimate_tokens(prompt)
+    total = prompt_tokens + max_tokens + _CONTEXT_SAFETY_MARGIN
+
+    if total > context_window:
+        available = context_window - prompt_tokens - _CONTEXT_SAFETY_MARGIN
+        if available >= _MIN_COMPLETION_TOKENS:
+            # Enough room — just shrink max_tokens
+            kwargs["max_tokens"] = available
+            logger.info(
+                "[FINALIZER] Context guard: reduced max_tokens %d→%d "
+                "(prompt=%d, ctx=%d)",
+                max_tokens, available, prompt_tokens, context_window,
+            )
+        else:
+            # Prompt itself is too large — truncate it
+            safe_prompt_budget = context_window - _MIN_COMPLETION_TOKENS - _CONTEXT_SAFETY_MARGIN
+            if safe_prompt_budget > 200:
+                # Rough char-based trim (estimate_tokens ≈ len/4)
+                target_chars = safe_prompt_budget * 4
+                if len(prompt) > target_chars:
+                    prompt = prompt[:target_chars]
+                    logger.warning(
+                        "[FINALIZER] Context guard: prompt truncated to ~%d tokens "
+                        "(ctx=%d)",
+                        safe_prompt_budget, context_window,
+                    )
+            kwargs["max_tokens"] = _MIN_COMPLETION_TOKENS
+
     def _do_complete() -> str:
         try:
             return llm.complete_text(prompt=prompt, **kwargs)
         except TypeError as e:
+            # Issue #1313: Retry without timeout_seconds but preserve other
+            # kwargs (max_tokens, temperature) to avoid silent truncation.
+            if "timeout_seconds" in kwargs:
+                filtered = {k: v for k, v in kwargs.items() if k != "timeout_seconds"}
+                try:
+                    return llm.complete_text(prompt=prompt, **filtered)
+                except TypeError:
+                    pass
             logger.warning(
                 "[FINALIZER] LLM client TypeError — kwargs dropped %s: %s",
                 list(kwargs.keys()),
@@ -986,15 +1293,29 @@ def _safe_complete(
 
     try:
         if timeout > 0:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="finalizer") as pool:
-                future = pool.submit(_do_complete)
+            # Issue #1313: Do NOT mutate llm._timeout_seconds — it's shared
+            # state across threads. Instead, pass timeout via kwargs so only
+            # this call is affected. The HTTP-level timeout is set per-request
+            # by the LLM client when it receives a timeout_seconds kwarg.
+            kwargs.setdefault("timeout_seconds", timeout)
+            # Issue #1183: Use module-level executor instead of creating
+            # a new one per call to avoid thread churn under load.
+            future = _FINALIZER_EXECUTOR.submit(_do_complete)
+            try:
                 text = future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                logger.error("[FINALIZER] LLM call timed out after %.1fs", timeout)
+                return None
         else:
             text = _do_complete()
-    except concurrent.futures.TimeoutError:
-        logger.error("[FINALIZER] LLM call timed out after %.1fs", timeout)
-        return None
     except Exception as exc:
+        # Re-raise LLMClientError so _try_quality can record the error code
+        # in the trace (Issue #215).  FastFinalizer.finalize() has its own
+        # try/except so this is safe for the fast path.
+        from bantz.llm.base import LLMClientError
+        if isinstance(exc, LLMClientError):
+            raise
         logger.warning("[FINALIZER] LLM call failed: %s", exc)
         return None
     return str(text or "").strip() or None
@@ -1014,7 +1335,12 @@ def _extract_reason_code(err: Exception) -> str:
 def _check_hard_failures(
     tool_results: list[dict[str, Any]],
 ) -> Optional[str]:
-    """If any tools hard-failed, return a deterministic error message."""
+    """If ALL tools hard-failed, return a deterministic error message.
+
+    Issue #1172: Only early-exit when every tool failed. Partial failures
+    (some succeeded, some failed) should be handled by the finalizer so
+    it can report both the successes and the errors to the user.
+    """
     if not tool_results:
         return None
 
@@ -1026,12 +1352,55 @@ def _check_hard_failures(
     if not hard_failures:
         return None
 
-    error_msg = "Üzgünüm efendim, bazı işlemler başarısız oldu:\n"
+    # Issue #1172: If some tools succeeded, let the finalizer handle the
+    # mixed result — don't early-exit with an error-only message.
+    successes = [r for r in tool_results if r.get("success", False)]
+    if successes:
+        return None
+
+    error_msg = "Üzgünüm efendim, işlemler başarısız oldu:\n"
     for result in hard_failures:
         tool_name = str(result.get("tool") or "")
         err = str(result.get("error") or "Unknown error")
         error_msg += f"- {tool_name}: {err}\n"
     return error_msg.strip()
+
+
+# ---------------------------------------------------------------------------
+# Issue #1228: No-Hallucination Gate helpers
+# ---------------------------------------------------------------------------
+
+def _no_tool_success(tool_results: list[dict[str, Any]]) -> bool:
+    """Return True if no tool in *tool_results* succeeded.
+
+    Covers three cases:
+    1. tool_results is empty/None (tool call was never attempted)
+    2. All results have ``success=False``
+    3. Results list exists but every entry is a failure
+    """
+    if not tool_results:
+        return True
+    return not any(r.get("success", False) for r in tool_results)
+
+
+_NO_TOOL_SUCCESS_MESSAGES: dict[str, str] = {
+    "calendar": (
+        "Takvime şu an erişemedim efendim. "
+        "Tekrar denememi ister misiniz?"
+    ),
+    "gmail": (
+        "E-posta kutusuna şu an erişemedim efendim. "
+        "Tekrar denememi ister misiniz?"
+    ),
+}
+
+
+def _no_tool_success_message(route: str) -> str:
+    """Return a deterministic Turkish error for a tool-dependent route."""
+    return _NO_TOOL_SUCCESS_MESSAGES.get(
+        route,
+        "İşlemi şu an gerçekleştiremedim efendim. Tekrar denememi ister misiniz?",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1061,6 +1430,8 @@ def build_finalization_context(
     planner_decision = {
         "route": orchestrator_output.route,
         "calendar_intent": orchestrator_output.calendar_intent,
+        "gmail_intent": orchestrator_output.gmail_intent,
+        "gmail": orchestrator_output.gmail,
         "slots": orchestrator_output.slots,
         "tool_plan": orchestrator_output.tool_plan,
         "requires_confirmation": orchestrator_output.requires_confirmation,

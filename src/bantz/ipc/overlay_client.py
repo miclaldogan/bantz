@@ -11,6 +11,7 @@ Handles:
 """
 
 import asyncio
+import json
 import logging
 import subprocess
 import sys
@@ -24,6 +25,10 @@ from .protocol import (
     PongMessage,
     AckMessage,
     EventMessage,
+    BriefingStartMessage,
+    BriefingCardMessage,
+    BriefingEndMessage,
+    VoiceStateMessage,
     encode_message,
     decode_message,
     parse_message,
@@ -37,6 +42,10 @@ from .protocol import (
     action_preview,
     action_cursor_dot,
     action_highlight_rect,
+    briefing_start,
+    briefing_card,
+    briefing_end,
+    voice_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +86,9 @@ class OverlayClient:
         # Event callback
         self._on_event: Optional[Callable[[EventMessage], Awaitable[None]]] = None
         
+        # Command callback (text commands from overlay UI)
+        self._on_command: Optional[Callable[[str], Awaitable[None]]] = None
+        
         # Tasks
         self._ping_task: Optional[asyncio.Task] = None
         self._receive_task: Optional[asyncio.Task] = None
@@ -104,6 +116,10 @@ class OverlayClient:
     def set_event_callback(self, callback: Callable[[EventMessage], Awaitable[None]]) -> None:
         """Set callback for overlay events (timeout, dismissed)."""
         self._on_event = callback
+    
+    def set_command_callback(self, callback: Callable[[str], Awaitable[None]]) -> None:
+        """Set callback for text commands from overlay UI."""
+        self._on_command = callback
     
     async def start(self, auto_spawn: bool = True) -> bool:
         """
@@ -230,6 +246,79 @@ class OverlayClient:
             await self._handle_disconnect()
             return False
 
+    async def send_raw(self, msg_dict: dict) -> bool:
+        """Send an arbitrary message dict to the overlay (JSONL).
+
+        Used for messages that don't have a dedicated send method yet.
+        For briefing messages, prefer ``send_briefing_start()``,
+        ``send_briefing_card()``, ``send_briefing_end()`` instead.
+
+        Parameters
+        ----------
+        msg_dict:
+            Pre-serialized message dict with at least a 'type' field.
+
+        Returns
+        -------
+        True if sent successfully.
+        """
+        if not self._connected or not self._writer:
+            logger.warning("[OverlayClient] Not connected, cannot send raw message")
+            return False
+
+        try:
+            json_str = json.dumps(msg_dict, ensure_ascii=False, separators=(",", ":"))
+            data = (json_str + "\n").encode("utf-8")
+            self._writer.write(data)
+            await self._writer.drain()
+            logger.debug(
+                "[OverlayClient] Sent raw: type=%s",
+                msg_dict.get("type", "unknown"),
+            )
+            return True
+        except Exception as e:
+            logger.error("[OverlayClient] Raw send error: %s", e)
+            await self._handle_disconnect()
+            return False
+
+    # ─── Typed briefing & voice-state senders ────────────────────
+
+    async def send_briefing_start(self) -> bool:
+        """Send a typed briefing_start message."""
+        msg = briefing_start()
+        return await self._send_typed(msg)
+
+    async def send_briefing_card(self, category: str, **kwargs) -> bool:
+        """Send a typed briefing_card message."""
+        msg = briefing_card(category=category, **kwargs)
+        return await self._send_typed(msg)
+
+    async def send_briefing_end(self) -> bool:
+        """Send a typed briefing_end message."""
+        msg = briefing_end()
+        return await self._send_typed(msg)
+
+    async def send_voice_state(self, state: str, trigger: str | None = None, data: dict | None = None) -> bool:
+        """Send a typed voice_state message."""
+        msg = voice_state(state=state, trigger=trigger, data=data)
+        return await self._send_typed(msg)
+
+    async def _send_typed(self, msg) -> bool:
+        """Send any typed BaseMessage over the socket."""
+        if not self._connected or not self._writer:
+            logger.warning("[OverlayClient] Not connected, cannot send %s", msg.type)
+            return False
+        try:
+            data = encode_message(msg)
+            self._writer.write(data)
+            await self._writer.drain()
+            logger.debug("[OverlayClient] Sent typed: %s", msg.type)
+            return True
+        except Exception as e:
+            logger.error("[OverlayClient] Typed send error: %s", e)
+            await self._handle_disconnect()
+            return False
+
     async def preview(self, text: str, duration_ms: int = 1200) -> bool:
         """Convenience: show a short action preview text."""
         return await self.send_action(action_preview(text=text, duration_ms=duration_ms))
@@ -295,7 +384,7 @@ class OverlayClient:
     # --- Internal methods ---
     
     async def _spawn_overlay(self) -> bool:
-        """Spawn the overlay process."""
+        """Spawn the overlay process (Electron-based overlay)."""
         if self._overlay_process and self._overlay_process.poll() is None:
             logger.debug("[OverlayClient] Overlay process already running")
             return True
@@ -307,20 +396,39 @@ class OverlayClient:
             env.setdefault("DISPLAY", ":0")
             env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
             
-            # Run overlay as a Python module (more reliable than script path)
-            # This works regardless of how bantz was installed
-            self._overlay_process = subprocess.Popen(
-                [sys.executable, "-m", "bantz.ui.overlay_process"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env,
-                start_new_session=True,  # Detach from parent
-            )
+            # Determine overlay directory — the Electron app lives in bantz-overlay/
+            overlay_dir = Path(__file__).resolve().parents[3] / "bantz-overlay"
+            
+            if not overlay_dir.exists():
+                logger.warning(
+                    "[OverlayClient] Overlay directory not found: %s — "
+                    "trying fallback python module",
+                    overlay_dir,
+                )
+                # Fallback to Python module for dev/testing
+                self._overlay_process = subprocess.Popen(
+                    [sys.executable, "-m", "bantz.ui.overlay_process"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env=env,
+                    start_new_session=True,
+                )
+            else:
+                # Spawn the Electron overlay via npm
+                npm_cmd = "npx"
+                self._overlay_process = subprocess.Popen(
+                    [npm_cmd, "electron", "."],
+                    cwd=str(overlay_dir),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env=env,
+                    start_new_session=True,
+                )
             
             logger.info(f"[OverlayClient] Spawned overlay process (PID: {self._overlay_process.pid})")
             
             # Give it time to start
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
             
             return True
             
@@ -361,7 +469,7 @@ class OverlayClient:
         """Connect to overlay socket."""
         socket_path = get_socket_path()
         
-        for attempt in range(5):
+        for attempt in range(20):
             try:
                 logger.debug(f"[OverlayClient] Connecting to {socket_path} (attempt {attempt + 1})")
                 
@@ -496,6 +604,17 @@ class OverlayClient:
                 # Parse message
                 data = decode_message(line)
                 if not data:
+                    continue
+                
+                # Handle command messages from Electron overlay (not in protocol enum)
+                if isinstance(data, dict) and data.get("type") == "command":
+                    text = data.get("text", "")
+                    logger.info(f"[OverlayClient] Received command: {text[:80]}")
+                    if self._on_command and text:
+                        try:
+                            await self._on_command(text)
+                        except Exception as e:
+                            logger.error(f"[OverlayClient] Command callback error: {e}")
                     continue
                 
                 msg = parse_message(data)

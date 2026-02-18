@@ -12,7 +12,7 @@ Handles:
 import asyncio
 import logging
 import os
-from typing import Optional, Callable, Awaitable
+from typing import Any, Optional, Callable, Awaitable
 
 from .protocol import (
     StateMessage,
@@ -21,6 +21,10 @@ from .protocol import (
     AckMessage,
     PingMessage,
     PongMessage,
+    BriefingStartMessage,
+    BriefingCardMessage,
+    BriefingEndMessage,
+    VoiceStateMessage,
     encode_message,
     decode_message,
     parse_message,
@@ -52,6 +56,8 @@ class OverlayServer:
         # Callbacks
         self._on_state: Optional[Callable[[StateMessage], Awaitable[None]]] = None
         self._on_action: Optional[Callable[[ActionMessage], Awaitable[None]]] = None
+        self._on_briefing: Optional[Callable[[Any], Awaitable[None]]] = None
+        self._on_voice_state: Optional[Callable[[VoiceStateMessage], Awaitable[None]]] = None
         self._on_disconnect: Optional[Callable[[], Awaitable[None]]] = None
         
         # Receive task
@@ -73,6 +79,14 @@ class OverlayServer:
     def set_action_callback(self, callback: Callable[[ActionMessage], Awaitable[None]]) -> None:
         """Set callback for action messages (daemon → overlay)."""
         self._on_action = callback
+
+    def set_briefing_callback(self, callback: Callable[[Any], Awaitable[None]]) -> None:
+        """Set callback for briefing messages (briefing_start, briefing_card, briefing_end)."""
+        self._on_briefing = callback
+
+    def set_voice_state_callback(self, callback: Callable[[VoiceStateMessage], Awaitable[None]]) -> None:
+        """Set callback for voice state messages."""
+        self._on_voice_state = callback
     
     def set_disconnect_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
         """
@@ -286,6 +300,24 @@ class OverlayServer:
                     await self._on_action(msg)
                 except Exception as e:
                     logger.error(f"[OverlayServer] Action callback error: {e}")
+
+        elif isinstance(msg, (BriefingStartMessage, BriefingCardMessage, BriefingEndMessage)):
+            logger.debug(f"[OverlayServer] Received briefing: {msg.type}")
+
+            if self._on_briefing:
+                try:
+                    await self._on_briefing(msg)
+                except Exception as e:
+                    logger.error(f"[OverlayServer] Briefing callback error: {e}")
+
+        elif isinstance(msg, VoiceStateMessage):
+            logger.debug(f"[OverlayServer] Received voice_state: {msg.state}")
+
+            if self._on_voice_state:
+                try:
+                    await self._on_voice_state(msg)
+                except Exception as e:
+                    logger.error(f"[OverlayServer] Voice state callback error: {e}")
         
         elif isinstance(msg, PingMessage):
             logger.debug("[OverlayServer] Received ping")

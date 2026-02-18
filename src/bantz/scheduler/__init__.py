@@ -1,4 +1,4 @@
-"""Bantz Scheduler - Hatırlatma ve zamanlı görev yönetimi."""
+"""Bantz Scheduler — reminder and scheduled task management."""
 from bantz.scheduler.reminder import ReminderManager
 from bantz.scheduler.checkin import CheckinManager
 

@@ -133,8 +133,8 @@ def test_orchestrator_loop_fallback_to_build_when_state_none():
         event_bus=Mock()
     )
 
-    # Patch the session context cache's get_or_build method
-    with patch.object(loop._session_ctx_cache, 'get_or_build') as mock_build:
+    # Patch SessionContextCache.get_or_build at class-level
+    with patch('bantz.brain.session_context_cache.SessionContextCache.get_or_build') as mock_build:
         built_context = {"timezone": "UTC", "locale": "en_GB"}
         mock_build.return_value = built_context
         
@@ -184,7 +184,7 @@ def test_timezone_preserved_across_multiple_turns():
         event_bus=Mock()
     )
 
-    with patch.object(loop._session_ctx_cache, 'get_or_build') as mock_build:
+    with patch('bantz.brain.session_context_cache.SessionContextCache.get_or_build') as mock_build:
         mock_build.return_value = {"timezone": "UTC"}  # Should never be used
         
         # Turn 1

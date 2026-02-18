@@ -106,15 +106,15 @@ def _cmd_list(args: argparse.Namespace) -> int:
         return 0
 
     if not skills:
-        print("📭 Yüklü skill bulunamadı.")
+        print("📭 No loaded skills found.")
         print()
-        print("Skill dizinleri:")
+        print("Skill directories:")
         for d in loader.skill_dirs:
             exists = "✅" if d.is_dir() else "❌"
             print(f"  {exists} {d}")
         print()
-        print("Yeni skill oluşturmak için:")
-        print("  bantz skill create <isim>")
+        print("To create a new skill:")
+        print("  bantz skill create <name>")
         return 0
 
     print(f"📦 {len(skills)} skill bulundu:\n")
@@ -145,7 +145,7 @@ def _cmd_info(args: argparse.Namespace) -> int:
             break
 
     if skill is None:
-        print(f"❌ Skill bulunamadı: {args.name}", file=sys.stderr)
+        print(f"❌ Skill not found: {args.name}", file=sys.stderr)
         return 1
 
     m = skill.metadata
@@ -198,19 +198,19 @@ def _cmd_create(args: argparse.Namespace) -> int:
             description=args.description,
             author=args.author,
         )
-        print(f"✅ Skill oluşturuldu: {path}")
+        print(f"✅ Skill created: {path}")
         print()
-        print("Sonraki adımlar:")
-        print(f"  1. SKILL.md dosyasını düzenleyin: {path}")
-        print(f"  2. Triggers ve tools tanımlayın")
-        print(f"  3. Instructions bölümünü yazın")
-        print(f"  4. Test edin: bantz skill validate {path}")
+        print("Next steps:")
+        print(f"  1. Edit SKILL.md: {path}")
+        print(f"  2. Define triggers and tools")
+        print(f"  3. Write the instructions section")
+        print(f"  4. Test it: bantz skill validate {path}")
         return 0
     except FileExistsError as exc:
         print(f"❌ {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
-        print(f"❌ Skill oluşturulamadı: {exc}", file=sys.stderr)
+        print(f"❌ Failed to create skill: {exc}", file=sys.stderr)
         return 1
 
 
@@ -220,7 +220,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
     path = Path(args.path)
     if not path.exists():
-        print(f"❌ Dosya bulunamadı: {path}", file=sys.stderr)
+        print(f"❌ File not found: {path}", file=sys.stderr)
         return 1
 
     try:
@@ -228,20 +228,20 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         errors = skill.validate()
 
         if errors:
-            print(f"❌ {len(errors)} doğrulama hatası:")
+            print(f"❌ {len(errors)} validation errors:")
             for err in errors:
                 print(f"  • {err}")
             return 1
 
         m = skill.metadata
-        print(f"✅ Geçerli SKILL.md: {m.icon} {m.name} v{m.version}")
+        print(f"✅ Valid SKILL.md: {m.icon} {m.name} v{m.version}")
         print(f"  {len(m.triggers)} trigger, {len(m.tools)} tool")
-        print(f"  Instructions: {len(skill.instructions)} karakter")
+        print(f"  Instructions: {len(skill.instructions)} characters")
         return 0
 
     except ValueError as exc:
-        print(f"❌ Parse hatası: {exc}", file=sys.stderr)
+        print(f"❌ Parse error: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
-        print(f"❌ Beklenmeyen hata: {exc}", file=sys.stderr)
+        print(f"❌ Unexpected error: {exc}", file=sys.stderr)
         return 1

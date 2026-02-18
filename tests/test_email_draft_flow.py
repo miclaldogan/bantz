@@ -78,8 +78,8 @@ class TestPlaceholderType:
     
     def test_description_tr(self) -> None:
         """Test Turkish description."""
-        assert PlaceholderType.RECIPIENT_NAME.description_tr == "Alıcı adı"
-        assert PlaceholderType.SENDER_NAME.description_tr == "Gönderen adı"
+        assert PlaceholderType.RECIPIENT_NAME.description_tr == "Recipient name"
+        assert PlaceholderType.SENDER_NAME.description_tr == "Sender name"
 
 
 # =============================================================================
@@ -300,7 +300,7 @@ class TestEmailDraft:
             ],
         )
         preview = draft.format_preview()
-        assert "E-POSTA TASLAĞI" in preview
+        assert "EMAIL DRAFT" in preview
         assert "Test Konu" in preview
         assert "RECIPIENT_NAME" in preview
 
@@ -550,7 +550,7 @@ class TestEmailDraftFlow:
         flow.start_draft("E-posta yaz")
         
         preview = flow.get_preview()
-        assert "E-POSTA TASLAĞI" in preview
+        assert "EMAIL DRAFT" in preview
     
     def test_get_preview_no_draft(self) -> None:
         """Test getting preview without draft."""

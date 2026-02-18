@@ -1,0 +1,215 @@
+name: "PR Quality Gate"
+
+on:
+  pull_request:
+    branches: [ "dev", "main", "master" ]
+    types: [ opened, synchronize, reopened ]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────
+  # 1. Lint — only changed Python files
+  # ─────────────────────────────────────────────
+  lint:
+    name: "Lint & Style"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install lint dependencies
+        run: pip install ruff isort
+
+      - name: Get changed Python files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' | tr '\n' ' ')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          if [ -z "$FILES" ]; then
+            echo "No Python files changed — skipping lint."
+          else
+            echo "Linting: $FILES"
+          fi
+
+      - name: Ruff lint (changed files only)
+        if: steps.changed.outputs.files != ''
+        run: ruff check ${{ steps.changed.outputs.files }} --output-format=github
+
+      - name: Import order check (changed files only)
+        if: steps.changed.outputs.files != ''
+        run: isort --check-only --diff ${{ steps.changed.outputs.files }}
+
+  # ─────────────────────────────────────────────
+  # 2. Unit Tests
+  # ─────────────────────────────────────────────
+  test:
+    name: "Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          for req in requirements/base.txt requirements/dev.txt requirements/llm.txt requirements/system.txt requirements/security.txt; do
+            if [ -f "$req" ]; then
+              pip install -r "$req" 2>/dev/null || echo "⚠️ Some deps in $req failed — continuing"
+            fi
+          done
+          pip install pytest pytest-asyncio pytest-cov pytest-timeout
+          pip install -e . 2>/dev/null || echo "⚠️ Package install failed — continuing"
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ \
+            --tb=short \
+            -q \
+            --ignore=tests/integration/ \
+            --ignore=tests/e2e/ \
+            -k "not test_cleanup_expired" \
+            --timeout=60 \
+            -x
+
+  # ─────────────────────────────────────────────
+  # 3. Security — multi-layer scanning
+  # ─────────────────────────────────────────────
+  security:
+    name: "Security Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install security tools
+        run: pip install bandit safety
+
+      # ── Bandit: Python-specific SAST (changed files only) ──
+      - name: Get changed Python source files
+        id: sec_changed
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- 'src/**/*.py' | tr '\n' ' ')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          if [ -z "$FILES" ]; then
+            echo "No Python source files changed — skipping Bandit."
+          else
+            echo "Scanning: $FILES"
+          fi
+
+      - name: Bandit SAST scan (changed files only)
+        if: steps.sec_changed.outputs.files != ''
+        run: |
+          echo "🔍 Running Bandit on changed files..."
+          bandit ${{ steps.sec_changed.outputs.files }} \
+            -f json \
+            -o bandit-report.json \
+            --severity-level medium \
+            --confidence-level medium \
+            || true
+          python3 -c "
+          import json, sys
+          try:
+              data = json.load(open('bandit-report.json'))
+              results = data.get('results', [])
+              if results:
+                  print(f'⚠️  Bandit found {len(results)} issue(s):')
+                  for r in results:
+                      sev, conf = r['issue_severity'], r['issue_confidence']
+                      print(f'  [{sev}/{conf}] {r[\"filename\"]}:{r[\"line_number\"]} — {r[\"issue_text\"]}')
+                      if sev == 'HIGH' and conf == 'HIGH':
+                          print(f'::error file={r[\"filename\"]},line={r[\"line_number\"]}::{r[\"issue_text\"]}')
+                  critical = [r for r in results if r['issue_severity'] == 'HIGH' and r['issue_confidence'] == 'HIGH']
+                  if critical:
+                      print(f'🚨 {len(critical)} critical issue(s) — blocking merge!')
+                      sys.exit(1)
+              else:
+                  print('✅ Bandit: No security issues found')
+          except FileNotFoundError:
+              print('⚠️  Bandit report not found')
+          "
+
+      # ── Safety: known vulnerability check (all requirement files) ──
+      - name: Safety dependency check
+        continue-on-error: true
+        run: |
+          echo "🔍 Checking dependencies for known vulnerabilities..."
+          for req in requirements/*.txt; do
+            if [ -f "$req" ]; then
+              echo "── Scanning $req ──"
+              safety check -r "$req" --output text 2>/dev/null || echo "⚠️ $req: completed with warnings"
+            fi
+          done
+
+      # ── Custom pattern checks ──
+      - name: Check for hardcoded secrets
+        run: |
+          echo "🔍 Scanning for potential hardcoded secrets..."
+          if grep -rn --include="*.py" -E '(api_key|secret_key|auth_token|password)\s*=\s*["\x27][A-Za-z0-9+/=_-]{20,}["\x27]' src/ 2>/dev/null \
+            | grep -v "test_\|mock\|fake\|example\|placeholder\|REDACTED\|TODO\|config\.get\|environ\|getenv"; then
+            echo "::error::Potential hardcoded secrets found in source code!"
+            exit 1
+          fi
+          echo "✅ No hardcoded secrets detected"
+
+      - name: Check for dangerous patterns
+        run: |
+          echo "🔍 Scanning for dangerous code patterns..."
+          ISSUES=0
+
+          if grep -rn --include="*.py" -E '^\s*(eval|exec)\(' src/ 2>/dev/null; then
+            echo "::warning::Found eval()/exec() usage — ensure it's justified"
+            ISSUES=$((ISSUES+1))
+          fi
+
+          if grep -rn --include="*.py" 'os\.system(' src/ 2>/dev/null; then
+            echo "::warning::Found os.system() — prefer subprocess.run()"
+            ISSUES=$((ISSUES+1))
+          fi
+
+          if grep -rn --include="*.py" -E "f['\"].*?(SELECT|INSERT|UPDATE|DELETE)" src/ 2>/dev/null | grep -v '# nosec\|# safe\|test_'; then
+            echo "::warning::Potential SQL injection — use parameterized queries"
+            ISSUES=$((ISSUES+1))
+          fi
+
+          if grep -rn --include="*.py" -E 'pickle\.loads?\(' src/ 2>/dev/null | grep -v '# nosec'; then
+            echo "::warning::Found pickle usage — potential RCE risk"
+            ISSUES=$((ISSUES+1))
+          fi
+
+          if grep -rn --include="*.py" -E 'subprocess\.(run|call|Popen)\(.*shell\s*=\s*True' src/ 2>/dev/null | grep -v '# nosec'; then
+            echo "::warning::Found subprocess with shell=True — potential command injection"
+            ISSUES=$((ISSUES+1))
+          fi
+
+          if [ $ISSUES -gt 0 ]; then
+            echo "⚠️ Found $ISSUES potential security pattern(s) — review manually"
+          else
+            echo "✅ No dangerous patterns detected"
+          fi

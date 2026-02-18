@@ -120,8 +120,415 @@ permissions:
     risk: "medium"
     decision: "confirm"
 
+  # ── Google Suite Connectors (Issue #1292) ───────────────────
+  - tool: "google.contacts.search"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "google.contacts.get"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "google.contacts.create"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "google.tasks.list"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "google.tasks.create"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+    conditions:
+      max_per_day: 30
+
+  - tool: "google.tasks.complete"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "google.tasks.delete"
+    action: "delete"
+    risk: "high"
+    decision: "confirm"
+    conditions:
+      max_per_day: 10
+
+  - tool: "google.keep.*"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "google.keep.create"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "google.classroom.*"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  # ── Proactive Secretary (Issue #1293) ──────────────────────
+  - tool: "proactive.daily_brief"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "proactive.status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  # ── Messaging Pipeline (#1294) ─────────────────────────────
+  - tool: "messaging.read_inbox"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "messaging.draft_reply"
+    action: "write"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "messaging.send"
+    action: "write"
+    risk: "high"
+    decision: "confirm"
+
+  - tool: "messaging.thread"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "messaging.status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  # ── Sandbox Agents (Issue #1295) ───────────────────────────
+  - tool: "sandbox.execute"
+    action: "execute"
+    risk: "high"
+    decision: "confirm"
+    conditions:
+      max_per_day: 100
+      max_per_session: 30
+
+  - tool: "sandbox.dry_run"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "sandbox.rollback"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "sandbox.checkpoints"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "safety.check"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.list_files"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.search_files"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.file_info"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.organize_files"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "pc.launch_app"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "pc.clipboard_get"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pc.clipboard_set"
+    action: "write"
+    risk: "medium"
+    decision: "confirm"
+
+  - tool: "pc.system_info"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "coding.generate"
+    action: "write"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "coding.write_tests"
+    action: "write"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "coding.run_tests"
+    action: "execute"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "coding.git_status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "coding.git_diff"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "coding.git_commit"
+    action: "write"
+    risk: "high"
+    decision: "confirm"
+    conditions:
+      max_per_day: 50
+
+  - tool: "coding.git_log"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "coding.review"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  # ── Music Control (Issue #1296) ────────────────────────────
+  - tool: "music.play"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.pause"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.resume"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.next"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.prev"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.stop"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.volume"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.search"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.playlists"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "music.suggest"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  # ── Health & Degradation (Issue #1298) ─────────────────────
+  - tool: "system.health"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "system.health_service"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "system.circuit_breaker"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "system.fallback"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  # ── Phone Call (Issue #1438) ────────────────────────────────
+  - tool: "phone.call"
+    action: "execute"
+    risk: "high"
+    decision: "confirm"
+    conditions:
+      max_per_session: 20
+
+  - tool: "phone.hangup"
+    action: "execute"
+    risk: "medium"
+    decision: "allow"
+
+  - tool: "phone.mute"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "phone.speaker"
+    action: "execute"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "phone.status"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "phone.call_log"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  # ── PDF Tools (Issue #1211) ────────────────────────────────
+  - tool: "pdf.extract_text"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pdf.summarize"
+    action: "read"
+    risk: "low"
+    decision: "allow"
+
+  - tool: "pdf.from_attachment"
+    action: "execute"
+    risk: "medium"
+    decision: "confirm"
+    conditions:
+      max_per_session: 30
+
   # ── Catch-all (unknown tools) ──────────────────────────────
   - tool: "*"
     action: "*"
     risk: "medium"
     decision: "confirm"
+
+
+# ── Redact Fields (Issue #1291) ──────────────────────────────
+# Per-tool sensitive parameter fields to mask in confirmation UI.
+# Global keys (password, api_key, token, secret, etc.) are ALWAYS
+# redacted regardless of this config.
+
+redact_fields:
+  gmail.send:
+    - password
+    - api_key
+    - token
+    - refresh_token
+  gmail.send_draft:
+    - password
+    - token
+  gmail.send_to_contact:
+    - password
+    - token
+  system.execute_command:
+    - env_vars
+    - environment
+  calendar.create_event: []
+  calendar.update_event: []
+  calendar.delete_event: []
+  "browser.*":
+    - cookie
+    - authorization
+
+
+# ── Editable Fields (Issue #1291) ────────────────────────────
+# Per-tool fields that users may edit before confirming (HIGH risk only).
+# Fields listed here appear as "[EDITABLE]" in the confirmation UI.
+
+editable_fields:
+  calendar.delete_event:
+    - notify_attendees
+  calendar.create_event:
+    - title
+    - description
+    - start_time
+    - end_time
+    - attendees
+  calendar.update_event:
+    - title
+    - description
+    - start_time
+    - end_time
+    - attendees
+  gmail.send:
+    - subject
+    - body
+    - to
+    - cc
+    - bcc
+  gmail.send_to_contact:
+    - subject
+    - body
+  gmail.send_draft:
+    - subject
+    - body
+  system.execute_command:
+    - command
+  messaging.send:
+    - to
+    - subject
+    - body
+    - cc
+    - bcc
+  sandbox.execute:
+    - command
+    - workdir
+    - timeout
+    - dry_run
+  coding.git_commit:
+    - message

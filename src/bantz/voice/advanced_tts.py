@@ -362,7 +362,7 @@ class AdvancedTTS(ABC):
         # Find player
         player = shutil.which("paplay") or shutil.which("aplay")
         if not player:
-            raise RuntimeError("Ses çalıcı bulunamadı (paplay/aplay).")
+            raise RuntimeError("Audio player not found (paplay/aplay).")
         
         # Play
         proc = subprocess.Popen(

@@ -28,7 +28,7 @@ class TinyContextLLM:
         self.last_prompt: str = ""
         self.last_max_tokens: int = 0
 
-    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 512) -> str:  # noqa: ARG002
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 512, **_kwargs: Any) -> str:  # noqa: ARG002
         self.last_prompt = str(prompt)
         self.last_max_tokens = int(max_tokens)
 

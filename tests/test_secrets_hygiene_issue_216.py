@@ -4,7 +4,7 @@ from bantz.security.env_loader import load_env, load_env_file
 from bantz.security.secrets import mask_path, mask_secrets, sanitize
 
 # Use os.path.join so tests work on any OS/machine
-_FAKE_CONFIG = os.path.join("home", "user", ".config", "bantz", "google")
+_FAKE_CONFIG = os.path.join("/home", "user", ".config", "bantz", "google")
 
 
 def test_mask_path_basename_only() -> None:
@@ -64,33 +64,36 @@ def test_sanitize_recursive() -> None:
 
 
 def test_env_loader_load_env_file_and_override(monkeypatch, tmp_path) -> None:
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
     p = tmp_path / "test.env"
-    p.write_text("GEMINI_API_KEY=AIza" + ("A" * 30) + "\n#comment\nFOO=bar\n", encoding="utf-8")
+    p.write_text("GOOGLE_API_KEY=AIza" + ("A" * 30) + "\n#comment\nBANTZ_FOO=bar\n", encoding="utf-8")
 
     loaded = load_env_file(str(p))
-    assert set(loaded) == {"GEMINI_API_KEY", "FOO"}
-    assert os.environ.get("FOO") == "bar"
+    assert set(loaded) == {"GOOGLE_API_KEY", "BANTZ_FOO"}
+    assert os.environ.get("BANTZ_FOO") == "bar"
 
     # Should not override by default
-    monkeypatch.setenv("FOO", "existing")
+    monkeypatch.setenv("BANTZ_FOO", "existing")
     loaded2 = load_env_file(str(p), override=False)
-    assert "FOO" not in loaded2
-    assert os.environ.get("FOO") == "existing"
+    assert "BANTZ_FOO" not in loaded2
+    assert os.environ.get("BANTZ_FOO") == "existing"
 
     # But should override when asked
     loaded3 = load_env_file(str(p), override=True)
-    assert "FOO" in loaded3
-    assert os.environ.get("FOO") == "bar"
+    assert "BANTZ_FOO" in loaded3
+    assert os.environ.get("BANTZ_FOO") == "bar"
 
 
 def test_env_loader_load_env_uses_env_var(monkeypatch, tmp_path) -> None:
     p = tmp_path / "bantz.env"
-    p.write_text("FOO=baz\n", encoding="utf-8")
+    p.write_text("BANTZ_FOO=baz\n", encoding="utf-8")
     monkeypatch.setenv("BANTZ_ENV_FILE", str(p))
+    # Allow tmp_path as project root for this test
+    import bantz.security.env_loader as _loader
+    monkeypatch.setattr(_loader, "_PROJECT_ROOT", tmp_path)
 
-    monkeypatch.delenv("FOO", raising=False)
+    monkeypatch.delenv("BANTZ_FOO", raising=False)
     loaded = load_env()
-    assert loaded == ["FOO"]
-    assert os.environ.get("FOO") == "baz"
+    assert loaded == ["BANTZ_FOO"]
+    assert os.environ.get("BANTZ_FOO") == "baz"

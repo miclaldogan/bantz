@@ -5,7 +5,7 @@ Orchestrates tool execution with:
 - Exponential backoff retry
 - Configurable timeout
 - Circuit breaker integration
-- Event publishing for progress
+- Event publishing for progress, execution, and failure (Issue #1297)
 """
 
 import asyncio
@@ -116,6 +116,9 @@ class ToolRunner:
                 self.circuit_breaker.record_success(domain)
             else:
                 self.circuit_breaker.record_failure(domain)
+        
+        # Publish tool execution event (Issue #1297)
+        self._emit_tool_event(context, tool, input, result)
         
         return result
     
@@ -248,7 +251,51 @@ class ToolRunner:
                     "attempt": attempt,
                     "delay": delay
                 },
-                source="tool_runner"
+                source="tool_runner",
+                correlation_id=context.job_id,
+            )
+
+    def _emit_tool_event(
+        self,
+        context: ToolContext,
+        tool: ToolBase,
+        input: dict,
+        result: ToolResult,
+    ) -> None:
+        """Publish tool.executed or tool.failed event (Issue #1297)."""
+        if not self.event_bus:
+            return
+
+        if result.success:
+            self.event_bus.publish(
+                event_type=EventType.TOOL_EXECUTED.value,
+                data={
+                    "job_id": context.job_id,
+                    "tool": tool.name,
+                    "params": input,
+                    "duration_ms": result.duration_ms,
+                    "retries_used": result.retries_used,
+                },
+                source="tool_runner",
+                correlation_id=context.job_id,
+            )
+        else:
+            self.event_bus.publish(
+                event_type=EventType.TOOL_FAILED.value,
+                data={
+                    "job_id": context.job_id,
+                    "tool": tool.name,
+                    "params": input,
+                    "error": result.error,
+                    "error_type": (
+                        result.error_type.value
+                        if result.error_type else "unknown"
+                    ),
+                    "duration_ms": result.duration_ms,
+                    "retries_used": result.retries_used,
+                },
+                source="tool_runner",
+                correlation_id=context.job_id,
             )
 
 

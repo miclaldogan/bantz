@@ -13,7 +13,7 @@ def _run(cmd: list[str]) -> tuple[bool, str]:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True, ""
     except FileNotFoundError:
-        return False, f"Komut bulunamadı: {cmd[0]}"
+        return False, f"Command not found: {cmd[0]}"
     except Exception as e:  # noqa: BLE001
         return False, str(e)
 
@@ -45,7 +45,7 @@ def open_path(target: str) -> Tuple[bool, str]:
     t = os.path.expanduser(t)
 
     # Eğer kullanıcı "bu dosyayı aç: ..." gibi bir şey yazdıysa, iki nokta sonrası gelebilir
-    # shell parsing yok: güvenli kalmak için xdg-open'a tek argüman veriyoruz
+    # no shell parsing: staying safe by passing a single arg to xdg-open
     if not t:
         return False, "Hangi dosya/klasörü açayım?"
 

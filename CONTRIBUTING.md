@@ -20,7 +20,7 @@ cd bantz
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-all.txt
+pip install -r requirements/all.txt
 pip install -e .
 ```
 

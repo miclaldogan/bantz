@@ -13,50 +13,191 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 from bantz.agent.tools import ToolRegistry
+from bantz.brain.context_builder import ContextBuilder
+from bantz.brain.language_bridge import get_bridge
 from bantz.brain.llm_router import JarvisLLMOrchestrator, OrchestratorOutput
-from bantz.brain.orchestrator_state import OrchestratorState
+from bantz.brain.memory_lite import CompactSummary, DialogSummaryManager
+from bantz.brain.misroute_integration import record_turn_misroute
+from bantz.brain.orchestrator_state import (OrchestratorState,
+                                            extract_entity_from_tool_result)
+from bantz.brain.plan_verifier import verify_plan
+from bantz.brain.post_route_corrections import (
+    extract_first_email, extract_message_body_hint, extract_recipient_name,
+    looks_like_email_send_intent, post_route_correction_email_send)
+from bantz.brain.reflection import ReflectionResult, reflect
 from bantz.brain.safety_guard import SafetyGuard, ToolSecurityPolicy
-from bantz.brain.memory_lite import DialogSummaryManager, CompactSummary
-from bantz.core.events import EventBus, EventType
-from bantz.routing.preroute import PreRouter, IntentCategory, LocalResponseGenerator
-from bantz.nlu.slots import SlotExtractor
-
+from bantz.brain.tool_param_builder import build_tool_params
+from bantz.brain.tool_plan_sanitizer import TOOL_REMAP
+from bantz.brain.tool_plan_sanitizer import \
+    force_tool_plan as _force_tool_plan_fn
+from bantz.brain.tool_plan_sanitizer import \
+    sanitize_tool_plan as _sanitize_tool_plan_fn
 # Issue #941: Extracted modules — keep backward-compat re-exports
 from bantz.brain.tool_result_summarizer import (  # noqa: F401
-    _summarize_tool_result,
-    _prepare_tool_results_for_finalizer,
-    _build_tool_success_summary,
-    _count_items,
-    _extract_count,
-    _extract_field,
-)
-from bantz.brain.tool_plan_sanitizer import (
-    TOOL_REMAP,
-    force_tool_plan as _force_tool_plan_fn,
-    sanitize_tool_plan as _sanitize_tool_plan_fn,
-)
-from bantz.brain.post_route_corrections import (
-    looks_like_email_send_intent,
-    extract_first_email,
-    extract_recipient_name,
-    extract_message_body_hint,
-    post_route_correction_email_send,
-)
-from bantz.brain.plan_verifier import verify_plan
-from bantz.brain.tool_param_builder import build_tool_params
-from bantz.brain.misroute_integration import record_turn_misroute
-from bantz.brain.context_builder import ContextBuilder
+    _build_tool_success_summary, _count_items, _extract_count, _extract_field,
+    _prepare_tool_results_for_finalizer, _summarize_tool_result)
+from bantz.core.events import EventBus, EventType
+from bantz.nlu.slots import SlotExtractor
+from bantz.routing.preroute import (IntentCategory, LocalResponseGenerator,
+                                    PreRouter)
 
 logger = logging.getLogger(__name__)
 
 # Issue #941: Module-level helpers moved to bantz.brain.tool_result_summarizer
 # Re-exported above for backward compatibility.
+
+
+def _turkish_lower(s: str) -> str:
+    """Lowercase with Turkish İ→i fix.
+
+    Python's str.lower() maps İ (U+0130) to i + combining-dot (U+0307),
+    which breaks regex tokenization.  Stripping U+0307 after lowering is
+    safe because composed ö/ü use U+0308 (diaeresis), not U+0307.
+    """
+    return s.lower().replace("\u0307", "")
+
+
+# ── Issue #event-time-ref: Turkish time reference → hour mapping ─────
+_TR_WORD_TO_HOUR: dict[str, int] = {
+    "bir": 1, "iki": 2, "üç": 3, "dört": 4, "beş": 5, "altı": 6,
+    "yedi": 7, "sekiz": 8, "dokuz": 9, "on": 10, "onbir": 11, "oniki": 12,
+    "on bir": 11, "on iki": 12,
+}
+# Matches: "9'daki", "9daki", "dokuzda", "dokuzdaki", "3'teki", "üçteki"
+_TIME_REF_RE = re.compile(
+    r"(?:(\d{1,2})\s*[''']?\s*(?:da|de|te|ta|daki|deki|taki|teki)\w*)"
+    r"|(?:(bir|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on\s*bir|on\s*iki|on)\s*"
+    r"(?:da|de|te|ta|daki|deki|taki|teki)\w*)",
+    re.IGNORECASE,
+)
+
+
+def _resolve_event_by_time_ref(
+    user_input: str,
+    listed_events: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Resolve a Turkish time reference to an event from the listed events.
+
+    Matches "9'daki etkinliği", "dokuzdaki toplantıyı" etc. against event
+    start times.  Returns the matching event dict or None.
+    """
+    if not listed_events:
+        return None
+    text = _turkish_lower(user_input or "")
+    m = _TIME_REF_RE.search(text)
+    if not m:
+        return None
+
+    target_hour: int | None = None
+    if m.group(1):  # numeric: "9'daki"
+        try:
+            target_hour = int(m.group(1))
+        except ValueError:
+            return None
+    elif m.group(2):  # word: "dokuzda"
+        word = m.group(2).strip()
+        target_hour = _TR_WORD_TO_HOUR.get(word)
+
+    if target_hour is None:
+        return None
+
+    # Normalize hour to 24h — assume business hours (8-22)
+    # If target_hour < 8, assume PM (e.g. 3 → 15)
+    if target_hour < 8:
+        target_hour += 12
+
+    # Match against listed events by start hour
+    for ev in listed_events:
+        start = ev.get("start") or ""
+        # start can be ISO datetime "2025-01-15T09:00:00+03:00" or dict
+        if isinstance(start, dict):
+            start = start.get("dateTime") or start.get("date") or ""
+        if not isinstance(start, str):
+            continue
+        # Extract hour from ISO string
+        t_match = re.search(r"T(\d{2}):\d{2}", start)
+        if t_match:
+            event_hour = int(t_match.group(1))
+            if event_hour == target_hour:
+                return ev
+
+    return None
+
+
+def _fuzzy_token_match(keyword: str, text: str, threshold: float = 0.75) -> bool:
+    """Check if *keyword* fuzzy-matches any word in *text*.
+
+    Issue #1256: Users often misspell proper nouns ("tübirak" for "tübitak",
+    "hackaton" for "hackathon").  We use SequenceMatcher ratio on individual
+    word tokens.  Only keywords ≥ 3 chars are eligible.
+    """
+    if len(keyword) < 3:
+        return False
+    from difflib import SequenceMatcher
+    for word in re.split(r"[^a-zçğıöşü0-9]+", text):
+        if not word or len(word) < 3:
+            continue
+        if SequenceMatcher(None, keyword, word).ratio() >= threshold:
+            return True
+    return False
+
+
+def _match_mail_by_keyword(
+    user_input: str,
+    listed_messages: list[dict[str, str]],
+) -> str | None:
+    """Match a user keyword against previously listed gmail messages.
+
+    Issue #1218: When user says "github mailinin içeriğini özetle", match
+    "github" against stored message subjects and senders.
+    Issue #1256: Falls back to fuzzy matching (SequenceMatcher ≥ 0.75) when
+    exact substring matching finds no hit, catching common typos.
+    Returns the message_id of the best match, or None.
+    """
+    text = _turkish_lower(user_input or "").strip()
+    if not text or not listed_messages:
+        return None
+
+    # Extract potential keywords by removing Turkish stop words / suffixes
+    _STOP_WORDS = frozenset({
+        "mailinin", "mailin", "maili", "mailini", "mailine", "mailden",
+        "mailinin", "mesajın", "mesajının", "mesajı",
+        "içeriğini", "içeriği", "özetle", "özetini", "özetler",
+        "anlat", "oku", "göster", "aç", "bak", "ne", "diyor", "yazıyor",
+        "son", "gelen", "misin", "bakar", "misiniz",
+    })
+    tokens = re.split(r"[^a-zçğıöşü0-9]+", text)
+    keywords = [t for t in tokens if t and len(t) >= 2 and t not in _STOP_WORDS]
+
+    if not keywords:
+        return None
+
+    best_id: str | None = None
+    best_score = 0.0
+
+    for msg in listed_messages:
+        subject = _turkish_lower(msg.get("subject") or "")
+        sender = _turkish_lower(msg.get("from") or "")
+        score = 0.0
+        for kw in keywords:
+            # 1) Exact substring match (full weight)
+            if kw in subject or kw in sender:
+                score += 1.0
+            # 2) Fuzzy fallback (Issue #1256) – partial weight
+            elif _fuzzy_token_match(kw, subject) or _fuzzy_token_match(kw, sender):
+                score += 0.6
+        if score > best_score:
+            best_score = score
+            best_id = msg.get("id")
+
+    return best_id if best_score > 0 else None
 
 
 @dataclass
@@ -73,10 +214,25 @@ class OrchestratorConfig:
     memory_pii_filter: bool = True  # Memory-lite PII filtering (Issue #368)
     tool_timeout_seconds: float = 30.0  # Per-tool execution timeout (Issue #431)
     enable_preroute: bool = True  # Issue #407: Rule-based pre-route bypass
-    finalizer_timeout_seconds: float = 10.0  # Issue #947: Finalizer LLM timeout (quality)
-    fast_finalizer_timeout_seconds: float = 5.0  # Issue #947: Fast finalizer LLM timeout
+    finalizer_timeout_seconds: float = 15.0  # Issue #947/#1367: Finalizer LLM timeout (quality)
+    fast_finalizer_timeout_seconds: float = 8.0  # Issue #947/#1367: Fast finalizer LLM timeout
     
     def __post_init__(self):
+        # Issue #1367: Allow env-var override for finalizer timeouts
+        import os
+        env_quality = os.getenv("BANTZ_FINALIZER_TIMEOUT_S")
+        if env_quality:
+            try:
+                self.finalizer_timeout_seconds = float(env_quality)
+            except ValueError:
+                pass
+        env_fast = os.getenv("BANTZ_FAST_FINALIZER_TIMEOUT_S")
+        if env_fast:
+            try:
+                self.fast_finalizer_timeout_seconds = float(env_fast)
+            except ValueError:
+                pass
+
         if self.require_confirmation_for is None:
             # Default: destructive operations require confirmation
             self.require_confirmation_for = [
@@ -109,6 +265,7 @@ class OrchestratorLoop:
         config: Optional[OrchestratorConfig] = None,
         finalizer_llm: Optional[Any] = None,
         audit_logger: Optional[Any] = None,
+        run_tracker: Optional[Any] = None,
     ):
         self.orchestrator = orchestrator
         self.tools = tools
@@ -116,6 +273,7 @@ class OrchestratorLoop:
         self.config = config or OrchestratorConfig()
         self.finalizer_llm = finalizer_llm
         self.audit_logger = audit_logger  # For tool execution auditing (Issue #160)
+        self.run_tracker = run_tracker  # Issue #1290: Observability
 
         # Issue #597: Cache FinalizationPipeline (avoid per-turn object allocation)
         self._finalization_pipeline: Any = None
@@ -167,7 +325,8 @@ class OrchestratorLoop:
 
         # Issue #599: Memory injection trace/audit (best-effort, non-fatal)
         try:
-            from bantz.brain.memory_trace import MemoryBudgetConfig, MemoryTracer
+            from bantz.brain.memory_trace import (MemoryBudgetConfig,
+                                                  MemoryTracer)
 
             self._memory_tracer = MemoryTracer(
                 MemoryBudgetConfig(
@@ -180,9 +339,18 @@ class OrchestratorLoop:
             self._memory_tracer = None
 
         # Initialize safety guard (Issue #140)
+        # Issue #1291: Policy Engine v2 — risk tiers, presets, redaction
+        _policy_v2 = None
+        try:
+            from bantz.policy.engine_v2 import PolicyEngineV2
+            _policy_v2 = PolicyEngineV2()
+        except Exception as _pv2_err:
+            logger.debug("[ORCHESTRATOR] PolicyEngineV2 init failed: %s", _pv2_err)
+
         if self.config.enable_safety_guard:
             self.safety_guard = SafetyGuard(
-                policy=self.config.security_policy or ToolSecurityPolicy()
+                policy=self.config.security_policy or ToolSecurityPolicy(),
+                policy_engine_v2=_policy_v2,
             )
         else:
             self.safety_guard = None
@@ -198,6 +366,7 @@ class OrchestratorLoop:
 
         # Issue #942: Caches to avoid redundant work in _llm_planning_phase
         # Issue #1010: Context assembly extracted to ContextBuilder
+        # NOTE: Initialized with placeholders; bridges are wired after init below.
         self._context_builder = ContextBuilder(
             memory=self.memory,
             user_memory=self.user_memory,
@@ -218,9 +387,89 @@ class OrchestratorLoop:
             max_workers=4, thread_name_prefix="bantz-tool",
         )
 
-        # Issue #900: Sync router _VALID_TOOLS with actual ToolRegistry
+        # Issue #1288: Ingest Store — cache tool results with TTL + dedup
         try:
-            JarvisLLMOrchestrator.sync_valid_tools(self.tools.names())
+            from bantz.data.ingest_bridge import IngestBridge
+            self._ingest_bridge: Any = IngestBridge.create_default()
+        except Exception as _isx:
+            logger.warning("[ORCHESTRATOR] IngestBridge init failed: %s", _isx)
+            self._ingest_bridge = None
+
+        # Issue #1289: Graph Memory — link tool results into knowledge graph
+        self._graph_bridge: Any = None
+        try:
+            from bantz.data.graph_bridge import GraphBridge
+            import asyncio as _aio
+            try:
+                _running_loop = _aio.get_running_loop()
+            except RuntimeError:
+                _running_loop = None
+
+            if _running_loop is not None and _running_loop.is_running():
+                # Async context: create_task so the init completes in the loop
+                async def _init_gb_async(self_ref=self):
+                    try:
+                        self_ref._graph_bridge = await GraphBridge.create_default()
+                        logger.info("[ORCHESTRATOR] GraphBridge initialized (async)")
+                    except Exception as _e:
+                        logger.warning("[ORCHESTRATOR] GraphBridge async init failed: %s", _e)
+                _running_loop.create_task(_init_gb_async())
+            else:
+                self._graph_bridge = _aio.run(GraphBridge.create_default())
+                logger.info("[ORCHESTRATOR] GraphBridge initialized (sync)")
+        except Exception as _gbx:
+            logger.warning("[ORCHESTRATOR] GraphBridge init failed: %s", _gbx)
+
+        # Wire IngestBridge + GraphBridge into ContextBuilder for live data enrichment
+        if getattr(self, "_ingest_bridge", None) is not None:
+            self._context_builder._ingest_bridge = self._ingest_bridge
+        if getattr(self, "_graph_bridge", None) is not None:
+            self._context_builder._graph_bridge = self._graph_bridge
+
+        # Issue #1450: Google Data Sync → SQLite IngestStore
+        # Pulls Gmail, Calendar, and Classroom data locally for fast offline access.
+        self._google_sync: Any = None
+        try:
+            from bantz.data.google_sync import GoogleSyncManager
+            _gs_store = self._ingest_bridge._store if self._ingest_bridge else None
+            self._google_sync = GoogleSyncManager(store=_gs_store)
+            import asyncio as _aio_gs
+            try:
+                _gs_loop = _aio_gs.get_running_loop()
+            except RuntimeError:
+                _gs_loop = None
+
+            if _gs_loop is not None and _gs_loop.is_running():
+                async def _start_google_sync(self_ref=self):
+                    try:
+                        await self_ref._google_sync.sync_all()
+                        await self_ref._google_sync.start_background_sync()
+                        logger.info("[ORCHESTRATOR] Google sync started")
+                    except Exception as _gse:
+                        logger.warning("[ORCHESTRATOR] Google sync error: %s", _gse)
+                _gs_loop.create_task(_start_google_sync())
+            else:
+                logger.info("[ORCHESTRATOR] Google sync deferred (no running loop)")
+        except Exception as _gsx:
+            logger.warning("[ORCHESTRATOR] GoogleSyncManager init failed: %s", _gsx)
+
+        # Issue #1297: Wire event bus subscribers — decoupled observability
+        self._event_subscribers: dict[str, Any] = {}
+        try:
+            from bantz.core.subscriber_registry import wire_subscribers
+            self._event_subscribers = wire_subscribers(
+                self.event_bus,
+                run_tracker=self.run_tracker,
+                ingest_bridge=self._ingest_bridge,
+                audit_logger=self.audit_logger,
+            )
+        except Exception as _ws_err:
+            logger.debug("[ORCHESTRATOR] wire_subscribers failed: %s", _ws_err)
+
+        # Issue #900: Sync router _VALID_TOOLS with actual ToolRegistry
+        # Issue #1275: Pass registry reference for route-based schema injection
+        try:
+            JarvisLLMOrchestrator.sync_valid_tools(self.tools.names(), registry=self.tools)
         except Exception:
             logger.warning("[ORCHESTRATOR] sync_valid_tools failed", exc_info=True)
 
@@ -235,27 +484,55 @@ class OrchestratorLoop:
             ("calendar", "create"): ["calendar.create_event"],
             ("calendar", "modify"): ["calendar.update_event"],
             ("calendar", "cancel"): ["calendar.delete_event"],
+            ("calendar", "free_slots"): ["calendar.find_free_slots"],
             # System routes
             ("system", "time"): ["time.now"],
             ("system", "status"): ["system.status"],
+            ("system", "volume"): ["system.volume"],
+            ("system", "open_app"): ["pc.launch_app"],
             ("system", "query"): ["time.now"],  # Default for system queries
         }
 
         # Gmail intent mapping (gmail_intent → mandatory tools)
         # Issue #317: Extended Gmail label/category support
+        # Issue #1225: Added draft, reply, detail intents
         self._gmail_intent_map: dict[str, list[str]] = {
             "list": ["gmail.list_messages"],
             "search": ["gmail.smart_search"],
             "read": ["gmail.get_message"],
+            "detail": ["gmail.get_message"],
             "send": ["gmail.send"],
+            "draft": ["gmail.create_draft"],
+            "reply": ["gmail.generate_reply"],
         }
 
     def close(self) -> None:
-        """Shut down the shared tool executor. Safe to call multiple times."""
+        """Shut down the shared tool executor and data stores. Safe to call multiple times."""
         try:
             self._tool_executor.shutdown(wait=False)
         except Exception:
             pass
+        # Issue #1288: Close ingest store
+        if getattr(self, "_ingest_bridge", None) is not None:
+            try:
+                self._ingest_bridge.close()
+            except Exception:
+                pass
+        # Issue #1289: Close graph store
+        if getattr(self, "_graph_bridge", None) is not None:
+            try:
+                import asyncio as _aio_close
+                _aio_close.get_event_loop().run_until_complete(
+                    self._graph_bridge.close()
+                )
+            except Exception:
+                pass
+        # Issue #1450: Close google sync manager
+        if getattr(self, "_google_sync", None) is not None:
+            try:
+                self._google_sync.close()
+            except Exception:
+                pass
 
     def __del__(self) -> None:
         self.close()
@@ -317,8 +594,63 @@ class OrchestratorLoop:
         """
         if state is None:
             state = OrchestratorState()
-        
+
+        # ── Issue #1221: Generate trace_id for end-to-end request tracking ──
+        import uuid as _uuid_mod
+        _trace_id = _uuid_mod.uuid4().hex[:16]
+        state.trace["trace_id"] = _trace_id
+        logger.info("[TRACE] trace_id=%s user_input=%.60r", _trace_id, user_input)
+        # use it as a fallback (e.g. gmail.query_from_nl text field).
+        state.current_user_input = user_input
+
+        # Issue #1242: Language Bridge — Input Gate
+        # Translate TR user input to EN canonical for the router.
+        # Original TR text stays in state.current_user_input for finalization.
+        _bridge = get_bridge()
+        _bridge_input_on = (
+            _bridge is not None
+            and os.getenv("BANTZ_BRIDGE_INPUT_GATE", "1").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+        if _bridge_input_on:
+            _br = _bridge.to_en(user_input)
+            _router_input = _br.canonical
+            state.detected_lang = _br.detected_lang
+            state.canonical_input = _br.canonical
+            if _br.detected_lang == "tr" and _br.canonical != user_input:
+                logger.info(
+                    "[BRIDGE] Input Gate: lang=%s canonical=%r protected=%s",
+                    _br.detected_lang, _br.canonical, list(_br.protected_spans),
+                )
+        else:
+            _router_input = user_input
+            state.detected_lang = ""
+            state.canonical_input = ""
+
         start_time = time.time()
+
+        # Issue #1290: Start observability run tracking
+        _obs_run = None
+        if self.run_tracker:
+            try:
+                _sid = getattr(state, "session_id", None) or str(id(state))
+                _obs_run = self.run_tracker.start_run(user_input, session_id=_sid)
+                state.trace["_obs_run_id"] = _obs_run.run_id
+            except Exception as _obs_err:
+                logger.debug("[OBS] start_run failed: %s", _obs_err)
+
+        # Issue #1297: Emit run.started event
+        _run_corr_id = getattr(_obs_run, "run_id", None) if _obs_run else None
+        self.event_bus.publish(
+            EventType.RUN_STARTED.value,
+            {
+                "user_input": user_input,
+                "session_id": getattr(state, "session_id", None),
+                "run_id": _run_corr_id or "",
+            },
+            source="orchestrator",
+            correlation_id=_run_corr_id,
+        )
 
         # Issue #417: Build session context once per turn (cached with TTL)
         # Issue #902: Per-session cache keyed by state identity
@@ -330,12 +662,16 @@ class OrchestratorLoop:
                 if len(self._session_ctx_caches) >= self._session_ctx_max_size:
                     oldest = next(iter(self._session_ctx_caches))
                     del self._session_ctx_caches[oldest]
-                from bantz.brain.session_context_cache import SessionContextCache
+                from bantz.brain.session_context_cache import \
+                    SessionContextCache
                 self._session_ctx_caches[sid] = SessionContextCache(ttl_seconds=self._session_ctx_ttl)
             state.session_context = self._session_ctx_caches[sid].get_or_build()
         
         # Emit turn start event
-        self.event_bus.publish("turn.start", {"user_input": user_input})
+        self.event_bus.publish("turn.start", {
+            "user_input": user_input,
+            "trace_id": _trace_id,
+        })
         
         try:
             # ── Issue #894 fix: Auto-detect affirmative input when a pending
@@ -347,6 +683,8 @@ class OrchestratorLoop:
             _AFFIRMATIVE_TOKENS = frozenset({
                 "evet", "e", "yes", "y", "ok", "okay", "tamam", "olur",
                 "peki", "tabii", "tabi", "elbette", "onaylıyorum",
+                "gönder", "at", "yolla",
+                "sil", "ekle", "yap", "koy", "kaydet",
             })
             _NEGATIVE_TOKENS = frozenset({
                 "hayır", "h", "no", "n", "iptal", "vazgeç", "istemiyorum",
@@ -377,6 +715,14 @@ class OrchestratorLoop:
                     "with '%s' — cleared.",
                     user_input,
                 )
+
+                # Issue #1297: Emit tool.denied event
+                self.event_bus.publish(
+                    EventType.TOOL_DENIED.value,
+                    {"tool": str(pending.get("tool", "")), "reason": "user_rejected"},
+                    source="orchestrator",
+                )
+
                 from bantz.brain.llm_router import OrchestratorOutput
                 rejection_output = OrchestratorOutput(
                     route="smalltalk",
@@ -392,6 +738,24 @@ class OrchestratorLoop:
                 self._update_state_phase(user_input, rejection_output, [], state)
                 return (rejection_output, state)
 
+            # ── Issue #1389 fix: If a pending confirmation exists but the
+            # user's input is neither affirmative nor negative, the user has
+            # changed topic.  Clear the stale confirmation so the new
+            # request is not blocked.
+            elif (
+                state.has_pending_confirmation()
+                and not state.confirmed_tool
+            ):
+                stale = state.peek_pending_confirmation() or {}
+                stale_tool = str(stale.get("tool", "")).strip()
+                state.clear_pending_confirmation()
+                logger.info(
+                    "[CONFIRMATION] User sent non-confirmation input '%s' "
+                    "while pending confirmation for '%s' exists — clearing "
+                    "stale confirmation (topic change).",
+                    user_input, stale_tool,
+                )
+
             # ── Issue #869 fix: When a confirmed_tool is set and there is a
             # pending confirmation, skip LLM planning entirely.  The prerouter
             # would otherwise intercept "evet" as AFFIRMATIVE/smalltalk and
@@ -405,6 +769,7 @@ class OrchestratorLoop:
                 pending = state.peek_pending_confirmation() or {}
                 pending_tool = str(pending.get("tool") or "").strip()
                 pending_slots = pending.get("slots") or {}
+                pending_gmail = pending.get("gmail") or {}
                 # Derive route/intent from the tool name (e.g. "calendar.create_event" → "calendar" / "create")
                 _parts = pending_tool.split(".", 1)
                 _derived_route = _parts[0] if _parts else "unknown"
@@ -437,6 +802,7 @@ class OrchestratorLoop:
                     route=_derived_route,
                     calendar_intent=_derived_intent,
                     slots=pending_slots,
+                    gmail=pending_gmail,
                     confidence=1.0,
                     tool_plan=[pending_tool] if pending_tool else [],
                     assistant_reply="",
@@ -444,7 +810,7 @@ class OrchestratorLoop:
                 )
             else:
                 # Phase 1: LLM Planning (route, intent, tools, confirmation)
-                orchestrator_output = self._llm_planning_phase(user_input, state)
+                orchestrator_output = self._llm_planning_phase(_router_input, state)
             
             # Issue #837: Self-Evolving Agent — detect skill gaps
             if (
@@ -453,7 +819,8 @@ class OrchestratorLoop:
                 and orchestrator_output.confidence < 0.5
             ):
                 try:
-                    from bantz.skills.declarative.generator import get_self_evolving_manager
+                    from bantz.skills.declarative.generator import \
+                        get_self_evolving_manager
                     mgr = get_self_evolving_manager()
                     if mgr is not None:
                         gap = mgr.check_for_skill_gap(
@@ -494,11 +861,51 @@ class OrchestratorLoop:
                 final_output = orchestrator_output
                 tool_results = []
             else:
-                # Phase 2: Tool Execution (with confirmation firewall)
-                tool_results = self._execute_tools_phase(orchestrator_output, state)
+                # ── Issue #1279: Check for hierarchical task decomposition
+                _use_subtask = False
+                if orchestrator_output.subtasks:
+                    try:
+                        from bantz.brain.task_planner import (
+                            build_plan, is_decomposition_candidate)
+                        if is_decomposition_candidate(
+                            orchestrator_output.tool_plan,
+                            orchestrator_output.status,
+                        ) or orchestrator_output.subtasks:
+                            _plan = build_plan(
+                                orchestrator_output.subtasks,
+                                valid_tools=getattr(self.orchestrator, '_VALID_TOOLS', None),
+                            )
+                            if not _plan.is_empty:
+                                state.subtask_plan = _plan
+                                _use_subtask = True
+                                logger.info(
+                                    "[Issue #1279] Subtask plan built: %d subtasks",
+                                    len(_plan.subtasks),
+                                )
+                    except Exception as _decomp_exc:
+                        logger.debug("[Issue #1279] Subtask plan build failed: %s", _decomp_exc)
 
-                # Phase 2.5: Verify tool results (Issue #591 / #523)
-                tool_results = self._verify_results_phase(tool_results, state)
+                if _use_subtask:
+                    # ── Issue #1279: Subtask execution loop
+                    tool_results = self._subtask_execute_loop(
+                        orchestrator_output, state, _router_input,
+                        trace_id=_trace_id,
+                    )
+                else:
+                    # ── Issue #1273: ReAct Loop (Düşün → Yap → Gözlemle → Tekrar Düşün)
+                    tool_results = self._react_execute_loop(
+                        orchestrator_output, state, _router_input,
+                        trace_id=_trace_id,
+                    )
+
+                # Phase 2.75: Self-Reflection (Issue #1277)
+                # Semantic verification: does the result satisfy the user's request?
+                try:
+                    self._reflection_phase(
+                        user_input, orchestrator_output, tool_results, state,
+                    )
+                except Exception as _ref_exc:
+                    logger.debug("[Issue #1277] Reflection failed (non-fatal): %s", _ref_exc)
 
                 # Phase 3: LLM Finalization (generate final response with tool results)
                 final_output = self._llm_finalization_phase(
@@ -518,11 +925,13 @@ class OrchestratorLoop:
                 "route": final_output.route,
                 "intent": final_output.calendar_intent,
                 "confidence": final_output.confidence,
+                "trace_id": _trace_id,
             })
 
             # Issue #664: Structured trace export (per turn)
             try:
-                from bantz.brain.trace_exporter import build_turn_trace, write_turn_trace
+                from bantz.brain.trace_exporter import (build_turn_trace,
+                                                        write_turn_trace)
                 turn_trace = build_turn_trace(
                     turn_id=state.turn_count,
                     user_input=user_input,
@@ -531,6 +940,7 @@ class OrchestratorLoop:
                     state_trace=state.trace,
                     total_elapsed_ms=int(elapsed * 1000),
                 )
+                turn_trace["trace_id"] = _trace_id  # Issue #1221
                 write_turn_trace(turn_trace)
             except Exception as exc:
                 logger.debug("[TRACE] Export failed: %s", exc)
@@ -550,12 +960,79 @@ class OrchestratorLoop:
                 )
             except Exception as exc:
                 logger.debug("[MISROUTE] Recording failed: %s", exc)
-            
+
+            # Issue #1290: Record tool results + finalise observability run
+            if _obs_run and self.run_tracker:
+                try:
+                    for _tr in tool_results:
+                        _t_name = str(_tr.get("tool") or "")
+                        if not _t_name or _tr.get("pending_confirmation"):
+                            continue
+                        self.run_tracker.record_tool_call(
+                            run_id=_obs_run.run_id,
+                            tool_name=_t_name,
+                            params=_tr.get("params"),
+                            result=_tr.get("raw_result"),
+                            result_summary=_tr.get("result_summary"),
+                            error=str(_tr["error"]) if _tr.get("error") else None,
+                            latency_ms=_tr.get("elapsed_ms", 0),
+                            confirmation="user_approved" if _tr.get("confirmed") else "auto",
+                            status="success" if _tr.get("success") else "error",
+                        )
+                    _obs_run.route = final_output.route
+                    _obs_run.intent = final_output.calendar_intent
+                    _obs_run.final_output = (final_output.assistant_reply or "")[:2000]
+                    _obs_run.model = (
+                        getattr(self.orchestrator, "model_name", None)
+                        or getattr(self.orchestrator, "model", None)
+                        or ""
+                    )
+                    self.run_tracker.end_run(_obs_run)
+                except Exception:
+                    logger.debug("[OBS] end_run failed", exc_info=True)
+
+            # Issue #1297: Emit run.completed event
+            _run_corr_id = getattr(_obs_run, "run_id", None) if _obs_run else None
+            self.event_bus.publish(
+                EventType.RUN_COMPLETED.value,
+                {
+                    "route": final_output.route,
+                    "intent": final_output.calendar_intent,
+                    "final_output": (final_output.assistant_reply or "")[:500],
+                    "model": getattr(self.orchestrator, "model_name", ""),
+                    "status": "success",
+                    "run_id": _run_corr_id or "",
+                },
+                source="orchestrator",
+                correlation_id=_run_corr_id,
+            )
+
             return final_output, state
         
         except Exception as e:
-            logger.exception(f"Orchestrator turn failed: {e}")
+            logger.exception("Orchestrator turn failed: %s", e)
             self.event_bus.publish(EventType.ERROR.value, {"error": str(e)})
+
+            # Issue #1290: Record error in observability
+            if _obs_run and self.run_tracker:
+                try:
+                    _obs_run.error = str(e)
+                    self.run_tracker.end_run(_obs_run, status="error")
+                except Exception:
+                    pass
+
+            # Issue #1297: Emit run.completed with error status
+            _run_corr_id = getattr(_obs_run, "run_id", None) if _obs_run else None
+            self.event_bus.publish(
+                EventType.RUN_COMPLETED.value,
+                {
+                    "status": "error",
+                    "error": str(e),
+                    "run_id": _run_corr_id or "",
+                },
+                source="orchestrator",
+                correlation_id=_run_corr_id,
+            )
             
             # Return fallback output
             from bantz.brain.llm_router import OrchestratorOutput
@@ -592,21 +1069,39 @@ class OrchestratorLoop:
         if state is None:
             state = OrchestratorState()
 
+        # Issue #1200: Stash user_input in state so tool param builder can
+        # use it as a fallback (e.g. gmail.query_from_nl text field).
+        state.current_user_input = user_input
+
+        # Issue #1242: Language Bridge — Input Gate (run_full_cycle path)
+        _bridge = get_bridge()
+        _bridge_input_on = (
+            _bridge is not None
+            and os.getenv("BANTZ_BRIDGE_INPUT_GATE", "1").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+        if _bridge_input_on:
+            _br = _bridge.to_en(user_input)
+            _router_input = _br.canonical
+            state.detected_lang = _br.detected_lang
+            state.canonical_input = _br.canonical
+        else:
+            _router_input = user_input
+
         start_time = time.time()
 
         # Phase 1: plan
-        orchestrator_output = self._llm_planning_phase(user_input, state)
+        orchestrator_output = self._llm_planning_phase(_router_input, state)
 
         # Issue #407: Full preroute bypass → skip tools + finalization
         if orchestrator_output.raw_output.get("preroute_complete"):
             final_output = orchestrator_output
             tool_results = []
         else:
-            # Phase 2: execute tools
-            tool_results = self._execute_tools_phase(orchestrator_output, state)
-
-            # Phase 2.5: verify
-            tool_results = self._verify_results_phase(tool_results, state)
+            # ── Issue #1273: ReAct Loop (run_full_cycle path) ────────────
+            tool_results = self._react_execute_loop(
+                orchestrator_output, state, _router_input,
+            )
 
             # Phase 3: finalize
             final_output = self._llm_finalization_phase(
@@ -640,6 +1135,13 @@ class OrchestratorLoop:
                 # Second execution pass: execute only the confirmed tool.
                 tool_results_2 = self._execute_tools_phase(orchestrator_output, state)
                 tool_results_2 = self._verify_results_phase(tool_results_2, state)
+                # Issue #1277: Reflection on confirmation-path results
+                try:
+                    self._reflection_phase(
+                        user_input, orchestrator_output, tool_results_2, state,
+                    )
+                except Exception:
+                    pass
                 final_output = self._llm_finalization_phase(
                     user_input,
                     orchestrator_output,
@@ -713,7 +1215,8 @@ class OrchestratorLoop:
 
         # Issue #664: Structured trace export for replay/regression
         try:
-            from bantz.brain.trace_exporter import build_turn_trace, write_turn_trace
+            from bantz.brain.trace_exporter import (build_turn_trace,
+                                                    write_turn_trace)
             elapsed_ms = int((time.time() - start_time) * 1000)
             turn_trace = build_turn_trace(
                 turn_id=state.turn_count,
@@ -728,7 +1231,297 @@ class OrchestratorLoop:
             logger.debug("[TRACE] Export failed: %s", exc)
 
         return trace
-    
+
+    # -----------------------------------------------------------------
+    # Issue #1273: Shared ReAct execution loop
+    # -----------------------------------------------------------------
+    def _react_execute_loop(
+        self,
+        orchestrator_output: "OrchestratorOutput",
+        state: OrchestratorState,
+        router_input: str,
+        trace_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """Execute the ReAct (Düşün → Yap → Gözlemle → Tekrar Düşün) loop.
+
+        Runs tool execution iteratively.  When the LLM signals
+        ``status="needs_more_info"``, tool results are fed back to the
+        router's ``react_replan`` method which decides the next action.
+
+        Single-shot (``status="done"``) runs exactly one iteration — fully
+        backward compatible with pre-ReAct behaviour.
+
+        Returns:
+            Accumulated ``tool_results`` list across all iterations.
+        """
+        _REACT_MAX_ITERATIONS = int(
+            os.getenv("BANTZ_REACT_MAX_ITER", "3")
+        )
+        _REACT_TIMEOUT_S = float(
+            os.getenv("BANTZ_REACT_TIMEOUT_S", "15.0")
+        )
+        _react_start = time.time()
+
+        # Clear per-turn ReAct state
+        state.react_observations = []
+        state.react_iteration = 0
+
+        all_tool_results: list[dict[str, Any]] = []
+        _current_output = orchestrator_output
+
+        for _react_iter in range(1, _REACT_MAX_ITERATIONS + 1):
+            state.react_iteration = _react_iter
+
+            # ── Time guard ──
+            if time.time() - _react_start > _REACT_TIMEOUT_S:
+                logger.warning(
+                    "[ReAct] Timeout after %.1fs at iteration %d — finalizing",
+                    time.time() - _react_start, _react_iter,
+                )
+                break
+
+            # Phase 2: Tool Execution
+            tool_results = self._execute_tools_phase(_current_output, state)
+
+            # Phase 2.5: Verify
+            tool_results = self._verify_results_phase(tool_results, state)
+
+            # Issue #1221: Enforce tool result size limits
+            try:
+                from bantz.brain.tool_result_limiter import \
+                    enforce_result_size_limits
+                tool_results = enforce_result_size_limits(
+                    tool_results, trace_id=trace_id,
+                )
+            except Exception:
+                pass
+
+            # Issue #1224: Calendar context
+            try:
+                self._save_calendar_context(tool_results, state)
+            except Exception:
+                pass
+
+            # Issue #1276: Extract entity slots from tool results for cross-turn tracking
+            try:
+                self._extract_and_register_entities(tool_results, state)
+            except Exception as _entity_exc:
+                logger.debug("[Issue #1276] Entity extraction failed (non-fatal): %s", _entity_exc)
+
+            all_tool_results.extend(tool_results)
+
+            # ── OBSERVE ──
+            for tr in tool_results:
+                state.add_react_observation({
+                    "iteration": _react_iter,
+                    "tool": tr.get("tool", ""),
+                    "result_summary": tr.get("result_summary", "")[:300],
+                    "success": tr.get("success", False),
+                })
+
+            # ── Should we continue? ──
+            if _current_output.status != "needs_more_info":
+                break
+            if state.has_pending_confirmation():
+                break
+            if _current_output.ask_user:
+                break
+            if not tool_results:
+                break
+            if _react_iter >= _REACT_MAX_ITERATIONS:
+                logger.info("[ReAct] Max iterations (%d) reached", _REACT_MAX_ITERATIONS)
+                break
+
+            # ── RE-PLAN ──
+            logger.info(
+                "[ReAct] iteration=%d → re-planning with %d observations",
+                _react_iter, len(state.react_observations),
+            )
+            try:
+                _current_output = self.orchestrator.react_replan(
+                    user_input=router_input,
+                    previous_output=_current_output,
+                    observations=state.react_observations,
+                    session_context=state.session_context,
+                    iteration=_react_iter + 1,
+                )
+            except Exception as _exc:
+                logger.warning("[ReAct] Re-plan failed: %s — finalizing", _exc)
+                break
+
+        # Record trace metadata
+        state.trace["react"] = {
+            "iterations": state.react_iteration,
+            "observations_count": len(state.react_observations),
+            "elapsed_ms": int((time.time() - _react_start) * 1000),
+        }
+        if state.react_iteration > 1:
+            logger.info(
+                "[ReAct] Completed %d iterations, %d observations, %.1fs",
+                state.react_iteration,
+                len(state.react_observations),
+                time.time() - _react_start,
+            )
+
+        return all_tool_results
+
+    # ------------------------------------------------------------------
+    # Issue #1279: Subtask Execution Loop
+    # ------------------------------------------------------------------
+
+    def _subtask_execute_loop(
+        self,
+        orchestrator_output: "OrchestratorOutput",
+        state: OrchestratorState,
+        router_input: str,
+        trace_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """Execute a hierarchical subtask plan (Issue #1279).
+
+        Iterates through the DAG-ordered subtask plan, executing each
+        subtask's tool and collecting results.  Dynamic params are
+        resolved from previous subtask results.
+
+        On subtask failure, dependent subtasks are automatically cancelled.
+        Integrates with ReAct observations for LLM visibility.
+
+        Returns:
+            Accumulated ``tool_results`` list across all subtasks.
+        """
+        from dataclasses import replace as dc_replace
+
+        from bantz.brain.task_planner import resolve_params
+
+        plan = state.subtask_plan
+        if plan is None or plan.is_empty:
+            return []
+
+        _start = time.time()
+        _SUBTASK_TIMEOUT_S = float(os.getenv("BANTZ_SUBTASK_TIMEOUT_S", "30.0"))
+
+        all_tool_results: list[dict[str, Any]] = []
+        state.react_observations = []
+        state.react_iteration = 0
+
+        subtask_idx = 0
+        while True:
+            subtask = plan.next_subtask()
+            if subtask is None:
+                break
+
+            subtask_idx += 1
+            state.react_iteration = subtask_idx
+
+            # Time guard
+            if time.time() - _start > _SUBTASK_TIMEOUT_S:
+                logger.warning(
+                    "[Subtask] Timeout after %.1fs at subtask %d — cancelling remaining",
+                    time.time() - _start, subtask.id,
+                )
+                plan.cancel_remaining()
+                break
+
+            # Confirmation guard
+            if state.has_pending_confirmation():
+                logger.info("[Subtask] Pending confirmation — pausing subtask %d", subtask.id)
+                break
+
+            # Mark running
+            subtask.status = "running"
+            logger.info(
+                "[Subtask] Executing subtask %d/%d: %s → %s",
+                subtask_idx, len(plan.subtasks), subtask.goal, subtask.tool,
+            )
+
+            # Resolve dynamic params
+            resolved = resolve_params(subtask, plan.get_results())
+
+            # Build a single-tool OrchestratorOutput for this subtask
+            _sub_output = dc_replace(
+                orchestrator_output,
+                tool_plan=[subtask.tool],
+                tool_plan_with_args=[{"name": subtask.tool, "args": resolved}],
+                status="done",  # Each subtask is single-shot
+                subtasks=[],
+            )
+
+            # Execute via existing tool execution phase
+            tool_results = self._execute_tools_phase(_sub_output, state)
+
+            # Verify results
+            tool_results = self._verify_results_phase(tool_results, state)
+
+            # Enforce result size limits
+            try:
+                from bantz.brain.tool_result_limiter import \
+                    enforce_result_size_limits
+                tool_results = enforce_result_size_limits(tool_results, trace_id=trace_id)
+            except Exception:
+                pass
+
+            # Calendar context
+            try:
+                self._save_calendar_context(tool_results, state)
+            except Exception:
+                pass
+
+            # Entity extraction
+            try:
+                self._extract_and_register_entities(tool_results, state)
+            except Exception:
+                pass
+
+            all_tool_results.extend(tool_results)
+
+            # Determine success/failure
+            _success = any(tr.get("success", False) for tr in tool_results) if tool_results else False
+            _summary = "; ".join(
+                tr.get("result_summary", "")[:150] for tr in tool_results
+            )
+
+            if _success:
+                plan.complete_subtask(
+                    subtask.id,
+                    result={
+                        "tool": subtask.tool,
+                        "result_summary": _summary,
+                        "success": True,
+                        "tool_results": tool_results,
+                    },
+                )
+            else:
+                _error = "; ".join(
+                    tr.get("error", "unknown") for tr in tool_results
+                ) if tool_results else "no_results"
+                plan.complete_subtask(subtask.id, error=_error)
+                logger.warning("[Subtask] Subtask %d failed: %s", subtask.id, _error[:100])
+
+            # Record observation
+            state.add_react_observation({
+                "iteration": subtask_idx,
+                "subtask_id": subtask.id,
+                "goal": subtask.goal,
+                "tool": subtask.tool,
+                "result_summary": _summary[:300],
+                "success": _success,
+            })
+
+        # Record trace
+        state.trace["subtask_execution"] = {
+            "total_subtasks": len(plan.subtasks),
+            "done": plan.done_count,
+            "failed": plan.failed_count,
+            "pending": plan.pending_count,
+            "elapsed_ms": int((time.time() - _start) * 1000),
+        }
+        logger.info(
+            "[Subtask] Completed: %d done, %d failed, %d pending out of %d subtasks (%.1fs)",
+            plan.done_count, plan.failed_count, plan.pending_count,
+            len(plan.subtasks), time.time() - _start,
+        )
+
+        return all_tool_results
+
     def _llm_planning_phase(
         self,
         user_input: str,
@@ -916,11 +1709,11 @@ class OrchestratorLoop:
                     pass
         
         if self.config.debug:
-            logger.debug(f"[ORCHESTRATOR] LLM Planning Phase:")
-            logger.debug(f"  User: {user_input}")
-            logger.debug(f"  Dialog Summary (memory-lite): {dialog_summary or 'None'}")
-            logger.debug(f"  Recent History: {len(conversation_history)} turns")
-            logger.debug(f"  Tool Results: {len(tool_results)}")
+            logger.debug("[ORCHESTRATOR] LLM Planning Phase:")
+            logger.debug("  User: %s", user_input)
+            logger.debug("  Dialog Summary (memory-lite): %s", dialog_summary or 'None')
+            logger.debug("  Recent History: %d turns", len(conversation_history))
+            logger.debug("  Tool Results: %d", len(tool_results))
         
         # Issue #417: Use cached session context from state (built once in process_turn)
         # Issue #359: state.session_context is always set by process_turn (or externally)
@@ -932,14 +1725,15 @@ class OrchestratorLoop:
                 if len(self._session_ctx_caches) >= self._session_ctx_max_size:
                     oldest = next(iter(self._session_ctx_caches))
                     del self._session_ctx_caches[oldest]
-                from bantz.brain.session_context_cache import SessionContextCache
+                from bantz.brain.session_context_cache import \
+                    SessionContextCache
                 self._session_ctx_caches[sid] = SessionContextCache(ttl_seconds=self._session_ctx_ttl)
             session_context = self._session_ctx_caches[sid].get_or_build()
             state.session_context = session_context
         
-        # Issue #339: Add recent conversation for anaphora / multi-turn
+        # Issue #339 + #1278: Add recent conversation with adaptive compaction
         if state.conversation_history:
-            session_context["recent_conversation"] = state.conversation_history[-3:]
+            session_context["recent_conversation"] = state.compact_conversation_history(raw_tail=3)
 
         # Issue #407: Merge preroute hint into session_context
         if _preroute_hint:
@@ -948,8 +1742,11 @@ class OrchestratorLoop:
         # Issue #938: Run NLU slot extraction BEFORE LLM router
         # Extracts Turkish time/date, URLs, app names, queries, positions
         # and injects them as pre-parsed hints so the 3B model doesn't hallucinate.
+        # Issue #1255: NLU patterns are Turkish — run on original TR text
+        # when bridge is active, not on the EN-translated router input.
+        _nlu_input = state.current_user_input or user_input
         try:
-            _nlu_slots = self._slot_extractor.extract_all(user_input)
+            _nlu_slots = self._slot_extractor.extract_all(_nlu_input)
             if _nlu_slots:
                 _flat_slots = self._slot_extractor.to_flat_dict(_nlu_slots)
                 # Serialize datetime objects to ISO strings for JSON compat
@@ -973,6 +1770,15 @@ class OrchestratorLoop:
         except Exception as _slot_exc:
             logger.debug("[NLU] Slot extraction failed (non-fatal): %s", _slot_exc)
 
+        # Issue #1276: Inject active entity context into session_context
+        # so the LLM can resolve follow-up references ("saatini değiştir")
+        try:
+            entity_block = state.slot_registry.to_prompt_block()
+            if entity_block:
+                session_context["active_entity"] = entity_block
+        except Exception as _ent_exc:
+            logger.debug("[Issue #1276] Entity context injection failed (non-fatal): %s", _ent_exc)
+
         # Call orchestrator with enhanced summary + session context
         output = self.orchestrator.route(
             user_input=user_input,
@@ -984,9 +1790,20 @@ class OrchestratorLoop:
         # NLU slots (Turkish time parser etc.) are authoritative — LLM slots
         # are overridden only for keys that NLU confidently extracted.
         _nlu_merged = session_context.get("nlu_slots") or {}
-        if _nlu_merged and output.slots is not None:
+        if _nlu_merged:
+            # Ensure slots dict exists — LLM may return slots=None
+            if output.slots is None:
+                output = replace(output, slots={})
+            # Known LLM default titles that should be treated as empty
+            _TITLE_DEFAULTS = {"etkinlik", "event", "meeting", "toplantı etkinliği"}
             for _nk, _nv in _nlu_merged.items():
-                if _nk not in output.slots or not output.slots[_nk]:
+                _existing = output.slots.get(_nk)
+                _treat_empty = not _existing
+                # For "title": also override if LLM returned a generic default
+                if _nk == "title" and isinstance(_existing, str):
+                    if _existing.strip().lower() in _TITLE_DEFAULTS:
+                        _treat_empty = True
+                if _nk not in output.slots or _treat_empty:
                     output.slots[_nk] = _nv
             if "time" in _nlu_merged:
                 # Time from NLU's Turkish parser is more reliable than LLM guess
@@ -996,18 +1813,297 @@ class OrchestratorLoop:
 
         # Issue #607: Post-route correction for email sending.
         # The 3B router can misroute send-intents to smalltalk/unknown.
-        output = self._post_route_correction_email_send(user_input, output)
+        # Use original Turkish text — email send patterns are Turkish.
+        _email_text = state.current_user_input or user_input
+        output = self._post_route_correction_email_send(_email_text, output)
+
+        # Issue #gmail-to: Gmail slot enrichment — when LLM correctly routes
+        # to gmail/send but fails to extract the email address from user input
+        # into gmail.to, regex-extract it here BEFORE plan_verifier blocks it.
+        if (
+            getattr(output, "route", "") == "gmail"
+            and getattr(output, "gmail_intent", "") in ("send", "create_draft", "forward")
+        ):
+            _gmail_obj = dict(getattr(output, "gmail", None) or {})
+            if not _gmail_obj.get("to"):
+                _extracted_email = extract_first_email(_email_text)
+                if _extracted_email:
+                    _gmail_obj["to"] = _extracted_email
+                    _slots = dict(output.slots or {})
+                    _slots.setdefault("to", _extracted_email)
+                    output = replace(output, gmail=_gmail_obj, slots=_slots)
+                    logger.info(
+                        "[GMAIL_ENRICH] Extracted to=%s from user input",
+                        _extracted_email,
+                    )
+            # Also enrich subject from user input if missing
+            if not _gmail_obj.get("subject"):
+                from bantz.brain.post_route_corrections import \
+                    extract_subject_hint
+                _subj = extract_subject_hint(_email_text)
+                if _subj:
+                    _gmail_obj["subject"] = _subj
+                    _slots = dict(output.slots or {})
+                    _slots.setdefault("subject", _subj)
+                    output = replace(output, gmail=_gmail_obj, slots=_slots)
+
+        # Issue #1212: Anaphoric follow-up recovery.
+        # When user says "nelermiş onlar", "bunları özetle" etc. after a tool
+        # call, the 3B router often misroutes to smalltalk/unknown because
+        # there are no domain-specific keywords.  If the input is anaphoric
+        # and we have a recent tool call, carry forward the previous route
+        # and re-execute the previous tool so the finalizer can give a richer
+        # summary using the existing tool results in state.
+        # Issue #1254: Use original TR text for anaphoric detection, not the
+        # bridge-translated EN text.  _ANAPHORA_TOKENS are Turkish words.
+        _anaphoric_text = state.current_user_input or user_input
+        if (
+            state.last_tool_called
+            and output.route in ("unknown", "smalltalk")
+            and not output.tool_plan
+            and self.orchestrator._is_anaphoric_followup(_anaphoric_text)
+        ):
+            prev_route = state.last_tool_route or "unknown"
+            prev_tool = state.last_tool_called
+            logger.info(
+                "[Issue #1212] Anaphoric follow-up detected: '%s' → "
+                "carrying forward route=%s tool=%s",
+                user_input, prev_route, prev_tool,
+            )
+            from dataclasses import replace as _dc_replace
+            output = _dc_replace(
+                output,
+                route=prev_route,
+                tool_plan=[prev_tool],
+                confidence=max(output.confidence, 0.6),
+                assistant_reply="",  # let finalization handle it
+                raw_output={
+                    **output.raw_output,
+                    "anaphoric_followup": True,
+                    "carried_route": prev_route,
+                    "carried_tool": prev_tool,
+                },
+            )
+
+        # Issue #1217: Gmail pagination — detect "başka", "devamı" etc.
+        # and inject page_token + previous query into the tool plan.
+        # Issue #1254: Use original TR text for pagination detection.
+        _PAGINATION_TOKENS = frozenset({
+            "başka", "devam", "devamı", "sonraki", "diğer", "diğerleri",
+        })
+        _pagination_text = (state.current_user_input or user_input or "").strip().lower()
+        _pagination_words = set(re.split(r"[^a-zçğıöşü]+", _pagination_text))
+        _is_pagination = bool(_pagination_words & _PAGINATION_TOKENS) or "daha var mı" in _pagination_text
+        if (
+            _is_pagination
+            and state.gmail_next_page_token
+            and state.last_tool_called in ("gmail.list_messages", "gmail.smart_search")
+        ):
+            logger.info(
+                "[Issue #1217] Pagination detected: injecting page_token for gmail"
+            )
+            output = replace(
+                output,
+                route="gmail",
+                tool_plan=["gmail.list_messages"],
+                gmail_intent="list",
+                confidence=max(output.confidence, 0.7),
+                assistant_reply="",
+                slots={
+                    **(output.slots or {}),
+                    "page_token": state.gmail_next_page_token,
+                    "query": state.gmail_last_query,
+                },
+                raw_output={
+                    **output.raw_output,
+                    "pagination_followup": True,
+                    "page_token": state.gmail_next_page_token,
+                },
+            )
+
+        # Issue #1218: Specific mail fetch — when user mentions a mail by
+        # keyword (e.g. "github mailinin içeriğini özetle") and we have
+        # previously listed messages, resolve the message_id by matching
+        # against stored subject/sender headers.
+        if (
+            state.gmail_listed_messages
+            and output.route == "gmail"
+            and output.tool_plan
+            and "gmail.list_messages" in output.tool_plan
+        ):
+            matched_id = _match_mail_by_keyword(user_input, state.gmail_listed_messages)
+            if matched_id:
+                logger.info(
+                    "[Issue #1218] Resolved specific mail id=%s from '%.40s'",
+                    matched_id, user_input,
+                )
+                output = replace(
+                    output,
+                    tool_plan=["gmail.get_message"],
+                    gmail_intent="detail",
+                    slots={**(output.slots or {}), "message_id": matched_id},
+                    raw_output={
+                        **output.raw_output,
+                        "specific_mail_resolved": True,
+                        "resolved_message_id": matched_id,
+                    },
+                )
+
+        # Issue #1230: Mail disambiguation-first — resolve #N refs and
+        # force disambiguation when intent is detail/read but no message_id.
+        if (
+            state.gmail_listed_messages
+            and output.route == "gmail"
+            and output.gmail_intent in ("read", "detail")
+            and not (output.slots or {}).get("message_id")
+        ):
+            _mail_resolved = False
+
+            # 1) Try #N reference (e.g. "#2 maili anlat")
+            try:
+                from bantz.brain.calendar_intent import parse_hash_ref_index
+                _mail_ref = parse_hash_ref_index(user_input)
+                if _mail_ref is not None and 1 <= _mail_ref <= len(state.gmail_listed_messages):
+                    _ref_msg = state.gmail_listed_messages[_mail_ref - 1]
+                    _ref_msg_id = _ref_msg.get("id")
+                    if _ref_msg_id:
+                        logger.info(
+                            "[Issue #1230] Resolved gmail #%d → id=%s",
+                            _mail_ref, _ref_msg_id,
+                        )
+                        output = replace(
+                            output,
+                            tool_plan=["gmail.get_message"],
+                            slots={**(output.slots or {}), "message_id": _ref_msg_id},
+                            raw_output={
+                                **output.raw_output,
+                                "gmail_ref_resolved": True,
+                                "resolved_ref_index": _mail_ref,
+                            },
+                        )
+                        _mail_resolved = True
+            except Exception:
+                pass
+
+            # 2) Try keyword match (e.g. "github maili")
+            if not _mail_resolved:
+                _kw_id = _match_mail_by_keyword(user_input, state.gmail_listed_messages)
+                if _kw_id:
+                    logger.info(
+                        "[Issue #1230] Keyword match → id=%s from '%.40s'",
+                        _kw_id, user_input,
+                    )
+                    output = replace(
+                        output,
+                        tool_plan=["gmail.get_message"],
+                        slots={**(output.slots or {}), "message_id": _kw_id},
+                        raw_output={
+                            **output.raw_output,
+                            "specific_mail_resolved": True,
+                            "resolved_message_id": _kw_id,
+                        },
+                    )
+                    _mail_resolved = True
+
+            # 3) Disambiguation — no match, ask user to pick
+            if not _mail_resolved:
+                lines = ["Hangi maili istiyorsunuz efendim?"]
+                for i, m in enumerate(state.gmail_listed_messages[:10], start=1):
+                    _subj = m.get("subject") or "(konu yok)"
+                    _sender = m.get("from") or ""
+                    lines.append(f"  #{i}  {_sender} — {_subj}")
+                logger.info("[Issue #1230] Mail disambiguation prompt shown")
+                output = replace(
+                    output,
+                    ask_user=True,
+                    question="\n".join(lines),
+                    tool_plan=[],
+                    raw_output={
+                        **output.raw_output,
+                        "mail_disambiguation": True,
+                    },
+                )
         
+        # Issue #1224: Calendar #N reference resolution — when user says
+        # "#2 toplantısını sil" and we previously listed events, resolve
+        # the event ref index to the actual event_id.
+        if (
+            state.calendar_listed_events
+            and output.route == "calendar"
+            and output.calendar_intent in ("cancel", "modify", "query")
+        ):
+            _event_resolved = False
+            try:
+                from bantz.brain.calendar_intent import parse_hash_ref_index
+                _ref_idx = parse_hash_ref_index(user_input)
+                if _ref_idx is not None and 1 <= _ref_idx <= len(state.calendar_listed_events):
+                    _ref_event = state.calendar_listed_events[_ref_idx - 1]
+                    _ref_event_id = _ref_event.get("id") or _ref_event.get("event_id")
+                    if _ref_event_id:
+                        logger.info(
+                            "[Issue #1224] Resolved calendar #%d → event_id=%s",
+                            _ref_idx, _ref_event_id,
+                        )
+                        _new_slots = {**(output.slots or {}), "event_id": _ref_event_id}
+                        # For modify/cancel, also carry over title for confirmation prompt
+                        _ref_title = _ref_event.get("summary") or _ref_event.get("title") or ""
+                        if _ref_title:
+                            _new_slots.setdefault("title", _ref_title)
+                        output = replace(
+                            output,
+                            slots=_new_slots,
+                            raw_output={
+                                **output.raw_output,
+                                "calendar_ref_resolved": True,
+                                "resolved_ref_index": _ref_idx,
+                                "resolved_event_id": _ref_event_id,
+                            },
+                        )
+                        _event_resolved = True
+            except Exception as _ref_exc:
+                logger.debug("[Issue #1224] Calendar ref resolution failed: %s", _ref_exc)
+
+            # Issue #event-time-ref: Time-based event resolution.
+            # When user says "9'daki etkinliği iptal et" (the event at 9),
+            # extract the hour from Turkish text and match against listed
+            # events' start times.
+            if not _event_resolved:
+                _time_ref_text = state.current_user_input or user_input
+                _resolved_event = _resolve_event_by_time_ref(
+                    _time_ref_text, state.calendar_listed_events,
+                )
+                if _resolved_event:
+                    _rev_id = _resolved_event.get("id") or _resolved_event.get("event_id")
+                    if _rev_id:
+                        logger.info(
+                            "[EVENT_TIME_REF] Resolved time ref → event_id=%s summary=%s",
+                            _rev_id, _resolved_event.get("summary", ""),
+                        )
+                        _new_slots = {**(output.slots or {}), "event_id": _rev_id}
+                        _rev_title = _resolved_event.get("summary") or _resolved_event.get("title") or ""
+                        if _rev_title:
+                            _new_slots.setdefault("title", _rev_title)
+                        output = replace(
+                            output,
+                            slots=_new_slots,
+                            raw_output={
+                                **output.raw_output,
+                                "calendar_ref_resolved": True,
+                                "resolved_event_id": _rev_id,
+                                "time_ref_resolved": True,
+                            },
+                        )
+
         if self.config.debug:
-            logger.debug(f"[ORCHESTRATOR] LLM Decision:")
-            logger.debug(f"  Route: {output.route}")
-            logger.debug(f"  Intent: {output.calendar_intent}")
-            logger.debug(f"  Confidence: {output.confidence:.2f}")
-            logger.debug(f"  Tool Plan: {output.tool_plan}")
-            logger.debug(f"  Ask User: {output.ask_user}")
-            logger.debug(f"  Requires Confirmation: {output.requires_confirmation}")
+            logger.debug("[ORCHESTRATOR] LLM Decision:")
+            logger.debug("  Route: %s", output.route)
+            logger.debug("  Intent: %s", output.calendar_intent)
+            logger.debug("  Confidence: %.2f", output.confidence)
+            logger.debug("  Tool Plan: %s", output.tool_plan)
+            logger.debug("  Ask User: %s", output.ask_user)
+            logger.debug("  Requires Confirmation: %s", output.requires_confirmation)
             if output.reasoning_summary:
-                logger.debug(f"  Reasoning: {output.reasoning_summary}")
+                logger.debug("  Reasoning: %s", output.reasoning_summary)
         
         # Emit routing event
         self.event_bus.publish("llm.decision", {
@@ -1042,19 +2138,237 @@ class OrchestratorLoop:
         # Issue #870: Sanitize tool_plan — remap hallucinated/mismatched tools
         output = self._sanitize_tool_plan(output)
 
+        # Issue #calendar-misroute: Calendar post-route correction.
+        # When the 3B model routes a clear calendar intent to a wrong domain
+        # (gmail, smalltalk, unknown) WITH wrong tools, the plan_verifier
+        # will catch route_tool_mismatch but infer_route_from_tools will
+        # suggest the wrong domain (based on wrong tools).  Fix it here by
+        # detecting calendar keywords and overriding route+tools.
+        _cal_check_text = state.current_user_input or user_input
+        if output.route in ("smalltalk", "unknown", "gmail"):
+            _kw_route = self.orchestrator._detect_route_from_input(_cal_check_text)
+            if _kw_route == "calendar":
+                # Calendar keywords dominate — override route and tool_plan
+                _cal_intent = "create"  # default; refine if we can
+                _cancel_words = {"iptal", "sil", "kaldır", "vazgeç"}
+                _query_words = {"ne var", "neler", "göster", "listele", "kontrol"}
+                _cal_check_lower = _cal_check_text.lower()
+                _cal_tokens = set(re.split(r"[^a-zçğıöşü]+", _cal_check_lower))
+                if _cal_tokens & _cancel_words:
+                    _cal_intent = "cancel"
+                elif _cal_tokens & _query_words or "ne var" in _cal_check_lower:
+                    _cal_intent = "query"
+                _cal_tool = self.orchestrator._resolve_tool_from_intent(
+                    "calendar", _cal_intent, "none",
+                )
+                if _cal_tool:
+                    logger.info(
+                        "[CALENDAR_MISROUTE] Overriding route=%s→calendar "
+                        "intent=%s tool=%s for '%.40s'",
+                        output.route, _cal_intent, _cal_tool, _cal_check_text,
+                    )
+                    output = replace(
+                        output,
+                        route="calendar",
+                        calendar_intent=_cal_intent,
+                        tool_plan=[_cal_tool],
+                        confidence=max(output.confidence, 0.5),
+                        raw_output={
+                            **output.raw_output,
+                            "calendar_misroute_recovery": True,
+                            "original_route": output.route,
+                        },
+                    )
+
+        # Issue #calendar-intent-misroute: Correct calendar/create→query when
+        # the input is clearly a query ("var mı", "neler", "planlarımız").
+        if output.route == "calendar" and output.calendar_intent in ("create", "none"):
+            _intent_check = (_cal_check_text or "").lower()
+            _query_markers = {
+                "var mı", "neler", "ne var", "planlarımız", "ne yapacağız",
+                "göster", "listele", "kontrol", "planımız", "programımız",
+                "neler var", "ne yapıyoruz", "planımızda", "takvimimizde",
+            }
+            if any(m in _intent_check for m in _query_markers):
+                _q_tool = self.orchestrator._resolve_tool_from_intent(
+                    "calendar", "query", "none",
+                )
+                if _q_tool:
+                    logger.info(
+                        "[CALENDAR_INTENT_FIX] Correcting create→query for '%.40s'",
+                        _cal_check_text,
+                    )
+                    output = replace(
+                        output,
+                        calendar_intent="query",
+                        tool_plan=[_q_tool],
+                        raw_output={
+                            **output.raw_output,
+                            "calendar_intent_corrected": True,
+                            "original_intent": "create",
+                        },
+                    )
+
         # Issue #907: Static plan verification
-        from bantz.brain.llm_router import _VALID_TOOLS
+        from bantz.brain.llm_router import JarvisLLMOrchestrator
+        from bantz.brain.plan_verifier import infer_route_from_tools
+
+        # Use the original Turkish user input for plan verification, since
+        # _has_tool_indicators() patterns are Turkish.  ``user_input`` here
+        # is the English bridge-translated text which would cause false
+        # ``tool_plan_no_indicators`` warnings.
+        _verify_text = state.current_user_input or user_input
         plan_ok, plan_errors = verify_plan(
             output.__dict__ if hasattr(output, "__dict__") else vars(output),
-            user_input,
-            _VALID_TOOLS,
+            _verify_text,
+            JarvisLLMOrchestrator._VALID_TOOLS,
         )
         if not plan_ok:
-            logger.warning("[PLAN_VERIFIER] errors=%s — falling back to ask_user", plan_errors)
-            # For hard errors (unknown tool, missing slot) — ask user to clarify
-            hard = [e for e in plan_errors if not e.startswith("tool_plan_no_indicators")]
+            logger.warning("[PLAN_VERIFIER] errors=%s input=%.60s", plan_errors, _verify_text)
+            # Separate correctable errors from hard errors
+            _correctable = {"route_tool_mismatch", "smalltalk_with_tools", "route_intent_mismatch"}
+            correctable = [e for e in plan_errors if any(e.startswith(c) for c in _correctable)]
+            hard = [
+                e for e in plan_errors
+                if not e.startswith("tool_plan_no_indicators")
+                and not any(e.startswith(c) for c in _correctable)
+            ]
+
+            # Auto-correct route from tool_plan prefixes when the only errors
+            # are route/tool mismatches (LLM got tools right but route wrong).
+            if correctable and not hard:
+                # Issue #1355: Intent-based route correction.
+                # When gmail_intent is set but route is not 'gmail', the LLM
+                # got the intent right but routed to the wrong domain. Fix
+                # route AND tool_plan from the intent.
+                _intent_corrected = False
+                _gmail_intent = getattr(output, "gmail_intent", "none") or "none"
+                _cal_intent = output.calendar_intent or "none"
+                if _gmail_intent != "none" and output.route != "gmail":
+                    _correct_tool = self.orchestrator._resolve_tool_from_intent(
+                        "gmail", _cal_intent, _gmail_intent,
+                    )
+                    if _correct_tool:
+                        logger.info(
+                            "[PLAN_VERIFIER] Auto-correcting route %s→gmail "
+                            "and tool→%s based on gmail_intent=%s",
+                            output.route, _correct_tool, _gmail_intent,
+                        )
+                        output = replace(
+                            output,
+                            route="gmail",
+                            tool_plan=[_correct_tool],
+                        )
+                        _intent_corrected = True
+                elif _cal_intent != "none" and output.route != "calendar":
+                    _correct_tool = self.orchestrator._resolve_tool_from_intent(
+                        "calendar", _cal_intent, _gmail_intent,
+                    )
+                    if _correct_tool:
+                        logger.info(
+                            "[PLAN_VERIFIER] Auto-correcting route %s→calendar "
+                            "and tool→%s based on calendar_intent=%s",
+                            output.route, _correct_tool, _cal_intent,
+                        )
+                        output = replace(
+                            output,
+                            route="calendar",
+                            tool_plan=[_correct_tool],
+                        )
+                        _intent_corrected = True
+
+                if not _intent_corrected:
+                    inferred = infer_route_from_tools(output.tool_plan)
+                    if inferred and inferred != output.route:
+                        logger.info(
+                            "[PLAN_VERIFIER] Auto-correcting route %s→%s based on tool_plan",
+                            output.route, inferred,
+                        )
+                        output = replace(output, route=inferred)
+                    elif not inferred:
+                        # Issue #1229: Cannot infer correct route → hard-block
+                        # tool execution to prevent misrouted tool calls.
+                        logger.warning(
+                            "[PLAN_VERIFIER] Cannot infer route from tool_plan, "
+                            "blocking execution. errors=%s",
+                            correctable,
+                        )
+                        output = replace(
+                            output,
+                            tool_plan=[],
+                            ask_user=True,
+                            question="Bu isteği tam anlayamadım efendim. Biraz daha açar mısınız?",
+                        )
+
             if hard:
-                output = replace(output, ask_user=True, question="Anlayamadım, tekrar eder misin?")
+                # Issue #1229: Hard errors MUST clear tool_plan to prevent
+                # execution of invalid/dangerous tool calls.
+                # Special recovery: if the only hard errors are hallucinated
+                # internal tools (e.g. _reflection) and route is valid,
+                # inject the correct tool instead of blocking.
+                _only_internal = all(
+                    e.startswith("unknown_tool:_") or e.startswith("route_tool_mismatch")
+                    for e in hard
+                )
+                if _only_internal and output.route in ("calendar", "gmail", "system", "contacts", "keep"):
+                    _recovery_tool = self.orchestrator._resolve_tool_from_intent(
+                        output.route,
+                        output.calendar_intent or "query",
+                        getattr(output, "gmail_intent", "none") or "none",
+                        system_intent=getattr(output, "system_intent", "none") or "none",
+                        contacts_intent=getattr(output, "contacts_intent", "none") or "none",
+                        keep_intent=getattr(output, "keep_intent", "none") or "none",
+                    )
+                    if _recovery_tool:
+                        logger.info(
+                            "[PLAN_VERIFIER] Recovered hallucinated tools → %s",
+                            _recovery_tool,
+                        )
+                        output = replace(output, tool_plan=[_recovery_tool])
+                        hard = []  # recovered
+
+                if hard:
+                    output = replace(
+                        output,
+                        tool_plan=[],
+                        ask_user=True,
+                        question="Anlayamadım, tekrar eder misin?",
+                    )
+
+        # Issue #1214: Keyword-based route recovery when LLM routes to
+        # smalltalk/unknown with no tool_plan but input has tool indicators.
+        # Use original Turkish text — _detect_route_from_input uses Turkish
+        # keyword patterns that won't match English bridge-translated text.
+        _kw_recovery_text = state.current_user_input or user_input
+        if (
+            output.route in ("smalltalk", "unknown")
+            and not output.tool_plan
+            and not output.raw_output.get("preroute_complete")
+        ):
+            kw_route = self.orchestrator._detect_route_from_input(_kw_recovery_text)
+            if kw_route not in ("smalltalk", "unknown"):
+                resolved_tool = self.orchestrator._resolve_tool_from_intent(
+                    kw_route, "none", "none",
+                    system_intent="none", contacts_intent="none", keep_intent="none",
+                )
+                if resolved_tool:
+                    logger.info(
+                        "[Issue #1214] Recovering misrouted %s→%s tool=%s for '%.40s'",
+                        output.route, kw_route, resolved_tool, _kw_recovery_text,
+                    )
+                    output = replace(
+                        output,
+                        route=kw_route,
+                        tool_plan=[resolved_tool],
+                        confidence=max(output.confidence, 0.5),
+                        assistant_reply="",
+                        raw_output={
+                            **output.raw_output,
+                            "misroute_recovery": True,
+                            "original_route": output.route,
+                            "recovered_route": kw_route,
+                        },
+                    )
 
         return output
 
@@ -1089,7 +2403,8 @@ class OrchestratorLoop:
             return tool_results
 
         try:
-            from bantz.brain.verify_results import VerifyConfig, verify_tool_results
+            from bantz.brain.verify_results import (VerifyConfig,
+                                                    verify_tool_results)
         except Exception:
             # If the verify module isn't available for any reason, proceed.
             return tool_results
@@ -1128,7 +2443,17 @@ class OrchestratorLoop:
 
                 risk_level = None
                 try:
-                    risk_level = get_tool_risk(tool_name).value
+                    # Issue #1291: Prefer PolicyEngineV2 for risk tier
+                    _v2 = (
+                        self.safety_guard.policy_engine_v2
+                        if self.safety_guard
+                        else None
+                    )
+                    if _v2 is not None:
+                        risk_level = _v2.get_risk_tier(tool_name).value
+                    else:
+                        from bantz.tools.metadata import get_tool_risk
+                        risk_level = get_tool_risk(tool_name).value
                 except Exception:
                     risk_level = original.get("risk_level")
 
@@ -1207,11 +2532,30 @@ class OrchestratorLoop:
                 state.pop_pending_confirmation()
                 state.confirmed_tool = None
                 logger.info("[FIREWALL] Confirmation accepted for %s — executing.", pending_tool)
+
+                # Issue #1297: Emit tool.confirmed event
+                self.event_bus.publish(
+                    EventType.TOOL_CONFIRMED.value,
+                    {"tool": pending_tool, "params": pending.get("params", {})},
+                    source="orchestrator",
+                )
+
+                # Issue #1291: Record session permit for MED-risk tools
+                # so confirm-once-per-session works.
+                if self.safety_guard and self.safety_guard.policy_engine_v2:
+                    try:
+                        _v2 = self.safety_guard.policy_engine_v2
+                        _tier = _v2.get_risk_tier(pending_tool)
+                        _sid = getattr(state, "session_id", None) or str(id(state))
+                        _v2.confirm(pending_tool, _sid, _tier)
+                    except Exception:
+                        pass  # best-effort
             else:
                 prompt = str(pending.get("prompt") or "Confirm to continue")
                 logger.warning(
-                    f"[FIREWALL] Cannot execute tools - confirmation pending for {pending_tool}. "
-                    f"User must confirm first."
+                    "[FIREWALL] Cannot execute tools - confirmation pending for %s. "
+                    "User must confirm first.",
+                    pending_tool,
                 )
                 return [{
                     "tool": "blocked",
@@ -1249,7 +2593,7 @@ class OrchestratorLoop:
             
             if violations:
                 for violation in violations:
-                    logger.warning(f"[SAFETY] Tool plan violation: {violation.reason}")
+                    logger.warning("[SAFETY] Tool plan violation: %s", violation.reason)
                     self.safety_guard.audit_decision(
                         decision_type="filter_tool_plan",
                         tool_name=violation.tool_name,
@@ -1265,40 +2609,96 @@ class OrchestratorLoop:
 
         # If no confirmation is pending AND we're not executing a confirmed tool,
         # pre-scan tool_plan and queue all confirmations in order.
+        # Issue #1291: Use PolicyEngineV2 for risk-tier evaluation when available;
+        # fall back to legacy metadata-based checks if v2 is not configured.
         if not state.has_pending_confirmation() and not confirmed_override_tool:
             try:
-                from bantz.tools.metadata import (
-                    get_tool_risk,
-                    is_destructive,
-                    requires_confirmation as check_confirmation,
-                    get_confirmation_prompt,
+                _session_id = getattr(state, "session_id", None) or str(id(state))
+                _v2_engine = (
+                    self.safety_guard.policy_engine_v2
+                    if self.safety_guard
+                    else None
                 )
 
                 confirmations_to_queue: list[dict[str, Any]] = []
                 for tool_name in filtered_tool_plan:
-                    needs_confirmation = check_confirmation(
-                        tool_name,
-                        llm_requested=bool(output.requires_confirmation)
-                    )
-                    if needs_confirmation:
-                        risk = get_tool_risk(tool_name)
-                        prompt = get_confirmation_prompt(tool_name, output.slots)
+                    _tool_params = tool_args_by_name.get(tool_name) or dict(output.slots)
+                    # Issue #1361: Filter params to only include keys valid for
+                    # this tool's schema.  NLU extracts route-agnostic slots
+                    # (url, site) that leak into confirmation prompts otherwise.
+                    _tool_def = self.tools.get(tool_name)
+                    if _tool_def and _tool_def.parameters:
+                        _valid_keys = set((_tool_def.parameters.get("properties") or {}).keys())
+                        if _valid_keys:
+                            _tool_params = {k: v for k, v in _tool_params.items() if k in _valid_keys}
+
+                    # ── PolicyEngineV2 path ──
+                    if _v2_engine is not None:
+                        decision = _v2_engine.evaluate(
+                            tool_name, _tool_params, session_id=_session_id,
+                        )
+                        if decision.action == "execute":
+                            continue  # Auto-allowed (LOW or session-confirmed MED)
+
+                        # confirm / confirm_with_edit → queue
                         confirmations_to_queue.append({
                             "tool": tool_name,
-                            "prompt": prompt,
+                            "prompt": decision.prompt,
                             "slots": output.slots,
-                            "risk_level": risk.value,
+                            "gmail": getattr(output, "gmail", None) or {},
+                            "risk_level": decision.tier.value,
+                            # v2-enriched fields
+                            "risk_tier": decision.tier.value,
+                            "action": decision.action,
+                            "display_params": decision.display_params,
+                            "editable_fields": decision.editable_fields,
+                            "editable": decision.editable,
+                            "requires_explicit_confirm": decision.requires_explicit_confirm,
+                            "cooldown_seconds": decision.cooldown_seconds,
                         })
 
-                        # Audit confirmation request
                         if self.safety_guard:
                             self.safety_guard.audit_decision(
                                 decision_type="confirmation_required",
                                 tool_name=tool_name,
                                 allowed=False,
-                                reason=f"Destructive tool ({risk.value}) requires user confirmation",
-                                metadata={"prompt": prompt, "params": output.slots},
+                                reason=f"PolicyEngineV2: {decision.reason} (tier={decision.tier.value})",
+                                metadata={
+                                    "prompt": decision.prompt,
+                                    "tier": decision.tier.value,
+                                    "action": decision.action,
+                                },
                             )
+                    else:
+                        # ── Legacy metadata path (fallback) ──
+                        from bantz.tools.metadata import (get_confirmation_prompt,
+                                                          get_tool_risk)
+                        from bantz.tools.metadata import \
+                            requires_confirmation as check_confirmation
+
+                        needs_confirmation = check_confirmation(
+                            tool_name,
+                            llm_requested=bool(output.requires_confirmation),
+                        )
+                        if needs_confirmation:
+                            risk = get_tool_risk(tool_name)
+                            prompt = get_confirmation_prompt(tool_name, output.slots)
+                            confirmations_to_queue.append({
+                                "tool": tool_name,
+                                "prompt": prompt,
+                                "slots": output.slots,
+                                "gmail": getattr(output, "gmail", None) or {},
+                                "risk_level": risk.value,
+                            })
+
+                            if self.safety_guard:
+                                self.safety_guard.audit_decision(
+                                    decision_type="confirmation_required",
+                                    tool_name=tool_name,
+                                    allowed=False,
+                                    reason=f"Destructive tool ({risk.value}) requires user confirmation",
+                                    metadata={"prompt": prompt, "params": output.slots},
+                                )
 
                 if confirmations_to_queue:
                     for confirmation in confirmations_to_queue:
@@ -1311,6 +2711,11 @@ class OrchestratorLoop:
                         "pending_confirmation": True,
                         "risk_level": str(first.get("risk_level") or ""),
                         "confirmation_prompt": str(first.get("prompt") or ""),
+                        # v2 fields (present only when PolicyEngineV2 is active)
+                        "risk_tier": first.get("risk_tier"),
+                        "editable_fields": first.get("editable_fields"),
+                        "editable": first.get("editable"),
+                        "cooldown_seconds": first.get("cooldown_seconds"),
                     })
                     return tool_results
             except Exception:
@@ -1319,13 +2724,13 @@ class OrchestratorLoop:
         
         for tool_name in filtered_tool_plan:
             if self.config.debug:
-                logger.debug(f"[ORCHESTRATOR] Executing tool: {tool_name}")
+                logger.debug("[ORCHESTRATOR] Executing tool: %s", tool_name)
             
             # Safety Guard: Check tool allowlist/denylist
             if self.safety_guard:
                 allowed, deny_reason = self.safety_guard.check_tool_allowed(tool_name)
                 if not allowed:
-                    logger.warning(f"[SAFETY] Tool '{tool_name}' denied: {deny_reason}")
+                    logger.warning("[SAFETY] Tool '%s' denied: %s", tool_name, deny_reason)
                     self.safety_guard.audit_decision(
                         decision_type="tool_allowlist",
                         tool_name=tool_name,
@@ -1340,53 +2745,108 @@ class OrchestratorLoop:
                     continue
             
             # Confirmation firewall (Issue #160 - enhanced)
-            # Import metadata module for risk classification
-            from bantz.tools.metadata import (
-                get_tool_risk,
-                is_destructive,
-                requires_confirmation as check_confirmation,
-                get_confirmation_prompt,
+            # Issue #1291: Use PolicyEngineV2 for per-tool risk evaluation
+            _v2_engine = (
+                self.safety_guard.policy_engine_v2
+                if self.safety_guard
+                else None
             )
-            
-            risk = get_tool_risk(tool_name)
-            needs_confirmation = check_confirmation(
-                tool_name,
-                llm_requested=bool(output.requires_confirmation)
-            )
+            _session_id = getattr(state, "session_id", None) or str(id(state))
+
+            needs_confirmation = False
+            risk_value = "moderate"
+            confirmation_prompt = ""
+            _v2_decision = None
 
             was_confirmed = False
             if confirmed_override_tool and tool_name == confirmed_override_tool:
                 # This tool was explicitly confirmed (queue head accepted).
                 needs_confirmation = False
                 was_confirmed = True
+            elif _v2_engine is not None:
+                # ── PolicyEngineV2 path ──
+                _tool_params = tool_args_by_name.get(tool_name) or dict(output.slots)
+                # Issue #1361: Filter params by tool schema
+                _tool_def = self.tools.get(tool_name)
+                if _tool_def and _tool_def.parameters:
+                    _valid_keys = set((_tool_def.parameters.get("properties") or {}).keys())
+                    if _valid_keys:
+                        _tool_params = {k: v for k, v in _tool_params.items() if k in _valid_keys}
+                _v2_decision = _v2_engine.evaluate(
+                    tool_name, _tool_params, session_id=_session_id,
+                )
+                if _v2_decision.action in ("confirm", "confirm_with_edit"):
+                    needs_confirmation = True
+                    risk_value = _v2_decision.tier.value
+                    confirmation_prompt = _v2_decision.prompt
+                else:
+                    needs_confirmation = False
+                    risk_value = _v2_decision.tier.value
+            else:
+                # ── Legacy metadata path (fallback) ──
+                from bantz.tools.metadata import (get_confirmation_prompt,
+                                                  get_tool_risk, is_destructive)
+                from bantz.tools.metadata import \
+                    requires_confirmation as check_confirmation
+
+                risk = get_tool_risk(tool_name)
+                risk_value = risk.value
+                needs_confirmation = check_confirmation(
+                    tool_name,
+                    llm_requested=bool(output.requires_confirmation),
+                )
+                if needs_confirmation:
+                    confirmation_prompt = get_confirmation_prompt(tool_name, output.slots)
+
+                    # FIREWALL: Destructive tools always need confirmation
+                    if is_destructive(tool_name) and not output.requires_confirmation:
+                        logger.warning(
+                            "[FIREWALL] Tool %s is DESTRUCTIVE but LLM didn't request confirmation. "
+                            "Enforcing confirmation requirement (Issue #160).",
+                            tool_name,
+                        )
 
             if needs_confirmation:
-                # FIREWALL: Destructive tools always need confirmation
-                # Even if LLM didn't request it
-                if is_destructive(tool_name) and not output.requires_confirmation:
-                    logger.warning(
-                        f"[FIREWALL] Tool {tool_name} is DESTRUCTIVE but LLM didn't request confirmation. "
-                        f"Enforcing confirmation requirement (Issue #160)."
-                    )
+                if not confirmation_prompt:
+                    try:
+                        from bantz.tools.metadata import get_confirmation_prompt
+                        confirmation_prompt = get_confirmation_prompt(tool_name, output.slots)
+                    except Exception:
+                        confirmation_prompt = f"{tool_name} — confirm? (evet/hayır)"
 
-                # If we reach here, confirmation wasn't queued in pre-scan.
-                # Queue it now and return a pending confirmation placeholder.
-                prompt = get_confirmation_prompt(tool_name, output.slots)
-                logger.info(f"[FIREWALL] Tool {tool_name} ({risk.value}) requires confirmation.")
+                logger.info("[FIREWALL] Tool %s (%s) requires confirmation.", tool_name, risk_value)
 
-                state.add_pending_confirmation({
+                _pending = {
                     "tool": tool_name,
-                    "prompt": prompt,
+                    "prompt": confirmation_prompt,
                     "slots": output.slots,
-                    "risk_level": risk.value,
-                })
+                    "gmail": getattr(output, "gmail", None) or {},
+                    "risk_level": risk_value,
+                }
+                # Enrich with v2 fields when available
+                if _v2_decision is not None:
+                    _pending.update({
+                        "risk_tier": _v2_decision.tier.value,
+                        "action": _v2_decision.action,
+                        "display_params": _v2_decision.display_params,
+                        "editable_fields": _v2_decision.editable_fields,
+                        "editable": _v2_decision.editable,
+                        "requires_explicit_confirm": _v2_decision.requires_explicit_confirm,
+                        "cooldown_seconds": _v2_decision.cooldown_seconds,
+                    })
+
+                state.add_pending_confirmation(_pending)
 
                 tool_results.append({
                     "tool": tool_name,
                     "success": False,
                     "pending_confirmation": True,
-                    "risk_level": risk.value,
-                    "confirmation_prompt": prompt,
+                    "risk_level": risk_value,
+                    "confirmation_prompt": confirmation_prompt,
+                    "risk_tier": _v2_decision.tier.value if _v2_decision else None,
+                    "editable_fields": _v2_decision.editable_fields if _v2_decision else None,
+                    "editable": _v2_decision.editable if _v2_decision else None,
+                    "cooldown_seconds": _v2_decision.cooldown_seconds if _v2_decision else None,
                 })
 
                 # Audit confirmation request
@@ -1395,8 +2855,12 @@ class OrchestratorLoop:
                         decision_type="confirmation_required",
                         tool_name=tool_name,
                         allowed=False,
-                        reason=f"Destructive tool ({risk.value}) requires user confirmation",
-                        metadata={"prompt": prompt, "params": output.slots},
+                        reason=(
+                            f"PolicyEngineV2: {_v2_decision.reason} (tier={_v2_decision.tier.value})"
+                            if _v2_decision
+                            else f"Destructive tool ({risk_value}) requires user confirmation"
+                        ),
+                        metadata={"prompt": confirmation_prompt, "params": output.slots},
                     )
 
                 return tool_results
@@ -1432,12 +2896,32 @@ class OrchestratorLoop:
                     continue
                 
                 # Build parameters: prefer explicit tool_plan args, else fall back to slots.
+                # Issue #1291: If this is a confirmed tool with edited params,
+                # merge the user-edited params over the original.
+                # Issue #1208: gmail.* tools ALWAYS go through _build_tool_params
+                # for proper aliasing (natural_query→text, title→subject, etc.)
                 args = tool_args_by_name.get(tool_name)
-                if args is not None:
+
+                # Apply edited params from HIGH-risk param edit UX
+                _edited = state.confirmed_edited_params if was_confirmed else None
+                if _edited and isinstance(_edited, dict):
+                    if args is not None:
+                        args.update(_edited)
+                    else:
+                        args = dict(_edited)
+                    state.confirmed_edited_params = None  # consume once
+                if args is not None and not tool_name.startswith("gmail."):
                     params = dict(output.slots)
                     params.update(args)
                 else:
-                    params = self._build_tool_params(tool_name, output.slots, output)
+                    merged_slots = dict(output.slots)
+                    if args:
+                        merged_slots.update(args)
+                    params = self._build_tool_params(
+                        tool_name, merged_slots, output,
+                        user_input=state.canonical_input or state.current_user_input,
+                        original_user_input=state.current_user_input if state.canonical_input else None,
+                    )
 
                 # Drop nulls (LLM JSON often includes explicit nulls for optional slots).
                 # Prevents spurious schema/type failures.
@@ -1448,7 +2932,7 @@ class OrchestratorLoop:
                 if self.safety_guard:
                     valid, error = self.safety_guard.validate_tool_args(tool, params)
                     if not valid:
-                        logger.warning(f"[SAFETY] Tool '{tool_name}' args invalid: {error}")
+                        logger.warning("[SAFETY] Tool '%s' args invalid: %s", tool_name, error)
                         self.safety_guard.audit_decision(
                             decision_type="arg_validation",
                             tool_name=tool_name,
@@ -1467,33 +2951,76 @@ class OrchestratorLoop:
                         continue
                 
                 # Execute tool (Issue #431: with timeout protection)
-                timeout = self.config.tool_timeout_seconds
-                try:
-                    exec_start = time.time()
-                    future = self._tool_executor.submit(tool.function, **params)
-                    result = future.result(timeout=timeout)
-                    elapsed_ms = int((time.time() - exec_start) * 1000)
-                except concurrent.futures.TimeoutError:
-                    elapsed_ms = int((time.time() - exec_start) * 1000) if "exec_start" in locals() else 0
-                    logger.error(
-                        "[TOOLS] Tool %s timed out after %.1fs",
-                        tool_name, timeout,
-                    )
-                    self.event_bus.publish("tool.timeout", {
-                        "tool": tool_name,
-                        "timeout_seconds": timeout,
-                    })
-                    tool_results.append({
-                        "tool": tool_name,
-                        "success": False,
-                        "error": f"Tool '{tool_name}' timed out after {timeout:.0f}s",
-                        "user_message": f"Efendim, '{tool_name}' işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.",
-                        "risk_level": risk.value,
-                        "params": params,
-                        "elapsed_ms": elapsed_ms,
-                    })
-                    state.add_tool_result(tool_name, f"timeout after {timeout}s", success=False)
-                    continue
+                # But first: check IngestStore cache for read-only tools
+                _cache_hit = None
+                _CACHEABLE_TOOLS = {
+                    # Legacy names
+                    "gmail_list_messages", "gmail_search", "gmail_get_message",
+                    "list_events", "find_free_slots", "system_info", "gmail_list_labels",
+                    # Canonical dotted names
+                    "gmail.list_messages", "gmail.smart_search", "gmail.get_message", "gmail.list_labels",
+                    "calendar.list_events", "calendar.find_free_slots",
+                    "weather.get_current", "weather.get_forecast",
+                    "news.latest", "news.briefing", "news.category",
+                    "google.classroom.courses", "google.classroom.coursework", "google.classroom.submissions",
+                }
+                if (
+                    tool_name in _CACHEABLE_TOOLS
+                    and getattr(self, "_ingest_bridge", None) is not None
+                ):
+                    try:
+                        _cache_hit = self._ingest_bridge.get_cached(
+                            tool_name, params, max_age=300,
+                        )
+                        if _cache_hit is not None:
+                            logger.info(
+                                "[CACHE] Hit for %s — skipping live call", tool_name,
+                            )
+                    except Exception:
+                        _cache_hit = None
+
+                if _cache_hit is not None:
+                    # Use cached result
+                    import json as _json_cache
+
+                    try:
+                        result = (
+                            _json_cache.loads(_cache_hit.content)
+                            if isinstance(_cache_hit.content, str)
+                            else _cache_hit.content
+                        )
+                    except Exception:
+                        result = _cache_hit.content
+                    elapsed_ms = 0
+                else:
+                    # Live tool execution
+                    timeout = self.config.tool_timeout_seconds
+                    try:
+                        exec_start = time.time()
+                        future = self._tool_executor.submit(tool.function, **params)
+                        result = future.result(timeout=timeout)
+                        elapsed_ms = int((time.time() - exec_start) * 1000)
+                    except concurrent.futures.TimeoutError:
+                        elapsed_ms = int((time.time() - exec_start) * 1000) if "exec_start" in locals() else 0
+                        logger.error(
+                            "[TOOLS] Tool %s timed out after %.1fs",
+                            tool_name, timeout,
+                        )
+                        self.event_bus.publish("tool.timeout", {
+                            "tool": tool_name,
+                            "timeout_seconds": timeout,
+                        })
+                        tool_results.append({
+                            "tool": tool_name,
+                            "success": False,
+                            "error": f"Tool '{tool_name}' timed out after {timeout:.0f}s",
+                            "user_message": f"Efendim, '{tool_name}' işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.",
+                            "risk_level": risk_value,
+                            "params": params,
+                            "elapsed_ms": elapsed_ms,
+                        })
+                        state.add_tool_result(tool_name, f"timeout after {timeout}s", success=False)
+                        continue
 
                 # Convention: tool functions often return a tool-friendly dict
                 # like {"ok": bool, "error": ...}. Treat ok=false as failure so
@@ -1515,10 +3042,48 @@ class OrchestratorLoop:
                     "raw_result": result,  # ✅ Original structured data
                     "result_summary": result_summary,  # ✅ Smart summary for display
                     "error": tool_error,
-                    "risk_level": risk.value,
+                    "risk_level": risk_value,
                     "params": params,
                     "elapsed_ms": elapsed_ms,
                 })
+
+                # Issue #1288: Ingest successful tool results into cache store
+                if bool(tool_returned_ok) and getattr(self, "_ingest_bridge", None):
+                    try:
+                        self._ingest_bridge.on_tool_result(
+                            tool_name=tool_name,
+                            params=params,
+                            result=result,
+                            elapsed_ms=elapsed_ms,
+                            success=True,
+                            summary=result_summary,
+                        )
+                    except Exception as _ing_err:
+                        logger.debug("[INGEST] Failed to cache %s: %s", tool_name, _ing_err)
+
+                # Issue #1289: Link tool results into knowledge graph
+                # Issue #1362: on_tool_result is async — ensure_future() from
+                # sync context produces "coroutine never awaited" warnings.
+                # Use run_until_complete when no loop is running, otherwise
+                # create_task for proper scheduling.
+                if bool(tool_returned_ok) and getattr(self, "_graph_bridge", None):
+                    try:
+                        import asyncio as _aio_gb
+                        _coro = self._graph_bridge.on_tool_result(
+                            tool_name=tool_name,
+                            params=params,
+                            result=result,
+                        )
+                        try:
+                            _loop = _aio_gb.get_running_loop()
+                        except RuntimeError:
+                            _loop = None
+                        if _loop is not None and _loop.is_running():
+                            _loop.create_task(_coro)
+                        else:
+                            _aio_gb.run(_coro)
+                    except Exception as _gb_err:
+                        logger.debug("[GRAPH] Failed to link %s: %s", tool_name, _gb_err)
 
                 # Add to state
                 state.add_tool_result(tool_name, result, success=bool(tool_returned_ok))
@@ -1537,7 +3102,7 @@ class OrchestratorLoop:
                             result=result,
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to log tool execution: {e}")
+                        logger.warning("Failed to log tool execution: %s", e)
                 
                 # Audit successful execution (Safety Guard)
                 if self.safety_guard:
@@ -1546,23 +3111,35 @@ class OrchestratorLoop:
                         tool_name=tool_name,
                         allowed=True,
                         reason="Tool executed successfully",
-                        metadata={"params": params, "risk_level": risk.value},
+                        metadata={"params": params, "risk_level": risk_value},
                     )
                 
-                # Emit tool event
-                self.event_bus.publish("tool.call", {
-                    "tool": tool_name,
-                    "params": params,
-                    "result": str(result)[:200],
-                })
+                # Emit tool event (Issue #1297: enriched payload for subscribers)
+                _obs_run_id = state.trace.get("_obs_run_id", "")
+                self.event_bus.publish(
+                    EventType.TOOL_CALL.value,
+                    {
+                        "tool": tool_name,
+                        "params": params,
+                        "result": str(result)[:500],
+                        "result_summary": result_summary,
+                        "elapsed_ms": elapsed_ms,
+                        "risk_level": risk_value,
+                        "confirmed": was_confirmed,
+                        "success": bool(tool_returned_ok),
+                        "run_id": _obs_run_id,
+                    },
+                    source="orchestrator",
+                    correlation_id=_obs_run_id or None,
+                )
                 
             except Exception as e:
-                logger.exception(f"Tool {tool_name} failed: {e}")
+                logger.exception("Tool %s failed: %s", tool_name, e)
                 tool_results.append({
                     "tool": tool_name,
                     "success": False,
                     "error": str(e),
-                    "risk_level": risk.value,
+                    "risk_level": risk_value,
                     "params": params if "params" in locals() else {},
                     "elapsed_ms": 0,
                 })
@@ -1582,7 +3159,23 @@ class OrchestratorLoop:
                             params=params if 'params' in locals() else None,
                         )
                     except Exception as audit_err:
-                        logger.warning(f"Failed to log tool execution error: {audit_err}")
+                        logger.warning("Failed to log tool execution error: %s", audit_err)
+
+                # Issue #1297: Emit tool.failed event for subscribers
+                _obs_run_id = state.trace.get("_obs_run_id", "")
+                self.event_bus.publish(
+                    EventType.TOOL_FAILED.value,
+                    {
+                        "tool": tool_name,
+                        "error": str(e),
+                        "risk_level": risk_value,
+                        "params": params if "params" in locals() else {},
+                        "elapsed_ms": 0,
+                        "run_id": _obs_run_id,
+                    },
+                    source="orchestrator",
+                    correlation_id=_obs_run_id or None,
+                )
         
         return tool_results
     
@@ -1592,8 +3185,76 @@ class OrchestratorLoop:
         tool_name: str,
         slots: dict[str, Any],
         output: Optional["OrchestratorOutput"] = None,
+        *,
+        user_input: Optional[str] = None,
+        original_user_input: Optional[str] = None,
     ) -> dict[str, Any]:
-        return build_tool_params(tool_name, slots, output)
+        return build_tool_params(
+            tool_name, slots, output,
+            user_input=user_input,
+            original_user_input=original_user_input,
+        )
+
+    # ── Issue #1277: Self-Reflection Phase ───────────────────────────
+
+    def _reflection_phase(
+        self,
+        user_input: str,
+        orchestrator_output: OrchestratorOutput,
+        tool_results: list[dict[str, Any]],
+        state: OrchestratorState,
+    ) -> ReflectionResult:
+        """Phase 2.75: Self-Reflection — semantic verification of tool results.
+
+        Checks whether tool results actually satisfy the user's request.
+        Only triggered when heuristics detect a likely problem (error,
+        empty result, low confidence).
+
+        When not satisfied:
+        - Annotates state.trace with reflection metadata
+        - Injects reflection reason into tool_results so the finalizer
+          can produce a more informative response
+
+        Returns the ReflectionResult for the caller to act on.
+        """
+        # Get the planner LLM for the reflection call
+        planner_llm = getattr(self.orchestrator, "_llm", None)
+        if planner_llm is None:
+            return ReflectionResult(triggered=False)
+
+        reflection = reflect(
+            user_input=user_input,
+            tool_results=tool_results,
+            confidence=orchestrator_output.confidence,
+            llm=planner_llm,
+        )
+
+        # Record in trace (telemetry)
+        state.update_trace(reflection=reflection.to_trace_dict())
+
+        # Publish event for monitoring
+        self.event_bus.publish("reflection.result", reflection.to_trace_dict())
+
+        if reflection.triggered and not reflection.satisfied:
+            logger.info(
+                "[Issue #1277] Reflection unsatisfied: reason=%s action=%s",
+                reflection.reason[:80],
+                reflection.corrective_action[:80] if reflection.corrective_action else "none",
+            )
+            # Annotate tool_results so the finalizer knows about the issue
+            tool_results.append({
+                "tool": "_reflection",
+                "success": True,
+                "result": reflection.reason,
+                "result_summary": f"[Reflection] {reflection.reason}",
+                "result_raw": {
+                    "satisfied": False,
+                    "reason": reflection.reason,
+                    "corrective_action": reflection.corrective_action,
+                },
+            })
+
+        return reflection
     
     def _llm_finalization_phase(
         self,
@@ -1607,9 +3268,8 @@ class OrchestratorLoop:
         Issue #404: Extracted from 300-line monolith into Strategy pattern.
         See ``bantz.brain.finalization_pipeline`` for the full pipeline.
         """
-        from bantz.brain.finalization_pipeline import (
-            build_finalization_context,
-        )
+        from bantz.brain.finalization_pipeline import \
+            build_finalization_context
 
         # Issue #874: Build personality block for finalizer prompt
         _personality_block: Optional[str] = None
@@ -1649,7 +3309,121 @@ class OrchestratorLoop:
 
         pipeline = self._get_finalization_pipeline()
 
-        return pipeline.run(ctx)
+        finalized = pipeline.run(ctx)
+
+        # ----- Issue #1243: Output Gate (EN→TR) -----
+        # When the bridge translated the user input to EN for routing,
+        # the finalizer usually produces Turkish output (via Gemini prompt).
+        # However, when the fast/quality finalizer returns English or
+        # mixed-language text, the Output Gate translates it back to TR.
+        # Gated by BANTZ_BRIDGE_OUTPUT_GATE env var (default: enabled).
+        if (
+            os.getenv("BANTZ_BRIDGE_OUTPUT_GATE", "1").strip().lower()
+            in ("1", "true", "yes", "on")
+            and state.detected_lang == "tr"
+        ):
+            _reply = finalized.assistant_reply or ""
+            if _reply.strip():
+                from bantz.brain.language_guard import detect_language_issue
+
+                _lang_issue = detect_language_issue(_reply)
+                if _lang_issue is not None:
+                    _bridge = get_bridge()
+                    if _bridge is not None:
+                        try:
+                            _tr_reply = _bridge.to_tr(_reply)
+                            if _tr_reply and _tr_reply.strip():
+                                logger.info(
+                                    "[BRIDGE] Output Gate: %s → translated %d chars EN→TR",
+                                    _lang_issue,
+                                    len(_reply),
+                                )
+                                finalized = replace(
+                                    finalized,
+                                    assistant_reply=_tr_reply,
+                                )
+                            else:
+                                logger.warning(
+                                    "[BRIDGE] Output Gate: to_tr returned empty, keeping original",
+                                )
+                        except Exception as _og_exc:
+                            logger.warning(
+                                "[BRIDGE] Output Gate translation failed: %s — keeping original",
+                                _og_exc,
+                            )
+
+        return finalized
+
+    # ------------------------------------------------------------------
+    # Issue #1224: Calendar context persistence for follow-up resolution
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _save_calendar_context(
+        tool_results: list[dict[str, Any]],
+        state: OrchestratorState,
+    ) -> None:
+        """Persist calendar.list_events results in state for #N follow-up.
+
+        Each event is stored as ``{id, summary, start, end}`` so that
+        subsequent turns referencing ``#2`` can resolve to the real event_id.
+        """
+        for tr in tool_results:
+            if tr.get("tool") != "calendar.list_events":
+                continue
+            if not tr.get("success"):
+                continue
+            raw = tr.get("raw_result")
+            if not isinstance(raw, dict):
+                continue
+            events = raw.get("events")
+            if not isinstance(events, list):
+                continue
+            # Store compact event refs (id + summary + start/end for display)
+            state.set_calendar_listed_events([
+                {
+                    "id": ev.get("id") or ev.get("event_id") or "",
+                    "summary": ev.get("summary") or ev.get("title") or "",
+                    "start": ev.get("start") or "",
+                    "end": ev.get("end") or "",
+                }
+                for ev in events
+                if isinstance(ev, dict)
+            ])
+
+    @staticmethod
+    def _extract_and_register_entities(
+        tool_results: list[dict[str, Any]],
+        state: OrchestratorState,
+    ) -> None:
+        """Issue #1276: Extract entities from tool results and register in SlotRegistry.
+
+        Called after tool execution in both _react_execute_loop and _update_state_phase.
+        Only the *last* entity-producing result becomes the active entity, so follow-up
+        turns naturally reference the most recent action.
+        """
+        for tr in tool_results:
+            if not tr.get("success", False):
+                continue
+            tool_name = tr.get("tool", "")
+            raw = tr.get("raw_result") or tr.get("result_raw")
+            if raw is None:
+                # Try parsing result string as JSON
+                result_str = tr.get("result", "")
+                if isinstance(result_str, str):
+                    try:
+                        raw = json.loads(result_str)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                else:
+                    raw = result_str
+
+            entity = extract_entity_from_tool_result(
+                tool_name=tool_name,
+                result_raw=raw,
+                current_turn=state.turn_count,
+            )
+            if entity is not None:
+                state.slot_registry.register(entity)
     
     def _update_state_phase(
         self,
@@ -1674,6 +3448,21 @@ class OrchestratorLoop:
             pending_items=self._extract_pending_items(output),
         )
         self.memory.add_turn(summary)
+
+        # Sync tool results into state.last_tool_results so API can report them
+        for _tr in tool_results:
+            _tname = str(_tr.get("tool") or "").strip()
+            if not _tname or _tr.get("pending_confirmation"):
+                continue
+            state.last_tool_results.append({
+                "tool": _tname,
+                "params": _tr.get("params") or {},
+                "result": str(_tr.get("result_summary") or _tr.get("raw_result") or "")[:500],
+                "success": bool(_tr.get("success")),
+            })
+        # Keep bounded
+        if len(state.last_tool_results) > (state.max_tool_results * 2):
+            state.last_tool_results = state.last_tool_results[-(state.max_tool_results * 2):]
 
         # Issue #873: Persistent user memory — learn from interaction
         if getattr(self, "user_memory", None) is not None:
@@ -1763,14 +3552,71 @@ class OrchestratorLoop:
         )
         
         if self.config.debug:
-            logger.debug(f"[ORCHESTRATOR] State Updated:")
-            logger.debug(f"  Rolling Summary: {state.rolling_summary[:100] if state.rolling_summary else 'None'}...")
-            logger.debug(f"  Memory-lite: {len(self.memory)} turns")
-            logger.debug(f"  Conversation Turns: {len(state.conversation_history)}")
-            logger.debug(f"  Tool Results: {len(state.last_tool_results)}")
+            logger.debug("[ORCHESTRATOR] State Updated:")
+            logger.debug("  Rolling Summary: %s...", state.rolling_summary[:100] if state.rolling_summary else 'None')
+            logger.debug("  Memory-lite: %d turns", len(self.memory))
+            logger.debug("  Conversation Turns: %d", len(state.conversation_history))
+            logger.debug("  Tool Results: %d", len(state.last_tool_results))
+
+        # Issue #1288: Log ingest store stats for this turn
+        if getattr(self, "_ingest_bridge", None) is not None:
+            try:
+                ingest_stats = self._ingest_bridge.reset_turn_stats()
+                if ingest_stats["ingested"] or ingest_stats["cache_hits"]:
+                    logger.debug(
+                        "[INGEST] Turn stats: %d ingested, %d cache hits",
+                        ingest_stats["ingested"], ingest_stats["cache_hits"],
+                    )
+                    state.update_trace(ingest_stats=ingest_stats)
+            except Exception:
+                pass
 
         # Advance turn counter (used by memory-lite summaries)
         state.turn_count += 1
+
+        # Issue #1276: Expire stale entities and extract from this turn's results
+        try:
+            expired = state.slot_registry.expire_stale(state.turn_count)
+            if expired:
+                logger.debug("[Issue #1276] Expired %d stale entities at turn %d", expired, state.turn_count)
+        except Exception as _exp_exc:
+            logger.debug("[Issue #1276] Entity expiry failed (non-fatal): %s", _exp_exc)
+
+        try:
+            self._extract_and_register_entities(tool_results, state)
+        except Exception as _ext_exc:
+            logger.debug("[Issue #1276] Entity extraction in update_state failed (non-fatal): %s", _ext_exc)
+
+        # Issue #1212: Track last successful tool + route for follow-up context
+        for r in reversed(tool_results):
+            if r.get("success", False) and r.get("tool"):
+                state.last_tool_called = r["tool"]
+                state.last_tool_route = (output.route or "").strip().lower()
+                break
+
+        # Issue #1217: Store gmail pagination token for continuation
+        for r in tool_results:
+            if r.get("success", False) and r.get("tool") in ("gmail.list_messages", "gmail.smart_search"):
+                raw = r.get("raw_result")
+                if isinstance(raw, dict):
+                    npt = raw.get("next_page_token") or ""
+                    state.gmail_next_page_token = str(npt)
+                    q = raw.get("query") or ""
+                    if q:
+                        state.gmail_last_query = str(q)
+                    # Issue #1218: Store listed message headers for entity resolution
+                    messages = raw.get("messages") or []
+                    if isinstance(messages, list) and messages:
+                        state.set_gmail_listed_messages([
+                            {
+                                "id": str(m.get("id", "")),
+                                "from": str(m.get("from", "")),
+                                "subject": str(m.get("subject", "")),
+                            }
+                            for m in messages[:20]
+                            if isinstance(m, dict) and m.get("id")
+                        ])
+                    break
     
     # =========================================================================
     # Memory-lite Helper Methods (Issue #141)
@@ -1802,11 +3648,14 @@ class OrchestratorLoop:
     
     def _extract_action_taken(self, output: OrchestratorOutput) -> str:
         """Extract action taken (1-3 words)."""
-        if output.tool_plan:
+        if output.tool_plan and isinstance(output.tool_plan, list):
             # Summarize tools
-            tool_names = [t.split(".")[-1] for t in output.tool_plan[:2]]  # First 2
-            tools_str = ", ".join(tool_names)
-            return f"called {tools_str}"
+            try:
+                tool_names = [str(t).rsplit(".", 1)[-1] for t in output.tool_plan[:2]]
+                tools_str = ", ".join(tool_names)
+                return f"called {tools_str}"
+            except Exception:
+                return "called tools"
         elif output.ask_user:
             return "asked for clarification"
         elif output.assistant_reply:

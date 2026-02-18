@@ -30,16 +30,16 @@ from typing import Any, Callable, Optional
 
 class EmailType(Enum):
     """Type of email being drafted."""
-    FORMAL = "formal"           # Resmi yazışma
-    INFORMAL = "informal"       # Samimi yazışma
-    BUSINESS = "business"       # İş yazışması
-    FOLLOW_UP = "follow_up"     # Takip e-postası
-    REPLY = "reply"             # Yanıt
-    INTRODUCTION = "introduction"  # Tanışma
-    REQUEST = "request"         # İstek/talep
-    THANK_YOU = "thank_you"     # Teşekkür
-    APOLOGY = "apology"         # Özür
-    ANNOUNCEMENT = "announcement"  # Duyuru
+    FORMAL = "formal"           # Formal correspondence
+    INFORMAL = "informal"       # Informal correspondence
+    BUSINESS = "business"       # Business correspondence
+    FOLLOW_UP = "follow_up"     # Follow-up email
+    REPLY = "reply"             # Reply
+    INTRODUCTION = "introduction"  # Introduction
+    REQUEST = "request"         # Request
+    THANK_YOU = "thank_you"     # Thank you
+    APOLOGY = "apology"         # Apology
+    ANNOUNCEMENT = "announcement"  # Announcement
 
 
 class PlaceholderType(Enum):
@@ -65,28 +65,28 @@ class PlaceholderType(Enum):
     def description_tr(self) -> str:
         """Turkish description."""
         descriptions = {
-            PlaceholderType.RECIPIENT_NAME: "Alıcı adı",
-            PlaceholderType.RECIPIENT_EMAIL: "Alıcı e-posta",
-            PlaceholderType.SENDER_NAME: "Gönderen adı",
-            PlaceholderType.COMPANY_NAME: "Şirket adı",
-            PlaceholderType.DATE: "Tarih",
-            PlaceholderType.TIME: "Saat",
-            PlaceholderType.MEETING_LINK: "Toplantı linki",
-            PlaceholderType.PHONE_NUMBER: "Telefon numarası",
-            PlaceholderType.ADDRESS: "Adres",
-            PlaceholderType.AMOUNT: "Tutar",
-            PlaceholderType.CUSTOM: "Özel alan",
+            PlaceholderType.RECIPIENT_NAME: "Recipient name",
+            PlaceholderType.RECIPIENT_EMAIL: "Recipient email",
+            PlaceholderType.SENDER_NAME: "Sender name",
+            PlaceholderType.COMPANY_NAME: "Company name",
+            PlaceholderType.DATE: "Date",
+            PlaceholderType.TIME: "Time",
+            PlaceholderType.MEETING_LINK: "Meeting link",
+            PlaceholderType.PHONE_NUMBER: "Phone number",
+            PlaceholderType.ADDRESS: "Address",
+            PlaceholderType.AMOUNT: "Amount",
+            PlaceholderType.CUSTOM: "Custom field",
         }
-        return descriptions.get(self, "Bilinmeyen")
+        return descriptions.get(self, "Unknown")
 
 
 class DraftStatus(Enum):
     """Status of email draft."""
-    DRAFT = "draft"             # İlk taslak
-    REVIEW = "review"           # İnceleme aşamasında
-    APPROVED = "approved"       # Onaylandı
-    REJECTED = "rejected"       # Reddedildi
-    SENT = "sent"               # Gönderildi (sadece simülasyon)
+    DRAFT = "draft"             # First draft
+    REVIEW = "review"           # In review
+    APPROVED = "approved"       # Approved
+    REJECTED = "rejected"       # Rejected
+    SENT = "sent"               # Sent (simulation only)
 
 
 # =============================================================================
@@ -241,19 +241,19 @@ class EmailDraft:
         """Format draft for preview."""
         lines = [
             "=" * 50,
-            "E-POSTA TASLAĞI",
+            "EMAIL DRAFT",
             "=" * 50,
-            f"Durum: {self.status.value}",
-            f"Tip: {self.email_type.value}",
+            f"Status: {self.status.value}",
+            f"Type: {self.email_type.value}",
             "-" * 50,
-            f"Konu: {self.subject}",
+            f"Subject: {self.subject}",
             "-" * 50,
             self.body,
             "-" * 50,
         ]
         
         if self.placeholders:
-            lines.append("Doldurulması gereken alanlar:")
+            lines.append("Fields to fill:")
             for p in self.placeholders:
                 status = "✓" if p.is_resolved else "○"
                 value_str = f" = {p.value}" if p.is_resolved else ""

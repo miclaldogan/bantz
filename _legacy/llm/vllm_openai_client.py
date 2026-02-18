@@ -1,0 +1,907 @@
+"""vLLM OpenAI-compatible client for fast GPU inference.
+
+Issue #133: Backend Abstraction
+Issue #158: TTFT Monitoring & Optimization
+
+This client uses vLLM's OpenAI-compatible API endpoint to run local models with GPU acceleration.
+vLLM provides 10-20x throughput compared to standard inference.
+
+Features:
+- Streaming support with TTFT measurement
+- Automatic TTFT monitoring integration
+- Performance regression detection
+
+Usage:
+    >>> client = VLLMOpenAIClient(base_url='http://localhost:8001')
+    >>> response = client.chat([LLMMessage(role='user', content='Hello')])
+    
+    >>> # Streaming with TTFT
+    >>> for chunk in client.chat_stream([LLMMessage(role='user', content='Hello')]):
+    ...     print(chunk, end='', flush=True)
+    
+Requirements:
+    pip install openai
+    
+vLLM server must be running:
+    python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-3B-Instruct-AWQ --port 8001
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import threading
+import time
+from dataclasses import dataclass
+from typing import Any, Iterator, List, Optional
+
+from bantz.llm.base import (LLMClient, LLMConnectionError,
+                            LLMInvalidResponseError, LLMMessage,
+                            LLMModelNotFoundError, LLMResponse,
+                            LLMTimeoutError, LLMToolCall)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StreamChunk:
+    """Streaming response chunk."""
+    content: str
+    is_first_token: bool = False
+    ttft_ms: Optional[int] = None
+    finish_reason: Optional[str] = None
+
+
+class VLLMOpenAIClient(LLMClient):
+    """vLLM client using OpenAI-compatible API.
+    
+    This client connects to a local vLLM server (or remote endpoint) that exposes
+    an OpenAI-compatible /v1/chat/completions endpoint.
+    
+    Features (Issue #158):
+    - Streaming support with TTFT measurement
+    - Automatic TTFT monitoring integration
+    - Performance tracking
+    
+    Attributes:
+        base_url: vLLM server URL (e.g., http://localhost:8001)
+        model: Model name (e.g., Qwen/Qwen2.5-3B-Instruct-AWQ)
+        timeout_seconds: Request timeout
+        track_ttft: Enable TTFT tracking (default: True)
+        ttft_phase: Phase name for TTFT tracking ("router" | "finalizer")
+    """
+    
+    def __init__(
+        self,
+        base_url: str = "",
+        model: str = "",
+        timeout_seconds: float = 120.0,
+        track_ttft: bool = True,
+        ttft_phase: str = "router",
+    ):
+        # Issue #1020: Read from env vars with sensible fallbacks
+        self.base_url = (
+            base_url or os.getenv("VLLM_BASE_URL", "http://127.0.0.1:8001")
+        ).rstrip("/")
+        self.model = (
+            model or os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-3B-Instruct-AWQ")
+        ).strip()
+        self.timeout_seconds = float(timeout_seconds)
+        self.track_ttft = track_ttft
+        self.ttft_phase = ttft_phase
+
+        # Cache for /v1/models capabilities.
+        self._cached_model_context_len: Optional[int] = None
+        
+        # Issue #1016: Lock for thread-safe lazy init of _client and model auto-resolve.
+        self._lock = threading.Lock()
+        
+        # Lazy-import OpenAI client
+        self._client: Optional[object] = None
+
+    def get_model_context_length(self, *, timeout_seconds: float = 1.5) -> Optional[int]:
+        """Best-effort discovery of the served model's context length.
+
+        Uses vLLM's OpenAI-compatible `/v1/models` endpoint when available.
+        Returns `None` if unavailable or if the server doesn't report it.
+        """
+
+        if self._cached_model_context_len is not None:
+            return int(self._cached_model_context_len)
+
+        try:
+            import requests
+        except ModuleNotFoundError:
+            return None
+
+        try:
+            r = requests.get(
+                f"{self._api_base_url}/models",
+                timeout=float(timeout_seconds),
+            )
+            if r.status_code != 200:
+                return None
+
+            data = r.json() or {}
+            models_list = data.get("data", [])
+            if not isinstance(models_list, list) or not models_list:
+                return None
+
+            chosen = None
+            wanted = str(self.model or "").strip()
+            for item in models_list:
+                if not isinstance(item, dict):
+                    continue
+                if wanted and str(item.get("id") or "").strip() == wanted:
+                    chosen = item
+                    break
+            if chosen is None:
+                # Fallback: first entry.
+                chosen = models_list[0] if isinstance(models_list[0], dict) else None
+
+            context_len = _extract_context_len(chosen) if isinstance(chosen, dict) else None
+            if context_len is not None and context_len > 0:
+                self._cached_model_context_len = int(context_len)
+                return int(context_len)
+            return None
+        except Exception:
+            return None
+
+    @property
+    def _api_base_url(self) -> str:
+        """Return base_url normalized to include /v1 suffix exactly once.
+
+        Issue #1102: Several methods duplicated this logic; centralised here
+        so ``list_available_models``, ``get_model_context_length``, and
+        ``is_available`` all use the same URL.
+        """
+        _base = self.base_url.rstrip("/")
+        if not _base.endswith("/v1"):
+            _base = f"{_base}/v1"
+        return _base
+
+    def _get_client(self):
+        """Lazy-initialize OpenAI client (thread-safe)."""
+        if self._client is not None:
+            return self._client
+        with self._lock:
+            if self._client is not None:
+                return self._client
+            try:
+                from openai import OpenAI
+            except ModuleNotFoundError as e:
+                raise RuntimeError(
+                    "openai kütüphanesi yüklü değil. Kurulum: pip install openai"
+                ) from e
+            
+            # OpenAI client expects base_url to point to API root.
+            # Issue #1102: Use shared _api_base_url property.
+            _api_base = self._api_base_url
+            
+            self._client = OpenAI(
+                base_url=_api_base,
+                api_key=os.getenv("VLLM_API_KEY", "EMPTY"),
+                timeout=self.timeout_seconds,
+            )
+        
+        return self._client
+    
+    def _resolve_auto_model(self) -> None:
+        """Thread-safe auto-resolution of model name from /v1/models.
+
+        Issue #1016: Called when self.model == "auto". Uses a lock to
+        prevent concurrent threads from racing on the assignment.
+        """
+        if (self.model or "").strip().lower() != "auto":
+            return
+        with self._lock:
+            # Double-check after acquiring lock (another thread may have resolved).
+            if (self.model or "").strip().lower() != "auto":
+                return
+            models = self.list_available_models(timeout_seconds=2.0)
+            if not models:
+                raise LLMModelNotFoundError(
+                    f"vLLM ({self.base_url}) did not report any models via /v1/models"
+                )
+            self.model = str(models[0]).strip()
+
+    def is_available(self, *, timeout_seconds: float = 1.5) -> bool:
+        """Check if vLLM server is reachable."""
+        try:
+            import requests
+        except ModuleNotFoundError:
+            return False
+        
+        try:
+            # Issue #996: self.base_url is the raw URL (e.g. http://localhost:8001).
+            # Issue #1102: Use shared _api_base_url property.
+            health_url = f"{self._api_base_url}/models"
+            r = requests.get(
+                health_url,
+                timeout=float(timeout_seconds),
+            )
+            return r.status_code == 200
+        except Exception:
+            return False
+    
+    def chat(
+        self,
+        messages: List[LLMMessage],
+        *,
+        temperature: float = 0.4,
+        max_tokens: int = 512,
+        response_format: Optional[dict[str, Any]] = None,
+        stop: Optional[List[str]] = None,
+        tools: Optional[List[dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """Chat completion (simple string response)."""
+        response = self.chat_detailed(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            stop=stop,
+            tools=tools,
+            tool_choice=tool_choice,
+            extra_body=extra_body,
+        )
+        return response.content
+    
+    def chat_detailed(
+        self,
+        messages: List[LLMMessage],
+        *,
+        temperature: float = 0.4,
+        max_tokens: int = 512,
+        seed: Optional[int] = None,
+        response_format: Optional[dict[str, Any]] = None,
+        stop: Optional[List[str]] = None,
+        tools: Optional[List[dict[str, Any]]] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+        tool_choice: Optional[str] = None,
+    ) -> LLMResponse:
+        """Chat completion with detailed metadata."""
+        client = self._get_client()
+
+        # Issue #1016: Thread-safe auto model resolution.
+        self._resolve_auto_model()
+        
+        # Convert to OpenAI message format
+        openai_messages = [
+            {"role": m.role, "content": m.content}
+            for m in messages
+        ]
+        
+        # Issue #1061: Retry with exponential backoff for transient errors
+        max_retries = 3
+        last_exc: Exception | None = None
+        for attempt in range(max_retries):
+            t0 = time.perf_counter()  # noqa: F841 — kept for future latency logging
+            try:
+                return self._do_chat_request(
+                    client, openai_messages,
+                    temperature=temperature, max_tokens=max_tokens,
+                    seed=seed, response_format=response_format, stop=stop,
+                    tools=tools, tool_choice=tool_choice,
+                    extra_body=extra_body,
+                )
+            except (LLMConnectionError, LLMTimeoutError) as e:
+                last_exc = e
+                if attempt < max_retries - 1:
+                    delay = 0.5 * (2 ** attempt)
+                    logger.warning(
+                        "[vLLM] Transient error (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1, max_retries, delay, e,
+                    )
+                    time.sleep(delay)
+                else:
+                    raise
+            except Exception:
+                raise  # Non-retryable errors fail immediately
+        # Should not reach here, but just in case
+        raise last_exc  # type: ignore[misc]
+
+    def _do_chat_request(
+        self,
+        client: Any,
+        openai_messages: list[dict[str, str]],
+        *,
+        temperature: float,
+        max_tokens: int,
+        seed: Optional[int],
+        response_format: Optional[dict[str, Any]],
+        stop: Optional[List[str]],
+        tools: Optional[List[dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
+        extra_body: Optional[dict[str, Any]] = None,
+    ) -> LLMResponse:
+        """Execute a single chat request (extracted for retry logic).
+
+        Args:
+            extra_body: Ollama-native parameters passed via OpenAI SDK's
+                ``extra_body`` mechanism.  Useful for thinking model control
+                (``think``, ``format``) and runtime options (``options``).
+        """
+        t0 = time.perf_counter()
+        try:
+            # Call OpenAI-compatible API
+            kwargs: dict[str, Any] = {}
+            if response_format is not None:
+                kwargs["response_format"] = response_format
+            if stop is not None:
+                kwargs["stop"] = stop
+            # Issue #1274: Structured Tool Calling
+            if tools is not None:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = tool_choice or "auto"
+
+            # Ollama-native parameters (thinking model control, runtime options)
+            if extra_body:
+                kwargs["extra_body"] = extra_body
+
+            completion = client.chat.completions.create(
+                model=self.model,
+                messages=openai_messages,
+                temperature=float(temperature),
+                max_tokens=int(max_tokens),
+                seed=seed,
+                **kwargs,
+            )
+
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            
+            # Extract response
+            choice = completion.choices[0]
+            content = choice.message.content or ""
+
+            # Thinking/reasoning model support — capture chain-of-thought
+            # Ollama OpenAI-compat exposes it as ``reasoning``; some backends
+            # use ``reasoning_content``.  We normalise to a single field.
+            _thinking_raw: Optional[str] = None
+            _msg = choice.message
+            for _tfield in ("reasoning", "reasoning_content", "thinking"):
+                _tv = getattr(_msg, _tfield, None)
+                if _tv is None and isinstance(getattr(_msg, "model_extra", None), dict):
+                    _tv = _msg.model_extra.get(_tfield)
+                if _tv:
+                    _thinking_raw = str(_tv)
+                    break
+
+            # If content is empty but thinking is present, the model used
+            # all tokens for reasoning and never produced an answer.  When
+            # finish_reason is "stop" we trust content; when it is "length"
+            # the model ran out of budget — we keep thinking for tracing
+            # but leave content empty so callers know.
+            if _thinking_raw:
+                logger.debug(
+                    "[vLLM] thinking model detected — reasoning=%d chars, content=%d chars",
+                    len(_thinking_raw), len(content),
+                )
+
+            # Issue #1274: Parse tool_calls from structured response
+            parsed_tool_calls: Optional[List[LLMToolCall]] = None
+            if hasattr(choice.message, "tool_calls") and choice.message.tool_calls:
+                parsed_tool_calls = []
+                for tc in choice.message.tool_calls:
+                    try:
+                        args_raw = tc.function.arguments
+                        if isinstance(args_raw, str):
+                            args_dict = json.loads(args_raw) if args_raw.strip() else {}
+                        elif isinstance(args_raw, dict):
+                            args_dict = args_raw
+                        else:
+                            args_dict = {}
+                    except (json.JSONDecodeError, AttributeError):
+                        args_dict = {}
+                    parsed_tool_calls.append(LLMToolCall(
+                        id=getattr(tc, "id", "") or "",
+                        name=tc.function.name,
+                        arguments=args_dict,
+                    ))
+                if not parsed_tool_calls:
+                    parsed_tool_calls = None
+
+            # Issue #1368: Ollama fallback — parse tool_calls from content field
+            # Ollama sometimes puts tool call JSON in content instead of tool_calls.
+            # Format: {"name": "tool_name", "arguments": {...}} or
+            #         [{"function": {"name": "...", "arguments": {...}}}]
+            if parsed_tool_calls is None and content.strip():
+                parsed_tool_calls = self._parse_tool_calls_from_content(content)
+                if parsed_tool_calls:
+                    content = ""  # Clear content since it was a tool call, not text
+            
+            usage_dict: dict[str, Any] | None = None
+            try:
+                if completion.usage is not None:
+                    usage_obj = completion.usage
+                    usage_dict = {
+                        "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
+                        "completion_tokens": getattr(usage_obj, "completion_tokens", None),
+                        "total_tokens": getattr(usage_obj, "total_tokens", None),
+                    }
+            except Exception:
+                usage_dict = None
+
+            total_tokens = -1
+            if isinstance(usage_dict, dict) and usage_dict.get("total_tokens") is not None:
+                try:
+                    total_tokens = int(usage_dict["total_tokens"])
+                except Exception:
+                    total_tokens = -1
+
+            resp = LLMResponse(
+                content=content.strip(),
+                model=completion.model,
+                tokens_used=total_tokens,
+                finish_reason=choice.finish_reason or "stop",
+                usage=usage_dict,
+                tool_calls=parsed_tool_calls,
+                thinking=_thinking_raw,
+            )
+
+            # Track TTFT (approximate for non-streaming)
+            if self.track_ttft:
+                try:
+                    from bantz.llm.ttft_monitor import record_ttft
+                    record_ttft(
+                        ttft_ms=elapsed_ms,  # Approximate: total time for non-streaming
+                        phase=self.ttft_phase,
+                        model=self.model_name,
+                        backend=self.backend_name,
+                        total_tokens=resp.tokens_used,
+                    )
+                except Exception as e:
+                    logger.debug(f"TTFT tracking failed: {e}")
+
+            if _metrics_enabled():
+                logging.getLogger("bantz.llm.metrics").info(
+                    "llm_call backend=%s model=%s latency_ms=%s total_tokens=%s",
+                    self.backend_name,
+                    self.model_name,
+                    elapsed_ms,
+                    resp.tokens_used,
+                )
+
+            return resp
+        
+        except Exception as e:
+            # Issue #1104: Classify OpenAI typed exceptions first, then
+            # fall back to string matching for generic exceptions.
+            try:
+                from openai import (APITimeoutError, AuthenticationError,
+                                    RateLimitError)
+                if isinstance(e, RateLimitError):
+                    raise LLMConnectionError(
+                        "vLLM rate_limited (429). Retry later."
+                    ) from e
+                if isinstance(e, AuthenticationError):
+                    raise LLMConnectionError(
+                        "vLLM authentication failed. Check VLLM_API_KEY."
+                    ) from e
+                if isinstance(e, APITimeoutError):
+                    raise LLMTimeoutError(
+                        f"vLLM request timeout ({self.timeout_seconds}s). Model yüklenirken zaman aşımı?"
+                    ) from e
+            except ImportError:
+                pass
+
+            error_msg = str(e).lower()
+            
+            # Classify error type
+            if "connection" in error_msg or "refused" in error_msg or "unreachable" in error_msg:
+                raise LLMConnectionError(
+                    f"vLLM sunucusuna bağlanamadım ({self.base_url}). "
+                    f"Başlat: python -m vllm.entrypoints.openai.api_server --model {self.model}"
+                ) from e
+            
+            elif "timeout" in error_msg:
+                raise LLMTimeoutError(
+                    f"vLLM request timeout ({self.timeout_seconds}s). Model yüklenirken zaman aşımı?"
+                ) from e
+            
+            elif "model" in error_msg and ("not found" in error_msg or "404" in error_msg):
+                raise LLMModelNotFoundError(
+                    f"vLLM model bulunamadı: '{self.model}'. "
+                    f"Sunucu başka model kullanıyor olabilir."
+                ) from e
+            
+            else:
+                raise LLMInvalidResponseError(
+                    f"vLLM response parsing failed: {e}"
+                ) from e
+
+    @staticmethod
+    def _parse_tool_calls_from_content(content: str) -> Optional[List[LLMToolCall]]:
+        """Parse tool calls embedded in content field (Issue #1368).
+
+        Ollama and some backends put tool call JSON in the content field
+        instead of the structured tool_calls field.  Supports formats:
+
+        1. Single object: {"name": "fn", "arguments": {...}}
+        2. Array of objects: [{"function": {"name": "fn", "arguments": {...}}}]
+        3. Ollama format: {"name": "fn", "parameters": {...}}
+
+        Returns None if content doesn't look like a tool call.
+        """
+        stripped = content.strip()
+        if not stripped or not (stripped.startswith("{") or stripped.startswith("[")):
+            return None
+
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+
+        results: List[LLMToolCall] = []
+
+        items = parsed if isinstance(parsed, list) else [parsed]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            # Format 1/3: {"name": "fn", "arguments"/"parameters": {...}}
+            name = item.get("name")
+            args = item.get("arguments") or item.get("parameters") or {}
+
+            # Format 2: {"function": {"name": "fn", "arguments": {...}}}
+            if not name and "function" in item:
+                func = item["function"]
+                if isinstance(func, dict):
+                    name = func.get("name")
+                    args = func.get("arguments") or func.get("parameters") or {}
+
+            if not name or not isinstance(name, str):
+                continue
+
+            # Validate it looks like a tool name (contains a dot)
+            if "." not in name:
+                continue
+
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args) if args.strip() else {}
+                except json.JSONDecodeError:
+                    args = {}
+
+            results.append(LLMToolCall(
+                id=item.get("id", "") or "",
+                name=name,
+                arguments=args if isinstance(args, dict) else {},
+            ))
+
+        return results if results else None
+
+    def chat_stream(
+        self,
+        messages: List[LLMMessage],
+        *,
+        temperature: float = 0.4,
+        max_tokens: int = 512,
+        seed: Optional[int] = None,
+    ) -> Iterator[StreamChunk]:
+        """Chat completion with streaming (Issue #158).
+        
+        This enables TTFT measurement and real-time response display.
+        
+        Args:
+            messages: Chat messages
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            seed: Random seed
+            
+        Yields:
+            StreamChunk with content and TTFT metadata
+            
+        Example:
+            >>> for chunk in client.chat_stream(messages):
+            ...     if chunk.is_first_token:
+            ...         print(f"[TTFT: {chunk.ttft_ms}ms]")
+            ...     print(chunk.content, end='', flush=True)
+        """
+        client = self._get_client()
+        
+        # Issue #1016: Thread-safe auto model resolution.
+        self._resolve_auto_model()
+        
+        # Convert to OpenAI message format
+        openai_messages = [
+            {"role": m.role, "content": m.content}
+            for m in messages
+        ]
+        
+        t0 = time.perf_counter()
+        ttft_measured = False
+        ttft_ms = None
+        total_tokens = 0
+        total_content_chars = 0  # Issue #1013: accumulate content length
+        chunk_count = 0
+        stream = None  # Issue #1311: track for cleanup in finally
+        
+        try:
+            # Call OpenAI-compatible streaming API
+            stream = client.chat.completions.create(
+                model=self.model,
+                messages=openai_messages,
+                temperature=float(temperature),
+                max_tokens=int(max_tokens),
+                seed=seed,
+                stream=True,
+            )
+            
+            for chunk_data in stream:
+                # Issue #1013: Try to extract usage from final chunk (vLLM sends
+                # usage stats in the last streaming chunk when available)
+                if hasattr(chunk_data, "usage") and chunk_data.usage:
+                    usage = chunk_data.usage
+                    if hasattr(usage, "completion_tokens") and usage.completion_tokens:
+                        total_tokens = int(usage.completion_tokens)
+
+                # Extract content
+                if not chunk_data.choices:
+                    continue
+                
+                choice = chunk_data.choices[0]
+                delta = choice.delta
+                
+                content = delta.content or ""
+                finish_reason = choice.finish_reason
+                
+                if content:
+                    chunk_count += 1
+                    total_content_chars += len(content)
+
+                    # Issue #1101: Measure TTFT on first real content chunk,
+                    # not on metadata/empty chunks that vLLM sends first.
+                    if not ttft_measured:
+                        ttft_ms = int((time.perf_counter() - t0) * 1000)
+                        ttft_measured = True
+
+                        if self.track_ttft:
+                            try:
+                                from bantz.llm.ttft_monitor import record_ttft
+                                record_ttft(
+                                    ttft_ms=ttft_ms,
+                                    phase=self.ttft_phase,
+                                    model=self.model_name,
+                                    backend=self.backend_name,
+                                )
+                            except Exception as e:
+                                logger.debug(f"TTFT tracking failed: {e}")
+                    
+                    yield StreamChunk(
+                        content=content,
+                        is_first_token=(chunk_count == 1),
+                        ttft_ms=ttft_ms if chunk_count == 1 else None,
+                        finish_reason=finish_reason,
+                    )
+                
+                if finish_reason:
+                    break
+
+            # Issue #1013: If usage stats weren't available from stream,
+            # estimate tokens from accumulated content length (chars/4)
+            if total_tokens == 0 and total_content_chars > 0:
+                total_tokens = max(1, total_content_chars // 4)
+            
+            # Log final metrics
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            
+            if _metrics_enabled():
+                logging.getLogger("bantz.llm.metrics").info(
+                    "llm_stream backend=%s model=%s ttft_ms=%s total_ms=%s total_tokens=%s",
+                    self.backend_name,
+                    self.model_name,
+                    ttft_ms or -1,
+                    elapsed_ms,
+                    total_tokens,
+                )
+        
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            # Classify error type
+            if "connection" in error_msg or "refused" in error_msg:
+                raise LLMConnectionError(
+                    f"vLLM sunucusuna bağlanamadım ({self.base_url})"
+                ) from e
+            
+            elif "timeout" in error_msg:
+                raise LLMTimeoutError(
+                    f"vLLM stream timeout ({self.timeout_seconds}s)"
+                ) from e
+            
+            else:
+                raise LLMInvalidResponseError(
+                    f"vLLM stream failed: {e}"
+                ) from e
+        finally:
+            # Issue #1311: Always close the stream to prevent HTTP connection
+            # leaks. This runs when the generator is fully consumed, explicitly
+            # closed, or garbage-collected after early exit.
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+    
+    def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None, system_prompt: Optional[str] = None, extra_body: Optional[dict[str, Any]] = None) -> str:
+        """Simple text completion (used by Router).
+
+        Issue #1050: When system_prompt is provided it is sent as a proper
+        system message instead of being crammed into the user message.
+        """
+        messages: List[LLMMessage] = []
+        if system_prompt:
+            messages.append(LLMMessage(role="system", content=system_prompt))
+        messages.append(LLMMessage(role="user", content=prompt))
+        return self.chat(messages, temperature=temperature, max_tokens=max_tokens, stop=stop, extra_body=extra_body)
+
+    def complete_text_detailed(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 200, stop: Optional[List[str]] = None, system_prompt: Optional[str] = None, extra_body: Optional[dict[str, Any]] = None) -> LLMResponse:
+        """Text completion returning full LLMResponse (including thinking).
+
+        Same interface as ``complete_text`` but returns the full ``LLMResponse``
+        so callers can access ``response.thinking`` for reasoning/thinking models.
+
+        Args:
+            extra_body: Ollama-native parameters (``think``, ``format``,
+                ``options: {num_gpu, num_predict, num_ctx}``, etc.).
+        """
+        messages: List[LLMMessage] = []
+        if system_prompt:
+            messages.append(LLMMessage(role="system", content=system_prompt))
+        messages.append(LLMMessage(role="user", content=prompt))
+        return self.chat_detailed(messages, temperature=temperature, max_tokens=max_tokens, stop=stop, extra_body=extra_body)
+
+    def chat_with_tools(
+        self,
+        messages: List[LLMMessage],
+        *,
+        tools: List[dict[str, Any]],
+        temperature: float = 0.0,
+        max_tokens: int = 512,
+        tool_choice: str = "auto",
+    ) -> LLMResponse:
+        """Chat completion with structured tool calling (Issue #1274).
+
+        Sends ``tools`` in OpenAI format and returns an ``LLMResponse``
+        whose ``tool_calls`` field is populated when the model selects a
+        tool.  Falls back to ``content`` when the model responds with
+        plain text (e.g. smalltalk).
+
+        Args:
+            messages: Conversation messages.
+            tools: OpenAI-format tool definitions.
+            temperature: Sampling temperature. Default 0.0 for routing.
+            max_tokens: Max completion tokens.
+            tool_choice: ``"auto"`` | ``"none"`` | ``"required"``.
+
+        Returns:
+            ``LLMResponse`` — check ``response.tool_calls`` first.
+        """
+        return self.chat_detailed(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+    
+    @property
+    def model_name(self) -> str:
+        return self.model
+    
+    @property
+    def backend_name(self) -> str:
+        return "vllm"
+    
+    def list_available_models(self, *, timeout_seconds: float = 2.0) -> List[str]:
+        """List models available on vLLM server.
+        
+        Returns:
+            List of model names (usually just one model per vLLM instance)
+        """
+        try:
+            import requests
+        except ModuleNotFoundError as e:
+            raise RuntimeError("requests yüklü değil. Kurulum: pip install requests") from e
+        
+        try:
+            r = requests.get(
+                f"{self._api_base_url}/models",
+                timeout=float(timeout_seconds),
+            )
+            r.raise_for_status()
+            
+            data = r.json() or {}
+            models_list = data.get("data", [])
+            
+            return [item["id"] for item in models_list if isinstance(item, dict) and "id" in item]
+        
+        except Exception as e:
+            raise RuntimeError(
+                f"vLLM sunucusundan model listesi alınamadı ({self.base_url})"
+            ) from e
+
+
+def _metrics_enabled() -> bool:
+    raw = str(os.environ.get("BANTZ_LLM_METRICS", "")).strip().lower()
+    if not raw:
+        return False
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _extract_context_len(model_item: dict[str, Any]) -> Optional[int]:
+    """Extract context length from a `/v1/models` entry.
+
+    vLLM deployments sometimes include fields like `max_model_len`. We keep the
+    parsing best-effort and conservative.
+    """
+
+    if not isinstance(model_item, dict):
+        return None
+
+    candidates: list[Any] = []
+    for key in (
+        "max_model_len",
+        "max_context_length",
+        "context_length",
+        "max_position_embeddings",
+    ):
+        if key in model_item:
+            candidates.append(model_item.get(key))
+
+    meta = model_item.get("metadata")
+    if isinstance(meta, dict):
+        for key in (
+            "max_model_len",
+            "max_context_length",
+            "context_length",
+            "max_position_embeddings",
+        ):
+            if key in meta:
+                candidates.append(meta.get(key))
+
+    # If the server stashes capabilities in a nested structure, try a small recursive walk.
+    def walk(obj: Any, depth: int = 0) -> None:
+        if depth > 3:
+            return
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                lk = str(k).lower()
+                if lk in {
+                    "max_model_len",
+                    "max_context_length",
+                    "context_length",
+                    "max_position_embeddings",
+                }:
+                    candidates.append(v)
+                else:
+                    walk(v, depth + 1)
+        elif isinstance(obj, list):
+            for v in obj[:10]:
+                walk(v, depth + 1)
+
+    walk(model_item)
+
+    best: Optional[int] = None
+    for v in candidates:
+        try:
+            iv = int(v)
+        except Exception:
+            continue
+        if iv <= 0:
+            continue
+        if best is None or iv > best:
+            best = iv
+
+    # Sanity bounds.
+    if best is None:
+        return None
+    if best < 256:
+        return None
+    if best > 262144:
+        return None
+    return int(best)

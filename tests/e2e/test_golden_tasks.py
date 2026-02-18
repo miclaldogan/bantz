@@ -3,7 +3,7 @@
 Three golden tasks verified against mock LLM responses:
 1. Smalltalk — Turkish greeting with "efendim"
 2. Calendar — create_event tool called
-3. System info — system.info tool called, Turkish response
+3. System info — system.status tool called, Turkish response
 
 Plus meta-tests for the E2E framework itself.
 """
@@ -70,11 +70,11 @@ class TestGoldenCalendar:
 
 
 class TestGoldenSystemInfo:
-    """Golden task 3: System info — system.info tool called."""
+    """Golden task 3: System info — system.status tool called."""
 
     def test_sysinfo_tool_called(self, e2e_runner: E2ETestRunner):
         result = e2e_runner.send("Sistem durumu nedir?")
-        e2e_runner.assert_tool_called("system.info", result)
+        e2e_runner.assert_tool_called("system.status", result)
 
     def test_sysinfo_response_turkish(self, e2e_runner: E2ETestRunner):
         result = e2e_runner.send("Sistem durumu nedir?")

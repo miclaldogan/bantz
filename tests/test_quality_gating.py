@@ -78,7 +78,7 @@ class TestPolicyConfig:
     
     def test_defaults(self):
         config = PolicyConfig()
-        assert config.quality_threshold == 2.5
+        assert config.quality_threshold == 1.8
         assert config.quality_rate_limit == 30
         assert config.finalizer_mode == "auto"
     

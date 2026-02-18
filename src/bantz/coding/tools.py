@@ -525,15 +525,15 @@ class CodingToolExecutor:
                 "params": params,
                 "message": str(e),
             }
-            return False, f"⚠️ Onay gerekli: {e}\n\nOnaylamak için: confirm {conf_id}"
+            return False, f"⚠️ Confirmation required: {e}\n\nTo confirm: confirm {conf_id}"
         except Exception as e:
-            return False, f"❌ Hata: {e}"
+            return False, f"❌ Error: {e}"
     
     async def confirm_pending(self, conf_id: str) -> tuple[bool, str]:
         """Confirm and execute a pending operation."""
         pending = self._pending_confirmations.pop(conf_id, None)
         if not pending:
-            return False, f"❌ Onay bulunamadı: {conf_id}"
+            return False, f"❌ Confirmation not found: {conf_id}"
         
         return await self.execute(
             pending["tool"],
@@ -569,7 +569,7 @@ class CodingToolExecutor:
             create_dirs = params.get("create_dirs", True)
             
             self.file_manager.write_file(path, content, create_dirs=create_dirs)
-            return True, f"✅ Dosya yazıldı: {path}"
+            return True, f"✅ File written: {path}"
         
         elif tool_name == "file_edit":
             path = self._resolve_path(params["path"])
@@ -577,28 +577,28 @@ class CodingToolExecutor:
             new_str = params["new_string"]
             
             result = self.file_manager.edit_file(path, old_str, new_str)
-            return True, f"✅ Düzenlendi: {path}\n{result.to_dict()}"
+            return True, f"✅ Edited: {path}\n{result.to_dict()}"
         
         elif tool_name == "file_create":
             path = self._resolve_path(params["path"])
             content = params.get("content", "")
             
             self.file_manager.create_file(path, content)
-            return True, f"✅ Dosya oluşturuldu: {path}"
+            return True, f"✅ File created: {path}"
         
         elif tool_name == "file_delete":
             path = self._resolve_path(params["path"])
             
             self.file_manager.delete_file(path, confirmed=confirmed)
-            return True, f"✅ Dosya silindi: {path}"
+            return True, f"✅ File deleted: {path}"
         
         elif tool_name == "file_undo":
             path = self._resolve_path(params["path"])
             
             if self.file_manager.undo_last_edit(path):
-                return True, f"✅ Geri alındı: {path}"
+                return True, f"✅ Reverted: {path}"
             else:
-                return False, f"❌ Geri alınacak değişiklik yok: {path}"
+                return False, f"❌ No changes to revert: {path}"
         
         elif tool_name == "file_list":
             path = self._resolve_path(params["path"])
@@ -616,7 +616,7 @@ class CodingToolExecutor:
             
             files = self.file_manager.search_files(path, pattern, content_pattern=content)
             result = "\n".join(files)
-            return True, result or "Dosya bulunamadı"
+            return True, result or "File not found"
         
         # ─────────────────── TERMINAL TOOLS ───────────────────
         
@@ -644,7 +644,7 @@ class CodingToolExecutor:
                 cwd = self._resolve_path(cwd)
             
             bg_id = self.terminal.run_background(command, cwd=cwd)
-            return True, f"✅ Arka plan işlemi başlatıldı (ID: {bg_id})"
+            return True, f"✅ Background process started (ID: {bg_id})"
         
         elif tool_name == "terminal_background_output":
             bg_id = params["id"]
@@ -655,9 +655,9 @@ class CodingToolExecutor:
             bg_id = params["id"]
             success = self.terminal.kill_background(bg_id)
             if success:
-                return True, f"✅ İşlem sonlandırıldı: {bg_id}"
+                return True, f"✅ Process terminated: {bg_id}"
             else:
-                return False, f"❌ İşlem bulunamadı: {bg_id}"
+                return False, f"❌ Process not found: {bg_id}"
         
         elif tool_name == "terminal_background_list":
             processes = self.terminal.list_background()

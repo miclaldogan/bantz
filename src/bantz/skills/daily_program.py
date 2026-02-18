@@ -1,15 +1,15 @@
 """Daily Program Manager — multi-source daily briefing & planning (Issue #844).
 
-"Bugün ne yapmam gerekiyor?" sorusuna Calendar, Gmail, Reminders
-ve hava durumu verilerini birleştirerek bütünsel bir cevap üretir.
+Answers "What do I need to do today?" by combining Calendar, Gmail,
+Reminders and weather data into a comprehensive response.
 
-Özellikler
-──────────
-- Çoklu kaynak toplama (Calendar, Gmail, Reminders)
-- Akıllı önceliklendirme (deadline × önem × aciliyet)
-- Gün planı önerisi (saatlere göre zaman blokları)
-- Çakışma tespiti (overlapping events)
-- Follow-up aksiyon önerileri
+Features
+────────
+- Multi-source aggregation (Calendar, Gmail, Reminders)
+- Smart prioritization (deadline × importance × urgency)
+- Day plan suggestions (time blocks by hour)
+- Conflict detection (overlapping events)
+- Follow-up action suggestions
 """
 
 from __future__ import annotations

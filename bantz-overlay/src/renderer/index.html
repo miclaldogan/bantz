@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bantz Overlay</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="boot-layer">
+    <div class="boot-bg">
+      <pre id="boot-log" class="boot-log"></pre>
+      <div class="boot-scanlines"></div>
+    </div>
+    <div class="boot-logo">
+      <img src="assets/bantz_no_bg_KEEP_SMILE_CLEAN.png" alt="BANTZ" onerror="this.style.display='none';this.parentNode.innerHTML='<span class=boot-text>BANTZ</span>'" />
+    </div>
+  </div>
+
+  <div id="app-shell">
+  <!--
+    The overlay root container.
+    Everything transparent by default; only content panels are visible.
+  -->
+  <div id="overlay-root">
+
+    <!-- Left column: inbox / notifications / daily tasks / system status -->
+    <div id="region-left" class="region region-left"></div>
+
+    <!-- Center column: sphere + speech (the original HUD core) -->
+    <div id="region-center" class="region region-center">
+      <div id="hud-panel" class="hud-panel">
+
+        <!-- Status indicator: shows connection state -->
+        <div id="status-indicator" class="status-indicator">
+          <span class="status-dot" id="status-dot"></span>
+          <span class="status-text" id="status-text">Connecting...</span>
+        </div>
+
+        <div id="content-area" class="content-area">
+          <div id="sphere-container" class="sphere-container"></div>
+        </div>
+
+        <!-- Speech area at bottom -->
+        <div id="speech-area" class="speech-area">
+          <div id="reasoning-chain" class="reasoning-chain"></div>
+          <div id="typewriter-output" class="typewriter-output">
+            <span id="typewriter-text"></span>
+            <span id="typewriter-cursor" class="cursor">█</span>
+          </div>
+        </div>
+
+      </div><!-- /#hud-panel -->
+    </div><!-- /#region-center -->
+
+    <!-- Right column: github feed / news / clock -->
+    <div id="region-right" class="region region-right"></div>
+
+  </div><!-- /#overlay-root -->
+
+  <script src="components/terminal-panel.js"></script>
+  <script src="components/panel-layout.js"></script>
+  <script src="components/news-feed.js"></script>
+  <script src="components/news-image-popup.js"></script>
+  <script src="components/daily-tasks.js"></script>
+  <script src="components/inbox-panel.js"></script>
+  <script src="components/system-status.js"></script>
+  <script src="components/typewriter.js"></script>
+  <script src="components/reasoning-chain.js"></script>
+  <script src="components/glitch-effects.js"></script>
+  <script src="components/panel-transitions.js"></script>
+  <script src="components/tts-sync.js"></script>
+  <script src="components/clock-panel.js"></script>
+  <script src="components/github-feed.js"></script>
+  <script src="components/phone-call-overlay.js"></script>
+  <script src="components/demo-mode.js"></script>
+  <!-- Error catcher for ES module loading -->
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      console.error('[ErrorCatcher] ' + msg + ' @ ' + src + ':' + line + ':' + col);
+      return false;
+    };
+    window.addEventListener('unhandledrejection', function(e) {
+      console.error('[ErrorCatcher] Unhandled rejection: ' + (e.reason ? e.reason.message || e.reason : 'unknown'));
+    });
+  </script>
+  <script type="module" src="renderer.js"></script>
+  <script type="module">
+    // Diagnostic: test ES module imports (does NOT re-execute renderer.js)
+    import('./vendor/three.min.js')
+      .then(() => console.log('[ModuleDiag] three.min.js OK'))
+      .catch(e => console.error('[ModuleDiag] three.min.js FAIL: ' + e.message));
+    import('./components/particle-sphere.js')
+      .then(() => console.log('[ModuleDiag] particle-sphere.js OK'))
+      .catch(e => console.error('[ModuleDiag] particle-sphere.js FAIL: ' + e.message));
+    import('./components/particle-scatter.js')
+      .then(() => console.log('[ModuleDiag] particle-scatter.js OK'))
+      .catch(e => console.error('[ModuleDiag] particle-scatter.js FAIL: ' + e.message));
+    import('./components/sphere-state.js')
+      .then(() => console.log('[ModuleDiag] sphere-state.js OK'))
+      .catch(e => console.error('[ModuleDiag] sphere-state.js FAIL: ' + e.message));
+  </script>
+  </div><!-- /#app-shell -->
+</body>
+</html>

@@ -349,37 +349,28 @@ class PromptBuilder:
 
     def _build_system_prompt(self, *, variant: PromptVariant, writing: int, personality_block: Optional[str] = None) -> str:
         # Keep this short; we have a strict token budget.
-        style = "kısa ve öz" if writing < 3 else "kibar ve akıcı"
-        extra = "" if variant == "A" else "- Gereksiz teknik detay verme; sonuç odaklı ol."
+        style = "concise and direct" if writing < 3 else "polished and eloquent"
+        extra = "" if variant == "A" else "- Avoid unnecessary technical details; stay result-oriented."
 
         # Issue #874: Use personality identity lines if available
         if personality_block:
-            # Personality block contains identity & style, but may omit
-            # the 'Efendim' honorific.  Issue #1019: Add it as a fallback
-            # line if the personality block doesn't already mention it.
-            honorific_line = ""
-            if "efendim" not in personality_block.lower():
-                honorific_line = "- 'Efendim' hitabını kullan."
             return "\n".join(
                 filter(None, [
-                    "Kimlik / Roller:",
+                    "Identity / Roles:",
                     personality_block,
-                    honorific_line,
-                    "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
-                    f"- Ton: {style}.",
-                    "- Çıktı: Sadece kullanıcıya söyleyeceğin metin. JSON/Markdown yok.",
+                    f"- Tone: {style}.",
+                    "- Output: Plain text for the user only. No JSON/Markdown.",
                     extra,
                 ])
             ).strip()
 
         return "\n".join(
             [
-                "Kimlik / Roller:",
-                "- Sen BANTZ'sın. Kullanıcı USER'dır.",
-                "- SADECE TÜRKÇE konuş. Asla Çince, Korece, İngilizce veya başka dil kullanma!",
-                "- 'Efendim' hitabını kullan.",
-                f"- Ton: {style}.",
-                "- Çıktı: Sadece kullanıcıya söyleyeceğin metin. JSON/Markdown yok.",
+                "Identity / Roles:",
+                "- You are BANTZ, The Broadcaster — a polished, theatrical, radio-host-style AI assistant.",
+                "- Address the user as 'friend'. Be warm, slightly theatrical, with mid-Atlantic charm.",
+                f"- Tone: {style}.",
+                "- Output: Plain text for the user only. No JSON/Markdown.",
                 extra,
             ]
         ).strip()
@@ -405,67 +396,67 @@ class PromptBuilder:
 
     def _template_chat(self, *, variant: PromptVariant) -> str:
         lines = [
-            "Görev:",
-            "- Bu bir sohbet mesajı. Samimi ama kısa cevap ver (1-2 cümle).",
+            "Task:",
+            "- This is a chat message. Give a warm but concise reply (1-2 sentences).",
         ]
         if variant == "B":
-            lines.append("- Kullanıcı soru sormadıysa, nazikçe 'Nasıl yardımcı olayım?' ile bitir.")
+            lines.append("- If the user didn't ask a question, end with 'How may I assist, friend?'")
         return "\n".join(lines)
 
     def _template_calendar(self, *, variant: PromptVariant, complexity: int) -> str:
         lines = [
-            "Görev (Takvim):",
-            "- Tool sonuçlarına göre programı özetle veya istenen işlemin sonucunu söyle.",
-            "- Tarih/saat belirt; varsa 1-2 maddeyle öne çıkan etkinlikleri say.",
+            "Task (Calendar):",
+            "- Summarize the schedule from tool results or report the outcome of the requested operation.",
+            "- Mention date/time; if there are 1-2 notable events, highlight them.",
         ]
         if complexity >= 3:
-            lines.append("- Birden çok sonuç varsa, en önemlileri önce ver.")
+            lines.append("- If multiple results, prioritize the most important ones.")
         if variant == "B":
-            lines.append("- Saat aralığı belirsizse kullanıcıya netleştirme sorusu sor.")
+            lines.append("- If the time range is ambiguous, ask the user to clarify.")
         
         # Few-shot example (short)
         lines.extend(
             [
                 "\nÖrnek:",
                 "PLANNER_DECISION: {route: calendar, calendar_intent: query}",
-                "TOOL_RESULTS: 2 etkinlik", 
-                "Cevap: 'Bugün 2 toplantınız var efendim: 10:00 proje, 15:00 birebir.'",
+                "TOOL_RESULTS: 2 events",
+                "Reply: 'You have 2 meetings today, friend: project sync at 10:00, one-on-one at 15:00.'",
             ]
         )
         return "\n".join(lines)
 
     def _template_gmail(self, *, variant: PromptVariant, writing: int) -> str:
         lines = [
-            "Görev (Gmail):",
-            "- Tool sonuçlarına göre kullanıcıya inbox/mesaj bilgisini özetle.",
-            "- Konu, gönderen, tarih gibi bilgileri kısa ver.",
-            "- Kullanıcı bir yanıt taslağı istiyorsa: 1 kısa taslak + 2 alternatif öner.",
+            "Task (Gmail):",
+            "- Summarize inbox/message info from tool results.",
+            "- Keep subject, sender, date concise.",
+            "- If user requests a draft reply: provide 1 short draft + 2 alternatives.",
         ]
         if writing >= 4:
-            lines.append("- Yazım kalitesi önemli: akıcı, kibar, hatasız Türkçe kullan.")
+            lines.append("- Writing quality matters: use fluent, polished language.")
         if variant == "B":
-            lines.append("- Taslak oluştururken gereksiz uzatma; net bir kapanış cümlesi ekle.")
+            lines.append("- When drafting, avoid padding; end with a clear closing line.")
         return "\n".join(lines)
 
     def _template_wiki(self, *, variant: PromptVariant, complexity: int) -> str:
         lines = [
-            "Görev (Wiki):",
-            "- Verilen içerikten 3-6 maddelik özet çıkar.",
-            "- Bilinmeyen/emin olunmayan kısımları kesin konuşma.",
+            "Task (Wiki):",
+            "- Extract a 3-6 bullet summary from the given content.",
+            "- Do not speak with certainty about unknown parts.",
         ]
         if complexity >= 3:
-            lines.append("- Kısa bir 'TL;DR' satırı ekle.")
+            lines.append("- Add a short 'TL;DR' line.")
         if variant == "B":
-            lines.append("- Kaynak adı/bağlantı varsa sona tek satırda ekle.")
+            lines.append("- If a source name/link exists, add it on one line at the end.")
         return "\n".join(lines)
 
     def _template_unknown(self, *, variant: PromptVariant) -> str:
         lines = [
-            "Görev:",
-            "- Kullanıcının isteğini netleştirmek için 1 soru sor veya kısa bir öneri sun.",
+            "Task:",
+            "- Ask 1 clarifying question or offer a brief suggestion.",
         ]
         if variant == "B":
-            lines.append("- Alternatif olarak 2 seçenek sun (örn. 'Takvim mi Gmail mi?').")
+            lines.append("- Offer 2 choices as alternatives (e.g., 'Calendar or Gmail?').")
         return "\n".join(lines)
 
 

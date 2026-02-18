@@ -193,6 +193,13 @@ class IdempotencyStore:
                     pass
                 raise
             
+            # Keep cache consistent: update mtime so next _load() won't
+            # unnecessarily re-read the file we just wrote.
+            try:
+                self._last_mtime = Path(self.store_path).stat().st_mtime
+            except OSError:
+                pass
+
             logger.debug("Saved %d idempotency records to %s", len(active_records), self.store_path)
         except Exception as e:
             logger.warning("Failed to save idempotency store: %s", e)

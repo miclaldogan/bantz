@@ -432,7 +432,7 @@ class TestYAMLIntegrity:
 
     def test_all_routes_valid(self) -> None:
         """Tüm mock route'lar geçerli enum değeri."""
-        valid_routes = {"calendar", "gmail", "smalltalk", "system", "unknown"}
+        valid_routes = {"calendar", "gmail", "news", "smalltalk", "system", "unknown"}
         for scenario in SCENARIOS:
             if "turns" in scenario:
                 for turn in scenario["turns"]:

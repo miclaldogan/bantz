@@ -48,11 +48,11 @@ TRIGGER_CANCEL = "cancel"
 class ConversationState(Enum):
     """Conversation states."""
     
-    IDLE = "idle"               # Bekliyor
-    LISTENING = "listening"     # VAD aktif, kullanıcı konuşuyor
-    THINKING = "thinking"       # LLM işliyor
-    SPEAKING = "speaking"       # TTS oynatılıyor
-    CONFIRMING = "confirming"   # Onay bekliyor ("emin misin?")
+    IDLE = "idle"               # Waiting
+    LISTENING = "listening"     # VAD active, user speaking
+    THINKING = "thinking"       # LLM processing
+    SPEAKING = "speaking"       # TTS playing
+    CONFIRMING = "confirming"   # Waiting for confirmation
     
     def __str__(self) -> str:
         return self.value

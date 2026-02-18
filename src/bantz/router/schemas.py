@@ -19,6 +19,7 @@ class RouteType(str, Enum):
     """Valid route types for router output."""
     CALENDAR = "calendar"
     GMAIL = "gmail"
+    NEWS = "news"
     SYSTEM = "system"
     SMALLTALK = "smalltalk"
     UNKNOWN = "unknown"

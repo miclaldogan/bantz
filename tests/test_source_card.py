@@ -108,12 +108,12 @@ class TestReliabilityLabels:
     """Tests for reliability labels."""
     
     def test_reliability_labels_turkish(self):
-        """Test reliability labels are in Turkish."""
+        """Test reliability labels."""
         from bantz.ui.source_card import RELIABILITY_LABELS
         
-        assert RELIABILITY_LABELS["high"] == "Güvenilir"
-        assert RELIABILITY_LABELS["medium"] == "Orta"
-        assert RELIABILITY_LABELS["low"] == "Düşük"
+        assert RELIABILITY_LABELS["high"] == "Reliable"
+        assert RELIABILITY_LABELS["medium"] == "Medium"
+        assert RELIABILITY_LABELS["low"] == "Low"
     
     def test_none_reliability_empty_label(self):
         """Test None reliability has empty label."""

@@ -1,8 +1,8 @@
 """
 Issue #58: Behavioral Learning & User Modeling (RL-style).
 
-Kullanıcı davranışlarından öğrenen ve kişiselleştirilmiş
-deneyim sunan akıllı öğrenme sistemi.
+Smart learning system that learns from user behavior
+and provides a personalized experience.
 """
 
 from bantz.learning.profile import (

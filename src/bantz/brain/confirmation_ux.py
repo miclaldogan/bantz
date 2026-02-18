@@ -580,10 +580,19 @@ def deterministic_confirmation_prompt(
         if target == "gmail" and not title and tool_name in _GENERIC_TOOL_TEMPLATES:
             return _safe_format(_GENERIC_TOOL_TEMPLATES[tool_name], slots)
 
+        # Issue #1212: For calendar events, use a descriptive default
+        # instead of generic "İşlem" so user sees what's being created.
+        if target == "calendar" and not title:
+            default_title = "Etkinlik"
+        elif not title:
+            default_title = "İşlem"
+        else:
+            default_title = title
+
         preview = ConfirmationPreview(
             action_type=action_type,
             target=target,
-            title=title or "İşlem",
+            title=default_title,
             time=slots.get("time"),
             date=slots.get("date"),
             duration=slots.get("duration"),

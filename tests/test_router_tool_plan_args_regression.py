@@ -21,18 +21,18 @@ class MockLLM:
 
 def test_tool_plan_string_list():
     """tool_plan as list of strings should work (backward compat)."""
-    mock_llm = MockLLM(response='{"route": "calendar", "calendar_intent": "query", "confidence": 0.9, "tool_plan": ["calendar.list_events", "calendar.get_free_slots"], "assistant_reply": ""}')
+    mock_llm = MockLLM(response='{"route": "calendar", "calendar_intent": "query", "confidence": 0.9, "tool_plan": ["calendar.list_events", "calendar.find_free_slots"], "assistant_reply": ""}')
     
     router = JarvisLLMOrchestrator(llm_client=mock_llm)
     output = router.route(user_input="show my meetings")
     
     # Tool plan should have names
-    assert output.tool_plan == ["calendar.list_events", "calendar.get_free_slots"]
+    assert output.tool_plan == ["calendar.list_events", "calendar.find_free_slots"]
     
     # tool_plan_with_args should be populated with empty args
     assert len(output.tool_plan_with_args) == 2
     assert output.tool_plan_with_args[0] == {"name": "calendar.list_events", "args": {}}
-    assert output.tool_plan_with_args[1] == {"name": "calendar.get_free_slots", "args": {}}
+    assert output.tool_plan_with_args[1] == {"name": "calendar.find_free_slots", "args": {}}
 
 
 def test_tool_plan_dict_with_args():
@@ -56,19 +56,19 @@ def test_tool_plan_dict_with_args():
 
 def test_tool_plan_mixed_strings_and_dicts():
     """tool_plan with mix of strings and dicts should work."""
-    mock_llm = MockLLM(response='{"route": "calendar", "calendar_intent": "query", "confidence": 0.9, "tool_plan": ["calendar.list_events", {"name": "calendar.get_free_slots", "args": {"duration_minutes": 30}}], "assistant_reply": ""}')
+    mock_llm = MockLLM(response='{"route": "calendar", "calendar_intent": "query", "confidence": 0.9, "tool_plan": ["calendar.list_events", {"name": "calendar.find_free_slots", "args": {"duration_minutes": 30}}], "assistant_reply": ""}')
     
     router = JarvisLLMOrchestrator(llm_client=mock_llm)
     output = router.route(user_input="meetings and free slots")
     
     # Tool plan should have both names
-    assert output.tool_plan == ["calendar.list_events", "calendar.get_free_slots"]
+    assert output.tool_plan == ["calendar.list_events", "calendar.find_free_slots"]
     
     # tool_plan_with_args: first has no args, second has args
     assert len(output.tool_plan_with_args) == 2
     assert output.tool_plan_with_args[0] == {"name": "calendar.list_events", "args": {}}
     assert output.tool_plan_with_args[1] == {
-        "name": "calendar.get_free_slots",
+        "name": "calendar.find_free_slots",
         "args": {"duration_minutes": 30}
     }
 
@@ -172,7 +172,7 @@ def test_tool_plan_length_consistency():
         # Dicts only
         '{"route": "calendar", "calendar_intent": "query", "confidence": 0.9, "tool_plan": [{"name": "calendar.list_events", "args": {}}], "assistant_reply": ""}',
         # Mixed
-        '{"route": "calendar", "calendar_intent": "query", "confidence": 0.9, "tool_plan": ["calendar.list_events", {"name": "calendar.get_free_slots", "args": {"duration": 30}}], "assistant_reply": ""}',
+        '{"route": "calendar", "calendar_intent": "query", "confidence": 0.9, "tool_plan": ["calendar.list_events", {"name": "calendar.find_free_slots", "args": {"duration": 30}}], "assistant_reply": ""}',
     ]
     
     for response in test_cases:

@@ -473,15 +473,15 @@ def test_calendar_create_event_always_requires_confirmation():
 
 def test_gmail_send_requires_confirmation_even_if_llm_does_not_request_it():
     tool_name = "gmail.send"
-    assert get_tool_risk(tool_name) == ToolRisk.MODERATE
-    assert is_destructive(tool_name) is False
+    assert get_tool_risk(tool_name) == ToolRisk.DESTRUCTIVE
+    assert is_destructive(tool_name) is True
     assert requires_confirmation(tool_name, llm_requested=False) is True
 
 
 def test_gmail_send_draft_requires_confirmation_even_if_llm_does_not_request_it():
     tool_name = "gmail.send_draft"
-    assert get_tool_risk(tool_name) == ToolRisk.MODERATE
-    assert is_destructive(tool_name) is False
+    assert get_tool_risk(tool_name) == ToolRisk.DESTRUCTIVE
+    assert is_destructive(tool_name) is True
     assert requires_confirmation(tool_name, llm_requested=False) is True
 
 
@@ -531,3 +531,39 @@ def test_confirmation_flow_full_cycle(tool_registry, audit_logger):
     assert logs[0]["risk_level"] == "destructive"
     assert logs[0]["confirmed"] is True
     assert logs[0]["success"] is True
+
+
+# ═══════════════════════════════════════════════════════════
+# Issue #1389 — Confirmation Bugfixes
+# ═══════════════════════════════════════════════════════════
+
+
+def test_contacts_search_is_safe_no_confirmation():
+    """Issue #1389: contacts.search should be SAFE — no confirmation needed."""
+    assert get_tool_risk("contacts.search") == ToolRisk.SAFE
+    assert requires_confirmation("contacts.search", llm_requested=False) is False
+
+
+def test_contacts_get_is_safe_no_confirmation():
+    """Issue #1389: contacts.get should be SAFE — no confirmation needed."""
+    assert get_tool_risk("contacts.get") == ToolRisk.SAFE
+    assert requires_confirmation("contacts.get", llm_requested=False) is False
+
+
+def test_gmail_send_is_destructive():
+    """Issue #1389: gmail.send must be DESTRUCTIVE — confirm every time."""
+    assert get_tool_risk("gmail.send") == ToolRisk.DESTRUCTIVE
+    assert is_destructive("gmail.send") is True
+    assert requires_confirmation("gmail.send", llm_requested=False) is True
+
+
+def test_gmail_send_to_contact_is_destructive():
+    """Issue #1389: gmail.send_to_contact must be DESTRUCTIVE."""
+    assert get_tool_risk("gmail.send_to_contact") == ToolRisk.DESTRUCTIVE
+    assert is_destructive("gmail.send_to_contact") is True
+
+
+def test_gmail_send_draft_is_destructive():
+    """Issue #1389: gmail.send_draft must be DESTRUCTIVE."""
+    assert get_tool_risk("gmail.send_draft") == ToolRisk.DESTRUCTIVE
+    assert is_destructive("gmail.send_draft") is True

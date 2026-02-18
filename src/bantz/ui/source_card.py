@@ -55,9 +55,9 @@ RELIABILITY_COLORS = {
 }
 
 RELIABILITY_LABELS = {
-    "high": "Güvenilir",
-    "medium": "Orta",
-    "low": "Düşük",
+    "high": "Reliable",
+    "medium": "Medium",
+    "low": "Low",
     None: "",
 }
 

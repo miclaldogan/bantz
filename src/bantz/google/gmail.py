@@ -10,11 +10,14 @@ Return payloads follow the tool-friendly `{ok: bool, ...}` pattern.
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import re
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from bantz.google.gmail_auth import GMAIL_MODIFY_SCOPES, GMAIL_READONLY_SCOPES, GMAIL_SEND_SCOPES, authenticate_gmail
 

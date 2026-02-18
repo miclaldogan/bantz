@@ -82,6 +82,9 @@ Token üretmek için:
 pip install -e ".[calendar]"
 bantz google auth gmail --scope readonly
 
+# Classroom (unified token scope genişletme)
+bantz google auth classroom
+
 Eğer Gmail client secret dosyan `client_secret_gmail.json` değil de tek bir dosyaysa:
 
 ```bash

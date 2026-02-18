@@ -1,7 +1,7 @@
 """Bantz Session Server - Unix socket daemon.
 
-Tarayıcıyı ve context'i canlı tutar.
-CLI komutları socket üzerinden alır, sonuçları döner.
+Keeps browser and context alive.
+Receives CLI commands via socket, returns results.
 """
 from __future__ import annotations
 
@@ -107,7 +107,7 @@ def ensure_server_running(
     started = start_server_in_background(session_name=session_name, policy_path=policy_path, log_path=log_path)
     if not started:
         err = _format_err(_bg_server_errors.get(session_name, ""))
-        hint = " (ipuçu: terminalde 'bantz --serve --session {s}' deneyebilirsin)".format(s=session_name)
+        hint = " (hint: try 'bantz --serve --session {s}' in terminal)".format(s=session_name)
         return False, False, f"start_failed:{err}{hint}" if err else f"start_failed{hint}"
 
     # Wait for socket to come up.
@@ -120,12 +120,12 @@ def ensure_server_running(
         err = _bg_server_errors.get(session_name)
         if err:
             short = _format_err(err)
-            hint = " (ipuçu: 'bantz --serve --session {s}' ile hata çıktısını gör)".format(s=session_name)
+            hint = " (hint: run 'bantz --serve --session {s}' to see error output)".format(s=session_name)
             return False, True, f"crashed:{short}{hint}" if short else f"crashed{hint}"
 
         time.sleep(0.1)
 
-    return False, True, "timeout (ipuçu: 'bantz --serve --session {s}' ile manuel başlatıp logu gör)".format(s=session_name)
+    return False, True, "timeout (hint: start with 'bantz --serve --session {s}' and check logs)".format(s=session_name)
 
 
 class InboxStore:
@@ -209,6 +209,7 @@ class IPCOverlayHook(OverlayStateHook):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
+        self._server_ref = None  # Reference to BantzServer for command handling
     
     def start(self) -> bool:
         """Start overlay client and spawn overlay process."""
@@ -237,16 +238,20 @@ class IPCOverlayHook(OverlayStateHook):
                 return False
             
             # Start client in the async loop
+            # auto_spawn=False: Electron overlay is started independently
+            # and creates the socket server; we just connect to it.
             future = asyncio.run_coroutine_threadsafe(
-                self._client.start(auto_spawn=True),
+                self._client.start(auto_spawn=False),
                 self._loop,
             )
             
-            # Wait for connection (max 10 seconds)
-            connected = future.result(timeout=10.0)
+            # Wait for connection (max 30 seconds — overlay may still be booting)
+            connected = future.result(timeout=30.0)
             
             if connected:
                 print("   Overlay: bağlandı ✓")
+                # Wire command callback for text commands from overlay UI
+                self._client.set_command_callback(self._handle_overlay_command)
                 return True
             else:
                 print("   Overlay: bağlanamadı")
@@ -400,6 +405,53 @@ class IPCOverlayHook(OverlayStateHook):
     def is_connected(self) -> bool:
         """Check if overlay is connected."""
         return self._client is not None and self._client.connected
+    
+    def set_server_ref(self, server: 'BantzServer') -> None:
+        """Set reference to BantzServer for command processing."""
+        self._server_ref = server
+    
+    async def _handle_overlay_command(self, text: str) -> None:
+        """Handle text command from overlay UI — runs handle_command in thread."""
+        if not self._server_ref:
+            logger.warning("[IPCOverlayHook] No server reference, cannot process command")
+            return
+        
+        # Show thinking state
+        await self.thinking("Düşünüyorum...")
+        
+        try:
+            # Run blocking handle_command in executor
+            import asyncio as _asyncio
+            loop = _asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, self._server_ref.handle_command, text
+            )
+            
+            response_text = result.get("text", "")
+            
+            # Show speaking state with response
+            if response_text:
+                await self.speaking(response_text[:200])
+            else:
+                await self.speaking("Tamam!")
+            
+            # Send response as a raw message so the overlay can display it
+            if self._client:
+                await self._client.send_raw({
+                    "type": "response",
+                    "text": response_text,
+                    "ok": result.get("ok", False),
+                })
+            
+            # Auto-hide after a delay
+            await _asyncio.sleep(8)
+            await self.idle()
+            
+        except Exception as e:
+            logger.error(f"[IPCOverlayHook] Command processing error: {e}")
+            await self.speaking(f"Hata: {e}")
+            await _asyncio.sleep(3)
+            await self.idle()
 
 
 # Global overlay hook instance
@@ -462,6 +514,43 @@ class BantzServer:
         self._scan_page_index = 0
         self._scan_page_size = 10
         self._last_scan: Optional[dict] = None
+
+        # ── Data Sync Scheduler (Gmail, Calendar, News → IngestStore) ──
+        self._sync_scheduler = None
+        self._sync_loop = None      # dedicated asyncio loop for sync
+        self._sync_thread = None    # background thread running the loop
+        try:
+            import asyncio as _aio
+            import threading
+            from bantz.data import IngestStore, SyncScheduler
+            from bantz.tools.sync_search_tools import init_sync_tools
+
+            _sync_store = IngestStore()
+            self._sync_scheduler = SyncScheduler(_sync_store)
+
+            # Run sync scheduler in a dedicated background thread with
+            # its own event loop so it works in both interactive and
+            # daemon modes (the main thread is sync/blocking).
+            self._sync_loop = _aio.new_event_loop()
+
+            def _sync_thread_target(loop, scheduler):
+                _aio.set_event_loop(loop)
+                loop.run_until_complete(scheduler.start())
+                loop.run_forever()
+
+            self._sync_thread = threading.Thread(
+                target=_sync_thread_target,
+                args=(self._sync_loop, self._sync_scheduler),
+                daemon=True,
+                name="bantz-sync",
+            )
+            self._sync_thread.start()
+            init_sync_tools(self._sync_scheduler)
+            logging.getLogger(__name__).info("Data sync scheduler started.")
+        except Exception as _sync_err:
+            logging.getLogger(__name__).warning(
+                "Data sync init failed (non-fatal): %s", _sync_err,
+            )
 
     def _get_router(self) -> Router:
         if self.router is None:
@@ -541,7 +630,10 @@ class BantzServer:
                     "browser": browser_url,
                     "overlay": "bağlı" if (get_ipc_overlay_hook()._client and get_ipc_overlay_hook()._client.connected) else "kapalı",
                     "queue_active": self.ctx.queue_active(),
-                    "pending": self.ctx.pending is not None,
+                    "pending": (
+                        self.ctx.pending is not None
+                        or (self._brain_state is not None and self._brain_state.has_pending_confirmation())
+                    ),
                 },
             }
 
@@ -602,6 +694,23 @@ class BantzServer:
         if parsed.intent.startswith("browser_"):
             self._init_browser()
 
+        # ── Cross-system confirmation: if old Router has ctx.pending and user
+        #    says yes/no (NLU → confirm_yes/confirm_no which doesn't start with
+        #    "browser_"), route to old Router so it can resolve its own pending. ──
+        if self.ctx.pending is not None and parsed.intent in ("confirm_yes", "confirm_no"):
+            router = self._get_router()
+            result = router.handle(text=command, ctx=self.ctx)
+            overlay = get_ipc_overlay_hook()
+            if overlay._client and overlay._client.connected:
+                if result.ok:
+                    overlay.speaking_sync(result.user_text[:100] if result.user_text else "Tamam!")
+                else:
+                    overlay.speaking_sync(result.user_text[:100] if result.user_text else "Bir sorun oluştu.")
+            return {
+                "ok": result.ok,
+                "text": result.user_text or ("Tamam." if result.ok else "Hata oluştu."),
+            }
+
         # Show thinking state on overlay
         overlay = get_ipc_overlay_hook()
         if overlay._client and overlay._client.connected:
@@ -626,7 +735,7 @@ class BantzServer:
                     _yes_tokens = {
                         "evet", "e", "ok", "tamam", "onay", "onaylıyorum",
                         "kabul", "yes", "y", "olur", "peki", "ekle", "yap",
-                        "koy", "kaydet",
+                        "koy", "kaydet", "gönder", "at", "yolla",
                     }
                     _no_tokens = {
                         "hayır", "hayir", "h", "no", "n", "iptal", "vazgeç",
@@ -678,12 +787,21 @@ class BantzServer:
                             "confirmation_tool": pending_tool,
                         }
 
+                # Snapshot tool results before this turn
+                _prev_tool_count = len(self._brain_state.last_tool_results) if self._brain_state else 0
+
                 output, self._brain_state = self._brain.process_turn(
                     command, self._brain_state
                 )
                 reply = str(getattr(output, "assistant_reply", "") or "").strip()
                 if not reply and getattr(output, "ask_user", False):
                     reply = str(getattr(output, "question", "") or "").strip()
+
+                # Extract only THIS turn's tool results
+                _current_tools = (
+                    self._brain_state.last_tool_results[_prev_tool_count:]
+                    if self._brain_state else []
+                )
 
                 # ── Issue #869: Check if this turn created a pending confirmation ──
                 confirmation_pending = (
@@ -697,6 +815,10 @@ class BantzServer:
                     # Use the confirmation prompt as the reply text
                     if conf_prompt:
                         reply = conf_prompt
+
+                # Show speaking state on overlay
+                if overlay._client and overlay._client.connected and reply:
+                    overlay.speaking_sync(reply[:100])
 
                 return {
                     "ok": True,
@@ -712,15 +834,29 @@ class BantzServer:
                         str((self._brain_state.peek_pending_confirmation() or {}).get("tool", ""))
                         if confirmation_pending else None
                     ),
+                    "tools_used": [
+                        {"tool": r.get("tool", ""), "args": r.get("params", {})}
+                        for r in _current_tools
+                    ] or None,
                 }
             except Exception as e:
                 logging.getLogger(__name__).error("Brain handler failed: %s", e)
+                # Show error on overlay then idle
+                if overlay._client and overlay._client.connected:
+                    overlay.speaking_sync(f"Hata: {e}"[:100])
                 return {
                     "ok": False,
                     "text": f"İşlem sırasında hata oluştu: {e}",
                     "brain": True,
                     "route": "error",
                 }
+            finally:
+                # Always return overlay to idle after brain processing
+                if overlay._client and overlay._client.connected:
+                    try:
+                        overlay.idle_sync()
+                    except Exception:
+                        pass
 
         # Route command (Router path — browser_* intents or brain unavailable)
         router = self._get_router()
@@ -837,6 +973,306 @@ class BantzServer:
         self._last_scan = scan
         return self._format_scan_result(scan)
 
+    def _run_startup_briefing(self, overlay_hook: "IPCOverlayHook") -> None:
+        """Run startup briefing in background thread — sends news, calendar,
+        weather, and system data to the overlay via IPC.
+
+        This wires together:
+        - DailyBriefingService (news, calendar, email sections)
+        - BriefingOverlay protocol (briefing_start/card/end IPC messages)
+        - Calendar + weather data fetched from IngestStore or live APIs
+        """
+        import threading
+
+        def _briefing_thread() -> None:
+            import asyncio as _aio
+
+            loop = _aio.new_event_loop()
+            _aio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    self._send_startup_briefing_async(overlay_hook)
+                )
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "[STARTUP_BRIEFING] failed: %s", e
+                )
+            finally:
+                loop.close()
+
+        t = threading.Thread(
+            target=_briefing_thread,
+            daemon=True,
+            name="bantz-startup-briefing",
+        )
+        t.start()
+        print("   Startup Briefing: arka planda hazırlanıyor...")
+
+    async def _send_startup_briefing_async(
+        self, overlay_hook: "IPCOverlayHook"
+    ) -> None:
+        """Async startup briefing — fetches live data and sends to overlay."""
+        from bantz.services.briefing_overlay import (
+            BriefingStartMessage,
+            BriefingCardMessage,
+            BriefingEndMessage,
+        )
+
+        _log = logging.getLogger(__name__)
+
+        # ── Helper: send a dict to the overlay ──
+        def _send_msg(msg_dict: dict) -> None:
+            if overlay_hook._client and overlay_hook._client.connected:
+                try:
+                    import asyncio as _aio2
+
+                    if overlay_hook._loop and overlay_hook._loop.is_running():
+                        fut = _aio2.run_coroutine_threadsafe(
+                            overlay_hook._client.send_raw(msg_dict),
+                            overlay_hook._loop,
+                        )
+                        fut.result(timeout=5.0)
+                    else:
+                        _log.debug("[BRIEFING] overlay loop not running")
+                except Exception as e:
+                    _log.debug("[BRIEFING] send failed: %s", e)
+
+        # ── 1. Generate briefing via DailyBriefingService ──
+        calendar_events = []
+        unread_emails = 0
+        important_emails = 0
+
+        # Try to fetch calendar data from IngestStore (synced data)
+        try:
+            from bantz.data.ingest_store import IngestStore
+
+            store = IngestStore()
+            cached_cal = store.query(source="calendar_sync", limit=20)
+            if cached_cal:
+                import json
+
+                for rec in cached_cal:
+                    try:
+                        data = (
+                            json.loads(rec.content)
+                            if isinstance(rec.content, str)
+                            else rec.content
+                        )
+                        if isinstance(data, dict):
+                            calendar_events.append(data)
+                    except Exception:
+                        pass
+                _log.info(
+                    "[BRIEFING] %d calendar events from IngestStore",
+                    len(calendar_events),
+                )
+        except Exception as e:
+            _log.debug("[BRIEFING] IngestStore calendar fetch failed: %s", e)
+
+        # Fallback: fetch calendar from Google API directly
+        if not calendar_events:
+            try:
+                from bantz.google.calendar import list_events
+
+                raw_events = list_events(max_results=10)
+                if isinstance(raw_events, list):
+                    calendar_events = raw_events
+                elif isinstance(raw_events, dict):
+                    calendar_events = raw_events.get("events", [])
+                _log.info(
+                    "[BRIEFING] %d calendar events from Google API",
+                    len(calendar_events),
+                )
+            except Exception as e:
+                _log.debug("[BRIEFING] Google Calendar fetch failed: %s", e)
+
+        # Try to get Gmail summary from IngestStore
+        try:
+            from bantz.data.ingest_store import IngestStore
+
+            store = IngestStore()
+            cached_mail = store.query(source="gmail_sync", limit=50)
+            if cached_mail:
+                unread_emails = len(cached_mail)
+                # Rough heuristic: emails from classified "important" sources
+                important_emails = sum(
+                    1
+                    for r in cached_mail
+                    if r.meta
+                    and r.meta.get("classification", {}).get("category") in (
+                        "work", "bank", "tubitak", "education",
+                    )
+                )
+        except Exception:
+            pass
+
+        # ── 2. Run the briefing service ──
+        from bantz.services.startup_hook import run_startup_briefing
+
+        briefing_dict = await run_startup_briefing(
+            event_bus=self._event_bus,
+            overlay_client=None,  # We handle overlay sending ourselves
+            calendar_events=calendar_events,
+            unread_emails=unread_emails,
+            important_emails=important_emails,
+        )
+
+        # ── 3. Send briefing_start ──
+        import asyncio
+
+        news_cards = briefing_dict.get("news_cards", [])
+        sections = briefing_dict.get("sections", [])
+
+        # Count total cards we'll send
+        cal_events = []
+        for sec in sections:
+            if sec.get("type") == "calendar":
+                cal_events = sec.get("items", [])
+
+        total_cards = len(news_cards) + len(cal_events) + 1  # +1 for weather
+
+        start_msg = BriefingStartMessage(
+            greeting=briefing_dict.get("greeting", ""),
+            time_context=briefing_dict.get("time_context", {}),
+            total_cards=total_cards,
+            days_away=briefing_dict.get("days_away", 0),
+        )
+        _send_msg(start_msg.to_dict())
+        await asyncio.sleep(2.0)
+
+        cards_shown = 0
+
+        # ── 4. Send news cards ──
+        for i, card in enumerate(news_cards):
+            card_msg = BriefingCardMessage(
+                index=i,
+                total=total_cards,
+                title=card.get("title", ""),
+                summary=card.get("summary", ""),
+                source=card.get("source", ""),
+                category="news",
+                image_url=card.get("image_url"),
+                url=card.get("url", ""),
+            )
+            _send_msg(card_msg.to_dict())
+            cards_shown += 1
+            await asyncio.sleep(3.0)
+
+        # ── 5. Send calendar cards ──
+        for i, evt in enumerate(cal_events):
+            cal_card = {
+                "type": "briefing_card",
+                "category": "calendar",
+                "title": evt.get("title", evt.get("summary", "")),
+                "start": evt.get("start", evt.get("start_time", "")),
+                "end": evt.get("end", evt.get("end_time", "")),
+                "all_day": evt.get("all_day", False),
+                "id": evt.get("id", f"cal-{i}"),
+            }
+            _send_msg(cal_card)
+            cards_shown += 1
+            await asyncio.sleep(0.3)
+
+        # ── 6. Send weather card ──
+        try:
+            import urllib.request
+            import json as _json
+
+            location = os.environ.get(
+                "BANTZ_WEATHER_LOCATION",
+                os.environ.get("BANTZ_LOCATION", "Corum"),
+            )
+            url = f"https://wttr.in/{location}?format=j1"
+            req = urllib.request.Request(url, headers={"User-Agent": "bantz/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                weather_data = _json.loads(resp.read())
+
+            current = weather_data.get("current_condition", [{}])[0]
+            weather_card = {
+                "type": "briefing_card",
+                "category": "weather",
+                "temperature": int(current.get("temp_C", 0)),
+                "condition": current.get("weatherDesc", [{}])[0].get("value", ""),
+                "humidity": int(current.get("humidity", 0)),
+                "wind_speed": int(current.get("windspeedKmph", 0)),
+            }
+            _send_msg(weather_card)
+            cards_shown += 1
+        except Exception as e:
+            _log.debug("[BRIEFING] weather fetch failed: %s", e)
+
+        # ── 7. Send system metrics card ──
+        try:
+            import psutil
+
+            cpu = psutil.cpu_percent(interval=0.5)
+            mem = psutil.virtual_memory()
+            disk = psutil.disk_usage("/")
+            uptime = int(time.time() - psutil.boot_time())
+
+            sys_card = {
+                "type": "briefing_card",
+                "category": "system",
+                "cpu": round(cpu, 1),
+                "ram": round(mem.percent, 1),
+                "disk": round(disk.percent, 1),
+                "uptime_seconds": uptime,
+            }
+            _send_msg(sys_card)
+            cards_shown += 1
+        except Exception as e:
+            _log.debug("[BRIEFING] system metrics failed: %s", e)
+
+        await asyncio.sleep(1.0)
+
+        # ── 8. Send briefing_end ──
+        end_msg = BriefingEndMessage(
+            total_shown=cards_shown,
+            summary=briefing_dict.get("spoken_text", ""),
+        )
+        _send_msg(end_msg.to_dict())
+
+        _log.info(
+            "[STARTUP_BRIEFING] complete: %d cards sent (news=%d, cal=%d)",
+            cards_shown,
+            len(news_cards),
+            len(cal_events),
+        )
+
+    def run_socket_only(self) -> None:
+        """Start ONLY the session socket accept loop.
+
+        Unlike ``run()`` this does NOT start overlay, extension bridge,
+        reminder scheduler or startup briefing — those are managed by the
+        orchestrator.  Use this when the server is embedded inside
+        ``BantzOrchestrator`` to avoid double-init.
+        """
+        self._cleanup_socket()
+
+        self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server_socket.bind(str(self.socket_path))
+        self._server_socket.listen(5)
+        self._server_socket.settimeout(1.0)
+
+        import atexit
+        atexit.register(self._cleanup_socket)
+        self._running = True
+
+        print(f"   Session socket: {self.socket_path}")
+
+        while self._running:
+            try:
+                conn, _ = self._server_socket.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            self._handle_client(conn)
+
+        self._server_socket.close()
+        self._cleanup_socket()
+
     def run(self) -> None:
         """Start the server loop."""
         self._cleanup_socket()
@@ -868,6 +1304,10 @@ class BantzServer:
             print("   Extension Bridge: ws://localhost:9876 ✓")
         else:
             print("   Extension Bridge: devre dışı (websockets yükleyin)")
+
+        # ── Startup Briefing (news, calendar, weather → overlay) ──
+        if overlay_started:
+            self._run_startup_briefing(overlay_hook)
 
         print(f"🚀 Bantz Server başlatıldı (session: {self.session_name})")
         print(f"   Socket: {self.socket_path}")
@@ -915,6 +1355,21 @@ class BantzServer:
         try:
             reminder_manager = get_reminder_manager()
             reminder_manager.stop_scheduler()
+        except Exception:
+            pass
+
+        # Stop data sync scheduler
+        try:
+            if self._sync_scheduler is not None and self._sync_loop is not None:
+                import asyncio as _aio
+                future = _aio.run_coroutine_threadsafe(
+                    self._sync_scheduler.stop(), self._sync_loop,
+                )
+                future.result(timeout=5)
+                self._sync_loop.call_soon_threadsafe(self._sync_loop.stop)
+                if self._sync_thread is not None:
+                    self._sync_thread.join(timeout=3)
+                logging.getLogger(__name__).info("Data sync scheduler stopped.")
         except Exception:
             pass
 

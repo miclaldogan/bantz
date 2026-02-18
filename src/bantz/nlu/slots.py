@@ -14,13 +14,12 @@ Uses Turkish-aware patterns for accurate extraction.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from bantz.nlu.types import Slot, SlotType
-
 
 # ============================================================================
 # Time Slot
@@ -66,18 +65,69 @@ TURKISH_NUMBERS = {
 }
 
 # Time unit patterns
+# Issue #1318: Removed "ay": "months" — timedelta does not accept
+# months; the mapping was dead code that would raise TypeError.
 TIME_UNITS = {
     r"saniye|sn": "seconds",
     r"dakika|dk": "minutes",
     r"saat|sa": "hours",
     r"gün": "days",
     r"hafta": "weeks",
-    r"ay": "months",
 }
 
+# ── Issue #1318: Module-level constants (avoid per-call rebuild) ─────────
+_DAY_OFFSETS = {
+    r"\byarın\b": 1,
+    r"\bbugün\b": 0,
+    r"\bdün\b": -1,
+    r"\böbür\s*gün\b": 2,
+    r"\bgelecek\s*hafta\b": 7,
+    r"\bhaftaya\b": 7,
+}
 
-def _parse_turkish_number(text: str) -> Optional[int]:
-    """Parse Turkish number words to integer."""
+# Turkish number word pattern for hour extraction
+_TR_NUM_WORDS_PATTERN = '|'.join(sorted(
+    [k for k, v in TURKISH_NUMBERS.items() if isinstance(v, int) and 0 < v <= 23],
+    key=len, reverse=True,
+))
+
+# Issue #1255: Period-of-day mappings for Turkish
+_PERIOD_OF_DAY: dict[str, tuple[int, int]] = {
+    "sabah": (9, 0),
+    "öğle": (12, 0),
+    "öğlen": (12, 0),
+    "öğleden sonra": (14, 0),
+    "akşamüstü": (17, 0),
+    "akşam": (18, 0),
+    "gece": (21, 0),
+}
+
+# Issue #1318: Turkish morning qualifiers that override PM heuristic.
+_MORNING_QUALIFIERS = frozenset({"sabah", "sabahı", "sabahleyin"})
+
+# Issue #1318: Absolute time patterns (module-level pre-compilation).
+_ABSOLUTE_TIME_PATTERNS = [
+    re.compile(r"saat\s*(\d{1,2})(?:[:.:](\d{2}))?"),  # saat 15:00
+    re.compile(r"(\d{1,2})[:.:](\d{2})"),              # 15:00
+    re.compile(r"(\d{1,2})[''`](?:de|da|te|ta)\b"),    # 3'te
+]
+
+# Issue #1318: Relative time pattern (module-level pre-compilation).
+_RELATIVE_TIME_RE = re.compile(
+    r"(\d+|bir|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on|yirmi|otuz|yarım|buçuk)\s*"
+    r"(saniye|sn|dakika|dk|saat|sa|gün|hafta)\s*"
+    r"(sonra|içinde)",
+    re.IGNORECASE,
+)
+
+
+def _parse_turkish_number(text: str) -> Optional[float]:
+    """Parse Turkish number words to numeric value.
+
+    Issue #1173: Returns float instead of int to support fractional
+    values like 'yarım' (0.5) and 'buçuk' (0.5). Callers that need
+    int should convert explicitly.
+    """
     text = text.lower().strip()
     
     # Direct digit
@@ -86,15 +136,18 @@ def _parse_turkish_number(text: str) -> Optional[int]:
     
     # Direct word match
     if text in TURKISH_NUMBERS:
-        return int(TURKISH_NUMBERS[text])
+        return TURKISH_NUMBERS[text]
     
     # Compound numbers like "on beş" or "yirmi üç"
+    # Also handles "bir buçuk" (1.5), "iki buçuk" (2.5)
     parts = text.split()
     if len(parts) == 2:
-        tens = TURKISH_NUMBERS.get(parts[0], 0)
-        ones = TURKISH_NUMBERS.get(parts[1], 0)
-        if tens >= 10 and ones < 10:
-            return int(tens + ones)
+        first = TURKISH_NUMBERS.get(parts[0], 0)
+        second = TURKISH_NUMBERS.get(parts[1], 0)
+        if parts[1] == "buçuk" and first >= 1:
+            return first + 0.5
+        if first >= 10 and second < 10:
+            return first + second
     
     return None
 
@@ -115,19 +168,25 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
         TimeSlot if found, None otherwise
     """
     if base_time is None:
-        base_time = datetime.now()
+        # Issue #1179: Use BANTZ_TIMEZONE if available so NLU resolves
+        # times in the user's timezone, not the server's.
+        import os as _os
+        _tz_name = _os.environ.get("BANTZ_TIMEZONE", "").strip()
+        if _tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+                base_time = datetime.now(tz=ZoneInfo(_tz_name))
+            except Exception:
+                base_time = datetime.now()
+        else:
+            base_time = datetime.now()
     
     text_lower = text.lower()
     
     # Pattern 1: X dakika/saat/gün sonra
-    pattern_relative = re.compile(
-        r"(\d+|bir|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on|yirmi|otuz)\s*"
-        r"(saniye|sn|dakika|dk|saat|sa|gün|hafta)\s*"
-        r"(sonra|içinde)",
-        re.IGNORECASE,
-    )
-    
-    match = pattern_relative.search(text_lower)
+    # Issue #1173: Added yarım|buçuk so "yarım saat sonra" is matched.
+    # Issue #1318: Use module-level compiled regex.
+    match = _RELATIVE_TIME_RE.search(text_lower)
     if match:
         num_str = match.group(1)
         unit = match.group(2).lower()
@@ -156,25 +215,46 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
             )
     
     # Pattern 2: Yarın, bugün, etc.
-    day_offsets = {
-        r"\byarın\b": 1,
-        r"\bbugün\b": 0,
-        r"\bdün\b": -1,
-        r"\böbür\s*gün\b": 2,
-        r"\bgelecek\s*hafta\b": 7,
-        r"\bhaftaya\b": 7,
-    }
-    
-    for pattern, offset in day_offsets.items():
+    # Issue #1318: Use module-level constants.
+    for pattern, offset in _DAY_OFFSETS.items():
         if re.search(pattern, text_lower):
             target_time = base_time + timedelta(days=offset)
             
-            # Check for time specification
-            time_match = re.search(r"saat\s*(\d{1,2})(?:[:.:](\d{2}))?", text_lower)
+            # Check for time specification (digits or Turkish number words)
+            # Suffix pattern handles dative (-e/-a/-ye/-ya) and locative (-de/-da/-te/-ta)
+            time_match = re.search(
+                rf"saat\s*(?:(\d{{1,2}})(?:[:.:](\d{{2}}))?|({_TR_NUM_WORDS_PATTERN}))(?:[ydt]?[eaEA])?\b",
+                text_lower,
+            )
             if time_match:
-                hour = int(time_match.group(1))
-                minute = int(time_match.group(2) or 0)
+                if time_match.group(1):
+                    hour = int(time_match.group(1))
+                    minute = int(time_match.group(2) or 0)
+                elif time_match.group(3):
+                    hour = int(_parse_turkish_number(time_match.group(3)))
+                    minute = 0
+                else:
+                    hour = 0
+                    minute = 0
+                # Issue #1318: PM heuristic — skip when user explicitly
+                # said "sabah" (morning qualifier).
+                _has_morning = any(q in text_lower for q in _MORNING_QUALIFIERS)
+                if 1 <= hour <= 6 and base_time.hour >= 12 and not _has_morning:
+                    hour += 12
                 target_time = target_time.replace(hour=hour, minute=minute, second=0)
+            else:
+                # Issue #1255: Check period-of-day words when no explicit
+                # "saat X" is given.  E.g. "yarın sabah" → 09:00,
+                # "yarın akşam" → 18:00.
+                # Check multi-word periods first (longest match)
+                _period_matched = False
+                for _period_phrase, (_ph, _pm) in sorted(
+                    _PERIOD_OF_DAY.items(), key=lambda x: len(x[0]), reverse=True
+                ):
+                    if _period_phrase in text_lower:
+                        target_time = target_time.replace(hour=_ph, minute=_pm, second=0)
+                        _period_matched = True
+                        break
             
             raw = re.search(pattern, text_lower)
             return TimeSlot(
@@ -185,20 +265,20 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
             )
     
     # Pattern 3: Absolute time "saat 15:00", "3'te"
-    time_patterns = [
-        r"saat\s*(\d{1,2})(?:[:.:](\d{2}))?",  # saat 15:00
-        r"(\d{1,2})[:.:](\d{2})",  # 15:00
-        r"(\d{1,2})[''`](?:de|da|te|ta)\b",  # 3'te
-    ]
-    
-    for pattern in time_patterns:
-        match = re.search(pattern, text_lower)
+    # Issue #1318: Use module-level pre-compiled patterns.
+    for _abs_re in _ABSOLUTE_TIME_PATTERNS:
+        match = _abs_re.search(text_lower)
         if match:
             hour = int(match.group(1))
             minute = int(match.group(2)) if match.lastindex >= 2 and match.group(2) else 0
             
             # Validate hour
             if 0 <= hour <= 23 and 0 <= minute <= 59:
+                # Issue #1318: PM heuristic — skip when user explicitly
+                # said "sabah" (morning qualifier).
+                _has_morning = any(q in text_lower for q in _MORNING_QUALIFIERS)
+                if 1 <= hour <= 6 and base_time.hour >= 12 and not _has_morning:
+                    hour += 12
                 target_time = base_time.replace(hour=hour, minute=minute, second=0)
                 
                 # If time has passed today, assume tomorrow
@@ -211,7 +291,32 @@ def extract_time(text: str, base_time: Optional[datetime] = None) -> Optional[Ti
                     is_relative=False,
                     confidence=0.85,
                 )
-    
+
+    # Pattern 4: "saat dört", "saat ikiye" — Turkish number words as time
+    # Issue #1318: Use module-level _TR_NUM_WORDS_PATTERN.
+    # Suffix pattern: dative -e/-a/-ye/-ya, locative -de/-da/-te/-ta
+    tr_time_match = re.search(
+        rf"saat\s*({_TR_NUM_WORDS_PATTERN})(?:[ydt]?[eaEA])?\b",
+        text_lower,
+    )
+    if tr_time_match:
+        hour = int(_parse_turkish_number(tr_time_match.group(1)))
+        # Issue #1318: PM heuristic — skip when user explicitly
+        # said "sabah" (morning qualifier).
+        _has_morning = any(q in text_lower for q in _MORNING_QUALIFIERS)
+        if 1 <= hour <= 6 and base_time.hour >= 12 and not _has_morning:
+            hour += 12
+        if 0 <= hour <= 23:
+            target_time = base_time.replace(hour=hour, minute=0, second=0)
+            if target_time < base_time:
+                target_time += timedelta(days=1)
+            return TimeSlot(
+                value=target_time,
+                raw_text=tr_time_match.group(0),
+                is_relative=False,
+                confidence=0.85,
+            )
+
     return None
 
 
@@ -316,6 +421,27 @@ TURKISH_SUFFIXES = [
     "a", "e", "i", "ı", "u", "ü",  # Without apostrophe
 ]
 
+# ── Issue #1320: Pre-compiled regex patterns ──────────────────────────────
+# Previously compiled inside extract_url() and extract_query() on every call.
+_URL_PATTERN_RE: re.Pattern[str] = re.compile(
+    r"(https?://[^\s<>\"']+)", re.IGNORECASE,
+)
+_DOMAIN_PATTERN_RE: re.Pattern[str] = re.compile(
+    r"([a-zA-Z0-9-]+)\.(com|org|net|io|dev|app|tv|co|me|ai)", re.IGNORECASE,
+)
+_SEARCH_PATTERN_RE: re.Pattern[str] = re.compile(
+    r"([a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)[''`]?(?:da|de|ta|te)\s+(.+?)\s+"
+    r"(?:ara|bul|araması|aratır|arat)",
+    re.IGNORECASE,
+)
+_REVERSE_PATTERN_RE: re.Pattern[str] = re.compile(
+    r"(.+?)\s+(?:ara|bul)\s+([a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)[''`]?(?:da|de|ta|te)",
+    re.IGNORECASE,
+)
+_SIMPLE_SEARCH_RE: re.Pattern[str] = re.compile(
+    r"(.+?)[''`]?(?:yi|ı|i|u|ü)?\s*ara\b", re.IGNORECASE,
+)
+
 
 def _normalize_site_name(text: str) -> str:
     """Normalize site name by removing Turkish suffixes."""
@@ -343,12 +469,7 @@ def extract_url(text: str) -> Optional[URLSlot]:
     text_lower = text.lower()
     
     # Pattern 1: Full URL
-    url_pattern = re.compile(
-        r"(https?://[^\s<>\"']+)",
-        re.IGNORECASE,
-    )
-    
-    match = url_pattern.search(text)
+    match = _URL_PATTERN_RE.search(text)
     if match:
         url = match.group(1)
         # Clean trailing punctuation
@@ -369,12 +490,7 @@ def extract_url(text: str) -> Optional[URLSlot]:
             pass
     
     # Pattern 2: Domain-like (xxx.com, xxx.org)
-    domain_pattern = re.compile(
-        r"([a-zA-Z0-9-]+)\.(com|org|net|io|dev|app|tv|co|me|ai)",
-        re.IGNORECASE,
-    )
-    
-    match = domain_pattern.search(text)
+    match = _DOMAIN_PATTERN_RE.search(text)
     if match:
         domain = match.group(0)
         site_name = match.group(1).lower()
@@ -584,13 +700,7 @@ def extract_query(text: str) -> Optional[QuerySlot]:
     text_lower = text.lower()
     
     # Pattern 1: "X'da Y ara/bul" or "X'de Y araması yap"
-    search_pattern = re.compile(
-        r"([a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)[''`]?(?:da|de|ta|te)\s+(.+?)\s+"
-        r"(?:ara|bul|araması|aratır|arat)",
-        re.IGNORECASE,
-    )
-    
-    match = search_pattern.search(text_lower)
+    match = _SEARCH_PATTERN_RE.search(text_lower)
     if match:
         site = _normalize_site_name(match.group(1))
         query = match.group(2).strip()
@@ -603,12 +713,7 @@ def extract_query(text: str) -> Optional[QuerySlot]:
         )
     
     # Pattern 2: "Y ara X'da" (reversed)
-    reverse_pattern = re.compile(
-        r"(.+?)\s+(?:ara|bul)\s+([a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)[''`]?(?:da|de|ta|te)",
-        re.IGNORECASE,
-    )
-    
-    match = reverse_pattern.search(text_lower)
+    match = _REVERSE_PATTERN_RE.search(text_lower)
     if match:
         query = match.group(1).strip()
         site = _normalize_site_name(match.group(2))
@@ -621,12 +726,7 @@ def extract_query(text: str) -> Optional[QuerySlot]:
         )
     
     # Pattern 3: Simple "Y ara" / "Y'yi ara"
-    simple_pattern = re.compile(
-        r"(.+?)[''`]?(?:yi|ı|i|u|ü)?\s*ara\b",
-        re.IGNORECASE,
-    )
-    
-    match = simple_pattern.search(text_lower)
+    match = _SIMPLE_SEARCH_RE.search(text_lower)
     if match:
         query = match.group(1).strip()
         # Remove leading verbs
@@ -702,6 +802,87 @@ def extract_position(text: str) -> Optional[Slot]:
 
 
 # ============================================================================
+# Calendar Title Extraction
+# ============================================================================
+
+# Turkish noise words that should NOT be extracted as event titles.
+_TITLE_STOP_WORDS = frozenset({
+    "bir", "ekle", "koy", "yap", "oluştur", "ekler", "koyar",
+    "ekleyebilir", "misin", "musun", "olsun", "lütfen",
+    "sabah", "akşam", "öğle", "gece", "yarın", "bugün", "dün",
+    "saat", "saate", "saatte", "için", "de", "da", "bu", "şu",
+    "bana", "benim", "bize", "bizim", "takvime", "takvimime",
+    "sen", "bak", "bakalım", "bakalom", "dostum", "efendim",
+    "sana", "etkinlik", "etkinliği", "event",
+    # Time reference words (dative/accusative suffixed numbers)
+    "bire", "ikiye", "üçe", "dörde", "beşe", "altıya", "yediye",
+    "sekize", "dokuza", "ona", "onbire", "onikiye",
+    "birde", "ikide", "üçte", "dörtte", "beşte", "altıda",
+    "yedide", "sekizde", "dokuzda", "onda", "onbirde", "onikide",
+})
+
+# Pattern: "<title> ekle/koy/oluştur" — extract the noun before the action verb.
+# Also handles: "X etkinliği ekle", "bir X ekle", "X toplantısı koy"
+_TITLE_ACTION_PATTERN = re.compile(
+    r"(?:^|[\s,]+)"                            # start or whitespace
+    r"(?:bir\s+)?"                             # optional "bir"
+    r"(\w+(?:\s+\w+)?)"                       # 1-2 word noun phrase
+    r"\s+"                                     # space before verb
+    r"(?:etkinliği?\s+|toplantısı?\s+)?"       # optional "etkinliği/toplantısı"
+    r"(?:ekle|koy|oluştur|yap)\b",             # action verb
+    re.IGNORECASE,
+)
+
+# Fallback: "ekle: X" or after time "... X ekle" where X is between time and verb
+_TITLE_AFTER_TIME_PATTERN = re.compile(
+    r"(?:saat\w*\s+\S+|dokuza|ona|sekize|yediye|altıya|beşe|dörde|üçe|ikiye|bire|\d{1,2}(?:[:.]\d{2})?(?:'[td]e|'[td]a)?)\s+"
+    r"(?:bir\s+)?"
+    r"(\w+(?:\s+\w+)?)"
+    r"\s+(?:ekle|koy|oluştur|yap)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_event_title(text: str) -> Optional[str]:
+    """Extract calendar event title from Turkish input.
+
+    Handles patterns like:
+    - "kahvaltı ekle" → "Kahvaltı"
+    - "sabah saat dokuza kahvaltı ekle" → "Kahvaltı"
+    - "toplantı koy yarın 3'e" → "Toplantı"
+    - "bir yemek ekle" → "Yemek"
+
+    Returns None if no valid title found.
+    """
+    t = (text or "").strip().lower()
+    if not t:
+        return None
+
+    # Try the after-time pattern first (more specific)
+    m = _TITLE_AFTER_TIME_PATTERN.search(t)
+    if m:
+        candidate = m.group(1).strip()
+        words = set(candidate.split())
+        if words - _TITLE_STOP_WORDS:
+            # At least one non-stop word
+            clean = " ".join(w for w in candidate.split() if w not in _TITLE_STOP_WORDS)
+            if clean:
+                return clean.capitalize()
+
+    # Try the general action pattern
+    m = _TITLE_ACTION_PATTERN.search(t)
+    if m:
+        candidate = m.group(1).strip()
+        words = set(candidate.split())
+        if words - _TITLE_STOP_WORDS:
+            clean = " ".join(w for w in candidate.split() if w not in _TITLE_STOP_WORDS)
+            if clean:
+                return clean.capitalize()
+
+    return None
+
+
+# ============================================================================
 # Slot Extractor (Main Class)
 # ============================================================================
 
@@ -726,11 +907,16 @@ class SlotExtractor:
         """Initialize the extractor."""
         pass
     
-    def extract_all(self, text: str) -> Dict[str, Any]:
+    def extract_all(
+        self, text: str, *, base_time: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
         """Extract all possible slots from text.
         
         Args:
             text: Input text
+            base_time: Base time for relative calculations. If *None*,
+                ``extract_time`` will fall back to ``BANTZ_TIMEZONE`` env
+                then ``datetime.now()``.
         
         Returns:
             Dictionary of slot name to extracted value
@@ -738,7 +924,7 @@ class SlotExtractor:
         slots = {}
         
         # Extract time
-        time_slot = extract_time(text)
+        time_slot = extract_time(text, base_time=base_time)
         if time_slot:
             slots["time"] = time_slot
         
@@ -763,6 +949,11 @@ class SlotExtractor:
         position_slot = extract_position(text)
         if position_slot:
             slots["position"] = position_slot.value
+
+        # Extract calendar event title
+        title = extract_event_title(text)
+        if title:
+            slots["title"] = title
         
         return slots
     
@@ -903,7 +1094,9 @@ def extract_free_slot_request(text: str, reference_time: Optional[datetime] = No
     duration_patterns = [
         (r"(\d+)\s*saatlik", lambda m: int(m.group(1)) * 60),
         (r"(\d+)\s*dakika", lambda m: int(m.group(1))),
-        (r"(yarım|30)\s*saat", lambda m: 30),
+        # Issue #1318: Separated "yarım saat" from numeric "N saat".
+        # Previously (yarım|30)\s*saat mapped "30 saat" to 30 min.
+        (r"yarım\s*saat", lambda m: 30),
         (r"(bir|1)\s*saat", lambda m: 60),
         (r"(iki|2)\s*saat", lambda m: 120),
     ]

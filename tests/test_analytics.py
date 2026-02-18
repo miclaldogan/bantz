@@ -792,7 +792,7 @@ class TestSmartSuggestions:
         
         assert len(results) > 0
         # Should have time-based reason
-        assert any("zamanı" in s.reason.lower() for s in results)
+        assert any("suggested for" in s.reason.lower() for s in results)
     
     def test_suggest_at_time_evening(self, analytics, suggestions):
         """Test evening suggestions."""

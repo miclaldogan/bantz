@@ -356,7 +356,11 @@ class TestPipelineEmptyDataGuard:
         assert result.finalizer_model == "none(empty_data_guard)"
 
     def test_nonempty_events_passes_to_quality_finalizer(self):
-        """When tool data has real events, quality finalizer should be used."""
+        """When tool data has real events, deterministic calendar guard handles it.
+
+        Issue #1215: All calendar reads now use the deterministic path to
+        prevent hallucinated times/titles, even when data is non-empty.
+        """
         mock_llm = Mock()
         mock_llm.complete_text.return_value = "Bugün 2 toplantınız var efendim."
         pipeline = FinalizationPipeline(
@@ -381,9 +385,9 @@ class TestPipelineEmptyDataGuard:
         )
 
         result = pipeline.run(ctx)
-        # Quality finalizer should have been called (data exists)
-        mock_llm.complete_text.assert_called_once()
-        assert "2 toplantı" in result.assistant_reply
+        # Issue #1215: deterministic_calendar guard intercepts before quality
+        mock_llm.complete_text.assert_not_called()
+        assert result.finalizer_model == "none(deterministic_calendar)"
 
     def test_smalltalk_not_affected_by_empty_data_guard(self):
         """Smalltalk route should never trigger the empty-data guard."""

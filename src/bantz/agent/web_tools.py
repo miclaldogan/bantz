@@ -30,17 +30,17 @@ class WebSearchTool(ToolBase):
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name="web_search",
-            description="Web'de arama yapar (Google/DuckDuckGo)",
+            description="Searches the web (Google/DuckDuckGo)",
             parameters={
                 "query": {
                     "type": "string",
                     "required": True,
-                    "description": "Arama sorgusu"
+                    "description": "Search query"
                 },
                 "max_results": {
                     "type": "integer",
                     "required": False,
-                    "description": "Maksimum sonuç sayısı (default: 5)"
+                    "description": "Maximum number of results (default: 5)"
                 }
             },
             timeout=30.0,
@@ -124,17 +124,17 @@ class WebSearchRequestsTool(ToolBase):
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name="web_search_requests",
-            description="Web'de arama yapar (requests fallback)",
+            description="Searches the web (requests fallback)",
             parameters={
                 "query": {
                     "type": "string",
                     "required": True,
-                    "description": "Arama sorgusu"
+                    "description": "Search query"
                 },
                 "max_results": {
                     "type": "integer",
                     "required": False,
-                    "description": "Maksimum sonuç sayısı (default: 5)"
+                    "description": "Maximum number of results (default: 5)"
                 }
             },
             timeout=30.0,
@@ -193,17 +193,17 @@ class PageReaderTool(ToolBase):
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name="page_reader",
-            description="Web sayfasını okur ve içeriğini çıkarır",
+            description="Reads a web page and extracts its content",
             parameters={
                 "url": {
                     "type": "string",
                     "required": True,
-                    "description": "Okunacak sayfa URL'i"
+                    "description": "Page URL to read"
                 },
                 "extract_mode": {
                     "type": "string",
                     "required": False,
-                    "description": "Çıkarma modu: 'text', 'html', 'markdown' (default: text)"
+                    "description": "Extraction mode: 'text', 'html', 'markdown' (default: text)"
                 }
             },
             timeout=45.0,
@@ -277,17 +277,17 @@ class FetchUrlTool(ToolBase):
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name="fetch_url",
-            description="URL'den ham içerik çeker",
+            description="Fetches raw content from a URL",
             parameters={
                 "url": {
                     "type": "string",
                     "required": True,
-                    "description": "Çekilecek URL"
+                    "description": "URL to fetch"
                 },
                 "headers": {
                     "type": "object",
                     "required": False,
-                    "description": "İstek başlıkları"
+                    "description": "Request headers"
                 }
             },
             timeout=30.0,

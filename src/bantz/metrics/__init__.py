@@ -6,6 +6,7 @@ Exports
 - :class:`LatencyGate` / :class:`GateResult` / :func:`check_gates` — CI gates
 - :func:`check_gates_from_records` — gate check from pre-loaded records
 - :func:`read_turn_metrics` — JSONL reader utility
+- :class:`PipelineMetrics` / :func:`compute_pipeline_metrics` — sprint metrics (Issue #1220)
 """
 
 from bantz.metrics.turn_metrics import TurnMetrics, TurnMetricsWriter
@@ -17,6 +18,7 @@ from bantz.metrics.gates import (
     read_turn_metrics,
     DEFAULT_GATES,
 )
+from bantz.metrics.pipeline_metrics import PipelineMetrics, compute_pipeline_metrics
 
 __all__ = [
     "TurnMetrics",
@@ -27,4 +29,6 @@ __all__ = [
     "check_gates_from_records",
     "read_turn_metrics",
     "DEFAULT_GATES",
+    "PipelineMetrics",
+    "compute_pipeline_metrics",
 ]

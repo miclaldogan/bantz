@@ -22,7 +22,6 @@ import re
 import unicodedata
 from typing import Optional, Tuple
 
-
 # ============================================================================
 # Unicode ranges
 # ============================================================================
@@ -72,7 +71,12 @@ _TURKISH_MARKERS = re.compile(
     r"tamam|efendim|oldu|yapıldı|açıyorum|kapatıyorum|"
     r"oluşturdum|arama|sonuçları|hatırlatma|"
     r"merhaba|günaydın|iyi|nasıl|ne|nerede|ama|veya|"
-    r"şey|çok|biraz|sonra|önce|şimdi)\b",
+    r"şey|çok|biraz|sonra|önce|şimdi|"
+    r"oluyor|ediyor|ediyorum|yapıyor|yapıyorum|bakıyorum|"
+    r"gidiyor|geliyor|diyor|olacak|saat|saatte|gün|bugün|"
+    r"yarın|dakika|bekliyorum|anlıyorum|biliyorum|istiyorum|"
+    r"gönderiyorum|alıyorum|görüyorum|söylüyorum|diyorum|"
+    r"kontrol|planımız|etkinlik|takvim|mail|posta|dostum)\b",
     re.IGNORECASE,
 )
 
@@ -205,7 +209,6 @@ def turkish_confidence(text: str) -> float:
 
     # Base score from letter composition
     turkish_letters = counts.get("turkish_latin", 0)
-    latin_letters = counts.get("latin", 0)
     cjk_letters = counts.get("cjk", 0) + counts.get("japanese", 0) + counts.get("korean", 0)
     foreign_letters = counts.get("cyrillic", 0) + counts.get("arabic_hebrew", 0)
 
@@ -277,10 +280,22 @@ def detect_language_issue(text: str) -> Optional[str]:
     if total_letters >= 10:
         # Issue #999: Skip confidence check for URLs and code-like strings
         # — these are technical content, not human language to translate.
+        # Issue #1176: Parenthesis check was too broad — normal Turkish
+        # text with parentheses (e.g. "Ali (kardeşim) geldi") would
+        # bypass the confidence check. Now requires actual code keywords.
+        # Issue #1317: "var" removed — it means "exists" in Turkish and
+        # caused false positives. Require ≥2 keyword matches to reduce
+        # single-keyword false positives. Narrowed http prefix to http(s)://.
+        _CODE_KW_RE = re.compile(
+            r"\b(?:def|class|import|return|print|function|const|let)\b"
+        )
         _url_or_code = (
             "://" in text
-            or text.strip().startswith("http")
-            or "(" in text and ")" in text  # function call pattern
+            or text.strip().startswith(("http://", "https://"))
+            or (
+                "(" in text and ")" in text
+                and len(_CODE_KW_RE.findall(text)) >= 1
+            )
         )
         if _url_or_code:
             return None

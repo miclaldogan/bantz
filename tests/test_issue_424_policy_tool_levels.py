@@ -101,7 +101,7 @@ class TestGmailToolsInPolicy:
 
     def test_gmail_send_is_moderate(self):
         policy = _load_policy()
-        assert policy["tool_levels"]["gmail.send"] == "moderate"
+        assert policy["tool_levels"]["gmail.send"] == "destructive"
 
     def test_gmail_create_draft_is_safe(self):
         policy = _load_policy()
@@ -109,7 +109,7 @@ class TestGmailToolsInPolicy:
 
     def test_gmail_send_draft_is_moderate(self):
         policy = _load_policy()
-        assert policy["tool_levels"]["gmail.send_draft"] == "moderate"
+        assert policy["tool_levels"]["gmail.send_draft"] == "destructive"
 
     def test_gmail_list_messages_is_safe(self):
         policy = _load_policy()
@@ -279,7 +279,7 @@ class TestLoadPolicyJson:
 
         # Should fall back to hardcoded registry
         assert "gmail.send" in registry
-        assert registry["gmail.send"] == ToolRisk.MODERATE
+        assert registry["gmail.send"] == ToolRisk.DESTRUCTIVE
         assert "gmail.send" in confirm_set
         assert undef_policy == "deny"
 
@@ -419,7 +419,7 @@ class TestBackwardCompat:
 
         assert get_tool_risk("web.search") == ToolRisk.SAFE
         assert get_tool_risk("calendar.delete_event") == ToolRisk.DESTRUCTIVE
-        assert get_tool_risk("gmail.send") == ToolRisk.MODERATE
+        assert get_tool_risk("gmail.send") == ToolRisk.DESTRUCTIVE
 
     def test_is_destructive(self):
         from bantz.tools.metadata import is_destructive

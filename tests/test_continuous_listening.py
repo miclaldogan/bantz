@@ -1335,8 +1335,8 @@ class TestEdgeCases:
         from bantz.voice.vad import MockVAD
         
         vad = MockVAD()
-        # Rapid speech/silence transitions
-        pattern = [True, False] * 20 + [False] * 10
+        # Rapid speech/silence transitions followed by extended silence
+        pattern = [True, False] * 20 + [False] * 30
         vad.set_speech_pattern(pattern)
         
         segmenter = SpeechSegmenter(vad=vad)
@@ -1346,10 +1346,8 @@ class TestEdgeCases:
             segmenter.process(audio_chunk)
         
         # After rapid transitions the segmenter must reach a stable state
-        # (pattern ends with silence → should not be speaking)
+        # (pattern ends with extended silence → should not be speaking)
         assert segmenter.is_speaking is False
-        # segment_count may be 0 or more, but must be a valid non-negative int
-        assert segmenter.segment_count >= 0
     
     def test_listener_multiple_wake_words(self):
         from bantz.voice.continuous import ContinuousListener, ListenerState

@@ -131,6 +131,28 @@ def cmd_auth_gmail(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_auth_classroom(args: argparse.Namespace) -> int:
+    from bantz.connectors.google.auth_manager import GoogleAuthManager
+
+    auth = GoogleAuthManager(
+        client_secret_path=args.client_secret,
+        token_path=args.token_path,
+        interactive=True,
+    )
+    creds = auth.ensure_scope("classroom")
+
+    out = {
+        "ok": True,
+        "service": "classroom",
+        "token_path": "…/" + os.path.basename(str(auth.token_path)),
+        "granted_scopes": getattr(creds, "scopes", None),
+        "connected_services": auth.connected_services(),
+        "note": "Classroom scope authorized in unified token.",
+    }
+    _print_json(out)
+    return 0
+
+
 def cmd_calendar_list(args: argparse.Namespace) -> int:
     from bantz.google.calendar import list_events
 
@@ -269,6 +291,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_auth_gm.set_defaults(func=cmd_auth_gmail)
+
+    p_auth_classroom = auth_sub.add_parser("classroom", help="Create/refresh Classroom scope in unified token")
+    p_auth_classroom.add_argument(
+        "--client-secret",
+        default=None,
+        help="Path to client_secret.json (overrides BANTZ_GOOGLE_CLIENT_SECRET)",
+    )
+    p_auth_classroom.add_argument(
+        "--token-path",
+        default=None,
+        help="Path to unified token (overrides BANTZ_GOOGLE_UNIFIED_TOKEN_PATH)",
+    )
+    p_auth_classroom.set_defaults(func=cmd_auth_classroom)
 
     p_cal = sub.add_parser("calendar", help="Calendar operations")
     cal_sub = p_cal.add_subparsers(dest="calendar_command", required=True)

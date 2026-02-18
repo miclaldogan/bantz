@@ -21,15 +21,15 @@ class MockLLM:
 
 def test_retrieved_memory_appears_in_router_prompt():
     """Verify retrieved_memory parameter is included in router prompt (Issue #358)."""
-    mock_llm = MockLLM(response='{"route": "calendar", "calendar_intent": "query", "confidence": 0.8, "tool_plan": [], "assistant_reply": "Bakalım efendim."}')
+    mock_llm = MockLLM(response='{"route": "calendar", "calendar_intent": "query", "confidence": 0.8, "tool_plan": [], "assistant_reply": "Let me check."}')
     
     router = JarvisLLMOrchestrator(llm_client=mock_llm)
     
     # Call route() with retrieved_memory
     router.route(
-        user_input="yarın toplantım var mı",
+        user_input="do I have a meeting tomorrow",
         dialog_summary="",
-        retrieved_memory="[PROFILE] Kullanıcı her pazartesi 10:00'da standup toplantısı yapar.\n[EPISODIC] Geçen hafta toplantı iptal edildi.",
+        retrieved_memory="[PROFILE] User has a standup meeting every Monday at 10:00.\n[EPISODIC] Last week the meeting was cancelled.",
     )
     
     # Verify prompt was called
@@ -38,19 +38,19 @@ def test_retrieved_memory_appears_in_router_prompt():
     
     # Issue #358: Verify retrieved_memory is in the prompt
     assert "RETRIEVED_MEMORY" in prompt
-    assert "Kullanıcı her pazartesi" in prompt
-    assert "standup toplantısı" in prompt
+    assert "User has a standup meeting" in prompt
+    assert "every Monday" in prompt
 
 
 def test_retrieved_memory_policy_instruction_in_prompt():
     """Router prompt should include policy instruction for retrieved_memory (when budget allows)."""
-    mock_llm = MockLLM(response='{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.9, "tool_plan": [], "assistant_reply": "Nasılsınız efendim."}')
+    mock_llm = MockLLM(response='{"route": "smalltalk", "calendar_intent": "none", "confidence": 0.9, "tool_plan": [], "assistant_reply": "How are you?"}')
     
     router = JarvisLLMOrchestrator(llm_client=mock_llm)
     
     router.route(
-        user_input="nasılsın",
-        retrieved_memory="[PROFILE] Kullanıcı samimi konuşmayı sever.",
+        user_input="how are you",
+        retrieved_memory="[PROFILE] User prefers friendly conversation.",
     )
     
     prompt = mock_llm.prompts[0]
@@ -58,14 +58,14 @@ def test_retrieved_memory_policy_instruction_in_prompt():
     # Should have RETRIEVED_MEMORY section
     assert "RETRIEVED_MEMORY" in prompt
     # Should have the memory content
-    assert "samimi konuşmayı sever" in prompt
+    assert "friendly conversation" in prompt
     # Policy instruction may be included if budget allows, or truncated if tight
     # Either way, memory should be present
 
 
 def test_retrieved_memory_empty_not_added():
     """Empty retrieved_memory should not add section to prompt."""
-    mock_llm = MockLLM(response='{"route": "unknown", "calendar_intent": "none", "confidence": 0.5, "tool_plan": [], "assistant_reply": "Anlamadım."}')
+    mock_llm = MockLLM(response='{"route": "unknown", "calendar_intent": "none", "confidence": 0.5, "tool_plan": [], "assistant_reply": "I did not understand."}')
     
     router = JarvisLLMOrchestrator(llm_client=mock_llm)
     
@@ -82,7 +82,7 @@ def test_retrieved_memory_empty_not_added():
 
 def test_retrieved_memory_none_not_added():
     """None retrieved_memory should not add section to prompt."""
-    mock_llm = MockLLM(response='{"route": "unknown", "calendar_intent": "none", "confidence": 0.5, "tool_plan": [], "assistant_reply": "Anlamadım."}')
+    mock_llm = MockLLM(response='{"route": "unknown", "calendar_intent": "none", "confidence": 0.5, "tool_plan": [], "assistant_reply": "I did not understand."}')
     
     router = JarvisLLMOrchestrator(llm_client=mock_llm)
     
@@ -104,9 +104,9 @@ def test_retrieved_memory_with_dialog_summary():
     router = JarvisLLMOrchestrator(llm_client=mock_llm)
     
     router.route(
-        user_input="bugün toplantılarım",
-        dialog_summary="User: dün neyaptım | AI: Geçen gün toplantınız vardı",
-        retrieved_memory="[EPISODIC] Kullanıcı her salı team meeting'e katılır.",
+        user_input="my meetings today",
+        dialog_summary="User: what did I do yesterday | AI: You had a meeting yesterday",
+        retrieved_memory="[EPISODIC] User attends team meeting every Tuesday.",
     )
     
     prompt = mock_llm.prompts[0]
@@ -130,7 +130,7 @@ def test_retrieved_memory_long_content_trimmed():
     
     # Call with tight token budget
     router.route(
-        user_input="toplantım",
+        user_input="my meeting",
         retrieved_memory=long_memory,
     )
     
@@ -139,7 +139,7 @@ def test_retrieved_memory_long_content_trimmed():
     # Should be present but trimmed
     assert "RETRIEVED_MEMORY" in prompt
     # Original long_memory is much longer than what fits in prompt
-    assert len(prompt) < len(long_memory) + 2000  # Some overhead for system prompt
+    assert len(prompt) < len(long_memory) + 6000  # Some overhead for system prompt (Issue #1273: +status rules, expanded routes, English conversion)
 
 
 def test_integration_retrieved_memory_calendar_context():
@@ -150,15 +150,15 @@ def test_integration_retrieved_memory_calendar_context():
     
     # User references recurring pattern from memory
     result = router.route(
-        user_input="normal toplantımı oluştur",
-        retrieved_memory="[PROFILE] Kullanıcının 'normal toplantı' = Pazartesi 10:00 standup meeting demektir.",
+        user_input="create my regular meeting",
+        retrieved_memory="[PROFILE] User's 'regular meeting' = Monday 10:00 standup meeting.",
     )
     
     prompt = mock_llm.prompts[0]
     
-    # Memory context should be available to help router understand "normal toplantı"
+    # Memory context should be available to help router understand "regular meeting"
     assert "RETRIEVED_MEMORY" in prompt
-    assert "Pazartesi 10:00" in prompt
+    assert "Monday 10:00" in prompt
     assert "standup meeting" in prompt
     
     # Router should route to calendar

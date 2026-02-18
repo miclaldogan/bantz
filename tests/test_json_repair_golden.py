@@ -92,13 +92,13 @@ class TestExtractFirstJsonObject:
         assert "Umarım" not in json.dumps(obj)
 
     def test_trailing_comma_still_has_valid_json(self):
-        """Trailing comma inside {} makes json.loads fail, but the
-        balanced-braces scanner will still find the candidate.
-        extract_first_json_object raises JsonParseError(json_decode_error)."""
+        """Trailing comma inside {} makes json.loads fail; the balanced-
+        braces scanner finds the candidate but discards it, resulting in
+        unbalanced_json (no separate json_decode_error path in source)."""
         raw = _load("trailing_comma.txt")
         with pytest.raises(JsonParseError) as exc_info:
             extract_first_json_object(raw)
-        assert exc_info.value.reason == "json_decode_error"
+        assert exc_info.value.reason == "unbalanced_json"
 
     def test_truncated_mid_key(self):
         raw = _load("truncated_mid_key.txt")

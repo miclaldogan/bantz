@@ -7,6 +7,7 @@ The ProactiveEngine is the central coordinator that:
 4. Routes results through the NotificationQueue
 5. Respects notification policies and quiet hours
 6. Integrates with the EventBus for CLI/UI delivery
+7. Hosts the Proactive Secretary (SignalCollector + RuleEngine + DailyBrief)
 
 Lifecycle::
 
@@ -15,31 +16,22 @@ Lifecycle::
     # ... runs autonomously ...
     engine.stop()    # Graceful shutdown
 
-Issue #835
+Issues #835, #1293
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time as _time
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from bantz.proactive.checks import get_builtin_checks
 from bantz.proactive.cross_analyzer import CrossAnalyzer
-from bantz.proactive.models import (
-    CheckResult,
-    CheckSchedule,
-    CrossAnalysis,
-    InsightSeverity,
-    NotificationPolicy,
-    ProactiveCheck,
-    ProactiveNotification,
-    ScheduleType,
-)
+from bantz.proactive.models import (CheckResult, NotificationPolicy,
+                                    ProactiveCheck, ScheduleType)
 from bantz.proactive.notification_queue import NotificationQueue
 
 logger = logging.getLogger(__name__)
@@ -108,6 +100,9 @@ class ProactiveEngine:
 
         # Register built-in checks
         self._register_builtins()
+
+        # Initialize Proactive Secretary (Issue #1293)
+        self._init_secretary()
 
     # ── Public API ──────────────────────────────────────────────
 
@@ -434,6 +429,99 @@ class ProactiveEngine:
             except Exception:
                 pass
         return {}
+
+    # ── Secretary Components (Issue #1293) ──────────────────────
+
+    def _init_secretary(self) -> None:
+        """Initialize the Proactive Secretary: signals + rules + brief."""
+        try:
+            from bantz.proactive.daily_brief import DailyBriefGenerator
+            from bantz.proactive.delivery import (DesktopNotificationDelivery,
+                                                  EventBusDelivery,
+                                                  TerminalDelivery)
+            from bantz.proactive.rule_engine import ProactiveRuleEngine
+            from bantz.proactive.signals import SignalCollector
+
+            yaml_config = self._load_yaml_config()
+
+            # Work hours from config
+            wh = yaml_config.get("work_hours", {})
+            work_hours = (wh.get("start", 9), wh.get("end", 18))
+
+            self._signal_collector = SignalCollector(
+                tool_registry=self._tool_registry,
+                work_hours=work_hours,
+            )
+            self._rule_engine = ProactiveRuleEngine()
+
+            # Apply rule enable/disable from YAML config
+            rules_cfg = yaml_config.get("rules", {})
+            for rule_name, rule_conf in rules_cfg.items():
+                if isinstance(rule_conf, dict):
+                    if not rule_conf.get("enabled", True):
+                        self._rule_engine.disable_rule(rule_name)
+
+            # Build delivery channels
+            channels: list = []
+            delivery_cfg = yaml_config.get("delivery", {})
+            if delivery_cfg.get("terminal", {}).get("enabled", True):
+                channels.append(TerminalDelivery())
+            if delivery_cfg.get("desktop_notification", {}).get("enabled", True):
+                dn_cfg = delivery_cfg.get("desktop_notification", {})
+                channels.append(DesktopNotificationDelivery(
+                    urgency=dn_cfg.get("urgency", "normal"),
+                    timeout_ms=dn_cfg.get("timeout_ms", 10_000),
+                ))
+            if delivery_cfg.get("eventbus", {}).get("enabled", True) and self._event_bus:
+                channels.append(EventBusDelivery(self._event_bus))
+
+            self._brief_generator = DailyBriefGenerator(
+                collector=self._signal_collector,
+                rule_engine=self._rule_engine,
+                delivery_channels=channels,
+            )
+            logger.info("Proactive Secretary initialized (channels=%d)", len(channels))
+
+        except Exception as exc:
+            logger.warning("Proactive Secretary init failed: %s", exc)
+            self._signal_collector = None
+            self._rule_engine = None
+            self._brief_generator = None
+
+    def _load_yaml_config(self) -> Dict[str, Any]:
+        """Load YAML config from ``config/proactive.yaml``.
+
+        Falls back to empty dict if the file doesn't exist or pyyaml
+        is not installed.
+        """
+        yaml_path = Path(__file__).resolve().parents[3] / "config" / "proactive.yaml"
+        if not yaml_path.exists():
+            return {}
+        try:
+            import yaml
+
+            return yaml.safe_load(yaml_path.read_text()) or {}
+        except ImportError:
+            logger.debug("pyyaml not installed — using default secretary config")
+            return {}
+        except Exception as exc:
+            logger.warning("Failed to load proactive.yaml: %s", exc)
+            return {}
+
+    @property
+    def signal_collector(self) -> Any:
+        """Access the :class:`SignalCollector` (may be ``None``)."""
+        return getattr(self, "_signal_collector", None)
+
+    @property
+    def rule_engine(self) -> Any:
+        """Access the :class:`ProactiveRuleEngine` (may be ``None``)."""
+        return getattr(self, "_rule_engine", None)
+
+    @property
+    def brief_generator(self) -> Any:
+        """Access the :class:`DailyBriefGenerator` (may be ``None``)."""
+        return getattr(self, "_brief_generator", None)
 
 
 # ── Singleton ───────────────────────────────────────────────────

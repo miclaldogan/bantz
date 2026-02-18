@@ -24,6 +24,27 @@ from bantz.agent.tools import ToolRegistry, Tool
 from bantz.core.events import EventBus
 
 
+# Capture pristine class-level state before any test narrows it.
+_PRISTINE_VALID_TOOLS = frozenset(JarvisLLMOrchestrator._VALID_TOOLS)
+_PRISTINE_SYSTEM_PROMPT = JarvisLLMOrchestrator.SYSTEM_PROMPT
+
+
+@pytest.fixture(autouse=True)
+def _restore_and_disable_bridge(monkeypatch):
+    """Restore _VALID_TOOLS, disable bridge, and no-op sync_valid_tools."""
+    JarvisLLMOrchestrator._VALID_TOOLS = set(_PRISTINE_VALID_TOOLS)
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+    monkeypatch.setattr(
+        JarvisLLMOrchestrator, "sync_valid_tools",
+        classmethod(lambda cls, *a, **kw: None),
+    )
+    monkeypatch.setenv("BANTZ_BRIDGE_INPUT_GATE", "0")
+    monkeypatch.setenv("BANTZ_BRIDGE_OUTPUT_GATE", "0")
+    yield
+    JarvisLLMOrchestrator._VALID_TOOLS = set(_PRISTINE_VALID_TOOLS)
+    JarvisLLMOrchestrator.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================

@@ -209,6 +209,19 @@ def create_runtime(
     # ── Finalizer wiring (#517 invariant) ───────────────────────────
     effective_finalizer = gemini_client or router_client
 
+    # ── Issue #1290: Observability — RunTracker ───────────────────
+    _run_tracker = None
+    if os.getenv("BANTZ_OBSERVABILITY", "1").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            from bantz.data.run_tracker import RunTracker
+
+            _run_tracker = RunTracker()
+            _run_tracker.initialise_sync()
+            logger.info("RunTracker ✓ (%s)", _run_tracker.db_path)
+        except Exception as exc:
+            logger.warning("RunTracker init failed (non-fatal): %s", exc)
+            _run_tracker = None
+
     # ── OrchestratorLoop ────────────────────────────────────────────
     loop = OrchestratorLoop(
         orchestrator=orchestrator,
@@ -216,6 +229,7 @@ def create_runtime(
         event_bus=_event_bus,
         config=OrchestratorConfig(debug=debug),
         finalizer_llm=effective_finalizer,
+        run_tracker=_run_tracker,
     )
 
     # ── Build runtime ──────────────────────────────────────────────

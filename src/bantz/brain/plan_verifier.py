@@ -25,6 +25,8 @@ _ROUTE_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
     "calendar": ("calendar.", "time.", "contacts."),
     "gmail": ("gmail.", "contacts.", "time."),
     "system": ("system.", "time."),
+    "contacts": ("google.contacts.", "contacts."),
+    "keep": ("google.keep.",),
     "smalltalk": ("time.",),
     "unknown": ("time.",),
 }
@@ -47,11 +49,48 @@ _TOOL_INDICATOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(oluştur|ekle|yarat|create|add)\b", re.IGNORECASE),
     re.compile(r"\b(sil|kaldır|delete|remove|cancel)\b", re.IGNORECASE),
     re.compile(r"\b(güncelle|değiştir|update|change|modify|move)\b", re.IGNORECASE),
-    re.compile(r"\b(listele|göster|bak|list|show)\b", re.IGNORECASE),
-    re.compile(r"\b(gönder|yolla|send|mail|e-?posta)\b", re.IGNORECASE),
+    # Turkish agglutinative forms: bak→bakalım/bakalom, göster→gösterir
+    re.compile(r"\b(listele|göster\w*|bak\w*|list|show)\b", re.IGNORECASE),
+    re.compile(r"\b(gönder|yolla|send|e-?posta)\b", re.IGNORECASE),
     re.compile(r"\b(oku|read|aç|open)\b", re.IGNORECASE),
-    re.compile(r"\b(takvim|calendar|toplantı|meeting|randevu)\b", re.IGNORECASE),
-    re.compile(r"\b(saat kaç|what time|tarih|date)\b", re.IGNORECASE),
+    re.compile(r"\b(takvim|calendar|toplantı\w*|meeting|randevu)\b", re.IGNORECASE),
+    # Typo tolerance: "saat kaö" for "saat kaç"
+    re.compile(r"\b(saat\s*ka[çö]\w*|what time|tarih|date)\b", re.IGNORECASE),
+    # Turkish suffixed forms: planımız/planımı/planım, etkinlik/etkinlikleri
+    re.compile(r"\b(kontrol\s*et|plan\w*|etkinlik\w*|ne\s*var)\b", re.IGNORECASE),
+    # Temporal / schedule query indicators
+    # Turkish suffixed: bugün→bugünkü, yarın→yarınki, dün→dünkü
+    re.compile(r"\b(bugün\w*|yarın\w*|dün\w*|bu\s*hafta|bu\s*ay|geçen\s*hafta|gelecek\s*hafta)\b", re.IGNORECASE),
+    re.compile(r"\b(neler|ne\s*yapacağız|ne\s*yapıyoruz|program\w*|ajanda)\b", re.IGNORECASE),
+    re.compile(r"\b(incele|incel[ea]\w*|gözden\s*geçir)\b", re.IGNORECASE),
+    re.compile(r"\b(mailleri?|son\s*mail|gelen\s*kutusu|inbox)\b", re.IGNORECASE),
+    re.compile(r"\b(ne\s*yazıyor|ne\s*diyor|ne\s*gelmiş|var\s*mı)\b", re.IGNORECASE),
+    re.compile(r"\b(ara|bul|search|find|kontrol)\b", re.IGNORECASE),
+    re.compile(r"\b(özetle|özetler?\s*m[iı]s[iı]n|özetl[ea]|summarize|summary)\b", re.IGNORECASE),
+    re.compile(r"\b(yaz|yazar?\s*m[iı]s[iı]n|yazd[ıi]r|write|compose|draft)\b", re.IGNORECASE),
+    re.compile(r"\b(cevapla|yan[ıi]tla|reply|respond)\b", re.IGNORECASE),
+    re.compile(r"\b(hat[ıi]rlat|remind|alarm|bildir)\b", re.IGNORECASE),
+    # Common Turkish mail/message words (with suffixes)
+    re.compile(r"\bmail[a-zıüöğçş]*\b", re.IGNORECASE),
+    # Turkish suffixed: posta→postalar/postalarım, mesaj→mesajları
+    re.compile(r"\b(posta\w*|mesaj\w*|ileti\w*)\b", re.IGNORECASE),
+    re.compile(r"\b(görüntüle|görüntüleyebil|söyle|söyler?\s*m[iı]s[iı]n)\b", re.IGNORECASE),
+    re.compile(r"\b(okunmuş|okunmam[ıi]ş|okunan|okunmayan|unread)\b", re.IGNORECASE),
+    re.compile(r"\b(at|atma[nk]?[ıi]?|diyelim|de)\b", re.IGNORECASE),
+    re.compile(r"\b(konu|adres[a-zıüöğçş]*)\b", re.IGNORECASE),
+    re.compile(r"\b(kontro[lr]|kontorl)\b", re.IGNORECASE),  # common typo tolerance
+    # Action verbs missing from original list
+    re.compile(r"\b(anlat\w*|anlatır?\s*m[iı]s[iı]n)\b", re.IGNORECASE),
+    # Adjectives that imply tool context
+    re.compile(r"\b(önemli|acil|yıldızlı)\b", re.IGNORECASE),
+    # Cancel/delete with suffixes: iptal→iptal et, iptali
+    re.compile(r"\b(iptal\w*|vazgeç\w*)\b", re.IGNORECASE),
+    # Follow-up / continuation verbs
+    re.compile(r"\b(devam\s*et|detay\w*|ayrıntı\w*)\b", re.IGNORECASE),
+    # Number + Turkish suffix for calendar event refs: "9'daki", "3teki"
+    re.compile(r"\b\d{1,2}\s*[''']?\s*(?:da|de|ta|te|daki|deki|taki|teki)\w*\b", re.IGNORECASE),
+    # Declarative calendar intent: "olacak" (will be/happen)
+    re.compile(r"\b(olacak|olacağım|olacağız|var\w*)\b", re.IGNORECASE),
 ]
 
 # ── Issue #1002: Calendar write intents that should have date/time ───
@@ -68,6 +107,47 @@ _ROUTE_INTENT_MISMATCH: dict[str, set[str]] = {
 def _has_tool_indicators(user_input: str) -> bool:
     """Return True if user input contains keywords hinting at a tool action."""
     return any(p.search(user_input) for p in _TOOL_INDICATOR_PATTERNS)
+
+
+# Issue #1360/#1363: Two-level prefixes that map to a single route domain.
+_COMPOUND_PREFIX_MAP: dict[str, str] = {
+    "google.contacts": "contacts",
+    "google.keep": "keep",
+}
+
+
+def infer_route_from_tools(tool_plan: list[Any]) -> str | None:
+    """Infer the correct route from tool_plan prefixes.
+
+    Returns a route string ("gmail", "calendar", "system", "contacts",
+    "keep") if all tools in the plan share the same domain prefix, or
+    ``None`` if the plan is empty or ambiguous.
+    """
+    if not tool_plan:
+        return None
+    domains: set[str] = set()
+    for item in tool_plan:
+        name = item if isinstance(item, str) else (
+            item.get("tool") if isinstance(item, dict) else str(item)
+        )
+        if not name:
+            continue
+        # Check compound prefixes first (google.contacts.* → contacts)
+        _matched_compound = False
+        for compound, domain in _COMPOUND_PREFIX_MAP.items():
+            if name.startswith(compound + "."):
+                domains.add(domain)
+                _matched_compound = True
+                break
+        if _matched_compound:
+            continue
+        prefix = name.split(".", 1)[0]
+        if prefix == "time":
+            continue  # time.* is allowed in any route
+        domains.add(prefix)
+    if len(domains) == 1:
+        return domains.pop()
+    return None
 
 
 def verify_plan(
@@ -162,3 +242,40 @@ def verify_plan(
         logger.debug("[PLAN_VERIFIER] plan OK route=%s tools=%d", route, len(tool_plan))
 
     return (not errors), errors
+
+
+# ── Issue #1229: Error classification ────────────────────────────────
+# CRITICAL errors MUST block tool execution.
+# WARNING errors are logged but do not block.
+_CRITICAL_PREFIXES: frozenset[str] = frozenset({
+    "unknown_tool",
+    "route_tool_mismatch",
+    "smalltalk_with_tools",
+    "missing_slot",
+    "missing_gmail_field",
+    "route_intent_mismatch",
+})
+
+_WARNING_PREFIXES: frozenset[str] = frozenset({
+    "tool_plan_no_indicators",
+    "calendar_write_no_temporal",
+})
+
+
+def classify_errors(
+    errors: list[str],
+) -> tuple[list[str], list[str]]:
+    """Split plan errors into (critical, warnings).
+
+    Critical errors must prevent tool execution.
+    Warnings are informational and should be logged only.
+    """
+    critical: list[str] = []
+    warnings: list[str] = []
+    for err in errors:
+        prefix = err.split(":")[0]
+        if prefix in _CRITICAL_PREFIXES:
+            critical.append(err)
+        else:
+            warnings.append(err)
+    return critical, warnings

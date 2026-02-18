@@ -15,13 +15,13 @@ from typing import Any, Dict, List, Optional, Tuple
 @dataclass
 class BehavioralProfile:
     """
-    Öğrenilen davranışsal kullanıcı profili.
+    Learned behavioral user profile.
     
-    Kullanıcının davranış kalıplarını, tercihlerini ve
-    kişilik özelliklerini saklar.
+    Stores user behavior patterns, preferences
+    and personality traits.
     
-    Not: memory.profile.UserProfile ile karıştırılmamalı
-    (o modül demografik/fact bilgileri saklar).
+    Note: not to be confused with memory.profile.UserProfile
+    (that module stores demographic/fact data).
     """
     
     id: str = ""
@@ -34,7 +34,7 @@ class BehavioralProfile:
     """Last update time."""
     
     # ============================================================
-    # Temel Tercihler
+    # Core Preferences
     # ============================================================
     
     preferred_apps: Dict[str, float] = field(default_factory=dict)
@@ -47,11 +47,11 @@ class BehavioralProfile:
     """Hour (0-23) -> activity level (0.0 - 1.0)."""
     
     # ============================================================
-    # Davranış Kalıpları
+    # Behavior Patterns
     # ============================================================
     
     command_sequences: List[Tuple[str, str, float]] = field(default_factory=list)
-    """(action_a, action_b, probability) - A'dan sonra B olasılığı."""
+    """(action_a, action_b, probability) - probability of B after A."""
     
     time_patterns: Dict[str, Dict[int, float]] = field(default_factory=dict)
     """Intent -> hour -> frequency."""
@@ -60,7 +60,7 @@ class BehavioralProfile:
     """Command -> usage count."""
     
     # ============================================================
-    # Kişilik Özellikleri (Inferred)
+    # Personality Traits (Inferred)
     # ============================================================
     
     verbosity_preference: float = 0.5

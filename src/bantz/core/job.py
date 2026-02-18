@@ -19,14 +19,14 @@ class JobState(Enum):
     Possible states for a Job in the Bantz system.
     
     State transitions:
-    - CREATED: Job oluşturuldu, henüz başlamadı
-    - RUNNING: Aktif çalışıyor
-    - WAITING_USER: Kullanıcı input bekliyor
-    - PAUSED: "bekle" komutu ile duraklatıldı
-    - VERIFYING: Sonuç doğrulanıyor
-    - DONE: Başarıyla tamamlandı (final)
-    - FAILED: Hata ile sonlandı (final)
-    - CANCELLED: Kullanıcı iptal etti (final)
+    - CREATED: Job created, not yet started
+    - RUNNING: Actively running
+    - WAITING_USER: Waiting for user input
+    - PAUSED: Paused via 'bekle' command
+    - VERIFYING: Verifying results
+    - DONE: Completed successfully (final)
+    - FAILED: Failed with error (final)
+    - CANCELLED: Cancelled by user (final)
     """
     CREATED = "created"
     RUNNING = "running"

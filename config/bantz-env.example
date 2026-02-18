@@ -153,6 +153,14 @@ BANTZ_BRIEFING_HOUR=08
 # BANTZ_MISROUTE_DATASET=~/.cache/bantz/datasets/router_misroutes.jsonl
 
 
+# ─── Neo4j / Graph Database ──────────────────────────────────────
+# NEO4J_URI=neo4j+s://xxxx.databases.neo4j.io
+# NEO4J_USERNAME=neo4j
+# NEO4J_PASSWORD=                          # Store in ~/.config/bantz/neo4j-aura.env
+# NEO4J_DATABASE=neo4j
+# BANTZ_GRAPH_BACKEND=sqlite               # sqlite | neo4j
+
+
 # ─── Memory / Context ───────────────────────────────────────────
 # BANTZ_MEMORY_DB=~/.bantz/memory.db       # User memory SQLite path
 # BANTZ_MEMORY_DB_PATH=~/.bantz/memory.db  # Memory store DB path (alternate)
@@ -163,6 +171,7 @@ BANTZ_BRIEFING_HOUR=08
 # BANTZ_MEMORY_PII_FILTER=true             # PII filtering in memory
 # BANTZ_PROFILE_PATH=~/.bantz/profile.json # User profile JSON
 # BANTZ_LOCATION=                          # User location for context prompts
+# BANTZ_WEATHER_LOCATION=                  # Weather-specific location (overrides BANTZ_LOCATION)
 # BANTZ_DEFAULT_LOCATION=                  # Fallback location
 
 
@@ -226,6 +235,21 @@ BANTZ_BRIEFING_HOUR=08
 # ─── Calendar Idempotency ───────────────────────────────────────
 # BANTZ_IDEMPOTENCY_STORE=                 # Calendar idempotency store path
 
+
+# ─── Language Bridge (TR↔EN translation layer) ──────────────────
+# Brain works in English for better routing accuracy, UI stays Turkish.
+# BANTZ_BRIDGE_ENABLED=0                   # Master switch (1=on, 0=off)
+# BANTZ_BRIDGE_INPUT_GATE=1                # TR→EN input translation for router
+# BANTZ_BRIDGE_OUTPUT_GATE=1               # EN→TR output translation (default: enabled)
+# BANTZ_BRIDGE_ENGINE=marianmt             # Translation engine: marianmt | nllb
+# BANTZ_BRIDGE_CACHE_TTL=300               # Translation cache TTL (seconds)
+# BANTZ_BRIDGE_LOG=0                       # Log every translation (debug)
+
+
+# ─── Structured Tool Calling (Issue #1274) ───────────────────────
+# Use Ollama's native tools API instead of JSON-from-text parsing.
+# Eliminates ~800 lines of JSON repair code when enabled.
+# BANTZ_STRUCTURED_TOOLS=0                 # Master switch (1=on, 0=off)
 
 # ─── Debug ───────────────────────────────────────────────────────
 # BANTZ_DEBUG=0                            # Enable debug mode (1=on)

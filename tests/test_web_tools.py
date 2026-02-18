@@ -77,26 +77,27 @@ class TestWebSearchToolRun:
     
     @pytest.mark.asyncio
     async def test_web_search_run_mock(self, context):
-        """WebSearchTool.run() returns results."""
+        """WebSearchTool.run() returns failure (Issue #1015: Playwright stub)."""
         tool = WebSearchTool()
         
         result = await tool.run({"query": "python programming"}, context)
         
-        assert result.success is True
-        assert "results" in result.data
-        assert isinstance(result.data["results"], list)
+        # Issue #1015: Playwright search is intentionally unimplemented.
+        # The tool returns a failure with a "not implemented" message.
+        assert result.success is False
+        assert "not implemented" in (result.error or "").lower()
     
     @pytest.mark.asyncio
     async def test_web_search_publishes_found(self, context):
-        """WebSearchTool publishes FOUND event."""
+        """WebSearchTool does NOT publish FOUND (Issue #1015: stub fails)."""
         events = []
         context.event_bus.subscribe("found", lambda e: events.append(e))
         
         tool = WebSearchTool()
         await tool.run({"query": "test"}, context)
         
-        assert len(events) == 1
-        assert events[0].data["tool"] == "web_search"
+        # Stub fails before publishing events
+        assert len(events) == 0
     
     @pytest.mark.asyncio
     async def test_web_search_publishes_progress(self, context):
@@ -143,14 +144,14 @@ class TestWebSearchRequestsToolRun:
     
     @pytest.mark.asyncio
     async def test_web_search_requests_run_mock(self, context):
-        """WebSearchRequestsTool.run() returns results."""
+        """WebSearchRequestsTool.run() returns failure (Issue #1015: stub)."""
         tool = WebSearchRequestsTool()
         
         result = await tool.run({"query": "fallback test"}, context)
         
-        assert result.success is True
-        assert "results" in result.data
-        assert result.data.get("fallback") is True
+        # Issue #1015: Requests search is intentionally unimplemented.
+        assert result.success is False
+        assert "not implemented" in (result.error or "").lower()
 
 
 class TestPageReaderToolSpec:
@@ -184,7 +185,7 @@ class TestPageReaderToolRun:
     
     @pytest.mark.asyncio
     async def test_page_reader_run_mock(self, context):
-        """PageReaderTool.run() returns content."""
+        """PageReaderTool.run() returns failure (Issue #1015: stub)."""
         tool = PageReaderTool()
         
         result = await tool.run(
@@ -192,34 +193,9 @@ class TestPageReaderToolRun:
             context
         )
         
-        assert result.success is True
-        assert "content" in result.data
-        assert "url" in result.data
-    
-    @pytest.mark.asyncio
-    async def test_page_reader_extract_modes(self, context):
-        """PageReaderTool respects extract_mode."""
-        tool = PageReaderTool()
-        
-        result = await tool.run(
-            {"url": "https://example.com", "extract_mode": "markdown"},
-            context
-        )
-        
-        assert result.data["extract_mode"] == "markdown"
-    
-    @pytest.mark.asyncio
-    async def test_page_reader_content_length(self, context):
-        """PageReaderTool includes content_length."""
-        tool = PageReaderTool()
-        
-        result = await tool.run(
-            {"url": "https://example.com"},
-            context
-        )
-        
-        assert "content_length" in result.data
-        assert result.data["content_length"] > 0
+        # Issue #1015: Page reader is intentionally unimplemented.
+        assert result.success is False
+        assert "not implemented" in (result.error or "").lower()
 
 
 class TestFetchUrlToolSpec:
@@ -246,7 +222,7 @@ class TestFetchUrlToolRun:
     
     @pytest.mark.asyncio
     async def test_fetch_url_run_mock(self, context):
-        """FetchUrlTool.run() returns content."""
+        """FetchUrlTool.run() returns failure (Issue #1015: stub)."""
         tool = FetchUrlTool()
         
         result = await tool.run(
@@ -254,9 +230,9 @@ class TestFetchUrlToolRun:
             context
         )
         
-        assert result.success is True
-        assert "content" in result.data
-        assert "status_code" in result.data
+        # Issue #1015: Fetch URL is intentionally unimplemented.
+        assert result.success is False
+        assert "not implemented" in (result.error or "").lower()
 
 
 class TestToolInstances:

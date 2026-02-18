@@ -29,6 +29,9 @@ Env dosyası: `~/.config/bantz/env` (veya `BANTZ_ENV_FILE` ile override)
 | `BANTZ_TIER_QUALITY_RATE_LIMIT` | `30` | Dakikada max Gemini çağrısı |
 | `BANTZ_TIER_DEBUG` | `0` | Tiering debug log |
 | `BANTZ_TIER_METRICS` | `0` | Tiering metrik log |
+| `BANTZ_FINALIZER_TIMEOUT_S` | `15.0` | Quality finalizer LLM timeout (saniye) |
+| `BANTZ_FAST_FINALIZER_TIMEOUT_S` | `8.0` | Fast finalizer LLM timeout (saniye) |
+| `BANTZ_SYNC_BOOT_STAGGER` | `5` | Syncer başlatma araları (saniye, Issue #1371) |
 
 ## Voice & Audio
 

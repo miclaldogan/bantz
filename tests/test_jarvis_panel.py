@@ -584,7 +584,7 @@ class TestPersonaPanelResponses:
         response = persona.get_response("panel_moved")
         
         assert response is not None
-        assert "efendim" in response.lower() or "panel" in response.lower()
+        assert "friend" in response.lower() or "moved" in response.lower() or "done" in response.lower() or "panel" in response.lower()
     
     def test_panel_shown_response(self):
         from bantz.llm.persona import JarvisPersona

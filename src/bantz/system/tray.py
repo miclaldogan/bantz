@@ -39,14 +39,14 @@ STATUS_ICONS = {
 }
 
 STATUS_TEXTS = {
-    TrayStatus.IDLE: "Hazır",
-    TrayStatus.LISTENING: "Dinliyorum",
-    TrayStatus.PROCESSING: "İşleniyor",
-    TrayStatus.SPEAKING: "Konuşuyor",
-    TrayStatus.MUTED: "Sessiz",
-    TrayStatus.PAUSED: "Duraklatıldı",
-    TrayStatus.ERROR: "Hata",
-    TrayStatus.DISCONNECTED: "Bağlantı Yok",
+    TrayStatus.IDLE: "Ready",
+    TrayStatus.LISTENING: "Listening",
+    TrayStatus.PROCESSING: "Processing",
+    TrayStatus.SPEAKING: "Speaking",
+    TrayStatus.MUTED: "Muted",
+    TrayStatus.PAUSED: "Paused",
+    TrayStatus.ERROR: "Error",
+    TrayStatus.DISCONNECTED: "Disconnected",
 }
 
 
@@ -84,12 +84,12 @@ class SystemTray:
     
     Example:
         tray = SystemTray()
-        tray.add_menu_item("🎤 Sesli Komut", on_voice_command)
-        tray.add_menu_item("⚙️ Ayarlar", on_settings)
+        tray.add_menu_item("🎤 Voice Command", on_voice_command)
+        tray.add_menu_item("⚙️ Settings", on_settings)
         tray.show()
         
         tray.update_status(TrayStatus.LISTENING)
-        tray.notify("Komut alındı", "YouTube'u açıyorum")
+        tray.notify("Command received", "Opening YouTube")
     """
     
     DEFAULT_ICON_PATH = "icons/bantz.png"
@@ -98,7 +98,7 @@ class SystemTray:
     def __init__(
         self,
         icon_path: Optional[str] = None,
-        tooltip: str = "Bantz - Kişisel Asistan",
+        tooltip: str = "Bantz - Personal Assistant",
         use_qt: bool = True,
     ):
         """
@@ -147,29 +147,29 @@ class SystemTray:
             ),
             TrayMenuItem.separator(),
             TrayMenuItem(
-                label="🎤 Sesli Komut",
+                label="🎤 Voice Command",
                 icon="🎤",
             ),
             TrayMenuItem(
-                label="⌨️ Yazılı Komut",
+                label="⌨️ Text Command",
                 icon="⌨️",
             ),
             TrayMenuItem.separator(),
             TrayMenuItem(
-                label="⚙️ Ayarlar",
+                label="⚙️ Settings",
                 icon="⚙️",
             ),
             TrayMenuItem(
-                label="📊 İstatistikler",
+                label="📊 Statistics",
                 icon="📊",
             ),
             TrayMenuItem(
-                label="📋 Komut Geçmişi",
+                label="📋 Command History",
                 icon="📋",
             ),
             TrayMenuItem.separator(),
             TrayMenuItem(
-                label="❌ Çıkış",
+                label="❌ Exit",
                 icon="❌",
             ),
         ]

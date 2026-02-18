@@ -70,9 +70,21 @@ def _prepare_tool_results_for_finalizer(
     """Prepare tool results for finalizer prompt with token budget control.
 
     Issue #354: Finalizer prompts can overflow context when tool results are large.
+    Issue #1219: Dynamic budget — single-content tools (gmail.get_message)
+    get a higher budget to avoid losing mail body details.
     """
     if not tool_results:
         return [], False
+
+    # Issue #1219: Increase budget for content-detail tools
+    _DETAIL_TOOLS = {"gmail.get_message", "gmail.get_thread"}
+    has_detail = any(
+        r.get("tool") in _DETAIL_TOOLS and r.get("success", False)
+        for r in tool_results
+    )
+    if has_detail and max_tokens <= 2000:
+        max_tokens = 4000  # 2x budget for detail content
+        logger.info("[Issue #1219] Increased token budget to %d for detail tool", max_tokens)
 
     from bantz.llm.token_utils import estimate_tokens_json
 
@@ -168,6 +180,75 @@ def _extract_field(raw: Any, *field_names: str) -> str | None:
     return None
 
 
+def _extract_event_list(raw: Any) -> list[dict[str, str]]:
+    """Extract a list of {title, time} from calendar.list_events result.
+
+    Issue #1215: Supports both list-of-dicts and dict-with-events-key formats.
+    """
+    events: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        events = raw
+    elif isinstance(raw, dict):
+        for key in ("events", "items", "data"):
+            val = raw.get(key)
+            if isinstance(val, list):
+                events = val
+                break
+
+    result = []
+    for ev in events[:10]:  # cap at 10 for display
+        if not isinstance(ev, dict):
+            continue
+        title = str(ev.get("summary") or ev.get("title") or "").strip()
+        time_str = _extract_event_time(ev) or ""
+        if title or time_str:
+            result.append({"title": title, "time": time_str})
+    return result
+
+
+def _extract_event_time(raw: Any) -> str | None:
+    """Extract HH:MM time from a calendar event tool result (local timezone).
+
+    Google Calendar API may return UTC timestamps (e.g. '2026-02-13T18:00:00Z').
+    This function converts to local timezone before extracting HH:MM.
+
+    Looks for 'start' field in various formats:
+    - ISO string: "2026-02-13T18:00:00Z" → "21:00" (UTC+3)
+    - ISO string: "2026-02-13T21:00:00+03:00" → "21:00"
+    - Dict: {"dateTime": "2026-02-13T21:00:00+03:00"} → "21:00"
+    - Params: {"time": "21:00"} → "21:00"
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    # Direct time field (from params echo) — already local
+    t = raw.get("time")
+    if isinstance(t, str) and ":" in t and len(t) <= 5:
+        return t.strip()
+
+    # Start field (ISO datetime or dict)
+    start = raw.get("start")
+    if isinstance(start, dict):
+        start = start.get("dateTime") or start.get("date")
+    if isinstance(start, str) and "T" in start:
+        try:
+            from datetime import datetime as _dt_cls
+            # Python 3.10 fromisoformat doesn't support "Z"
+            clean = start.replace("Z", "+00:00")
+            dt = _dt_cls.fromisoformat(clean)
+            # Convert to local timezone if timezone-aware
+            if dt.tzinfo is not None:
+                local_dt = dt.astimezone()
+                return local_dt.strftime("%H:%M")
+            # Fallback: extract HH:MM directly
+            time_part = start.split("T")[1]
+            return time_part[:5]
+        except (ValueError, IndexError, TypeError):
+            pass
+
+    return None
+
+
 def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
     """Build a tool-aware success summary instead of generic 'Tamamlandı efendim'.
 
@@ -181,6 +262,9 @@ def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
 
     for r in tool_results:
         tool_name = str(r.get("tool") or "")
+        # Skip internal/synthetic tools (e.g. _reflection)
+        if tool_name.startswith("_"):
+            continue
         raw = r.get("raw_result")
         success = r.get("success", False)
 
@@ -192,10 +276,25 @@ def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
             if tool_name == "calendar.list_events":
                 if count == 0:
                     parts.append("Takvimde etkinlik bulunamadı efendim.")
-                elif count == 1:
-                    parts.append("1 etkinlik bulundu efendim.")
                 else:
-                    parts.append(f"{count} etkinlik bulundu efendim.")
+                    # Issue #1215: Include event details (title + time)
+                    events = _extract_event_list(raw)
+                    if events:
+                        lines = []
+                        for ev in events:
+                            title = ev.get("title", "")
+                            time_str = ev.get("time", "")
+                            if title and time_str:
+                                lines.append(f"  • {time_str} — {title}")
+                            elif title:
+                                lines.append(f"  • {title}")
+                        if lines:
+                            header = f"{count} etkinlik bulundu efendim:" if count > 1 else "1 etkinlik bulundu efendim:"
+                            parts.append(header + "\n" + "\n".join(lines))
+                        else:
+                            parts.append(f"{count} etkinlik bulundu efendim." if count > 1 else "1 etkinlik bulundu efendim.")
+                    else:
+                        parts.append(f"{count} etkinlik bulundu efendim." if count > 1 else "1 etkinlik bulundu efendim.")
             else:
                 if count == 0:
                     parts.append("Uygun boş zaman dilimi bulunamadı efendim.")
@@ -204,8 +303,14 @@ def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
 
         elif tool_name == "calendar.create_event":
             title = _extract_field(raw, "title", "summary")
-            if title:
+            # Extract time from the tool result for deterministic reply
+            start_time = _extract_event_time(raw)
+            if title and start_time:
+                parts.append(f"'{title}' etkinliği {start_time}'de oluşturuldu efendim.")
+            elif title:
                 parts.append(f"'{title}' etkinliği oluşturuldu efendim.")
+            elif start_time:
+                parts.append(f"Etkinlik {start_time}'de oluşturuldu efendim.")
             else:
                 parts.append("Etkinlik oluşturuldu efendim.")
 
@@ -243,6 +348,35 @@ def _build_tool_success_summary(tool_results: list[dict[str, Any]]) -> str:
 
         elif tool_name == "contacts.resolve":
             parts.append("Kişi bilgisi çözümlendi efendim.")
+
+        elif tool_name == "time.now":
+            if isinstance(raw, dict):
+                t = raw.get("time") or ""
+                d = raw.get("date") or ""
+                if t and d:
+                    parts.append(f"Şu an {d} saat {t} efendim.")
+                elif t:
+                    parts.append(f"Saat {t} efendim.")
+                else:
+                    parts.append("Saat bilgisi alındı efendim.")
+            else:
+                parts.append("Saat bilgisi alındı efendim.")
+
+        elif tool_name == "system.status":
+            if isinstance(raw, dict):
+                cpu = raw.get("cpu_percent")
+                mem = raw.get("memory_percent")
+                info_parts = []
+                if cpu is not None:
+                    info_parts.append(f"CPU: %{cpu}")
+                if mem is not None:
+                    info_parts.append(f"RAM: %{mem}")
+                if info_parts:
+                    parts.append(f"Sistem durumu: {', '.join(info_parts)} efendim.")
+                else:
+                    parts.append("Sistem durumu alındı efendim.")
+            else:
+                parts.append("Sistem durumu alındı efendim.")
 
         else:
             tool_short = tool_name.split(".")[-1] if "." in tool_name else tool_name

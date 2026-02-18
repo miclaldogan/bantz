@@ -153,7 +153,7 @@ class PanelEventBinder(QObject):
         Expected event.data:
             - message: str - Error message
         """
-        message = event.data.get("message", "Bir hata oluştu")
+        message = event.data.get("message", "An error occurred")
         self._error_signal.emit(message)
     
     def _handle_found(self, data: dict) -> None:

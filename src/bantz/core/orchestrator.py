@@ -454,6 +454,14 @@ class BantzOrchestrator:
                 log_path=self.config.log_path,
             )
             
+            # Start session socket accept loop in background thread
+            # so CLI clients can connect via `python3 -m bantz --once "..."`
+            import threading
+            self._server_thread = threading.Thread(
+                target=self._server.run_socket_only, daemon=True, name="BantzServerLoop"
+            )
+            self._server_thread.start()
+            
             self._set_component_state("server", ComponentState.RUNNING)
             print("✓")
             
@@ -475,6 +483,9 @@ class BantzOrchestrator:
             connected = self._overlay_hook.start()
             
             if connected:
+                # Wire server reference for command processing
+                if self._server:
+                    self._overlay_hook.set_server_ref(self._server)
                 # Set overlay hook for router
                 set_overlay_hook(self._overlay_hook)
                 self._set_component_state("overlay", ComponentState.RUNNING)
@@ -944,7 +955,16 @@ def stop_jarvis() -> None:
 def main() -> int:
     """Main entry point for Jarvis."""
     import argparse
-    
+
+    # Load .env from project root so BANTZ_VLLM_URL / BANTZ_VLLM_MODEL etc. apply
+    try:
+        from dotenv import load_dotenv as _load_dotenv
+        _env_path = Path(__file__).resolve().parents[3] / ".env"
+        if _env_path.exists():
+            _load_dotenv(_env_path, override=False)
+    except ImportError:
+        pass  # python-dotenv not installed, rely on env vars being set externally
+
     parser = argparse.ArgumentParser(
         prog="jarvis",
         description="Jarvis - Just A Rather Very Intelligent System",

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-import os
-import json
 
 from bantz.security.secrets import mask_path
-
 
 # Canonical Gmail OAuth scopes.
 # Accept short forms like "gmail.readonly" too.
@@ -167,7 +166,22 @@ def get_gmail_credentials(
     - Access tokens expire quickly; refresh tokens are used to refresh silently.
     - If the stored credential doesn't cover the requested scopes, a new consent
       flow will be triggered.
+
+    Issue #1292: When the unified ``GoogleAuthManager`` is available,
+    delegates to it for centralized scope management.
     """
+
+    # ── Unified auth manager bridge (Issue #1292) ───────────────
+    if client_secret_path is None and token_path is None:
+        try:
+            from bantz.connectors.google.auth_manager import get_auth_manager
+
+            mgr = get_auth_manager()
+            if mgr is not None:
+                normalized = _normalize_gmail_scopes(scopes)
+                return mgr.get_credentials(scopes=normalized)
+        except Exception:
+            pass  # Fall through to legacy flow
 
     requested_scopes = _normalize_gmail_scopes(scopes)
     if not requested_scopes:
@@ -278,8 +292,8 @@ def get_gmail_credentials(
                 scope_hint = ""
 
             raise RuntimeError(
-                "Gmail OAuth yetkilendirmesi gerekli (token yok/uyumsuz). "
-                f"Gmail araçlarını kullanmadan önce '{auth_cmd}' ile yetkilendirme yapın. "
+                "Gmail OAuth authorization required (token missing/incompatible). "
+                f"Authorize with '{auth_cmd}' before using Gmail tools. "
                 f"client_secret={mask_path(str(secret_path))} token={mask_path(str(cfg.token_path))}{scope_hint}"
             )
         flow = InstalledAppFlow.from_client_secrets_file(str(secret_path), scopes=requested_scopes)

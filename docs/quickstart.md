@@ -84,10 +84,22 @@ python -m bantz
 
 ## İlk Kullanım Checklist
 
+- [ ] Doctor çalıştır → `bantz doctor` (tüm kontrolleri tek seferde yapar)
 - [ ] vLLM çalışıyor mu? → `curl http://localhost:8001/v1/models`
 - [ ] Env dosyası var mı? → `~/.config/bantz/env`
 - [ ] (Opsiyonel) Gemini API key? → `GEMINI_API_KEY=...`
 - [ ] (Opsiyonel) Google Calendar/Gmail? → `python -m bantz.google auth`
+
+## Onboarding Wizard
+
+İlk kez kuruluyor ve adım adım rehber isterseniz:
+
+```bash
+bantz onboard
+```
+
+Wizard sırasıyla kontrol eder: Python sürümü, GPU/CUDA, vLLM bağlantısı,
+env dosyası, Google OAuth tokenları.  Eksik adımları otomatik tamamlar.
 
 ## Sorun Giderme
 

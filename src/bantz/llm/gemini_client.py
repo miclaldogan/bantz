@@ -2,30 +2,21 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import os
+import threading
+import time
+from dataclasses import dataclass
 from typing import Iterator, List, Optional
 
 import requests
 
-from bantz.llm.base import (
-    LLMClient,
-    LLMMessage,
-    LLMResponse,
-    LLMConnectionError,
-    LLMModelNotFoundError,
-    LLMTimeoutError,
-    LLMInvalidResponseError,
-)
-
-from bantz.llm.privacy import redact_for_cloud, minimize_for_cloud
-from bantz.llm.quota_tracker import (
-    QuotaTracker,
-    QuotaExceeded,
-    CircuitBreaker,
-    CircuitOpen,
-)
-
+from bantz.llm.base import (LLMClient, LLMConnectionError,
+                            LLMInvalidResponseError, LLMMessage,
+                            LLMModelNotFoundError, LLMResponse,
+                            LLMTimeoutError)
+from bantz.llm.privacy import minimize_for_cloud, redact_for_cloud
+from bantz.llm.quota_tracker import (CircuitBreaker, CircuitOpen,
+                                     QuotaExceeded, QuotaTracker)
 
 logger = logging.getLogger(__name__)
 metrics_logger = logging.getLogger("bantz.llm.metrics")
@@ -33,13 +24,17 @@ metrics_logger = logging.getLogger("bantz.llm.metrics")
 # Module-level defaults (shared across instances unless overridden)
 _default_quota_tracker: Optional[QuotaTracker] = None
 _default_circuit_breaker: Optional[CircuitBreaker] = None
+# Issue #1313: Lock for thread-safe lazy initialization of singletons.
+_defaults_lock = threading.Lock()
 
 
 def get_default_quota_tracker() -> QuotaTracker:
     """Get or create the module-level default QuotaTracker."""
     global _default_quota_tracker
     if _default_quota_tracker is None:
-        _default_quota_tracker = QuotaTracker()
+        with _defaults_lock:
+            if _default_quota_tracker is None:
+                _default_quota_tracker = QuotaTracker()
     return _default_quota_tracker
 
 
@@ -47,7 +42,9 @@ def get_default_circuit_breaker() -> CircuitBreaker:
     """Get or create the module-level default CircuitBreaker."""
     global _default_circuit_breaker
     if _default_circuit_breaker is None:
-        _default_circuit_breaker = CircuitBreaker()
+        with _defaults_lock:
+            if _default_circuit_breaker is None:
+                _default_circuit_breaker = CircuitBreaker()
     return _default_circuit_breaker
 
 
@@ -58,8 +55,30 @@ RETRY_MAX_DELAY = 30.0  # seconds
 RETRY_BACKOFF_FACTOR = 2.0
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
+# Issue #1323: Minimum fallback for system-only prompts
+_FALLBACK_USER_PROMPT = "Lütfen devam et."
 
-from dataclasses import dataclass
+
+def _make_fallback_user_content(system_lines: list[str]) -> dict:
+    """Build a fallback user content dict when no user messages exist.
+
+    If system messages are available, the last one is re-roled as user
+    content so the model receives meaningful context.  Otherwise a
+    minimal Turkish continuation prompt is used.
+    """
+    if system_lines:
+        fallback = minimize_for_cloud(redact_for_cloud(system_lines[-1]))
+        logger.warning(
+            "[GEMINI] No user messages found — re-roling last system "
+            "message as user (%d chars)",
+            len(fallback),
+        )
+    else:
+        fallback = _FALLBACK_USER_PROMPT
+        logger.warning(
+            "[GEMINI] No user or system messages — using minimum fallback prompt",
+        )
+    return {"role": "user", "parts": [{"text": fallback}]}
 
 
 @dataclass
@@ -206,8 +225,15 @@ class GeminiClient(LLMClient):
             safe_text = minimize_for_cloud(redact_for_cloud(content))
             contents.append({"role": gemini_role, "parts": [{"text": safe_text}]})
 
+        # Issue #1323: When all messages are system-role, Gemini requires at
+        # least one user turn.  Re-role the last system message as user rather
+        # than sending an empty string (which can cause hallucination or API
+        # rejection).
+        if not contents:
+            contents = [_make_fallback_user_content(system_lines)]
+
         payload: dict = {
-            "contents": contents or [{"role": "user", "parts": [{"text": ""}]}],
+            "contents": contents,
             "generationConfig": {
                 "temperature": float(temperature),
                 "maxOutputTokens": int(max_tokens),
@@ -343,7 +369,7 @@ class GeminiClient(LLMClient):
 
             except requests.Timeout as e:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                last_exception = e
+                last_exception = e  # noqa: F841 — kept for debugger inspection
                 if _metrics_enabled():
                     metrics_logger.info(
                         "llm_call_failed backend=%s model=%s latency_ms=%s "
@@ -374,7 +400,7 @@ class GeminiClient(LLMClient):
 
             except requests.RequestException as e:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                last_exception = e
+                last_exception = e  # noqa: F841 — kept for debugger inspection
                 if _metrics_enabled():
                     metrics_logger.info(
                         "llm_call_failed backend=%s model=%s latency_ms=%s "
@@ -420,7 +446,7 @@ class GeminiClient(LLMClient):
                         attempt,
                     )
                 raise LLMInvalidResponseError(
-                    f"Gemini parse_error reason=parse_error"
+                    "Gemini parse_error reason=parse_error"
                 ) from e
 
         # Should not reach here, but safety net
@@ -523,8 +549,12 @@ class GeminiClient(LLMClient):
             safe_text = minimize_for_cloud(redact_for_cloud(content))
             contents.append({"role": gemini_role, "parts": [{"text": safe_text}]})
 
+        # Issue #1323: Same fallback as chat_detailed
+        if not contents:
+            contents = [_make_fallback_user_content(system_lines)]
+
         payload: dict = {
-            "contents": contents or [{"role": "user", "parts": [{"text": ""}]}],
+            "contents": contents,
             "generationConfig": {
                 "temperature": float(temperature),
                 "maxOutputTokens": int(max_tokens),
@@ -562,12 +592,14 @@ class GeminiClient(LLMClient):
                     _wait = 2 ** _attempt
                     logger.warning("[GEMINI_STREAM] 429 rate-limited, retry %d/%d in %ds",
                                    _attempt, _max_stream_retries, _wait)
+                    r.close()  # Issue #1311: close before retry to prevent leak
                     time.sleep(_wait)
                     continue
                 if r.status_code >= 500 and _attempt < _max_stream_retries:
                     _wait = 2 ** _attempt
                     logger.warning("[GEMINI_STREAM] %d server error, retry %d/%d in %ds",
                                    r.status_code, _attempt, _max_stream_retries, _wait)
+                    r.close()  # Issue #1311: close before retry to prevent leak
                     time.sleep(_wait)
                     continue
                 break
@@ -579,8 +611,12 @@ class GeminiClient(LLMClient):
                                    _attempt, _max_stream_retries, _wait, exc)
                     time.sleep(_wait)
                     continue
+                if isinstance(exc, requests.Timeout):
+                    raise LLMTimeoutError(
+                        f"Gemini timeout after {_max_stream_retries} retries reason=timeout"
+                    ) from exc
                 raise LLMConnectionError(
-                    f"Gemini stream connection failed after {_max_stream_retries} attempts"
+                    f"Gemini connection_error after {_max_stream_retries} retries reason=connection_error"
                 ) from exc
 
         if r is None:
@@ -704,6 +740,14 @@ class GeminiClient(LLMClient):
             raise LLMInvalidResponseError(
                 "Gemini parse_error reason=parse_error"
             ) from e
+        finally:
+            # Issue #1311: Always close the response to release the HTTP
+            # connection back to the pool, even on early exit or error.
+            if r is not None:
+                try:
+                    r.close()
+                except Exception:
+                    pass
 
     def chat_stream_to_text(
         self,

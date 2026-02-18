@@ -562,16 +562,17 @@ class TestLowConfidenceToolForcing:
     def test_confidence_threshold_documentation(self, loop):
         """
         Document the confidence threshold value used.
-        Issue #682: Threshold lowered from 0.7 to 0.4 for 3B models.
+        Issue #682: Threshold lowered from 0.7.
+        Current threshold: 0.5 (see tool_plan_sanitizer.force_tool_plan).
         """
-        # Threshold is 0.4 (lowered from 0.7 in Issue #682)
+        # Threshold is 0.5
         
         # Below threshold
         output_low = OrchestratorOutput(
             route="calendar",
             calendar_intent="query",
             slots={},
-            confidence=0.39,
+            confidence=0.49,
             tool_plan=[],
             assistant_reply="",
         )
@@ -583,7 +584,7 @@ class TestLowConfidenceToolForcing:
             route="calendar",
             calendar_intent="query",
             slots={},
-            confidence=0.4,
+            confidence=0.5,
             tool_plan=[],
             assistant_reply="",
         )
@@ -595,7 +596,7 @@ class TestLowConfidenceToolForcing:
             route="calendar",
             calendar_intent="query",
             slots={},
-            confidence=0.5,
+            confidence=0.6,
             tool_plan=[],
             assistant_reply="",
         )

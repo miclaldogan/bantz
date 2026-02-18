@@ -6,7 +6,7 @@ before SESSION_CONTEXT so the model always knows the current date/time.
 
 import pytest
 
-from bantz.brain.prompt_engineering import estimate_tokens
+from bantz.brain.prompt_engineering import estimate_tokens, PromptLimits
 
 
 class FakeBuilder:
@@ -14,6 +14,7 @@ class FakeBuilder:
 
     def __init__(self, token_budget: int):
         self._token_budget = token_budget
+        self._limits = PromptLimits(token_budget=token_budget)
 
     def _assemble(self, *, system, template, blocks, user_input):
         lines = [system.strip(), "", template.strip(), ""]

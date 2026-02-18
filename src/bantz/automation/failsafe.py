@@ -30,11 +30,11 @@ class ASREngine(Protocol):
 class FailSafeAction(Enum):
     """Actions that can be taken on failure."""
     
-    RETRY = "retry"           # Tekrar dene
-    SKIP = "skip"             # Bu step'i atla
-    ABORT = "abort"           # Planı iptal et
-    MANUAL = "manual"         # Kullanıcı manuel yapsın
-    MODIFY = "modify"         # Planı değiştir
+    RETRY = "retry"           # Retry
+    SKIP = "skip"             # Skip this step
+    ABORT = "abort"           # Abort plan
+    MANUAL = "manual"         # User does it manually
+    MODIFY = "modify"         # Modify plan
 
 
 @dataclass

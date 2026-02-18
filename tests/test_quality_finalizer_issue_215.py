@@ -19,7 +19,7 @@ class PlannerMock:
         self.fast_finalize_calls = 0
 
     def complete_text(self, *, prompt: str, temperature: float = 0.0, max_tokens: int = 512) -> str:  # noqa: ARG002
-        if "ASSISTANT (sadece JSON):" in prompt:
+        if "ASSISTANT (JSON only):" in prompt:
             self.router_calls += 1
             user_lines = [line[5:].strip() for line in prompt.split("\n") if line.startswith("USER:")]
             user_input = (user_lines[-1] if user_lines else "").lower()
@@ -135,6 +135,7 @@ def test_quality_finalizer_no_new_facts_falls_back(monkeypatch: pytest.MonkeyPat
     )
 
     state = OrchestratorState()
+    state.max_trace_keys = 50  # Prevent trace key eviction
     output, state = loop.process_turn("Ahmet'e nazik bir email taslağı yaz", state)
 
     assert finalizer.calls >= 1
@@ -162,6 +163,7 @@ def test_quality_finalizer_error_has_reason_code_and_falls_back(monkeypatch: pyt
     )
 
     state = OrchestratorState()
+    state.max_trace_keys = 50  # Prevent trace key eviction
     output, state = loop.process_turn("Ahmet'e nazik bir email taslağı yaz", state)
 
     assert finalizer.calls == 1

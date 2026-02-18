@@ -148,7 +148,7 @@ class Planner:
             # No valid handler could be inferred — tell user LLM is needed
             plan.add_step(
                 action="notify_user",
-                description="LLM bağlantısı yok. Bu görevi planlamak için LLM gerekli.",
+                description="No LLM connection. LLM required to plan this task.",
                 parameters={"goal": goal, "error": "llm_unavailable"},
             )
         else:

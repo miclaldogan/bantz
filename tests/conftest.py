@@ -10,6 +10,32 @@ from typing import Any
 
 import pytest
 
+# ── Issue: sync_valid_tools class mutation guard ─────────────────────────
+# JarvisLLMOrchestrator.sync_valid_tools() (called by OrchestratorLoop.__init__)
+# mutates class-level _VALID_TOOLS and SYSTEM_PROMPT. Without this global
+# autouse fixture, tests that create OrchestratorLoop with different registries
+# progressively narrow _VALID_TOOLS, causing later tests to fail.
+from bantz.brain.llm_router import JarvisLLMOrchestrator as _Orch
+
+_PRISTINE_VALID_TOOLS = frozenset(_Orch._VALID_TOOLS)
+_PRISTINE_SYSTEM_PROMPT = (
+    _Orch._SYSTEM_PROMPT_CORE
+    + _Orch._SYSTEM_PROMPT_DETAIL
+    + _Orch._SYSTEM_PROMPT_EXAMPLES
+)
+
+
+@pytest.fixture(autouse=True)
+def _restore_orchestrator_class_state():
+    """Restore JarvisLLMOrchestrator class-level state before/after each test."""
+    _Orch._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    _Orch.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+    _Orch._tool_registry = None
+    yield
+    _Orch._VALID_TOOLS = _PRISTINE_VALID_TOOLS
+    _Orch.SYSTEM_PROMPT = _PRISTINE_SYSTEM_PROMPT
+    _Orch._tool_registry = None
+
 
 @pytest.fixture(autouse=True)
 def _ensure_event_loop_for_sync_tests():
@@ -55,12 +81,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Run tests marked with @pytest.mark.benchmark.",
     )
+    parser.addoption(
+        "--run-golden-path",
+        action="store_true",
+        default=False,
+        help="Run golden path E2E tests (Issue #1226). Must pass for merge.",
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     run_integration = bool(config.getoption("--run-integration"))
     run_regression = bool(config.getoption("--run-regression"))
     run_benchmark = bool(config.getoption("--run-benchmark"))
+    run_golden_path = bool(config.getoption("--run-golden-path"))
 
     deselected: list[pytest.Item] = []
     selected: list[pytest.Item] = []
@@ -73,6 +106,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             deselected.append(item)
             continue
         if not run_benchmark and item.get_closest_marker("benchmark"):
+            deselected.append(item)
+            continue
+        if not run_golden_path and item.get_closest_marker("golden_path"):
             deselected.append(item)
             continue
         selected.append(item)

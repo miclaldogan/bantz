@@ -632,13 +632,13 @@ class TestConstants:
     """Doğru constant kümelerini kontrol et."""
 
     def test_valid_routes(self) -> None:
-        assert VALID_ROUTES == {"calendar", "gmail", "smalltalk", "system", "unknown", "wiki", "chat"}
+        assert VALID_ROUTES == {"calendar", "gmail", "news", "smalltalk", "system", "unknown", "wiki", "chat"}
 
     def test_valid_calendar_intents(self) -> None:
         assert VALID_CALENDAR_INTENTS == {"create", "modify", "cancel", "delete", "query", "none"}
 
     def test_valid_gmail_intents(self) -> None:
-        assert VALID_GMAIL_INTENTS == {"list", "search", "read", "send", "reply", "forward", "delete", "mark_read", "none"}
+        assert VALID_GMAIL_INTENTS == {"list", "search", "read", "send", "reply", "forward", "delete", "mark_read", "draft", "none"}
 
     def test_required_fields(self) -> None:
         assert "route" in REQUIRED_FIELDS

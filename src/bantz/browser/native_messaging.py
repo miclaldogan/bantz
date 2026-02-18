@@ -437,7 +437,7 @@ def main():
         if not is_server_running():
             logger.warning("Bantz daemon is not running — cannot forward message")
             return NativeMessage.error_response(
-                "Bantz daemon çalışmıyor. 'bantz --serve' ile başlatın.",
+                "Bantz daemon is not running. Start with 'bantz --serve'.",
                 raw_message.get("requestId"),
             ).to_dict()
 

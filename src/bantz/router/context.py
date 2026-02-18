@@ -37,7 +37,7 @@ class ConversationContext:
     # Mode state
     mode: str = "normal"  # "normal" | "dev"
 
-    # Basit bağlam: son intent ve beklenen follow-up
+    # Simple context: last intent and expected follow-up
     last_intent: Optional[str] = None
     awaiting: Optional[str] = None  # e.g. "search_query", "app_next_step"
     pending: Optional[PendingAction] = None
