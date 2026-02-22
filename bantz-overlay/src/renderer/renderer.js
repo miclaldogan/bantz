@@ -483,6 +483,10 @@ function checkFirstBootOrAbsence() {
 // Declared here so handleDaemonEvent can reference it; initialized later.
 let phoneCallOverlay = null;
 
+// ─── Google Auth HUD Badge (early declaration) ───────────────
+// Shows Google connection state; initialized after panels are ready.
+let googleAuthBadge = null;
+
 // ─── Daemon Connection State ──────────────────────────────────
 // Listen for connection state changes from the IPC client.
 if (window.overlayAPI && window.overlayAPI.onDaemonConnectionState) {
@@ -991,6 +995,20 @@ initClassroomDialog();
 // ─── Initialize Google Auth Scope Indicator ─────────────────
 initGoogleAuthScopeIndicator();
 
+// ─── Initialize Google Auth HUD Badge ───────────────────────
+function initGoogleAuthBadge() {
+  if (!window.GoogleAuthBadge) {
+    console.warn('[Overlay] GoogleAuthBadge not loaded');
+    return;
+  }
+  googleAuthBadge = new window.GoogleAuthBadge();
+  googleAuthBadge.mount(hudPanel);
+  window.bantzAuthBadge = googleAuthBadge;
+  console.log('[Overlay] Google auth badge initialized');
+}
+
+initGoogleAuthBadge();
+
 // ─── Initialize Floating Text Input ─────────────────────────
 let textInput = null;
 let _textInputRetries = 0;
@@ -1045,6 +1063,7 @@ console.log('[Overlay]   panelTransitions:', !!panelTransitions);
 console.log('[Overlay]   ttsSync:', !!ttsSync);
 console.log('[Overlay]   reasoningChain:', !!reasoningChain);
 console.log('[Overlay]   phoneCallOverlay:', !!phoneCallOverlay);
+console.log('[Overlay]   googleAuthBadge:', !!googleAuthBadge);
 console.log('[Overlay]   textInput:', !!textInput);
 console.log('[Overlay]   classroomDialog:', !!classroomDialog);
 console.log('[Overlay]   googleAuthScopeIndicator:', !!googleAuthScopeIndicator);
