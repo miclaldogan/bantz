@@ -23,4 +23,8 @@ MIGRATIONS: Dict[int, str] = {
     CREATE INDEX IF NOT EXISTS idx_ingest_source  ON ingest_store(source);
     CREATE INDEX IF NOT EXISTS idx_ingest_expires ON ingest_store(expires_at);
     """,
+    2: """
+    -- v2: add tags column (Issue #1471)
+    ALTER TABLE ingest_store ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+    """,
 }
